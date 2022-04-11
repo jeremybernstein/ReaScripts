@@ -1,0 +1,8 @@
+@description automidireset (MIDI Plug and Play)
+@author sockmonkey72
+@version 1.3
+@provides
+  [darwin] automidireset/reaper_automidireset.dylib > reaper_automidireset.dylib
+  [linux64] automidireset/reaper_automidireset.so > reaper_automidireset.so
+  [win64] automidireset/reaper_automidireset_x64.dll > reaper_automidireset_x64.dll
+  [win32] automidireset/reaper_automidireset_w32.dll > reaper_automidireset_w32.dll

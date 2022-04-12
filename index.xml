@@ -1,2 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey Scripts"/>
+<index version="1" name="sockmonkey Scripts" commit="0a17dc37c7d89aae96dcaaab7d2a0125f660670d">
+  <category name="Items Editing">
+    <reapack name="Paste at play position.lua" type="script" desc="Paste at play position">
+      <version name="1.0" author="sockmonkey72" time="2022-04-12T08:34:42Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/0a17dc37c7d89aae96dcaaab7d2a0125f660670d/Items%20Editing/Paste%20at%20play%20position.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="MIDI">
+    <reapack name="automidireset.ext" type="extension" desc="automidireset (MIDI Plug and Play)">
+      <version name="1.3" author="sockmonkey72" time="2022-04-12T08:34:38Z">
+        <source platform="darwin" file="reaper_automidireset.dylib">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset.dylib</source>
+        <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset.so</source>
+        <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset_x64.dll</source>
+        <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
+    </reapack>
+  </category>
+</index>

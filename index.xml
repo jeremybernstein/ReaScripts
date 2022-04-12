@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey Scripts" commit="0a17dc37c7d89aae96dcaaab7d2a0125f660670d">
+<index version="1" name="sockmonkey Scripts" commit="7beae5f518ad8af606be244ea5bbc6999a7fd123">
   <category name="Items Editing">
     <reapack name="Paste at play position.lua" type="script" desc="Paste at play position">
       <version name="1.0" author="sockmonkey72" time="2022-04-12T08:34:42Z">
@@ -15,6 +15,27 @@
         <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset.so</source>
         <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset_x64.dll</source>
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Razor Edit">
+    <reapack name="Razor Edit - Fast Mode.eel" type="script" desc="Razor Edit - Fast Mode">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by {\field{\*\fldinst{HYPERLINK "https://youtu.be/HEVKLiWkRkk"}}{\fldrslt{\ul
+Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
+}}}
+, this script makes the appropriate changes to the Mouse Modifier preferences to support fast Razor Editing. Improved over what Kenny can do using standard actions is that the shift-modified left-drag actions are incorporated with the "ignoring snap" action variants.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The workflow is also simpler, as it's just a single toggle script. It can be hooked up to a key command and/or a toolbar button.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.1" author="sockmonkey72" time="2022-04-12T08:37:02Z">
+        <changelog><![CDATA[simplify to a single Toggle Command script]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/7beae5f518ad8af606be244ea5bbc6999a7fd123/Razor%20Edit/Razor%20Edit%20-%20Fast%20Mode.eel</source>
       </version>
     </reapack>
   </category>

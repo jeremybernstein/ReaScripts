@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="7beae5f518ad8af606be244ea5bbc6999a7fd123">
+<index version="1" name="sockmonkey72 Scripts" commit="f04569a39cc75f34022d464998e20856b1525315">
+  <category name="Envelopes">
+    <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Modified version of X-Raym's "X-Raym_Add point on envelopes at edit cursor.lua"; instead of just adding a point for the momentary value along the existing envelope curve, this script adds a point for the current value of the parameter. The use case is latch-preview mode, if the user makes a change she likes and wants to print it as a point to the automation lane at the time under the edit cursor.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-04-12T11:02:22Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/f04569a39cc75f34022d464998e20856b1525315/Envelopes/Add%20point%20for%20current%20value%20on%20visible%20armed%20envelopes%20of%20selected%20tracks%20at%20edit%20cursor.lua</source>
+      </version>
+    </reapack>
+  </category>
   <category name="Items Editing">
     <reapack name="Paste at play position.lua" type="script" desc="Paste at play position">
       <version name="1.0" author="sockmonkey72" time="2022-04-12T08:34:42Z">

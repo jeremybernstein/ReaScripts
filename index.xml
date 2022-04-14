@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="f04569a39cc75f34022d464998e20856b1525315">
+<index version="1" name="sockmonkey72 Scripts" commit="119c4d6fa4a0e2cf61bb3579cc9ff99d303aa0fa">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -53,6 +53,22 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       <version name="1.1" author="sockmonkey72" time="2022-04-12T08:37:02Z">
         <changelog><![CDATA[simplify to a single Toggle Command script]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/7beae5f518ad8af606be244ea5bbc6999a7fd123/Razor%20Edit/Razor%20Edit%20-%20Fast%20Mode.eel</source>
+      </version>
+    </reapack>
+    <reapack name="Selected Envelope Points to Razor Edit.lua" type="script" desc="Selected Envelope Points to Razor Edit">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Selected Envelope Points to Razor Edit\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Convert selected envelope points to a razor edit region.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-04-14T06:45:44Z">
+        <changelog><![CDATA[initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/119c4d6fa4a0e2cf61bb3579cc9ff99d303aa0fa/Razor%20Edit/Selected%20Envelope%20Points%20to%20Razor%20Edit.lua</source>
       </version>
     </reapack>
   </category>

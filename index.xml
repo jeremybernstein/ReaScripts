@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="119c4d6fa4a0e2cf61bb3579cc9ff99d303aa0fa">
+<index version="1" name="sockmonkey72 Scripts" commit="25470000ab7516b31ae665d26cfd6b1392311e25">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -16,12 +16,59 @@
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/f04569a39cc75f34022d464998e20856b1525315/Envelopes/Add%20point%20for%20current%20value%20on%20visible%20armed%20envelopes%20of%20selected%20tracks%20at%20edit%20cursor.lua</source>
       </version>
     </reapack>
+    <reapack name="ToggleSendVolumeEnvelopes.lua" type="script" desc="Toggle Send Volume Envelopes">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle arm status of track send volume envelopes\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Envelopes/ToggleSendVolumeEnvelopes.lua</source>
+      </version>
+    </reapack>
+    <reapack name="ToggleWidthEnvelopes.lua" type="script" desc="Toggle Width Envelopes">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle arm status of track width envelopes\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Envelopes/ToggleWidthEnvelopes.lua</source>
+      </version>
+    </reapack>
   </category>
   <category name="Items Editing">
     <reapack name="Paste at play position.lua" type="script" desc="Paste at play position">
       <version name="1.0" author="sockmonkey72" time="2022-04-12T08:34:42Z">
         <changelog><![CDATA[initial]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/0a17dc37c7d89aae96dcaaab7d2a0125f660670d/Items%20Editing/Paste%20at%20play%20position.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Metering">
+    <reapack name="ClearClipsAfter3Seconds.lua" type="script" desc="Clear Clip Indicators After 3 Seconds">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Clear clip indicators after 3s of non-clipping (background script)\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Metering/ClearClipsAfter3Seconds.lua</source>
       </version>
     </reapack>
   </category>
@@ -69,6 +116,20 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       <version name="1.0" author="sockmonkey72" time="2022-04-14T06:45:44Z">
         <changelog><![CDATA[initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/119c4d6fa4a0e2cf61bb3579cc9ff99d303aa0fa/Razor%20Edit/Selected%20Envelope%20Points%20to%20Razor%20Edit.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Transport">
+    <reapack name="Fast forward 1s.lua" type="script" desc="Fast forward 1 second">
+      <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Transport/Fast%20forward%201s.lua</source>
+      </version>
+    </reapack>
+    <reapack name="Rewind 1s.lua" type="script" desc="Rewind 1 second">
+      <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Transport/Rewind%201s.lua</source>
       </version>
     </reapack>
   </category>

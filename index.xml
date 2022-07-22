@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="25470000ab7516b31ae665d26cfd6b1392311e25">
+<index version="1" name="sockmonkey72 Scripts" commit="6bb3358ad99a6465dc113ad9ede787e369036170">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -69,6 +69,10 @@
       <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Metering/ClearClipsAfter3Seconds.lua</source>
+      </version>
+      <version name="1.1" author="sockmonkey72" time="2022-07-22T11:52:52Z">
+        <changelog><![CDATA[1.1 add master track processing]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/6bb3358ad99a6465dc113ad9ede787e369036170/Metering/ClearClipsAfter3Seconds.lua</source>
       </version>
     </reapack>
   </category>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="6bb3358ad99a6465dc113ad9ede787e369036170">
+<index version="1" name="sockmonkey72 Scripts" commit="68d0aa1e057c940611732cc0f92d9520a0d32057">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -97,13 +97,17 @@
 Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
 }}}
 , this script makes the appropriate changes to the Mouse Modifier preferences to support fast Razor Editing. Improved over what Kenny can do using standard actions is that the shift-modified left-drag actions are incorporated with the "ignoring snap" action variants.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 The workflow is also simpler, as it's just a single toggle script. It can be hooked up to a key command and/or a toolbar button.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The workflow is also simpler, as it's just a single toggle script. It can be hooked up to a key command and/or a toolbar button. For best results add as a global startup action to initialize the toggle state\par}
 }
 ]]></description>
       </metadata>
       <version name="1.1" author="sockmonkey72" time="2022-04-12T08:37:02Z">
         <changelog><![CDATA[simplify to a single Toggle Command script]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/7beae5f518ad8af606be244ea5bbc6999a7fd123/Razor%20Edit/Razor%20Edit%20-%20Fast%20Mode.eel</source>
+      </version>
+      <version name="1.2" author="sockmonkey72" time="2022-07-23T14:53:31Z">
+        <changelog><![CDATA[simplify to a single Toggle Command script]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/68d0aa1e057c940611732cc0f92d9520a0d32057/Razor%20Edit/Razor%20Edit%20-%20Fast%20Mode.eel</source>
       </version>
     </reapack>
     <reapack name="Selected Envelope Points to Razor Edit.lua" type="script" desc="Selected Envelope Points to Razor Edit">

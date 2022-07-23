@@ -1,33 +1,48 @@
 // @description Razor Edit - Fast Mode
 // @author sockmonkey72
-// @version 1.1
+// @version 1.2
 // @changelog simplify to a single Toggle Command script
 // @about
 //   Inspired by [Kenny Gioia's "Razor Edit - Fast Mode in REAPER"](https://youtu.be/HEVKLiWkRkk), this script makes the appropriate changes to the Mouse Modifier preferences to support fast Razor Editing. Improved over what Kenny can do using standard actions is that the shift-modified left-drag actions are incorporated with the "ignoring snap" action variants.
 //
 //   The workflow is also simpler, as it's just a single toggle script. It can be hooked up to a key command and/or a toolbar button.
+//   For best results add as a global startup action to initialize the toggle state
 
 
 get_action_context(#filename,sectionID,cmdID,mode,resolution,val);
 
 state = GetToggleCommandStateEx(sectionID, cmdID);
 
-state > 0 ? (
-  SetMouseModifier("MM_CTX_TRACK", 0, "-1"); // Factory Default
-  SetMouseModifier("MM_CTX_ITEM", 0, "-1"); // Factory Default
-  SetMouseModifier("MM_CTX_ITEMLOWER", 0, "-1"); // Factory Default
-
-  SetMouseModifier("MM_CTX_TRACK", 1, "-1"); // Factory Default
-  SetMouseModifier("MM_CTX_ITEM", 1, "-1"); // Factory Default
-  SetMouseModifier("MM_CTX_ITEMLOWER", 1, "-1"); // Factory Default
+state == -1 ? (
+  GetExtState(#rv, "sockmonkey72", "RazorEditFastMode") ? (
+    SetToggleCommandState(sectionID, cmdID, !strcmp(#rv, "1") ? 1 : 0);
+  ) : (
+    SetToggleCommandState(sectionID, cmdID, 0);
+    SetExtState(#rv, "sockmonkey72", "RazorEditFastMode", 0);
+  )
 ) : (
-  SetMouseModifier("MM_CTX_TRACK", 0, "25"); // Create Razor Edit Area
-  SetMouseModifier("MM_CTX_ITEM", 0, "62"); // Create Razor Edit Area
-  SetMouseModifier("MM_CTX_ITEMLOWER", 0, "64"); // Add to Razor Edit Area
+  state > 0 ? (
+    SetMouseModifier("MM_CTX_TRACK", 0, "-1"); // Factory Default
+    SetMouseModifier("MM_CTX_ITEM", 0, "-1"); // Factory Default
+    SetMouseModifier("MM_CTX_ITEMLOWER", 0, "-1"); // Factory Default
 
-  SetMouseModifier("MM_CTX_TRACK", 1, "26"); // Create Razor Edit Area (ignoring snap)
-  SetMouseModifier("MM_CTX_ITEM", 1, "63"); // Create Razor Edit Area (ignoring snap)
-  SetMouseModifier("MM_CTX_ITEMLOWER", 1, "65"); // Add to Razor Edit Area (ignoring snap)
+    SetMouseModifier("MM_CTX_TRACK", 1, "-1"); // Factory Default
+    SetMouseModifier("MM_CTX_ITEM", 1, "-1"); // Factory Default
+    SetMouseModifier("MM_CTX_ITEMLOWER", 1, "-1"); // Factory Default
+  ) : (
+    SetMouseModifier("MM_CTX_TRACK", 0, "25"); // Create Razor Edit Area
+    SetMouseModifier("MM_CTX_ITEM", 0, "62"); // Create Razor Edit Area
+    SetMouseModifier("MM_CTX_ITEMLOWER", 0, "64"); // Add to Razor Edit Area
+
+    SetMouseModifier("MM_CTX_TRACK", 1, "26"); // Create Razor Edit Area (ignoring snap)
+    SetMouseModifier("MM_CTX_ITEM", 1, "63"); // Create Razor Edit Area (ignoring snap)
+    SetMouseModifier("MM_CTX_ITEMLOWER", 1, "65"); // Add to Razor Edit Area (ignoring snap)
+  );
+
+  SetToggleCommandState(sectionID, cmdID, state > 0 ? 0 : 1);
+
+  SetExtState("sockmonkey72", "RazorEditFastMode", state > 0 ? "0" : "1", 1);
 );
 
-SetToggleCommandState(sectionID, cmdID, state > 0 ? 0 : 1);
+TrackList_AdjustWindows(0);
+

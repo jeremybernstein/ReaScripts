@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="68d0aa1e057c940611732cc0f92d9520a0d32057">
+<index version="1" name="sockmonkey72 Scripts" commit="2752dedcc969e6dd89f1b17c75668d762d018568">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -44,6 +44,28 @@
       <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Envelopes/ToggleWidthEnvelopes.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Grouping">
+    <reapack name="SmartItemGroupUngroup.lua" type="script" desc="Smart item group/ungroup">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Smart item group/ungroup\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Thanks to daxliniere for the following specification:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab I select 3 ungrouped items and run the action - those items form a unique group.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If I run the action again those 3 are no longer part of any group.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If I select 3 items, some of which are part of a group and some ungrouped, the ungrouped items should be placed into the existing group.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If I select 3 items, some of which are part of one group and some another group, the grouping should be removed.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-07-25T20:07:28Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/2752dedcc969e6dd89f1b17c75668d762d018568/Grouping/SmartItemGroupUngroup.lua</source>
       </version>
     </reapack>
   </category>

@@ -1,7 +1,7 @@
--- @description (deprecated) Smart item group/ungroup
+-- @description Smart item group/ungroup
 -- @author sockmonkey72
--- @version 1.1
--- @changelog 1.1 deprecated, use sockmonkey72_ prefixed version
+-- @version 1.0
+-- @changelog 1.0 initial upload
 -- @about
 --   # Smart item group/ungroup
 --   Thanks to daxliniere for the following specification:

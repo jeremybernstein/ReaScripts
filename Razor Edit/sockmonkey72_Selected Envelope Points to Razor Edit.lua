@@ -1,11 +1,11 @@
--- @description (deprecated) Selected Envelope Points to Razor Edit
--- @version 1.1
+-- @description Selected Envelope Points to Razor Edit
+-- @version 1.0
 -- @author sockmonkey72
 -- @about
 --   # Selected Envelope Points to Razor Edit
 --   Convert selected envelope points to a razor edit region.
 -- @changelog
---   deprecated, use sockmonkey72_ prefixed version
+--   initial upload
 
 local anEnvelope = reaper.GetSelectedEnvelope(0)
 if anEnvelope then

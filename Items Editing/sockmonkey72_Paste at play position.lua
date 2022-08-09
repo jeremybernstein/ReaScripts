@@ -1,7 +1,7 @@
--- @description (deprecated) Paste at play position
+-- @description Paste at play position
 -- @author sockmonkey72
--- @version 1.1
--- @changelog 1.1 deprecated, use sockmonkey72_ prefixed version
+-- @version 1.0
+-- @changelog initial
 
 local pos = reaper.GetPlayPosition()
 local editpos = reaper.GetCursorPositionEx(0)

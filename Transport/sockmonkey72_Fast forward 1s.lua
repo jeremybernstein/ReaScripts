@@ -1,7 +1,7 @@
--- @description (deprecated) Fast forward 1 second
+-- @description Fast forward 1 second
 -- @author sockmonkey72
--- @version 1.1
--- @changelog 1.1 deprecated, use sockmonkey72_ prefixed version
+-- @version 1.0
+-- @changelog 1.0 initial upload
 
 amount = 1. -- 1 second
 

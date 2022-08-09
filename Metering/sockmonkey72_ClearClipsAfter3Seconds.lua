@@ -1,7 +1,7 @@
--- @description (deprecated) Clear Clip Indicators After 3 Seconds
+-- @description Clear Clip Indicators After 3 Seconds
 -- @author sockmonkey72
--- @version 1.2
--- @changelog 1.2 deprecated, use sockmonkey72_ prefixed version
+-- @version 1.1
+-- @changelog 1.1 add master track processing
 -- @about Clear clip indicators after 3s of non-clipping (background script)
 
 

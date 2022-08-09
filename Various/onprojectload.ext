@@ -1,0 +1,8 @@
+@description onprojectload (run action at project load)
+@author sockmonkey72
+@version 1.0-beta.2
+@provides
+  [darwin] onprojectload/reaper_onprojectload.dylib > reaper_onprojectload.dylib
+  [linux64] onprojectload/reaper_onprojectload.so > reaper_onprojectload.so
+  [win64] onprojectload/reaper_onprojectload_x64.dll > reaper_onprojectload_x64.dll
+  [win32] onprojectload/reaper_onprojectload_w32.dll > reaper_onprojectload_w32.dll

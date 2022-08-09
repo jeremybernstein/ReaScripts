@@ -1,7 +1,7 @@
--- @description (deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor
+-- @description Add point for current value on visible armed envelopes of selected tracks at edit cursor
 -- @author sockmonkey72
--- @version 1.1
--- @changelog 1.1 deprecated, use sockmonkey72_ prefixed version
+-- @version 1.0
+-- @changelog 1.0 initial upload
 -- @about Modified version of X-Raym's "X-Raym_Add point on envelopes at edit cursor.lua"; instead of just adding a point for the momentary value along the existing envelope curve, this script adds a point for the current value of the parameter. The use case is latch-preview mode, if the user makes a change she likes and wants to print it as a point to the automation lane at the time under the edit cursor.
 
 -- ----- DEBUGGING ====>

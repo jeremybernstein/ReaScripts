@@ -1,7 +1,7 @@
-// @description (deprecated) Razor Edit - Fast Mode
+// @description Razor Edit - Fast Mode
 // @author sockmonkey72
-// @version 1.3
-// @changelog deprecated, use sockmonkey72_ prefixed version
+// @version 1.2
+// @changelog simplify to a single Toggle Command script
 // @about
 //   Inspired by [Kenny Gioia's "Razor Edit - Fast Mode in REAPER"](https://youtu.be/HEVKLiWkRkk), this script makes the appropriate changes to the Mouse Modifier preferences to support fast Razor Editing. Improved over what Kenny can do using standard actions is that the shift-modified left-drag actions are incorporated with the "ignoring snap" action variants.
 //

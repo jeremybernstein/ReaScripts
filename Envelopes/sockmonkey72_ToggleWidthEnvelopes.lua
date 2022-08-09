@@ -1,7 +1,7 @@
--- @description (deprecated) Toggle Width Envelopes
+-- @description Toggle Width Envelopes
 -- @author sockmonkey72
--- @version 1.1
--- @changelog 1.1 deprecated, use sockmonkey72_ prefixed version
+-- @version 1.0
+-- @changelog 1.0 initial upload
 -- @about Toggle arm status of track width envelopes
 
 count = reaper.CountSelectedTracks(0)

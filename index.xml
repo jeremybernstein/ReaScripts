@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="1f72e864647c4de01da51c368807c6e44c0cb825">
+<index version="1" name="sockmonkey72 Scripts" commit="a67521ebb4a93751af0c55cf43b2bd231c2f08a6">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="(deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -216,6 +216,12 @@
         <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset_x64.dll</source>
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/4ffd7a618e665c79facb91a1daa831e843b883c5/MIDI/automidireset/reaper_automidireset_w32.dll</source>
       </version>
+      <version name="1.3.1" author="sockmonkey72" time="2022-08-09T14:48:57Z">
+        <source platform="darwin" file="reaper_automidireset.dylib">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset.dylib</source>
+        <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset.so</source>
+        <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_x64.dll</source>
+        <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
     </reapack>
   </category>
   <category name="Razor Edit">
@@ -343,6 +349,12 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
         <source platform="linux64" file="reaper_onprojectload.so">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload.so</source>
         <source platform="win64" file="reaper_onprojectload_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload_x64.dll</source>
         <source platform="win32" file="reaper_onprojectload_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload_w32.dll</source>
+      </version>
+      <version name="1.0.0" author="sockmonkey72" time="2022-08-09T14:48:57Z">
+        <source platform="darwin" file="reaper_onprojectload.dylib">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload.dylib</source>
+        <source platform="linux64" file="reaper_onprojectload.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload.so</source>
+        <source platform="win64" file="reaper_onprojectload_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload_x64.dll</source>
+        <source platform="win32" file="reaper_onprojectload_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload_w32.dll</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_Smarter_Zoom.lua" type="script" desc="Smarter Zoom">

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="ab27a4d1a416b22c41997334802099d03c64875e">
+<index version="1" name="sockmonkey72 Scripts" commit="1f72e864647c4de01da51c368807c6e44c0cb825">
   <category name="Envelopes">
-    <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
+    <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="(deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -15,8 +15,57 @@
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/f04569a39cc75f34022d464998e20856b1525315/Envelopes/Add%20point%20for%20current%20value%20on%20visible%20armed%20envelopes%20of%20selected%20tracks%20at%20edit%20cursor.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Envelopes/Add%20point%20for%20current%20value%20on%20visible%20armed%20envelopes%20of%20selected%20tracks%20at%20edit%20cursor.lua</source>
+      </version>
     </reapack>
-    <reapack name="ToggleSendVolumeEnvelopes.lua" type="script" desc="Toggle Send Volume Envelopes">
+    <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Modified version of X-Raym's "X-Raym_Add point on envelopes at edit cursor.lua"; instead of just adding a point for the momentary value along the existing envelope curve, this script adds a point for the current value of the parameter. The use case is latch-preview mode, if the user makes a change she likes and wants to print it as a point to the automation lane at the time under the edit cursor.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Envelopes/sockmonkey72_Add%20point%20for%20current%20value%20on%20visible%20armed%20envelopes%20of%20selected%20tracks%20at%20edit%20cursor.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_ToggleSendVolumeEnvelopes.lua" type="script" desc="Toggle Send Volume Envelopes">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle arm status of track send volume envelopes\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Envelopes/sockmonkey72_ToggleSendVolumeEnvelopes.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_ToggleWidthEnvelopes.lua" type="script" desc="Toggle Width Envelopes">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle arm status of track width envelopes\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Envelopes/sockmonkey72_ToggleWidthEnvelopes.lua</source>
+      </version>
+    </reapack>
+    <reapack name="ToggleSendVolumeEnvelopes.lua" type="script" desc="(deprecated) Toggle Send Volume Envelopes">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -30,8 +79,12 @@
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Envelopes/ToggleSendVolumeEnvelopes.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Envelopes/ToggleSendVolumeEnvelopes.lua</source>
+      </version>
     </reapack>
-    <reapack name="ToggleWidthEnvelopes.lua" type="script" desc="Toggle Width Envelopes">
+    <reapack name="ToggleWidthEnvelopes.lua" type="script" desc="(deprecated) Toggle Width Envelopes">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -45,10 +98,14 @@
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Envelopes/ToggleWidthEnvelopes.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Envelopes/ToggleWidthEnvelopes.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Grouping">
-    <reapack name="SmartItemGroupUngroup.lua" type="script" desc="Smart item group/ungroup">
+    <reapack name="SmartItemGroupUngroup.lua" type="script" desc="(deprecated) Smart item group/ungroup">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -67,18 +124,52 @@
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/2752dedcc969e6dd89f1b17c75668d762d018568/Grouping/SmartItemGroupUngroup.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Grouping/SmartItemGroupUngroup.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_SmartItemGroupUngroup.lua" type="script" desc="Smart item group/ungroup">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Smart item group/ungroup\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Thanks to daxliniere for the following specification:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab I select 3 ungrouped items and run the action - those items form a unique group.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If I run the action again those 3 are no longer part of any group.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If I select 3 items, some of which are part of a group and some ungrouped, the ungrouped items should be placed into the existing group.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If I select 3 items, some of which are part of one group and some another group, the grouping should be removed.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Grouping/sockmonkey72_SmartItemGroupUngroup.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Items Editing">
-    <reapack name="Paste at play position.lua" type="script" desc="Paste at play position">
+    <reapack name="Paste at play position.lua" type="script" desc="(deprecated) Paste at play position">
       <version name="1.0" author="sockmonkey72" time="2022-04-12T08:34:42Z">
         <changelog><![CDATA[initial]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/0a17dc37c7d89aae96dcaaab7d2a0125f660670d/Items%20Editing/Paste%20at%20play%20position.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Items%20Editing/Paste%20at%20play%20position.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_Paste at play position.lua" type="script" desc="Paste at play position">
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Items%20Editing/sockmonkey72_Paste%20at%20play%20position.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Metering">
-    <reapack name="ClearClipsAfter3Seconds.lua" type="script" desc="Clear Clip Indicators After 3 Seconds">
+    <reapack name="ClearClipsAfter3Seconds.lua" type="script" desc="(deprecated) Clear Clip Indicators After 3 Seconds">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -96,6 +187,25 @@
         <changelog><![CDATA[1.1 add master track processing]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/6bb3358ad99a6465dc113ad9ede787e369036170/Metering/ClearClipsAfter3Seconds.lua</source>
       </version>
+      <version name="1.2" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.2 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Metering/ClearClipsAfter3Seconds.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_ClearClipsAfter3Seconds.lua" type="script" desc="Clear Clip Indicators After 3 Seconds">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Clear clip indicators after 3s of non-clipping (background script)\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 add master track processing]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Metering/sockmonkey72_ClearClipsAfter3Seconds.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="MIDI">
@@ -109,7 +219,7 @@
     </reapack>
   </category>
   <category name="Razor Edit">
-    <reapack name="Razor Edit - Fast Mode.eel" type="script" desc="Razor Edit - Fast Mode">
+    <reapack name="Razor Edit - Fast Mode.eel" type="script" desc="(deprecated) Razor Edit - Fast Mode">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -131,8 +241,12 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
         <changelog><![CDATA[simplify to a single Toggle Command script]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/68d0aa1e057c940611732cc0f92d9520a0d32057/Razor%20Edit/Razor%20Edit%20-%20Fast%20Mode.eel</source>
       </version>
+      <version name="1.3" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Razor%20Edit/Razor%20Edit%20-%20Fast%20Mode.eel</source>
+      </version>
     </reapack>
-    <reapack name="Selected Envelope Points to Razor Edit.lua" type="script" desc="Selected Envelope Points to Razor Edit">
+    <reapack name="Selected Envelope Points to Razor Edit.lua" type="script" desc="(deprecated) Selected Envelope Points to Razor Edit">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -147,23 +261,90 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
         <changelog><![CDATA[initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/119c4d6fa4a0e2cf61bb3579cc9ff99d303aa0fa/Razor%20Edit/Selected%20Envelope%20Points%20to%20Razor%20Edit.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Razor%20Edit/Selected%20Envelope%20Points%20to%20Razor%20Edit.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_Razor Edit - Fast Mode.eel" type="script" desc="Razor Edit - Fast Mode">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by {\field{\*\fldinst{HYPERLINK "https://youtu.be/HEVKLiWkRkk"}}{\fldrslt{\ul
+Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
+}}}
+, this script makes the appropriate changes to the Mouse Modifier preferences to support fast Razor Editing. Improved over what Kenny can do using standard actions is that the shift-modified left-drag actions are incorporated with the "ignoring snap" action variants.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The workflow is also simpler, as it's just a single toggle script. It can be hooked up to a key command and/or a toolbar button. For best results add as a global startup action to initialize the toggle state\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.2" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[simplify to a single Toggle Command script]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Razor%20Edit/sockmonkey72_Razor%20Edit%20-%20Fast%20Mode.eel</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_Selected Envelope Points to Razor Edit.lua" type="script" desc="Selected Envelope Points to Razor Edit">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Selected Envelope Points to Razor Edit\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Convert selected envelope points to a razor edit region.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Razor%20Edit/sockmonkey72_Selected%20Envelope%20Points%20to%20Razor%20Edit.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Transport">
-    <reapack name="Fast forward 1s.lua" type="script" desc="Fast forward 1 second">
+    <reapack name="Fast forward 1s.lua" type="script" desc="(deprecated) Fast forward 1 second">
       <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Transport/Fast%20forward%201s.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Transport/Fast%20forward%201s.lua</source>
+      </version>
     </reapack>
-    <reapack name="Rewind 1s.lua" type="script" desc="Rewind 1 second">
+    <reapack name="Rewind 1s.lua" type="script" desc="(deprecated) Rewind 1 second">
       <version name="1.0" author="sockmonkey72" time="2022-07-18T07:22:55Z">
         <changelog><![CDATA[1.0 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/25470000ab7516b31ae665d26cfd6b1392311e25/Transport/Rewind%201s.lua</source>
       </version>
+      <version name="1.1" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.1 deprecated, use sockmonkey72_ prefixed version]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Transport/Rewind%201s.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_Fast forward 1s.lua" type="script" desc="Fast forward 1 second">
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Transport/sockmonkey72_Fast%20forward%201s.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_Rewind 1s.lua" type="script" desc="Rewind 1 second">
+      <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Transport/sockmonkey72_Rewind%201s.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Various">
+    <reapack name="onprojectload.ext" type="extension" desc="onprojectload (run action at project load)">
+      <version name="1.0-beta.2" author="sockmonkey72" time="2022-08-09T13:57:05Z">
+        <source platform="darwin" file="reaper_onprojectload.dylib">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload.dylib</source>
+        <source platform="linux64" file="reaper_onprojectload.so">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload.so</source>
+        <source platform="win64" file="reaper_onprojectload_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload_x64.dll</source>
+        <source platform="win32" file="reaper_onprojectload_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Various/onprojectload/reaper_onprojectload_w32.dll</source>
+      </version>
+    </reapack>
     <reapack name="sockmonkey72_Smarter_Zoom.lua" type="script" desc="Smarter Zoom">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}

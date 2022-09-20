@@ -1,5 +1,5 @@
 -- @description Harmonize MIDI
--- @version 1.2
+-- @version 1.3
 -- @author sockmonkey72
 -- @about
 --   # Harmonize MIDI
@@ -8,7 +8,8 @@
 --   initial upload
 -- @provides
 --   {HarmonizeMIDI}/*
---   [main] sockmonkey72_HarmonizeMIDIUsingLastSetting.lua
+--   [main=main,midi_editor] sockmonkey72_HarmonizeMIDI.lua
+--   [main=main,midi_editor] sockmonkey72_HarmonizeMIDIUsingLastSetting.lua
 
 package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
 require "HarmonizeMIDI/HarmonizeMIDIUtils"

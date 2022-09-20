@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5">
+<index version="1" name="sockmonkey72 Scripts" commit="9490ff187d0688a0169b8399afae074af2cc14f2">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="(deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -230,7 +230,7 @@
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Harmonize MIDI\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Chromatic doubling at specified intervals (item/take, razor edit or MIDI Editor).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Chromatic doubling at specified intervals (item/take, razor edit or MIDI Editor (incl. event list and inline)).\par}
 }
 ]]></description>
       </metadata>
@@ -255,6 +255,12 @@
         <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
         <source main="main midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
         <source main="main midi_editor" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
+      </version>
+      <version name="1.4" author="sockmonkey72" time="2022-09-20T17:24:35Z">
+        <changelog><![CDATA[add support for various MIDI editors]]></changelog>
+        <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
       </version>
     </reapack>
   </category>

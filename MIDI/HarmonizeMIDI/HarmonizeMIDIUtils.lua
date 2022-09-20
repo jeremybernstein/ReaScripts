@@ -168,8 +168,9 @@ function GetRazorEdits()
 end
 
 function DoHarmonizeMIDI(intervals)
-  _, _,sectionID = reaper.get_action_context()
-  local isME = sectionID == 32060
+  _, _, sectionID = reaper.get_action_context()
+  -- ---------------- MIDI Editor ---------- Event List ------- Inline Editor
+  local isME = sectionID == 32060 or sectionID == 32061 or sectionID == 32062
 
   intervals_ = intervals
 
@@ -181,7 +182,6 @@ function DoHarmonizeMIDI(intervals)
       local take = reaper.MIDIEditor_GetTake(hwnd)
       if take then
         ProcessTake(take, true)
-        -- reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), reaper.GetMediaItemTake_Item(take))
       end
     end
   else
@@ -193,7 +193,6 @@ function DoHarmonizeMIDI(intervals)
           if take then
             if reaper.TakeIsMIDI(take) then
               ProcessTake(take, false, areaData.areaStart, areaData.areaEnd)
-              -- reaper.MarkTrackItemsDirty(areaData.track, item)
             end
           end
         end
@@ -207,7 +206,6 @@ function DoHarmonizeMIDI(intervals)
           if take then
             if reaper.TakeIsMIDI(take) then
               ProcessTake(take)
-              -- reaper.MarkTrackItemsDirty(reaper.GetMediaItem_Track(item), item)
             end
           end
         end

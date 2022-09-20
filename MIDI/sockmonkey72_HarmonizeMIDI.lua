@@ -1,15 +1,15 @@
 -- @description Harmonize MIDI
--- @version 1.3
+-- @version 1.4
 -- @author sockmonkey72
 -- @about
 --   # Harmonize MIDI
---   Chromatic doubling at specified intervals (item/take, razor edit or MIDI Editor).
+--   Chromatic doubling at specified intervals (item/take, razor edit or MIDI Editor (incl. event list and inline)).
 -- @changelog
---   initial upload
+--   add support for various MIDI editors
 -- @provides
 --   {HarmonizeMIDI}/*
---   [main=main,midi_editor] sockmonkey72_HarmonizeMIDI.lua
---   [main=main,midi_editor] sockmonkey72_HarmonizeMIDIUsingLastSetting.lua
+--   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_HarmonizeMIDI.lua
+--   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_HarmonizeMIDIUsingLastSetting.lua
 
 package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
 require "HarmonizeMIDI/HarmonizeMIDIUtils"

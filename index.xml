@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="9490ff187d0688a0169b8399afae074af2cc14f2">
+<index version="1" name="sockmonkey72 Scripts" commit="62920c9f8f0e7f5a65ca4a55811c73b490a45f3d">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="(deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -261,6 +261,32 @@
         <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
         <source main="main midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
         <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_NudgeMIDI.lua" type="script" desc="Nudge MIDI">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Nudge MIDI\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 MIDI Editor script to nudge MIDI note, CC and pitch bend events. Thanks to Stevie for the inspiration. The main script will present a dialog to set a nudge amount in ticks The two 'UsingLastSetting' scripts will use that value for 'faceless' nudging left or right using the previously set value Note that notes and CCs/pitch bend messages work slightly differently. Notes will be truncated and eventually deleted if they collide with another note to the left or right. CCs and pitch bend messages will simply delete anything in their path. If you associate these actions with keyboard shortcuts, you can hold the key down for a repeated nudge with consolidated undo points (requires js_ReaScriptAPI extension: https://forum.cockos.com/showthread.php?t=212174).\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-09-23T16:44:22Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/sockmonkey72_NudgeMIDI.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
+      </version>
+      <version name="1.1" author="sockmonkey72" time="2022-09-23T16:44:24Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDI.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
       </version>
     </reapack>
   </category>

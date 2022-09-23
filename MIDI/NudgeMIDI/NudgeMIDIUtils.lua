@@ -334,7 +334,7 @@ function Setup(nudge, keyrepeat)
     _nudge = nudge
     reaper.atexit(OnExit)
 
-    if keyrepeat then
+    if keyrepeat and reaper.APIExists("JS_VKeys_GetState") then
       local state = reaper.JS_VKeys_GetState(0)
       for i = 1, #state do
         local abyte = state:byte(i)

@@ -1,5 +1,5 @@
 -- @description Nudge MIDI
--- @version 1.0
+-- @version 1.1
 -- @author sockmonkey72
 -- @about
 --   # Nudge MIDI
@@ -11,7 +11,7 @@
 --    eventually deleted if they collide with another note to the left or right.
 --   CCs and pitch bend messages will simply delete anything in their path.
 --   If you associate these actions with keyboard shortcuts, you can hold the key down for a repeated nudge
---   with consolidated undo points.
+--   with consolidated undo points (requires js_ReaScriptAPI extension: https://forum.cockos.com/showthread.php?t=212174).
 -- @changelog
 --   initial
 -- @provides

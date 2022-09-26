@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="62920c9f8f0e7f5a65ca4a55811c73b490a45f3d">
+<index version="1" name="sockmonkey72 Scripts" commit="9f1580ce255cf52cb75d168ffe7f6099cc27315f">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="(deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -287,6 +287,13 @@
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDI.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
+      </version>
+      <version name="1.2" author="sockmonkey72" time="2022-09-26T13:46:24Z">
+        <changelog><![CDATA[bug fixes, added primitive item extension]]></changelog>
+        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/sockmonkey72_NudgeMIDI.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
       </version>
     </reapack>
   </category>

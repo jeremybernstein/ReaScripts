@@ -76,6 +76,8 @@ function NoteLookForward(sourceMsg, sourcePPQ, sourceMIDIString, sourceStringPos
 
   local ppqTime = sourcePPQ
 
+  local lastNoteOff = -1
+
   while stringPos < sourceMIDIString:len() - 12 do
     local offset, flags, msg, newStringPos = string.unpack("i4Bs4", sourceMIDIString, stringPos)
     local selected = flags & 1 ~= 0
@@ -89,18 +91,21 @@ function NoteLookForward(sourceMsg, sourcePPQ, sourceMIDIString, sourceStringPos
 
     ppqTime = ppqTime + offset
     local diff = ppqTime - (sourcePPQ + nudge)
-    if (not selected or noteOff) and diff <= nudge then
-      if (noteOn or noteOff) and msg:byte(2) == sourceMsg:byte(2) then -- same note
-        if noteOff then
-          if sourceNoteOn then
-            deletePos[#deletePos + 1] = stringPos -- mark this for deletion later
-            break
-          end
+    if diff <= nudge then
+      if (not selected or noteOff)
+        and (noteOn or noteOff)
+        and msg:byte(2) == sourceMsg:byte(2)
+      then -- same note
+        if noteOff then -- if we hit an unselected noteoff first, it's bogus and needs to be deleted
+          if not selected then deletePos[#deletePos + 1] = stringPos -- mark this for deletion later
+          else lastNoteOff = stringPos end
         elseif noteOn then
-          if sourceNoteOff then
+          if sourceNoteOn then -- delete the source
+            if lastNoteOff ~= -1 then deletePos[#deletePos + 1] = lastNoteOff end -- and delete the associated note-off
+          elseif sourceNoteOff then
             adjustedNudge = diff <= -nudge and 0 or (diff <= 0 and nudge - -diff or nudge)
-            break
           end
+          break
         end
       end
     else
@@ -136,22 +141,32 @@ function NoteLookBackward(sourceMsg, sourcePPQ, events, nudge)
       end
 
       local diff = (sourcePPQ + nudge) - event.ppq
-      if (not selected or noteOn) and diff <= 0 and diff >= nudge then
-        if (noteOn or noteOff) and event.msg:byte(2) == sourceMsg:byte(2) then -- same note
-          if noteOn then
-            if sourceNoteOff then
-              -- delete it
-              local offset, flags, msg = string.unpack("i4Bs4", events.midi[i], 1)
-              events.midi[i] = string.pack("i4Bs4", offset, 0, "")
-              event.msg = ""
-              deleteIt = true
-              break
-            end
+      if diff <= 0 and diff >= nudge then
+        if not selected and (noteOn or noteOff) and event.msg:byte(2) == sourceMsg:byte(2) then -- same note
+          if noteOn then -- if we hit a noteon first, it's something weird, delete it and keep searching
+            local offset, flags, msg = string.unpack("i4Bs4", events.midi[i], 1)
+            events.midi[i] = string.pack("i4Bs4", offset, 0, "")
+            event.msg = ""
+            deleteIt = true
           elseif noteOff then
             if sourceNoteOn then
               adjustedNudge = diff <= nudge and 0 or (diff <= nudge and nudge or nudge + -diff)
-              break
+            elseif sourceNoteOff then
+              deleteIt = true
+              for j = i + 1, 1, -1 do -- it's the event in front of this one
+                local ev = events.ppq[j]
+                local status = ev.msg:byte(1) & 0xF0
+                if ev.selected and status == 0x90 and ev.msg:byte(3) ~= 0
+                  and ev.msg:byte(2) == sourceMsg:byte(2)
+                then
+                   -- matching note-on for the note-off to delete, we need to delete it, too
+                   local offset, flags, msg = string.unpack("i4Bs4", events.midi[j], 1)
+                   events.midi[j] = string.pack("i4Bs4", offset, 0, "")
+                   ev.msg = ""
+                end
+              end
             end
+            break
           end
         end
       else
@@ -190,15 +205,97 @@ function LookBackward(sourceMsg, sourcePPQ, events, nudge)
     return 0, false
 end
 
+function GetPrevNextGridPos(take, ppqpos, prev)
+  local qnsom = reaper.MIDI_GetProjQNFromPPQPos(take, reaper.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos))
+  local qnpos = reaper.MIDI_GetProjQNFromPPQPos(take, ppqpos)
+  local intg = math.floor(qnpos)
+  local frac = qnpos - intg
+  local grid = reaper.MIDI_GetGrid(take)
+
+  if grid > 1 then
+    intg = math.floor(intg / grid) * grid
+  end
+
+  local newpqpos
+  if prev then
+    newpqpos = intg + math.floor(frac / grid) * grid
+  else
+    newqnpos = intg + (math.floor(frac / grid) + 1) * grid
+  end
+  return reaper.MIDI_GetPPQPosFromProjQN(take, newpqpos)
+end
+
+function GetPreviousGridPosition(take, ppqpos)
+  return GetPrevNextGridPos(take, ppqpos, true)
+end
+
+function GetNextGridPosition(take, ppqpos)
+  return GetPrevNextGridPos(take, ppqpos, false)
+end
+
+function ExtendItem(take, nudge, PPQEvents)
+  local itemPos = reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_POSITION")
+  local itemLen = reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_LENGTH")
+  local thePPQ = 0
+  local theDiffPPQ = 0
+
+  if nudge > 0 then
+    local endPosInPPQ = reaper.MIDI_GetPPQPosFromProjTime(take, itemPos + itemLen)
+    for i = #PPQEvents, 1, -1 do
+      if PPQEvents[i].selected and PPQEvents[i].msg ~= "" then
+        thePPQ = PPQEvents[i].ppq
+        break
+      end
+    end
+    theDiffPPQ = endPosInPPQ - thePPQ
+    if theDiffPPQ < 0 and theDiffPPQ < math.abs(nudge) then
+      -- local newEndPos = reaper.MIDI_GetProjTimeFromPPQPos(take, GetNextGridPosition(take, endPosInPPQ + -(theDiffPPQ - math.abs(nudge))))
+      local newEndPos = reaper.MIDI_GetProjTimeFromPPQPos(take, endPosInPPQ + -(theDiffPPQ - math.abs(nudge)))
+      reaper.SetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_LENGTH", newEndPos - itemPos)
+    end
+  else
+    local startPosInPPQ = reaper.MIDI_GetPPQPosFromProjTime(take, itemPos)
+    for i = 1, #PPQEvents do
+      if PPQEvents[i].selected and PPQEvents[i].msg ~= "" then
+        thePPQ = PPQEvents[i].ppq
+        break
+      end
+    end
+    theDiffPPQ = thePPQ - startPosInPPQ
+    if theDiffPPQ < 0 and theDiffPPQ < math.abs(nudge) then
+      -- local gridppq = GetPreviousGridPosition(take, startPosInPPQ + (theDiffPPQ - math.abs(nudge)))
+      local notepos = reaper.MIDI_GetProjTimeFromPPQPos(take, startPosInPPQ + (theDiffPPQ - math.abs(nudge)))
+      -- local newStartPos = reaper.MIDI_GetProjTimeFromPPQPos(take, gridppq)
+      local newStartPos = reaper.MIDI_GetProjTimeFromPPQPos(take, startPosInPPQ + (theDiffPPQ - math.abs(nudge)))
+      reaper.SetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_POSITION", newStartPos)
+      local newLen = (itemPos + itemLen) - newStartPos
+      reaper.SetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_LENGTH", newLen)
+
+      --reaper.MIDI_SetItemExtents(reaper.GetMediaItemTake_Item(take), reaper.MIDI_GetProjQNFromPPQPos(take, gridppq), reaper.MIDI_GetProjQNFromPPQPos(take, startPosInPPQ + reaper.MIDI_GetPPQPosFromProjTime(take, itemPos + newLen)))
+
+      -- reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", newStartPos - notepos)
+      -- reaper.ShowConsoleMsg("D_STARTOFFS: " .. notepos-newStartPos .. "\n")
+    end
+  end
+end
+
 function NudgeSelectedEvents(take, nudge)
-  local rv, MIDIString = reaper.MIDI_GetAllEvts(take)
+  local rv, MIDIString = reaper.MIDI_GetAllEvts(take, "") -- empty string for backward compatibility with older REAPER versions
 
   local stringPos = 1 -- Position inside MIDIString while parsing
 
   local PPQEvents = {}
   local MIDIEvents = {}
   local ppqTime = 0;
+  local startOffset = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
   local toDelete = {}
+
+  -- if startOffset ~= 0 then
+  --   local startPPQ = reaper.MIDI_GetPPQPosFromProjTime(take, reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_POSITION") + startOffset)
+  --   ppqTime = ppqTime + startPPQ
+  --   reaper.ShowConsoleMsg("startPPQ: " .. startPPQ .. "\n")
+  -- end
+
 
   while stringPos < MIDIString:len() - 12 do -- -12 to exclude final All-Notes-Off message
     local offset, flags, msg, newStringPos = string.unpack("i4Bs4", MIDIString, stringPos)
@@ -240,7 +337,7 @@ function NudgeSelectedEvents(take, nudge)
         if not deleteIt then
           MIDIEvents[#MIDIEvents + 1] = string.pack("i4Bs4", offset + nudgeIt, flags, msg)
           PPQEvents[#PPQEvents + 1] = { ppq = ppqTime + nudgeIt, selected = selected, msg = msg }
-          if nudgeIt then
+          if nudgeIt ~= 0 then
             MIDIEvents[#MIDIEvents + 1] = string.pack("i4Bs4", -nudgeIt, 0, "")
             PPQEvents[#PPQEvents + 1] = { ppq = ppqTime - nudgeIt, selected = false, msg = "" }
           end
@@ -261,6 +358,9 @@ function NudgeSelectedEvents(take, nudge)
 
   reaper.MIDI_SetAllEvts(take, table.concat(MIDIEvents) .. MIDIString:sub(-12))
   reaper.MIDI_Sort(take)
+
+  ExtendItem(take, nudge, PPQEvents)
+
   reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), reaper.GetMediaItemTake_Item(take))
 end
 
@@ -276,13 +376,33 @@ local _totalNudge = 0
 local _held = {}
 local _startTime = 0
 
-function OnExit()
+function InterceptKeys()
+  local state = reaper.JS_VKeys_GetState(0)
+  for i = 1, #state do
+    local abyte = state:byte(i)
+    if abyte and abyte == 1 then -- abyte ~= 0 then
+      _held[#_held + 1] = i
+      reaper.JS_VKeys_Intercept(i, 1) -- Block the key, else REAPER will run script again.
+    end
+  end
+end
+
+function ReleaseKeys()
   for _, v in pairs(_held) do
     reaper.JS_VKeys_Intercept(v, -1) -- Unblock the key
   end
+end
+
+function OnExit()
+  ReleaseKeys()
   reaper.Undo_BeginBlock2(0)
   if _totalNudge < 0 then _totalNudge = -_totalNudge end
   reaper.Undo_EndBlock2(0, "Nudge " .. (_nudge > 0 and "Forward " or "Backward ") .. _totalNudge .. " ticks", -1) -- message ignored in defer apparently
+end
+
+function OnCrash(err)
+  reaper.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
+  ReleaseKeys()
 end
 
 function DoIt()
@@ -307,14 +427,7 @@ function DoIt()
     end
   end
 
-  reaper.defer(DoIt)
-end
-
-function DoItFirstTime()
-  if #_held == 0 then return
-  else
-    reaper.defer(DoIt)
-  end
+  reaper.defer(function() xpcall(DoIt, OnCrash) end)
 end
 
 function GetActiveMIDIEditorTake()
@@ -335,14 +448,7 @@ function Setup(nudge, keyrepeat)
     reaper.atexit(OnExit)
 
     if keyrepeat and reaper.APIExists("JS_VKeys_GetState") then
-      local state = reaper.JS_VKeys_GetState(0)
-      for i = 1, #state do
-        local abyte = state:byte(i)
-        if abyte and abyte == 1 then -- abyte ~= 0 then
-          _held[#_held + 1] = i
-          reaper.JS_VKeys_Intercept(i, 1) -- Block the key, else REAPER will run script again.
-        end
-      end
+      InterceptKeys()
     end
     return true
   end
@@ -350,7 +456,7 @@ function Setup(nudge, keyrepeat)
 end
 
 function Nudge()
-  DoIt()
+  xpcall(DoIt, OnCrash)
 end
 
 

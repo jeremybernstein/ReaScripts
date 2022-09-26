@@ -153,7 +153,7 @@ function NoteLookBackward(sourceMsg, sourcePPQ, events, nudge)
               adjustedNudge = diff <= nudge and 0 or (diff <= nudge and nudge or nudge + -diff)
             elseif sourceNoteOff then
               deleteIt = true
-              for j = i + 1, 1, -1 do -- it's the event in front of this one
+              for j = i + 1, #events.ppq do -- it's the event in front of this one
                 local ev = events.ppq[j]
                 local status = ev.msg:byte(1) & 0xF0
                 if ev.selected and status == 0x90 and ev.msg:byte(3) ~= 0
@@ -163,6 +163,7 @@ function NoteLookBackward(sourceMsg, sourcePPQ, events, nudge)
                    local offset, flags, msg = string.unpack("i4Bs4", events.midi[j], 1)
                    events.midi[j] = string.pack("i4Bs4", offset, 0, "")
                    ev.msg = ""
+                   break
                 end
               end
             end

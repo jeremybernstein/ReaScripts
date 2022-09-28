@@ -36,8 +36,8 @@ function CCLookForward(sourceMsg, sourcePPQ, sourceMIDIString, sourceStringPos, 
 end
 
 function CCLookBackward(sourceMsg, sourcePPQ, events, nudge)
-  for i = #events.ppq, 1, -1 do
-    local event = events.ppq[i]
+  for i = #events, 1, -1 do
+    local event = events[i]
     local selected = event.selected
     if event.msg ~= "" then
       local isCC = event.msg:byte(1) & 0xF0 == 0xB0
@@ -46,8 +46,8 @@ function CCLookBackward(sourceMsg, sourcePPQ, events, nudge)
       local diff = (sourcePPQ + nudge) - event.ppq
       if not selected and diff <= 0 and diff >= nudge then
         if isPB or (isCC and event.msg:byte(2) == sourceMsg:byte(2)) then -- same CC pr PB
-          local offset, flags, msg = string.unpack("i4Bs4", events.midi[i], 1)
-          events.midi[i] = string.pack("i4Bs4", offset, 0, "")
+          local offset, flags, msg = string.unpack("i4Bs4", event.MIDI, 1)
+          event.MIDI = string.pack("i4Bs4", offset, 0, "")
           event.msg = ""
           -- break
         end
@@ -128,8 +128,8 @@ function NoteLookBackward(sourceMsg, sourcePPQ, events, nudge)
     sourceNoteOn = false
   end
 
-  for i = #events.ppq, 1, -1 do
-    local event = events.ppq[i]
+  for i = #events, 1, -1 do
+    local event = events[i]
     local selected = event.selected
     if event.msg ~= "" then
       local noteOn = event.msg:byte(1) & 0xF0 == 0x90
@@ -144,8 +144,8 @@ function NoteLookBackward(sourceMsg, sourcePPQ, events, nudge)
       if diff <= 0 and diff >= nudge then
         if not selected and (noteOn or noteOff) and event.msg:byte(2) == sourceMsg:byte(2) then -- same note
           if noteOn then -- if we hit a noteon first, it's something weird, delete it and keep searching
-            local offset, flags, msg = string.unpack("i4Bs4", events.midi[i], 1)
-            events.midi[i] = string.pack("i4Bs4", offset, 0, "")
+            local offset, flags, msg = string.unpack("i4Bs4", event.MIDI, 1)
+            event.MIDI = string.pack("i4Bs4", offset, 0, "")
             event.msg = ""
             deleteIt = true
           elseif noteOff then
@@ -153,15 +153,15 @@ function NoteLookBackward(sourceMsg, sourcePPQ, events, nudge)
               adjustedNudge = diff <= nudge and 0 or (diff <= nudge and nudge or nudge + -diff)
             elseif sourceNoteOff then
               deleteIt = true
-              for j = i + 1, #events.ppq do -- it's the event in front of this one
-                local ev = events.ppq[j]
+              for j = i + 1, #events do -- it should be the event just in front of this one
+                local ev = events[j]
                 local status = ev.msg:byte(1) & 0xF0
                 if ev.selected and status == 0x90 and ev.msg:byte(3) ~= 0
                   and ev.msg:byte(2) == sourceMsg:byte(2)
                 then
                    -- matching note-on for the note-off to delete, we need to delete it, too
-                   local offset, flags, msg = string.unpack("i4Bs4", events.midi[j], 1)
-                   events.midi[j] = string.pack("i4Bs4", offset, 0, "")
+                   local offset, flags, msg = string.unpack("i4Bs4", ev.MIDI, 1)
+                   ev.MIDI = string.pack("i4Bs4", offset, 0, "")
                    ev.msg = ""
                    break
                 end
@@ -233,7 +233,7 @@ function GetNextGridPosition(take, ppqpos)
   return GetPrevNextGridPos(take, ppqpos, false)
 end
 
-function ExtendItem(take, nudge, PPQEvents)
+function ExtendItem(take, nudge, events)
   local itemPos = reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_POSITION")
   local itemLen = reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(take), "D_LENGTH")
   local thePPQ = 0
@@ -241,9 +241,9 @@ function ExtendItem(take, nudge, PPQEvents)
 
   if nudge > 0 then
     local endPosInPPQ = reaper.MIDI_GetPPQPosFromProjTime(take, itemPos + itemLen)
-    for i = #PPQEvents, 1, -1 do
-      if PPQEvents[i].selected and PPQEvents[i].msg ~= "" then
-        thePPQ = PPQEvents[i].ppq
+    for i = #events, 1, -1 do
+      if events[i].selected and events[i].msg ~= "" then
+        thePPQ = events[i].ppq
         break
       end
     end
@@ -259,9 +259,9 @@ function ExtendItem(take, nudge, PPQEvents)
     end
   else
     local startPosInPPQ = reaper.MIDI_GetPPQPosFromProjTime(take, itemPos)
-    for i = 1, #PPQEvents do
-      if PPQEvents[i].selected and PPQEvents[i].msg ~= "" then
-        thePPQ = PPQEvents[i].ppq
+    for i = 1, #events do
+      if events[i].selected and events[i].msg ~= "" then
+        thePPQ = events[i].ppq
         break
       end
     end
@@ -292,7 +292,6 @@ function NudgeSelectedEvents(take, nudge)
 
   local stringPos = 1 -- Position inside MIDIString while parsing
 
-  local PPQEvents = {}
   local MIDIEvents = {}
   local ppqTime = 0;
   local toDelete = {}
@@ -332,34 +331,35 @@ function NudgeSelectedEvents(take, nudge)
            if not isCC and not isPB then deleteIt = true end -- don't delete the source event for CCs
           end
         else
-          nudgeIt, deleteIt = LookBackward(msg, ppqTime, { midi = MIDIEvents, ppq = PPQEvents }, nudge)
+          nudgeIt, deleteIt = LookBackward(msg, ppqTime, MIDIEvents, nudge)
         end
 
         if not deleteIt then
           local calcOffset = offset + nudgeIt
-          MIDIEvents[#MIDIEvents + 1] = string.pack("i4Bs4", calcOffset, flags, msg)
-          PPQEvents[#PPQEvents + 1] = { ppq = ppqTime + nudgeIt, selected = selected, msg = msg }
+          MIDIEvents[#MIDIEvents + 1] = { MIDI = string.pack("i4Bs4", calcOffset, flags, msg), ppq = ppqTime + nudgeIt, selected = selected, msg = msg }
           if calcOffset < preNudgeTicks then preNudgeTicks = calcOffset end
           if nudgeIt ~= 0 then
-            MIDIEvents[#MIDIEvents + 1] = string.pack("i4Bs4", -nudgeIt, 0, "")
-            PPQEvents[#PPQEvents + 1] = { ppq = ppqTime - nudgeIt, selected = false, msg = "" }
+            MIDIEvents[#MIDIEvents + 1] = { MIDI = string.pack("i4Bs4", -nudgeIt, 0, ""), ppq = ppqTime - nudgeIt, selected = false, msg = "" }
           end
         end
       else
-        MIDIEvents[#MIDIEvents + 1] = string.sub(MIDIString, stringPos, newStringPos - 1)
-        PPQEvents[#PPQEvents + 1] = { ppq = ppqTime, selected = selected, msg = msg }
+        MIDIEvents[#MIDIEvents + 1] = { MIDI = string.sub(MIDIString, stringPos, newStringPos - 1), ppq = ppqTime, selected = selected, msg = msg }
       end
     end
 
     if deleteIt then
-      MIDIEvents[#MIDIEvents + 1] = string.pack("i4Bs4", offset, 0, "")
-      PPQEvents[#PPQEvents + 1] = { ppq = ppqTime, selected = false, msg = "" }
+      MIDIEvents[#MIDIEvents + 1] = { MIDI = string.pack("i4Bs4", offset, 0, ""), ppq = ppqTime, selected = false, msg = "" }
     end
 
     stringPos = newStringPos
   end
 
-  reaper.MIDI_SetAllEvts(take, table.concat(MIDIEvents) .. MIDIString:sub(-12))
+  local newMIDIString = ""
+  for _, event in pairs(MIDIEvents) do
+    newMIDIString = newMIDIString .. event.MIDI
+  end
+
+  reaper.MIDI_SetAllEvts(take, newMIDIString .. MIDIString:sub(-12))
   reaper.MIDI_Sort(take)
 
   local item = reaper.GetMediaItemTake_Item(take)
@@ -373,7 +373,7 @@ function NudgeSelectedEvents(take, nudge)
   end
 
   -- extend the item forward or backward as necessary
-  ExtendItem(take, nudge, PPQEvents, preNudgeTicks)
+  ExtendItem(take, nudge, MIDIEvents, preNudgeTicks)
 
   reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), item)
 end

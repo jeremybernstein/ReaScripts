@@ -1,5 +1,5 @@
 -- @description Nudge MIDI
--- @version 1.4
+-- @version 1.5
 -- @author sockmonkey72
 -- @about
 --   # Nudge MIDI
@@ -14,6 +14,7 @@
 --   with consolidated undo points (requires js_ReaScriptAPI extension: https://forum.cockos.com/showthread.php?t=212174).
 -- @changelog
 --   bug fixes, improve item extension (and extend to grid)
+--   some refactoring
 -- @provides
 --   {NudgeMIDI}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_NudgeMIDI.lua

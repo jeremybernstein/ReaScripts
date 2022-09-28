@@ -1,5 +1,5 @@
 -- @description Nudge MIDI
--- @version 1.3
+-- @version 1.4
 -- @author sockmonkey72
 -- @about
 --   # Nudge MIDI
@@ -13,7 +13,7 @@
 --   If you associate these actions with keyboard shortcuts, you can hold the key down for a repeated nudge
 --   with consolidated undo points (requires js_ReaScriptAPI extension: https://forum.cockos.com/showthread.php?t=212174).
 -- @changelog
---   bug fixes, added primitive item extension
+--   bug fixes, improve item extension (and extend to grid)
 -- @provides
 --   {NudgeMIDI}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_NudgeMIDI.lua

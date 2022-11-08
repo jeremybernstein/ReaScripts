@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="3ce6fd8e8753294172b6e8b710364c507aea1e7f">
+<index version="1" name="sockmonkey72 Scripts" commit="7c1c0149ea70073ef51c3d4794438c7255def030">
   <category name="Envelopes">
     <reapack name="Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="(deprecated) Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -221,6 +221,22 @@
         <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset.so</source>
         <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_x64.dll</source>
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_ExtendMIDIItemToNearestBars.lua" type="script" desc="Extend MIDI Item to Nearest Bars">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Extend MIDI Item to Nearest Bars\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Extend both ends of a MIDI item to the nearest full measure. The item can only get larger.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-11-08T14:12:21Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/7c1c0149ea70073ef51c3d4794438c7255def030/MIDI/sockmonkey72_ExtendMIDIItemToNearestBars.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_HarmonizeMIDI.lua" type="script" desc="Harmonize MIDI">
@@ -476,6 +492,22 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
         <source platform="linux64" file="reaper_onprojectload.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload.so</source>
         <source platform="win64" file="reaper_onprojectload_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload_x64.dll</source>
         <source platform="win32" file="reaper_onprojectload_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/Various/onprojectload/reaper_onprojectload_w32.dll</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_FuzzyFloatCmpUtil.lua" type="script" desc="Fuzzy Float Comparison Utility">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Fuzzy Float Comparison Utility\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 A fuzzy float comparison function based on https://floating-point-gui.de/errors/comparison/ as well as some tests to prove that it works.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-11-08T14:12:21Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/7c1c0149ea70073ef51c3d4794438c7255def030/Various/sockmonkey72_FuzzyFloatCmpUtil.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_Smarter_Zoom.lua" type="script" desc="Smarter Zoom">

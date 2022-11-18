@@ -1,5 +1,5 @@
 -- @description Thin MIDI CC Events
--- @version 1.3
+-- @version 1.4
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
@@ -15,7 +15,7 @@
 
 local reaper = reaper
 
-_, _, sectionID = reaper.get_action_context()
+local _, _, sectionID = reaper.get_action_context()
 -- ---------------- MIDI Editor ---------- Event List ------- Inline Editor
 local isME = sectionID == 32060 or sectionID == 32061 or sectionID == 32062
 if not isME then return end

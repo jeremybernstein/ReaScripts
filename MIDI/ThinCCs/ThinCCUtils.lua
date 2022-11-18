@@ -20,15 +20,17 @@ function AddPointToList(eventlist, event)
   local is2byte = status == 0xC0 or status == 0xD0
   local isPB = status == 0xE0
 
+  status = event.chanmsg | event.chan
+
   for _, v in pairs(eventlist.events) do
     local which = (is2byte or isPB) and 0 or event.msg2
-    if v.status == event.chanmsg and v.which == which then
+    if v.status == status and v.which == which then
       curlist = v.points
       break
     end
   end
   if not curlist then
-    local entry = { status = event.chanmsg, which = (is2byte or isPB) and 0 or event.msg2, points = {} }
+    local entry = { status = status, which = (is2byte or isPB) and 0 or event.msg2, points = {} }
     eventlist.events[#eventlist.events + 1] = entry
     curlist = entry.points
   end
@@ -107,7 +109,7 @@ function PerformReduction(eventlist, take)
         b2 = p.value & 0x7F
         b3 = (p.value >> 7) & 0x7F
       end
-      reaper.MIDI_InsertCC(take, 1, p.muted, p.ppqpos, v.status, v.status & 0xF, b2, b3)
+      reaper.MIDI_InsertCC(take, 1, p.muted, p.ppqpos, v.status & 0xF0, v.status & 0xF, b2, b3)
     end
   end
 

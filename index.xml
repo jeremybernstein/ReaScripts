@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="6e2f06ade82e428e092ca64d4e4247a302b0ffed">
+<index version="1" name="sockmonkey72 Scripts" commit="af4746236b1f330fcb2c221f0a7f0f0a8b7096f7">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -218,6 +218,26 @@ some refactoring]]></changelog>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/sockmonkey72_NudgeMIDI.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_Thin_CCs_Selected.lua" type="script" desc="Thin MIDI CC Events">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Thin MIDI CC Events\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Reduce density of MIDI CC events\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2022-11-18T12:08:39Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
+        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/ThinCCs/ThinCCUtils.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
       </version>
     </reapack>
   </category>

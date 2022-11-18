@@ -1,5 +1,5 @@
 -- @description Thin MIDI CC Events
--- @version 1.1
+-- @version 1.2
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
@@ -11,6 +11,7 @@
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Time_Selection.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Setup.lua
+--   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Selected_Items.lua
 
 local reaper = reaper
 

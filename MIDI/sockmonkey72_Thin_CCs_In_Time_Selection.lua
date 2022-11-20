@@ -30,5 +30,6 @@ if take then
 
   reaper.Undo_BeginBlock2(0)
   PerformReductionForAllEvents({ events = tt }, take)
+  reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), reaper.GetMediaItemTake_Item(take))
   reaper.Undo_EndBlock2(0, "Thin All CCs In Time Selection", -1)
 end

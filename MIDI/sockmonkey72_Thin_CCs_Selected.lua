@@ -1,5 +1,5 @@
 -- @description Thin MIDI CC Events
--- @version 1.5
+-- @version 1.5.1
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
@@ -7,6 +7,7 @@
 -- @changelog
 --   - add 'main' context script for reducing selected items
 --   - add new script for only affecting visible items, versus all items in time selection
+--   - fix undo
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua
@@ -47,5 +48,6 @@ if take then
 
   reaper.Undo_BeginBlock2(0)
   PerformReduction({ events = tt, todelete = dt }, take)
+  reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), reaper.GetMediaItemTake_Item(take))
   reaper.Undo_EndBlock2(0, "Thin Selected CCs", -1)
 end

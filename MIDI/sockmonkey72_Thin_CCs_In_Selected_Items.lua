@@ -11,6 +11,7 @@ package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.l
 require "ThinCCs/ThinCCUtils"
 
 local numSelItems = reaper.CountSelectedMediaItems(0)
+reaper.Undo_BeginBlock2(0)
 for i = 0, numSelItems do
   local item = reaper.GetSelectedMediaItem(0, i)
   if item then
@@ -21,9 +22,9 @@ for i = 0, numSelItems do
       local hasEvents = PrepareList({ events = tt })
       if not hasEvents then return end
 
-      reaper.Undo_BeginBlock2(0)
       PerformReductionForAllEvents({ events = tt }, take)
-      reaper.Undo_EndBlock2(0, "Thin CCs In Selected Items", -1)
+      reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), item)
     end
   end
 end
+reaper.Undo_EndBlock2(0, "Thin CCs In Selected Items", -1)

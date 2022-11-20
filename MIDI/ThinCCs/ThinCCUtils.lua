@@ -10,6 +10,36 @@
 package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
 local reduce = require "RamerDouglasPeucker"
 
+local lastMIDIMessage = ""
+local MIDIEvents = {}
+
+function GenerateEventListFromAllEvents(take, fun)
+  local events = {}
+  local stringPos = 1 -- Position inside MIDIString while parsing
+  local ppqpos = 0
+
+  local _, MIDIString = reaper.MIDI_GetAllEvts(take, "") -- empty string for backward compatibility with older REAPER versions
+  while stringPos < MIDIString:len() - 12 do -- -12 to exclude final All-Notes-Off message
+    local offset, flags, msg, newStringPos = string.unpack("i4Bs4", MIDIString, stringPos)
+
+    ppqpos = ppqpos + offset
+
+    MIDIEvents[#MIDIEvents + 1] = { ppqpos = ppqpos, offset = offset, flags = flags, msg = msg }
+
+    if fun(MIDIEvents[#MIDIEvents]) == true then
+      local b1 = msg:byte(1)
+      local status = b1 & 0xF0
+      if status >= 0xA0 and status <= 0xF0 then
+        MIDIEvents[#MIDIEvents].wantsdelete = 1 -- we will delete this point before rewriting
+        AddPointToList({ events = events }, { idx = -1, ppqpos = ppqpos, chanmsg = b1 & 0xF0, chan = b1 & 0x0F, msg2 = msg:byte(2), msg3 = msg:byte(3), selected = (flags & 1 ~= 0) and true or false, muted = (flags & 2 ~= 0) and true or false, shape = (flags & 0xF0) >> 4 })
+      end
+    end
+    stringPos = newStringPos
+  end
+  lastMIDIMessage = MIDIString:sub(-12)
+  return events
+end
+
 function AddPointToList(eventlist, event)
   local curlist = nil
 
@@ -43,8 +73,10 @@ function AddPointToList(eventlist, event)
     if isPB then
       curlist[#curlist].value = event.msg2 | (event.msg3 << 7)
     end
-    eventlist.todelete[event.idx] = 1
-    eventlist.todelete.maxidx = event.idx
+    if eventlist.todelete then
+      eventlist.todelete[event.idx] = 1
+      eventlist.todelete.maxidx = event.idx
+    end
   end
 end
 
@@ -52,9 +84,11 @@ function PrepareList(eventlist)
   -- exclude tables with fewer than 3 points
   for _, v in pairs(eventlist.events) do
     if #v.points < 3 then
-      for _, p in pairs(v.points) do
-        if p.idx >= 0 then
-          eventlist.todelete[p.idx] = nil
+      if eventlist.todelete then
+        for _, p in pairs(v.points) do
+          if p.idx >= 0 then
+            eventlist.todelete[p.idx] = nil
+          end
         end
       end
       v.points = {}
@@ -62,8 +96,8 @@ function PrepareList(eventlist)
   end
 
   local hasEvents = false
-  for i = 1, eventlist.todelete.maxidx do
-    if eventlist.todelete[i] then
+  for _, v in pairs(eventlist.events) do
+    if #v.points > 0 then
       hasEvents = true
       break
     end
@@ -72,7 +106,8 @@ function PrepareList(eventlist)
   return hasEvents
 end
 
-function PerformReduction(eventlist, take)
+function DoReduction(events)
+  local newevents = {}
 
   local defaultReduction = "10"
   if reaper.HasExtState("sockmonkey72_ThinCCs", "level") then
@@ -80,6 +115,33 @@ function PerformReduction(eventlist, take)
   end
   local reduction = tonumber(defaultReduction)
 
+  -- iterate, reduce points
+  for _, v in pairs(events) do
+    local status = v.status & 0xF0
+    local is3byte = status == 0xA0 or status == 0xB0
+    local is2byte = status == 0xC0 or status == 0xD0
+    local isPB = status == 0xE0
+
+    local newpoints = reduce(v.points, reduction, false, "ppqpos", "value")
+    for _, p in pairs(newpoints) do
+      local b2 = is2byte and p.value or v.which
+      local b3 = is2byte and 0 or p.value
+      if isPB then
+        b2 = p.value & 0x7F
+        b3 = (p.value >> 7) & 0x7F
+      end
+
+      local flags = p.shape << 4
+      if p.muted == true then flags = flags | 2 end
+      if p.selected == true then flags = flags | 1 end
+
+      newevents[#newevents + 1] = { ppqpos = p.ppqpos, flags = flags, b1 = v.status, b2 = b2, b3 = b3 }
+    end
+  end
+  return newevents
+end
+
+function PerformReduction(eventlist, take)
   reaper.MIDI_DisableSort(take)
 
   -- reverse iterate, delete points
@@ -94,26 +156,43 @@ function PerformReduction(eventlist, take)
 
   reaper.MIDIEditor_OnCommand(reaper.MIDIEditor_GetActive(), 40671) -- unselect all CC events
 
-  -- iterate, reduce points
-  for _, v in pairs(eventlist.events) do
-    local status = v.status & 0xF0
-    local is3byte = status == 0xA0 or status == 0xB0
-    local is2byte = status == 0xC0 or status == 0xD0
-    local isPB = status == 0xE0
-
-    local newpoints = reduce(v.points, reduction, false, "ppqpos", "value")
-    for _, p in pairs(newpoints) do
-      local b2 = is2byte and p.value or v.which
-      local b3 = is2byte and 0 or p.value
-      if isPB then
-        b2 = p.value & 0x7F
-        b3 = (p.value >> 7) & 0x7F
-      end
-      reaper.MIDI_InsertCC(take, 1, p.muted, p.ppqpos, v.status & 0xF0, v.status & 0xF, b2, b3)
-    end
+  local reduced = DoReduction(eventlist.events)
+  for _, p in pairs(reduced) do
+    reaper.MIDI_InsertCC(take, 1, (p.flags & 2 ~= 0) and true or false, p.ppqpos, p.b1 & 0xF0, p.b1 & 0xF, p.b2, p.b3)
   end
 
   reaper.MIDI_Sort(take)
-
   reaper.MIDIEditor_OnCommand(reaper.MIDIEditor_GetActive(), 42080) -- set selected points to linear
+end
+
+function PerformReductionForAllEvents(eventlist, take)
+  if #MIDIEvents == 0 then return end
+
+  local reduced = DoReduction(eventlist.events)
+  table.sort(reduced, function (e1, e2) return e1.ppqpos < e2.ppqpos end) -- sort by ppqpos
+
+  -- apply negative offset
+  reaper.MIDI_DisableSort(take)
+  local lastppq = MIDIEvents[#MIDIEvents].ppqpos
+  MIDIEvents[#MIDIEvents + 1] = { ppqpos = 0, offset = -lastppq, flags = 0, msg = "" }
+
+  -- insert new events (now in eventlist.events) -- they are sorted by ppqpos
+  lastppq = 0
+  for _, v in pairs(reduced) do
+    MIDIEvents[#MIDIEvents + 1] = { ppqpos = v.ppqpos, offset = v.ppqpos - lastppq, flags = v.flags, msg = table.concat({string.char(v.b1), string.char(v.b2), string.char(v.b3)}) }
+    lastppq = v.ppqpos
+  end
+
+  -- write the raw MIDI table
+  local MIDIData = {}
+  for _, v in pairs(MIDIEvents) do
+    if v.wantsdelete == 1 then
+      MIDIData[#MIDIData + 1] = string.pack("i4Bs4", v.offset, 0, "")
+    else
+      MIDIData[#MIDIData + 1] = string.pack("i4Bs4", v.offset, v.flags, v.msg)
+    end
+  end
+
+  reaper.MIDI_SetAllEvts(take, table.concat(MIDIData) .. lastMIDIMessage)
+  reaper.MIDI_Sort(take)
 end

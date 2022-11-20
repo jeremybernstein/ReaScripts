@@ -1,16 +1,18 @@
 -- @description Thin MIDI CC Events
--- @version 1.4
+-- @version 1.5
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
 --   Reduce density of MIDI CC events
 -- @changelog
---   initial
+--   - add 'main' context script for reducing selected items
+--   - add new script for only affecting visible items, versus all items in time selection
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Time_Selection.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Setup.lua
+--   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua
 --   [main=main] sockmonkey72_Thin_CCs_In_Selected_Items.lua
 
 local reaper = reaper

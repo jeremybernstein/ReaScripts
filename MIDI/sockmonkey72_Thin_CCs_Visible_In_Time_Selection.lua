@@ -5,10 +5,6 @@
    * NoIndex: true
 --]]
 
--- ultimately this isn't necessary. the take acquired from the MIDI editor takes the filtering etc.
--- into account and doesn't actually provide events for stuff you can't see. checking in for reference
--- at some point, maybe something like this is useful, but it shouldn't be public
-
 local reaper = reaper
 
 local _, _, sectionID = reaper.get_action_context()
@@ -26,13 +22,13 @@ local take = reaper.MIDIEditor_GetTake(reaper.MIDIEditor_GetActive())
 if take then
   local tt = {}
   local dt = { maxidx = 0 }
-   wants = {}
-   fchan = 0
+  local wants = {}
+  local fchan = 0
 
   local item = reaper.GetMediaItemTake_Item(take)
   if item then
     local _, str = reaper.GetItemStateChunk(item, "", false)
-    reaper.ShowConsoleMsg("str: "..str.."\n")
+    -- reaper.ShowConsoleMsg("str: "..str.."\n")
     local lanes = {}
     local i = 0
     while true do
@@ -41,28 +37,34 @@ if take then
       i = index
       table.insert(lanes, tonumber(idx))
     end
-    local _, _, filterchan, filteractive = string.find(str, "EVTFILTER (%-?%d+)%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+(%-?%d+)")
-    fchan = tonumber(filterchan)
-    if fchan > 0 then
-      if tonumber(filteractive) == 0 then
-        fchan = 0
-      end
-    end
+    -- this is unnecessary, REAPER only provides filtered events via the MIDI_CountEvts/MIDI_GetCC API
+    -- you can use MIDI_GetAllEvts to see filtered events, so adapting the main time selection
+    -- script to operate on all evts.
+    -- local _, _, filterchan, filteractive = string.find(str, "EVTFILTER (%-?%d+)%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+(%-?%d+)")
+    -- fchan = tonumber(filterchan)
+    -- if fchan > 0 then
+    --   if tonumber(filteractive) == 0 then
+    --     fchan = 0
+    --   end
+    -- end
 
     for _, v in pairs(lanes) do
+      local status = 0
+      local which = 0
       if v >= 0 and v <= 127 then
-        wants[#wants + 1] = { status = 0xB0 | (fchan > 0 and fchan - 1 or 0), which = v }
-      elseif v == 128 then
-        wants[#wants + 1] = { status = 0xE0 | (fchan > 0 and fchan - 1 or 0), which = 0 } -- pitch
-      elseif v == 129 then
-        wants[#wants + 1] = { status = 0xC0 | (fchan > 0 and fchan - 1 or 0), which = 0 } -- pgch
-      elseif v == 130 then
-        wants[#wants + 1] = { status = 0xD0 | (fchan > 0 and fchan - 1 or 0), which = 0 } -- channel AT
+        status = 0xB0
+        which = v
+      elseif v == 128 then status = 0xE0
+      elseif v == 129 then status = 0xC0
+      elseif v == 130 then status = 0xD0
+      end
+      if status ~= 0 then
+        wants[#wants + 1] = { status = status | (fchan > 0 and fchan - 1 or 0), which = which }
       end
     end
   end
 
-  local _, _, ccevtcnt = reaper.MIDI_CountEvts(take)
+  local _, _, ccevtcnt = reaper.MIDI_CountEvts(take) -- only filtered events
 
   local ppqstart = reaper.MIDI_GetPPQPosFromProjTime(take, starttime)
   local ppqend = reaper.MIDI_GetPPQPosFromProjTime(take, endtime)
@@ -89,5 +91,5 @@ if take then
 
   reaper.Undo_BeginBlock2(0)
   PerformReduction({ events = tt, todelete = dt }, take)
-  reaper.Undo_EndBlock2(0, "Thin CCs Visible In Time Selection", -1)
+  reaper.Undo_EndBlock2(0, "Thin Visible CCs In Time Selection", -1)
 end

@@ -37,7 +37,30 @@ function GenerateEventListFromAllEvents(take, fun)
     stringPos = newStringPos
   end
   lastMIDIMessage = MIDIString:sub(-12)
-  return events
+  return { events = events }
+end
+
+function GenerateEventListFromFilteredEvents(take, fun)
+  local eventlist = { events = {}, todelete = { maxidx = 0} }
+  local wants = GetVisibleCCs(take)
+
+  local _, _, ccevtcnt = reaper.MIDI_CountEvts(take) -- only filtered events
+  for idx = 0, ccevtcnt - 1 do
+    local event = { idx = idx }
+    _, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3 = reaper.MIDI_GetCC(take, idx)
+    _, event.shape = reaper.MIDI_GetCCShape(take, idx)
+    if fun(event) == true then
+      for _, v in pairs(wants) do
+        if ((v.status & 0xF0) == event.chanmsg)
+          and ((event.chanmsg == 0xB0 or event.chanmsg == 0xA0) and (v.which == event.msg2) or true)
+        then
+          AddPointToList(eventlist, event)
+          break
+        end
+      end
+    end
+  end
+  return eventlist
 end
 
 function AddPointToList(eventlist, event)
@@ -195,4 +218,49 @@ function PerformReductionForAllEvents(eventlist, take)
 
   reaper.MIDI_SetAllEvts(take, table.concat(MIDIData) .. lastMIDIMessage)
   reaper.MIDI_Sort(take)
+end
+
+function GetVisibleCCs(take)
+  local wants = {}
+  local item = reaper.GetMediaItemTake_Item(take)
+
+  if item then
+    local _, str = reaper.GetItemStateChunk(item, "", false)
+    -- reaper.ShowConsoleMsg("str: "..str.."\n")
+    local lanes = {}
+    local i = 0
+    while true do
+      local index, _, idx = string.find(str, "VELLANE (%d+)", i + 1)
+      if index == nil then break end
+      i = index
+      table.insert(lanes, tonumber(idx))
+    end
+
+    -- this is unnecessary, REAPER only provides filtered events via the MIDI_CountEvts/MIDI_GetCC API
+    -- you can use MIDI_GetAllEvts to see filtered events, so adapting the main time selection
+    -- script to operate on all evts.
+    -- local _, _, filterchan, filteractive = string.find(str, "EVTFILTER (%-?%d+)%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+(%-?%d+)")
+    -- fchan = tonumber(filterchan)
+    -- if fchan > 0 then
+    --   if tonumber(filteractive) == 0 then
+    --     fchan = 0
+    --   end
+    -- end
+
+    for _, v in pairs(lanes) do
+      local status = 0
+      local which = 0
+      if v >= 0 and v <= 127 then
+        status = 0xB0 -- CC
+        which = v
+      elseif v == 128 then status = 0xE0 -- pitch bend
+      elseif v == 129 then status = 0xC0 -- program change
+      elseif v == 130 then status = 0xD0 -- channel pressure
+      end
+      if status ~= 0 then
+        wants[#wants + 1] = { status = status, which = which }
+      end
+    end
+  end
+  return wants
 end

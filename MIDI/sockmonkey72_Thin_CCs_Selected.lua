@@ -1,5 +1,5 @@
 -- @description Thin MIDI CC Events
--- @version 1.5.1
+-- @version 1.6.0
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
@@ -14,6 +14,9 @@
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Time_Selection.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Setup.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua
+--   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_All.lua
+--   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_All_Visible.lua
+--   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua
 --   [main=main] sockmonkey72_Thin_CCs_In_Selected_Items.lua
 
 local reaper = reaper
@@ -28,8 +31,7 @@ require "ThinCCs/ThinCCUtils"
 
 local take = reaper.MIDIEditor_GetTake(reaper.MIDIEditor_GetActive())
 if take then
-  local tt = {}
-  local dt = { maxidx = 0 }
+  local eventlist = { events = {}, todelete = { maxidx = 0 }}
   local idx = reaper.MIDI_EnumSelCC(take, -1)
 
   while idx >= 0 do
@@ -37,17 +39,16 @@ if take then
     _, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3 = reaper.MIDI_GetCC(take, idx)
     _, event.shape = reaper.MIDI_GetCCShape(take, idx)
     if event.selected then -- overkill here, but I'm owning it
-      AddPointToList({ events = tt, todelete = dt }, event)
+      AddPointToList(eventlist, event)
     end
     idx = reaper.MIDI_EnumSelCC(take, idx)
   end
 
-
-  local hasEvents = PrepareList({ events = tt, todelete = dt })
+  local hasEvents = PrepareList(eventlist)
   if not hasEvents then return end
 
   reaper.Undo_BeginBlock2(0)
-  PerformReduction({ events = tt, todelete = dt }, take)
+  PerformReduction(eventlist, take)
   reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), reaper.GetMediaItemTake_Item(take))
   reaper.Undo_EndBlock2(0, "Thin Selected CCs", -1)
 end

@@ -17,12 +17,12 @@ for i = 0, numSelItems do
   if item then
     local take = reaper.GetActiveTake(item)
     if take and reaper.TakeIsMIDI(take) then
-      local tt = GenerateEventListFromAllEvents(take, function (me) return true end)
+      local eventlist = GenerateEventListFromAllEvents(take, function (me) return true end)
 
-      local hasEvents = PrepareList({ events = tt })
+      local hasEvents = PrepareList(eventlist)
       if not hasEvents then return end
 
-      PerformReductionForAllEvents({ events = tt }, take)
+      PerformReductionForAllEvents(eventlist, take)
       reaper.MarkTrackItemsDirty(reaper.GetMediaItemTake_Track(take), item)
     end
   end

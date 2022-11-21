@@ -18,6 +18,8 @@ function GenerateEventListFromAllEvents(take, fun)
   local stringPos = 1 -- Position inside MIDIString while parsing
   local ppqpos = 0
 
+  MIDIEvents = {}
+
   local _, MIDIString = reaper.MIDI_GetAllEvts(take, "") -- empty string for backward compatibility with older REAPER versions
   while stringPos < MIDIString:len() - 12 do -- -12 to exclude final All-Notes-Off message
     local offset, flags, msg, newStringPos = string.unpack("i4Bs4", MIDIString, stringPos)

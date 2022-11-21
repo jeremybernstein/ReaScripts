@@ -5,9 +5,9 @@
 --   # Thin MIDI CC Events
 --   Reduce density of MIDI CC events
 -- @changelog
---   - add 'main' context script for reducing selected items
---   - add new script for only affecting visible items, versus all items in time selection
---   - fix undo
+--   - add new scripts for thinning all and all visible CCs in the item
+--   - add script for thinning lane under the mouse (requires SWS)
+--   - (main) context selected items script will respect Razor Edit areas
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua

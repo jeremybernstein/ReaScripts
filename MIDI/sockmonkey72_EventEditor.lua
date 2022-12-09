@@ -1,9 +1,17 @@
---[[
-   * Author: sockmonkey72
-   * Licence: MIT
-   * Version: 1.00
-   * NoIndex: true
---]]
+-- @description MIDI Event Editor
+-- @version 1.0.0
+-- @author sockmonkey72
+-- @about
+--   # MIDI Event Editor
+--   One-line MIDI event editor
+--   The Math Operators ()+, -, *, /) can be used to calculate relative values, also on multi-selected values
+--   The Range Operator (.) can be used to scale a selection from its current range to the specified target range
+--   (for example: .20-80 will scale the selected events to the range 20-80)
+--   When setting negative absolute values for pitch bend, use --VALUE (instead of -VALUE, which will use the '-' Math Operator)
+-- @changelog
+--   - initial
+-- @provides
+--   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
 
 local r = reaper
 
@@ -13,8 +21,11 @@ dofile(r.GetResourcePath() ..
 local ctx = r.ImGui_CreateContext('sockmonkey72_Event_Editor')
 local sans_serif = r.ImGui_CreateFont('sans-serif', 13)
 local sans_serif_small = r.ImGui_CreateFont('sans-serif', 11)
+local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', 11)
+
 r.ImGui_Attach(ctx, sans_serif)
 r.ImGui_Attach(ctx, sans_serif_small)
+r.ImGui_Attach(ctx, sans_serif_titlebar)
 
 local commonEntries = { 'measures', 'beats', 'ticks', 'chan' }
 local scaleOpWhitelist = { 'pitch', 'channel', 'vel', 'notedur', 'ccnum', 'ccval' }
@@ -47,23 +58,55 @@ local function myWindow()
   local NOTE_FILTER = 0x90
   local changedParameter = nil
 
-  local events = {}
+  local allEvents = {}
+  local selectedEvents = {}
 
   local take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
   if not take then return end
 
-  function ppqToTime(ppqpos)
-    local ppqmeasurepos = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
-    local _, measures, cml, fullbeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, ppqpos))
-    --rv, text = r.ImGui_InputText(ctx, 'text field', text)
-    local _, som, _, sombeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, ppqmeasurepos))
+  function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
+    if not measures then measures = 0 end
+    if not beats then beats = 0 end
+    if not ticks then ticks = 0 end
+    if relativeppq then
+      local relMeasures, relBeats, _, relTicks = ppqToTime(relativeppq)
+      measures = measures + relMeasures
+      beats = beats + relBeats
+      ticks = ticks + relTicks
+    end
+    local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, r.TimeMap2_beatsToTime(0, beats, measures)) + ticks
+    if relativeppq and not nosubtract then ppqpos = ppqpos - relativeppq end
+    return math.floor(ppqpos)
+  end
 
-    local beats = math.floor(fullbeats - sombeats)
+  function ppqToTime(ppqpos)
+    local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, ppqpos))
+    local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
+
+    local measures = posMeasures
+    local beats = math.floor(posBeats - posBeatsSOM)
     local beatsmax = math.floor(cml)
-    local qtime = r.TimeMap2_beatsToTime(0, math.floor(fullbeats))
-    local ppqbeatpos = r.MIDI_GetPPQPosFromProjTime(take, qtime)
-    local ticks = math.floor(ppqpos - ppqbeatpos)
+    local posBeats_PPQ = BBTToPPQ(nil, math.floor(posBeats))
+    local ticks = math.floor(ppqpos - posBeats_PPQ)
     return measures, beats, beatsmax, ticks
+  end
+
+  function ppqToLength(ppqpos, ppqlen)
+    -- REAPER, why is this so difficult?
+    -- get the PPQ position of the nearest measure start (to ensure that we're dealing with round values)
+    local _, startMeasures, _, startBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
+    local startPPQ = BBTToPPQ(nil,  math.floor(startBeats))
+
+    -- now we need the nearest measure start to the end position
+    local _, endMeasuresSOM, _, endBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, startPPQ + ppqlen)))
+    -- and the actual end position
+    local _, endMeasures, _, endBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, startPPQ + ppqlen))
+
+    local measures = endMeasures - startMeasures -- measures from start to end
+    local beats = math.floor(endBeats - endBeatsSOM) -- beats from the SOM (only this measure)
+    local endBeats_PPQ = BBTToPPQ(nil,  math.floor(endBeats)) -- ppq location of the beginning of this beat
+    local ticks = math.floor((startPPQ + ppqlen) - endBeats_PPQ) -- finally the ticks
+    return measures, beats, ticks
   end
 
   function calcMIDITime(e)
@@ -71,26 +114,33 @@ local function myWindow()
   end
 
   local newNotes = {}
-  local noteidx = r.MIDI_EnumSelNotes(take, -1)
-  if noteidx > -1 then
-    while noteidx > -1 do
-      events[#events + 1] = { type = NOTE_TYPE, idx = noteidx }
-      local e = events[#events]
-      _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = r.MIDI_GetNote(take, noteidx)
+
+  local noteEventsCount = 0
+  local CCEventsCount = 0
+  local FNG_take = r.FNG_AllocMidiTake(take)
+  local _, notecnt, cccnt = r.MIDI_CountEvts(take)
+  for noteidx = 0, notecnt - 1 do
+    local e = { type = NOTE_TYPE, idx = noteidx }
+    _, e.selected, e.muted, e.ppqpos, _, e.chan, e.pitch, e.vel = r.MIDI_GetNote(take, noteidx)
+    e.chanmsg = 0x90
+    local FNG_note = r.FNG_GetMidiNote(FNG_take, noteidx)
+    e.notedur = r.FNG_GetMidiNoteIntProperty(FNG_note, 'LENGTH') -- necessary to get the 'editor length', can still be wrong
+    -- r.ShowConsoleMsg('e.notedur: '..e.notedur..', alt: '..(endppqpos - e.ppqpos)..'\n')
+    e.endppqpos = e.ppqpos + e.notedur
+    if e.selected then
       calcMIDITime(e)
-      e.notedur = e.endppqpos - e.ppqpos
-      e.chanmsg = 0x90
       hasNotes = true
+      table.insert(selectedEvents, e)
       table.insert(newNotes, e.idx)
-      noteidx = r.MIDI_EnumSelNotes(take, noteidx)
     end
+    table.insert(allEvents, e)
   end
 
-  local ccidx = r.MIDI_EnumSelCC(take, -1)
-  while ccidx > -1 do
-    events[#events + 1] = { type = CC_TYPE, idx = ccidx }
-    local e = events[#events]
+  for ccidx = 0, cccnt - 1 do
+    local e = { type = CC_TYPE, idx = ccidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = r.MIDI_GetCC(take, ccidx)
+    _, e.shape, e.beztension = r.MIDI_GetCCShape(take, ccidx)
+
     if e.chanmsg == 0xE0 then
       e.ccnum = INVALID
       e.ccval = ((e.msg3 << 7) + e.msg2) - (1 << 13)
@@ -101,9 +151,12 @@ local function myWindow()
       e.ccnum = e.msg2
       e.ccval = e.msg3
     end
-    calcMIDITime(e)
-    hasCCs = true
-    ccidx = r.MIDI_EnumSelCC(take, ccidx)
+    if e.selected then
+      calcMIDITime(e)
+      hasCCs = true
+      table.insert(selectedEvents, e)
+    end
+    table.insert(allEvents, e)
   end
 
   local resetFilter = false
@@ -126,7 +179,7 @@ local function myWindow()
   if resetFilter then popupFilter = 0x90 end
   selectedNotes = newNotes
 
-  if #events == 0 then return end
+  if #selectedEvents == 0 or not (hasNotes or hasCCs) then return end
 
   local OP_ABS = 0
   local OP_ADD = string.byte('+', 1)
@@ -146,12 +199,17 @@ local function myWindow()
   ccTypes[0xD0] = { val = 0xD0, label = 'ChanAT', exists = false }
   ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 
-  for _, v in pairs(events) do
-    ccTypes[v.chanmsg].exists = true
+  for _, v in pairs(selectedEvents) do
+    if v.chanmsg and v.chanmsg ~= 0 then ccTypes[v.chanmsg].exists = true end
   end
   if popupFilter ~= 0 and not ccTypes[popupFilter].exists then popupFilter = 0 end
   if popupFilter == 0 then
-    popupFilter = events[1].chanmsg
+    for _, v in pairs(selectedEvents) do
+      if v.chanmsg and v.chanmsg ~= 0 then
+        popupFilter = v.chanmsg
+        break
+      end
+    end
   end
   popupLabel = ccTypes[popupFilter].label
   if popupFilter == 0xD0 or popupFilter == 0xE0 then cc2byte = true end
@@ -170,13 +228,17 @@ local function myWindow()
 
     if e.chanmsg == popupFilter then
       if e.ppqpos < union.selposticks then union.selposticks = e.ppqpos end
-      if e.ppqpos > union.selendticks then union.selendticks = e.ppqpos end
+      if e.type == NOTE_TYPE then
+        if e.endppqpos > union.selendticks then union.selendticks = e.endppqpos end
+      else
+        if e.ppqpos > union.selendticks then union.selendticks = e.ppqpos end
+      end
     end
   end
 
   union.selposticks = -INVALID
   union.selendticks = INVALID
-  for _, v in pairs(events) do
+  for _, v in pairs(selectedEvents) do
     commonUnionEntries(v)
     if v.type == NOTE_TYPE then
       unionEntry('notedur', v.notedur, v)
@@ -216,11 +278,11 @@ local function myWindow()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if (hasTypes and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, "context menu")
+    r.ImGui_OpenPopup(ctx, 'context menu')
   end
 
   local bail = false
-  if r.ImGui_BeginPopup(ctx, "context menu") then
+  if r.ImGui_BeginPopup(ctx, 'context menu') then
     r.ImGui_PushFont(ctx, sans_serif_small)
     for _, v in pairs(ccTypes) do
       if v.exists then
@@ -239,7 +301,7 @@ local function myWindow()
 
   if bail then return end
 
-  local values = {}
+  local userValues = {}
 
   function makeValueEntry(name)
     return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and math.floor(union[name]) or INVALID }
@@ -247,38 +309,38 @@ local function myWindow()
 
   function commonValueEntries()
     for _, v in pairs(commonEntries) do
-      values[v] = makeValueEntry(v)
+      userValues[v] = makeValueEntry(v)
     end
-    values.selposticks = { operation = OP_ABS, opval = union.selposticks }
-    values.seldurticks = { operation = OP_ABS, opval = union.seldurticks }
+    userValues.selposticks = { operation = OP_ABS, opval = union.selposticks }
+    userValues.seldurticks = { operation = OP_ABS, opval = union.seldurticks }
   end
 
   commonValueEntries()
   if popupFilter == NOTE_FILTER then
-    values.pitch = makeValueEntry('pitch')
-    values.vel = makeValueEntry('vel')
-    values.notedur = makeValueEntry('notedur')
+    userValues.pitch = makeValueEntry('pitch')
+    userValues.vel = makeValueEntry('vel')
+    userValues.notedur = makeValueEntry('notedur')
   elseif popupFilter ~= 0 then
-    values.ccnum = makeValueEntry('ccnum')
-    values.ccval = makeValueEntry('ccval')
-    values.chanmsg = makeValueEntry('chanmsg')
+    userValues.ccnum = makeValueEntry('ccnum')
+    userValues.ccval = makeValueEntry('ccval')
+    userValues.chanmsg = makeValueEntry('chanmsg')
   end
 
-  local inputs = {}
+  local itemBounds = {}
   local recalcEventTimes = false
   local recalcSelectionTimes = false
 
   function registerItem(name, recalc)
     local ix1, ix2 = currentRect.left, currentRect.right
     local iy1, iy2 = currentRect.top, currentRect.bottom
-    inputs[#inputs + 1] = { name = name, hitx = { ix1 - vx, ix2 - vx }, hity = { iy1 - vy, iy2 - vy }, recalc = recalc and true or false }
+    itemBounds[#itemBounds + 1] = { name = name, hitx = { ix1 - vx, ix2 - vx }, hity = { iy1 - vy, iy2 - vy }, recalc = recalc and true or false }
   end
 
   function makeVal(name, str, op)
     local val = tonumber(str)
     if val then
       if name == 'chan' or name == 'beats' then val = val - 1 end
-      values[name] = { operation = op and op or OP_ABS, opval = val }
+      userValues[name] = { operation = op and op or OP_ABS, opval = val }
       return true
     end
     return false
@@ -298,9 +360,9 @@ local function myWindow()
     if char == OP_SCL then
       if not paramCanScale(name) then return false end
 
-      local first, second = str:sub(2):match("(%d+)[%s%-]+(%d+)")
+      local first, second = str:sub(2):match('([-+]?%d+)[%s%-]+([-+]?%d+)')
       if first and second then
-        values[name] = { operation = char, opval = first, opval2 = second }
+        userValues[name] = { operation = char, opval = first, opval2 = second }
         return true
       else return false
       end
@@ -324,7 +386,7 @@ local function myWindow()
     if not ranges[name] then
       local rangeLo = 0xFFFF
       local rangeHi = -0xFFFF
-      for _, v in pairs(events) do
+      for _, v in pairs(selectedEvents) do
         if v.chanmsg == popupFilter then
           if v[name] and v[name] ~= INVALID then
             if v[name] < rangeLo then rangeLo = v[name] end
@@ -389,11 +451,11 @@ local function myWindow()
 
     r.ImGui_PushFont(ctx, sans_serif)
 
-    local val = values[name].opval
+    local val = userValues[name].opval
     if ((name == 'chan' or name == 'beats') and val ~= INVALID) then val = val + 1 end
-    local str = val ~= INVALID and tostring(val) or "-"
-    local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_EnterReturnsTrue() + r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
-    if rt then
+    local str = val ~= INVALID and tostring(val) or '-'
+    local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
+    if rt and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())) then
       if processString(name, nstr) then
         if timeval then recalcEventTimes = true else rv = true end
       end
@@ -438,32 +500,17 @@ local function myWindow()
     return measures, beats, ticks
   end
 
-  function BBQToPPQ(measures, beats, ticks, relativeppq, nosubtract)
-    if relativeppq then
-      local relMeasures, relBeats, _, relTicks = ppqToTime(relativeppq)
-      measures = measures + relMeasures
-      beats = beats + relBeats
-      ticks = ticks + relTicks
-    end
-    local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, r.TimeMap2_beatsToTime(0, beats, measures)) + ticks
-    if relativeppq and not nosubtract then ppqpos = ppqpos - relativeppq end
-    return math.floor(ppqpos)
-  end
-
   function parseTimeString(name, str)
     local ppqpos = nil
     local measures, beats, ticks = timeStringToTime(str)
     if measures and beats and ticks then
       local timebeats
       if name == 'selposticks' then
-        ppqpos = BBQToPPQ(measures, beats, ticks)
+        ppqpos = BBTToPPQ(measures, beats - 1, ticks)
       elseif name == 'seldurticks' then
-        ppqpos = BBQToPPQ(measures, beats, ticks, union.selposticks)
+        ppqpos = BBTToPPQ(measures, beats, ticks, union.selposticks)
       else return nil
       end
-      -- r.ShowConsoleMsg('timebeats: '..timebeats..'\n')
-      -- r.ShowConsoleMsg('ppqpos: '..ppqpos..'\n')
-    else
     end
     return math.floor(ppqpos)
   end
@@ -478,9 +525,8 @@ local function myWindow()
       if char == OP_ADD or char == OP_SUB then
         local measures, beats, ticks = timeStringToTime(str:sub(2))
         if measures and beats and ticks then
-          local opand = BBQToPPQ(measures, beats, ticks, union.selposticks)
+          local opand = BBTToPPQ(measures, beats, ticks, union.selposticks)
           _, ppqpos = doPerformOperation(nil, union[name], char, opand)
-          --ppqpos = ppqpos - union.selposticks
         end
       end
       if not ppqpos then
@@ -490,7 +536,7 @@ local function myWindow()
       ppqpos = parseTimeString(name, str)
     end
     if ppqpos then
-      values[name] = { operation = OP_ABS, opval = ppqpos }
+      userValues[name] = { operation = OP_ABS, opval = ppqpos }
       return true
     end
     return false
@@ -504,13 +550,18 @@ local function myWindow()
 
     r.ImGui_PushFont(ctx, sans_serif)
 
-    local measuresOffset = name == 'seldurticks' and -1 or 0
     local beatsOffset = name == 'seldurticks' and 0 or 1
-    local val = values[name].opval
-    local measures, beats, _, ticks = ppqToTime(values[name].opval)
-    local str = (measures + measuresOffset)..'.'..(beats + beatsOffset)..'.'..ticks
-    local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_EnterReturnsTrue() + r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
-    if rt then
+    local val = userValues[name].opval
+    local measures, beats, ticks
+    if name == 'seldurticks' then
+      measures, beats, ticks = ppqToLength(userValues.selposticks.opval, userValues.seldurticks.opval)
+    else
+      measures, beats, _, ticks = ppqToTime(userValues[name].opval)
+    end
+
+    local str = measures..'.'..(beats + beatsOffset)..'.'..ticks
+    local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
+    if rt and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())) then
       if processTimeString(name, nstr) then
         recalcSelectionTimes = true
         changedParameter = name
@@ -519,9 +570,9 @@ local function myWindow()
     currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
     currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
     r.ImGui_PopFont(ctx)
-    -- registerItem(name, true)
+    -- registerItem(name, true) -- no scrolling support
     generateLabel(label)
-    -- generateRangeLabel(name) -- GenerateTimeRangeLabel?
+    -- generateRangeLabel(name) -- no range support
     r.ImGui_EndGroup(ctx)
   end
 
@@ -556,8 +607,8 @@ local function myWindow()
     if shiftdown then
       adjust = adjust * 3
     end
-    for _, v in pairs(inputs) do
-      if values[v.name].operation == OP_ABS and values[v.name].opval ~= INVALID
+    for _, v in pairs(itemBounds) do
+      if userValues[v.name].operation == OP_ABS -- and userValues[v.name].opval ~= INVALID
       and posy > v.hity[1] and posy < v.hity[2]
       and posx > v.hitx[1] and posx < v.hitx[2]
       then
@@ -567,7 +618,8 @@ local function myWindow()
           adjust = adjust > 1 and 10 or -10
         end
 
-        values[v.name].opval = values[v.name].opval + adjust
+        userValues[v.name].operation = OP_ADD
+        userValues[v.name].opval = adjust
         if v.recalc then recalcEventTimes = true
         else rv = true end
 
@@ -581,7 +633,7 @@ local function myWindow()
   local cachedSelPosTicks = nil
   local cachedSelDurTicks = nil
 
-  function performTimeSelectionOperation(e)
+  function performTimeSelectionOperation(name, e)
     local rv = true
     if changedParameter == 'seldurticks' then
       local newdur = cachedSelDurTicks
@@ -593,8 +645,8 @@ local function myWindow()
       if rv then
         local inlo, inhi = union.selposticks, union.selendticks
         local outlo, outhi = union.selposticks, union.selposticks + newdur
-        local newppq = math.floor(((e.ppqpos - inlo) / (inhi - inlo)) * (outhi - outlo) + outlo)
-        -- r.ShowConsoleMsg('newppq from seldur: '..newppq..'\n')
+        local oldppq = name == 'endppqpos' and e.endppqpos or e.ppqpos
+        local newppq = math.floor(((oldppq - inlo) / (inhi - inlo)) * (outhi - outlo) + outlo)
         return true, newppq
       end
     elseif changedParameter == 'selposticks' then
@@ -605,8 +657,8 @@ local function myWindow()
         cachedSelPosTicks = newpos
       end
       if rv then
-        local newppq = e.ppqpos + (newpos - union.selposticks)
-        -- r.ShowConsoleMsg('newppq from selpos: '..newppq..'\n')
+        local oldppq = name == 'endppqpos' and e.endppqpos or e.ppqpos
+        local newppq = oldppq + (newpos - union.selposticks)
         return true, newppq
       end
     end
@@ -627,6 +679,7 @@ local function myWindow()
       return true, baseval / opval
     elseif op == OP_SCL and name and opval2 then
       local inlo, inhi = getCurrentRange(name)
+      local outlo, outhi = opval, opval2
       local inrange = inhi - inlo
       if inrange ~= 0 then
         local valnorm = (baseval - inlo) / (inhi - inlo)
@@ -639,9 +692,9 @@ local function myWindow()
   end
 
   function performOperation(name, e)
-    if name == 'ppqpos' then return performTimeSelectionOperation(e) end
+    if name == 'ppqpos' or name == 'endppqpos' then return performTimeSelectionOperation(name, e) end
 
-    local op = values[name]
+    local op = userValues[name]
     if op then
       return doPerformOperation(name, e[name], op.operation, op.opval, op.opval2)
     end
@@ -652,8 +705,10 @@ local function myWindow()
     local rv, val = performOperation(name, e)
     if rv then
       if name == 'chan' then val = val < 0 and 0 or val > 15 and 15 or val
-      elseif name == 'beats' then val = val < 0 and 0 or val >= e.beatsmax and e.beatsmax - 1 or val
-      elseif name == 'pitch' or name == 'vel' or name == 'ccnum' then val = val < 0 and 0 or val > 127 and 127 or val
+      elseif name == 'measures' then val = val < 1 and 1 or val
+      elseif name == 'beats' then val = val < 0 and 0 or val >= e.beatsmax and e.beatsmax -1 or val
+      elseif name == 'vel' then val = val < 1 and 1 or val > 127 and 127 or val
+      elseif name == 'pitch' or name == 'ccnum' then val = val < 0 and 0 or val > 127 and 127 or val
       elseif name == 'ccval' then
         if e.chanmsg == 0xE0 then val = val < -(1<<13) and -(1<<13) or val > ((1<<13) - 1) and ((1<<13) - 1) or val
         else val = val < 0 and 0 or val > 127 and 127 or val
@@ -681,7 +736,7 @@ local function myWindow()
       vals.ccnum = getEventValue('ccnum', e)
       vals.ccval = getEventValue('ccval', e)
       if e.chanmsg == 0xA0 then
-        vals.msg2 = ccval
+        vals.msg2 = vals.ccval
         vals.msg3 = 0
       elseif e.chanmsg == 0xE0 then
         vals.ccval = vals.ccval + (1<<13)
@@ -695,36 +750,88 @@ local function myWindow()
     end
     if recalcSelectionTimes then
       vals.ppqpos = getEventValue('ppqpos', e)
+      if popupFilter == NOTE_FILTER then
+        vals.endppqpos = getEventValue('endppqpos', e)
+        vals.notedur = vals.endppqpos - vals.ppqpos
+      end
     end
     return vals
   end
 
   if rv then
     r.Undo_BeginBlock2(0)
+
     r.MIDI_DisableSort(take)
-    for _, v in pairs(events) do
-      if popupFilter == v.chanmsg then
-        local vals = getValuesForEvent(v)
-        local newstartppq = INVALID
-        if recalcEventTimes then
-          local timebeats = r.TimeMap2_beatsToTime(0, vals.beats, vals.measures)
-          newstartppq = r.MIDI_GetPPQPosFromProjTime(take, timebeats) + vals.ticks
-        end
-        if recalcSelectionTimes then
-          newstartppq = vals.ppqpos
-        end
-        local vppqpos = newstartppq ~= INVALID and newstartppq or v.ppqpos
+    for i = #selectedEvents, 1, -1 do
+      if popupFilter == selectedEvents[i].chanmsg and selectedEvents[i].selected then
         if popupFilter == NOTE_FILTER then
-          local vendppqpos = vppqpos + vals.notedur or nil
-          r.MIDI_SetNote(take, v.idx, v.selected, v.muted, vppqpos, vendppqpos, vals.chan, vals.pitch, vals.vel)
+          r.MIDI_DeleteNote(take, selectedEvents[i].idx)
         elseif popupFilter ~= 0 then
-          r.MIDI_SetCC(take, v.idx, v.selected, v.muted, vppqpos, v.chanmsg, vals.chan, vals.msg2, vals.msg3)
+          r.MIDI_DeleteCC(take, selectedEvents[i].idx)
         end
       end
     end
     r.MIDI_Sort(take)
+
+    function correctOverlaps(event)
+      -- find input event
+      local idx
+      for i = 1, #allEvents do
+        if allEvents[i].type == event.type and allEvents[i].idx == event.idx then
+          idx = i
+          break
+        end
+      end
+
+      if not idx then return end
+
+      -- look backward
+      for i = idx - 1, 1, -1 do
+        local v = allEvents[i]
+        if v.type == NOTE_TYPE and v.pitch == event.pitch and v.endppqpos > event.ppqpos then
+          event.ppqpos = v.endppqpos
+          break
+        end
+      end
+      -- look forward
+      for i = idx + 1, #selectedEvents do
+        local v = allEvents[i]
+        if v.type == NOTE_TYPE and v.pitch == event.pitch and v.ppqpos < event.endppqpos then
+          event.endppqpos = v.ppqpos
+          break
+        end
+      end
+    end
+
+    r.MIDI_DisableSort(take)
+    for _, v in pairs(selectedEvents) do
+      if popupFilter == v.chanmsg then
+        local eventVals = getValuesForEvent(v)
+        local newstartppq = INVALID
+        if recalcEventTimes then
+          newstartppq = BBTToPPQ(eventVals.measures, eventVals.beats, eventVals.ticks)
+        end
+        if recalcSelectionTimes then
+          newstartppq = eventVals.ppqpos
+        end
+        v.ppqpos = newstartppq ~= INVALID and newstartppq or v.ppqpos
+        if popupFilter == NOTE_FILTER then
+          v.endppqpos = v.ppqpos + eventVals.notedur
+          correctOverlaps(v)
+          -- r.MIDI_SetNote(take, v.idx, v.selected, v.muted, vppqpos, vendppqpos, eventVals.chan, eventVals.pitch, eventVals.vel)
+          r.MIDI_InsertNote(take, v.selected, v.muted, v.ppqpos, v.endppqpos, eventVals.chan, eventVals.pitch, eventVals.vel, true)
+        elseif popupFilter ~= 0 then
+          -- r.MIDI_SetCC(take, v.idx, v.selected, v.muted, vppqpos, v.chanmsg, eventVals.chan, eventVals.msg2, eventVals.msg3)
+          r.MIDI_InsertCC(take, v.selected, v.muted, v.ppqpos, v.chanmsg, eventVals.chan, eventVals.msg2, eventVals.msg3)
+          _, _, ccevtcnt = r.MIDI_CountEvts(take) -- get latest count to reapply the shape
+          r.MIDI_SetCCShape(take, ccevtcnt - 1, v.shape, v.beztension)
+        end
+      end
+    end
+
+    r.MIDI_Sort(take)
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take))
-    r.Undo_EndBlock2(0, "Edit CC(s)", -1)
+    r.Undo_EndBlock2(0, 'Edit CC(s)', -1)
   end
 end
 
@@ -759,13 +866,16 @@ local function loop()
     font_size_small = new_font_size_small
   end
 
-  r.ImGui_PushFont(ctx, sans_serif)
-
   r.ImGui_SetNextWindowSize(ctx, ww, wh, r.ImGui_Cond_FirstUseEver())
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
 
-  local winheight = r.ImGui_GetFrameHeight(ctx) * 4.6
+  r.ImGui_PushFont(ctx, sans_serif)
+
+  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 4
   r.ImGui_SetNextWindowSizeConstraints(ctx, DEFAULT_WIDTH, winheight, DEFAULT_WIDTH * 3, winheight)
+  r.ImGui_PopFont(ctx)
+
+  r.ImGui_PushFont(ctx, sans_serif_titlebar)
 
   local visible, open = r.ImGui_Begin(ctx, 'Event Editor', true, r.ImGui_WindowFlags_TopMost() + r.ImGui_WindowFlags_NoScrollWithMouse() + r.ImGui_WindowFlags_NoScrollbar()) -- + r.ImGui_WindowFlags_NoResize())
   if visible then
@@ -776,6 +886,8 @@ local function loop()
     elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then
       r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40014)
     end
+    r.ImGui_PopFont(ctx)
+    r.ImGui_PushFont(ctx, sans_serif)
     myWindow()
     ww, wh = r.ImGui_GetWindowSize(ctx)
     r.ImGui_End(ctx)

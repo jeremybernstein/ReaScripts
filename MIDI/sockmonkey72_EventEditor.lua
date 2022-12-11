@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.2
+-- @version 1.0.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -807,7 +807,7 @@ local function myWindow()
         end
       end
       -- look forward
-      for i = idx + 1, #selectedEvents do
+      for i = idx + 1, #allEvents do
         local v = allEvents[i]
         if v.type == NOTE_TYPE and v.pitch == event.pitch and v.ppqpos < event.endppqpos then
           event.endppqpos = v.ppqpos

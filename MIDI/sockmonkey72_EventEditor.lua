@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.1
+-- @version 1.0.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -30,7 +30,7 @@ r.ImGui_Attach(ctx, sans_serif_titlebar)
 local commonEntries = { 'measures', 'beats', 'ticks', 'chan' }
 local scaleOpWhitelist = { 'pitch', 'channel', 'vel', 'notedur', 'ccnum', 'ccval' }
 
-local INVALID = -0xFFFF
+local INVALID = -0xFFFFFFFF
 local selectedNotes = {}
 local popupFilter = 0x90 -- note default
 local canvas_scale = 1.0
@@ -251,7 +251,7 @@ local function myWindow()
     end
   end
   if union.selposticks == -INVALID then union.selposticks = INVALID end
-  union.seldurticks = union.selendticks - union.selposticks
+  union.seldurticks = union.selposticks == INVALID and INVALID or union.selendticks - union.selposticks
 
   r.ImGui_NewLine(ctx)
   r.ImGui_AlignTextToFramePadding(ctx)
@@ -557,14 +557,19 @@ local function myWindow()
 
     local beatsOffset = name == 'seldurticks' and 0 or 1
     local val = userValues[name].opval
-    local measures, beats, ticks
-    if name == 'seldurticks' then
-      measures, beats, ticks = ppqToLength(userValues.selposticks.opval, userValues.seldurticks.opval)
-    else
-      measures, beats, _, ticks = ppqToTime(userValues[name].opval)
+
+    local str = '-'
+
+    if val ~= INVALID then
+      local measures, beats, ticks
+      if name == 'seldurticks' then
+        measures, beats, ticks = ppqToLength(userValues.selposticks.opval, userValues.seldurticks.opval)
+      else
+        measures, beats, _, ticks = ppqToTime(userValues[name].opval)
+      end
+      str = measures..'.'..(beats + beatsOffset)..'.'..ticks
     end
 
-    local str = measures..'.'..(beats + beatsOffset)..'.'..ticks
     local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
     if rt and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())) then
       if processTimeString(name, nstr) then
@@ -718,6 +723,7 @@ local function myWindow()
         if e.chanmsg == 0xE0 then val = val < -(1<<13) and -(1<<13) or val > ((1<<13) - 1) and ((1<<13) - 1) or val
         else val = val < 0 and 0 or val > 127 and 127 or val
         end
+      elseif name == 'ppqpos' or name == 'endppqpos' then val = val
       else val = val < 0 and 0 or val
       end
       return math.floor(val)
@@ -817,6 +823,48 @@ local function myWindow()
       end
     end
 
+    -- item extents management, currently disabled
+    function getItemExtents(item)
+      local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
+      local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+      local extents = {}
+      extents.item = item
+      extents.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, item_pos)
+      extents.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, item_pos + item_len)
+      extents.ppqpos_changed = false
+      extents.endppqpos_changed = false
+      return extents
+    end
+
+    function correctItemExtents(extents, v)
+      if v.ppqpos < extents.ppqpos then
+        extents.ppqpos = v.ppqpos
+        extents.ppqpos_changed = true
+      end
+      if v.type == NOTE_TYPE and v.endppqpos > extents.endppqpos then
+        extents.endppqpos = v.endppqpos
+        extents.endppqpos_changed = true
+      end
+    end
+
+    function updateItemExtents(extents)
+      if extents.ppqpos_changed or extents.endppqpos_changed then
+        -- to nearest beat
+        local extentStart = r.MIDI_GetProjQNFromPPQPos(take, extents.ppqpos)
+        if extents.ppqpos_changed then
+          extentStart = math.floor(extentStart) -- extent to previous beat
+        end
+        local extentEnd = r.MIDI_GetProjQNFromPPQPos(take, extents.endppqpos)
+        if extents.endppqpos_changed then
+          extendEnd = math.floor(extentEnd + 1) -- extend to next beat
+        end
+        r.MIDI_SetItemExtents(extents.item, extentStart, extentEnd)
+      end
+    end
+
+    local item = r.GetMediaItemTake_Item(take)
+    local item_extents = getItemExtents(item)
+
     for _, v in pairs(selectedEvents) do
       if popupFilter == v.chanmsg then
         if popupFilter == NOTE_FILTER then
@@ -827,11 +875,14 @@ local function myWindow()
           _, _, ccevtcnt = r.MIDI_CountEvts(take) -- get latest count to reapply the shape
           r.MIDI_SetCCShape(take, ccevtcnt - 1, v.shape, v.beztension)
         end
+        correctItemExtents(item_extents, v)
       end
     end
 
+    updateItemExtents(item_extents)
+
     r.MIDI_Sort(take)
-    r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take))
+    r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
     r.Undo_EndBlock2(0, 'Edit CC(s)', -1)
   end
 end

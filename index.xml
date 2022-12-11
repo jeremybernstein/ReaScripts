@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="a043d2b14870a05ad36b19435af31fd5b79f4f37">
+<index version="1" name="sockmonkey72 Scripts" commit="eef47aad5cb24e5ff390bc69187bd0cff13d90c2">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -107,6 +107,26 @@
         <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset.so</source>
         <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_x64.dll</source>
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_EventEditor.lua" type="script" desc="MIDI Event Editor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 MIDI Event Editor\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 One-line MIDI event editor The Math Operators ()+, -, *, /) can be used to calculate relative values, also on multi-selected values The Range Operator (.) can be used to scale a selection from its current range to the specified target range (for example: .20-80 will scale the selected events to the range 20-80) When setting negative absolute values for pitch bend, use --VALUE (instead of -VALUE, which will use the '-' Math Operator)\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="sockmonkey72" time="2022-12-11T16:19:49Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/4e5e35f1fd28d09f1c6abddcd96832bd437758b5/MIDI/sockmonkey72_EventEditor.lua</source>
+      </version>
+      <version name="1.0.1" author="sockmonkey72" time="2022-12-11T21:55:55Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/eef47aad5cb24e5ff390bc69187bd0cff13d90c2/MIDI/sockmonkey72_EventEditor.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_ExtendMIDIItemToNearestBars.lua" type="script" desc="Extend MIDI Item to Nearest Bars">

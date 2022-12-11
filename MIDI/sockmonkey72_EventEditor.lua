@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.0
+-- @version 1.0.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -470,7 +470,7 @@ local function myWindow()
     r.ImGui_EndGroup(ctx)
   end
 
-  function timeStringToTime(timestr)
+  function timeStringToTime(timestr, ispos)
     local a = 1
     local dots = {}
     repeat
@@ -494,19 +494,24 @@ local function myWindow()
     if #nums == 0 then table.insert(nums, timestr) end
 
     local measures = (not nums[1] or nums[1] == '') and 0 or math.floor(tonumber(nums[1]))
-    local beats = (not nums[2] or nums[2] == '') and 0 or math.floor(tonumber(nums[2]))
+    local beats = (not nums[2] or nums[2] == '') and (ispos and 1 or 0) or math.floor(tonumber(nums[2]))
     local ticks = (not nums[3] or nums[3] == '') and 0 or math.floor(tonumber(nums[3]))
+
+    if ispos then
+      beats = beats - 1
+      if beats < 0 then beats = 0 end
+    end
 
     return measures, beats, ticks
   end
 
   function parseTimeString(name, str)
     local ppqpos = nil
-    local measures, beats, ticks = timeStringToTime(str)
+    local measures, beats, ticks = timeStringToTime(str, name == 'selposticks')
     if measures and beats and ticks then
       local timebeats
       if name == 'selposticks' then
-        ppqpos = BBTToPPQ(measures, beats - 1, ticks)
+        ppqpos = BBTToPPQ(measures, beats, ticks)
       elseif name == 'seldurticks' then
         ppqpos = BBTToPPQ(measures, beats, ticks, union.selposticks)
       else return nil
@@ -523,7 +528,7 @@ local function myWindow()
 
     if char == OP_ADD or char == OP_SUB or char == OP_MUL or char == OP_DIV then
       if char == OP_ADD or char == OP_SUB then
-        local measures, beats, ticks = timeStringToTime(str:sub(2))
+        local measures, beats, ticks = timeStringToTime(str:sub(2), false)
         if measures and beats and ticks then
           local opand = BBTToPPQ(measures, beats, ticks, union.selposticks)
           _, ppqpos = doPerformOperation(nil, union[name], char, opand)
@@ -720,42 +725,44 @@ local function myWindow()
     return INVALID
   end
 
-  function getValuesForEvent(e)
-    local vals = {}
+  function updateValuesForEvent(e)
     if e.chanmsg ~= popupFilter then return {} end
 
-    vals.measures = getEventValue('measures', e)
-    vals.beats = getEventValue('beats', e)
-    vals.ticks = getEventValue('ticks', e)
-    vals.chan = getEventValue('chan', e)
+    e.measures = getEventValue('measures', e)
+    e.beats = getEventValue('beats', e)
+    e.ticks = getEventValue('ticks', e)
+    e.chan = getEventValue('chan', e)
     if popupFilter == NOTE_FILTER then
-      vals.pitch = getEventValue('pitch', e)
-      vals.vel = getEventValue('vel', e)
-      vals.notedur = getEventValue('notedur', e)
+      e.pitch = getEventValue('pitch', e)
+      e.vel = getEventValue('vel', e)
+      e.notedur = getEventValue('notedur', e)
     elseif popupFilter ~= 0 then
-      vals.ccnum = getEventValue('ccnum', e)
-      vals.ccval = getEventValue('ccval', e)
+      e.ccnum = getEventValue('ccnum', e)
+      e.ccval = getEventValue('ccval', e)
       if e.chanmsg == 0xA0 then
-        vals.msg2 = vals.ccval
-        vals.msg3 = 0
+        e.msg2 = e.ccval
+        e.msg3 = 0
       elseif e.chanmsg == 0xE0 then
-        vals.ccval = vals.ccval + (1<<13)
-        if vals.ccval > ((1<<14) - 1) then vals.ccval = ((1<<14) - 1) end
-        vals.msg2 = vals.ccval & 0x7F
-        vals.msg3 = (vals.ccval >> 7) & 0x7F
+        e.ccval = e.ccval + (1<<13)
+        if e.ccval > ((1<<14) - 1) then e.ccval = ((1<<14) - 1) end
+        e.msg2 = e.ccval & 0x7F
+        e.msg3 = (e.ccval >> 7) & 0x7F
       else
-        vals.msg2 = vals.ccnum
-        vals.msg3 = vals.ccval
+        e.msg2 = e.ccnum
+        e.msg3 = e.ccval
       end
+    end
+    if recalcEventTimes then
+      e.ppqpos = BBTToPPQ(e.measures, e.beats, e.ticks)
+      e.endppqpos = e.ppqpos + e.notedur
     end
     if recalcSelectionTimes then
-      vals.ppqpos = getEventValue('ppqpos', e)
+      e.ppqpos = getEventValue('ppqpos', e)
       if popupFilter == NOTE_FILTER then
-        vals.endppqpos = getEventValue('endppqpos', e)
-        vals.notedur = vals.endppqpos - vals.ppqpos
+        e.endppqpos = getEventValue('endppqpos', e)
+        e.notedur = e.endppqpos - e.ppqpos
       end
     end
-    return vals
   end
 
   if rv then
@@ -806,23 +813,17 @@ local function myWindow()
     r.MIDI_DisableSort(take)
     for _, v in pairs(selectedEvents) do
       if popupFilter == v.chanmsg then
-        local eventVals = getValuesForEvent(v)
-        local newstartppq = INVALID
-        if recalcEventTimes then
-          newstartppq = BBTToPPQ(eventVals.measures, eventVals.beats, eventVals.ticks)
-        end
-        if recalcSelectionTimes then
-          newstartppq = eventVals.ppqpos
-        end
-        v.ppqpos = newstartppq ~= INVALID and newstartppq or v.ppqpos
+        updateValuesForEvent(v) -- first update the values
+      end
+    end
+
+    for _, v in pairs(selectedEvents) do
+      if popupFilter == v.chanmsg then
         if popupFilter == NOTE_FILTER then
-          v.endppqpos = v.ppqpos + eventVals.notedur
-          correctOverlaps(v)
-          -- r.MIDI_SetNote(take, v.idx, v.selected, v.muted, vppqpos, vendppqpos, eventVals.chan, eventVals.pitch, eventVals.vel)
-          r.MIDI_InsertNote(take, v.selected, v.muted, v.ppqpos, v.endppqpos, eventVals.chan, eventVals.pitch, eventVals.vel, true)
+          correctOverlaps(v) -- then perform overlap correction etc.
+          r.MIDI_InsertNote(take, v.selected, v.muted, v.ppqpos, v.endppqpos, v.chan, v.pitch, v.vel)
         elseif popupFilter ~= 0 then
-          -- r.MIDI_SetCC(take, v.idx, v.selected, v.muted, vppqpos, v.chanmsg, eventVals.chan, eventVals.msg2, eventVals.msg3)
-          r.MIDI_InsertCC(take, v.selected, v.muted, v.ppqpos, v.chanmsg, eventVals.chan, eventVals.msg2, eventVals.msg3)
+          r.MIDI_InsertCC(take, v.selected, v.muted, v.ppqpos, v.chanmsg, v.chan, v.msg2, v.msg3)
           _, _, ccevtcnt = r.MIDI_CountEvts(take) -- get latest count to reapply the shape
           r.MIDI_SetCCShape(take, ccevtcnt - 1, v.shape, v.beztension)
         end

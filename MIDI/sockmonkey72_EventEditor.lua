@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.3
+-- @version 1.0.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -760,7 +760,9 @@ local function myWindow()
     end
     if recalcEventTimes then
       e.ppqpos = BBTToPPQ(e.measures, e.beats, e.ticks)
-      e.endppqpos = e.ppqpos + e.notedur
+      if popupFilter == NOTE_FILTER then
+        e.endppqpos = e.ppqpos + e.notedur
+      end
     end
     if recalcSelectionTimes then
       e.ppqpos = getEventValue('ppqpos', e)

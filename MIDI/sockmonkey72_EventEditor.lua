@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.5
+-- @version 1.0.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -297,7 +297,7 @@ local function windowFn()
   local bail = false
   if r.ImGui_BeginPopup(ctx, 'context menu') then
     r.ImGui_PushFont(ctx, sans_serif_small)
-    for _, v in ipairs(ccTypes) do
+    for _, v in pairs(ccTypes) do
       if v.exists then
         local rv, selected = r.ImGui_Selectable(ctx, v.label)
         if rv and selected then
@@ -319,6 +319,8 @@ local function windowFn()
       wantsBBU = v
       r.ImGui_CloseCurrentPopup(ctx)
     end
+
+    r.ImGui_Separator(ctx)
     r.ImGui_Indent(ctx)
     r.ImGui_Text(ctx, 'PPQ = '..PPQ)
 

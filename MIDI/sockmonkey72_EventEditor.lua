@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.2
+-- @version 1.0.8-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -36,7 +36,9 @@ local INVALID = -0xFFFFFFFF
 local DEFAULT_ITEM_WIDTH = 60
 
 local popupFilter = 0x90 -- note default
-local canvas_scale = 1.0
+local canvasScale = 1.0
+DEFAULT_TITLEBAR_TEXT =  'Event Editor'
+local titleBarText = DEFAULT_TITLEBAR_TEXT
 
 local function post(...)
   local args = {...}
@@ -91,6 +93,8 @@ local function windowFn()
 
   local PPQ = getPPQ()
   local PPQCent = math.floor(PPQ * 0.01)
+
+  titleBarText = DEFAULT_TITLEBAR_TEXT..' (PPQ='..PPQ..')'
 
   local function needsBBUConversion(name)
     return wantsBBU and (name == 'ticks' or name == 'notedur')
@@ -286,7 +290,7 @@ local function windowFn()
 
   r.ImGui_NewLine(ctx)
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvas_scale)
+  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
   r.ImGui_Button(ctx, popupLabel)
 
   -- cache the positions to generate next box position
@@ -294,7 +298,7 @@ local function windowFn()
   local vx, vy = r.ImGui_GetWindowPos(ctx)
   currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
   currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
-  currentRect.right = currentRect.right + 20 * canvas_scale -- add some spacing after the button
+  currentRect.right = currentRect.right + 20 * canvasScale -- add some spacing after the button
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
@@ -335,9 +339,9 @@ local function windowFn()
       r.ImGui_CloseCurrentPopup(ctx)
     end
 
-    r.ImGui_Separator(ctx)
-    r.ImGui_Indent(ctx)
-    r.ImGui_Text(ctx, 'PPQ = '..PPQ)
+    -- r.ImGui_Separator(ctx)
+    -- r.ImGui_Indent(ctx)
+    -- r.ImGui_Text(ctx, 'PPQ = '..PPQ)
 
     r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
@@ -528,8 +532,8 @@ local function windowFn()
     local timeval = isTimeValue(name)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
-    r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvas_scale) or (DEFAULT_ITEM_WIDTH * canvas_scale))
-    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvas_scale) + (more and (4 * canvas_scale) or 0))
+    r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale))
+    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
 
     r.ImGui_PushFont(ctx, sans_serif)
 
@@ -548,6 +552,7 @@ local function windowFn()
       end
       changedParameter = name
     end
+
     currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
     currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
     r.ImGui_PopFont(ctx)
@@ -665,8 +670,8 @@ local function windowFn()
   local function makeTimeInput(name, label, more, wid)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
-    r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvas_scale) or (DEFAULT_ITEM_WIDTH * canvas_scale))
-    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvas_scale) + (more and (4 * canvas_scale) or 0))
+    r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale))
+    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
 
     r.ImGui_PushFont(ctx, sans_serif)
 
@@ -725,7 +730,7 @@ local function windowFn()
   makeTimeInput('selposticks', 'Sel. Position', true, DEFAULT_ITEM_WIDTH * 2)
   makeTimeInput('seldurticks', 'Sel. Duration', true, DEFAULT_ITEM_WIDTH * 2)
 
-  local v, _ = r.ImGui_GetMouseWheel(ctx)
+  local v = r.ImGui_GetMouseWheel(ctx)
   local mScrollAdjust = v > 0 and -1 or v < 0 and 1 or 0
   if reverseScroll then mScrollAdjust = mScrollAdjust * -1 end
 
@@ -1072,12 +1077,46 @@ local font_size = 13
 local font_size_small = 11
 local DEFAULT_WIDTH = 825
 local DEFAULT_HEIGHT = 89
-local ww = DEFAULT_WIDTH
-local wh = DEFAULT_HEIGHT
+local windowWidth = DEFAULT_WIDTH
+local windowHeight = DEFAULT_HEIGHT
+local windowLeft, windowTop
+
+local function updateWindowPosition()
+  local curWindowWidth, curWindowHeight = r.ImGui_GetWindowSize(ctx)
+  local curWindowLeft, curWindowTop = r.ImGui_GetWindowPos(ctx)
+
+  if curWindowWidth ~= windowWidth
+    or curWindowHeight ~= windowHeight
+    or curWindowLeft ~= windowLeft
+    or curWindowTop ~= windowTop
+  then
+    r.SetExtState(scriptID, 'windowRect', math.floor(curWindowLeft)..','..math.floor(curWindowTop)..','..math.floor(curWindowWidth)..','..math.floor(curWindowHeight), true)
+    windowLeft, windowTop, windowWidth, windowHeight = curWindowLeft, curWindowTop, curWindowWidth, curWindowHeight
+  end
+end
+
+local function initializeWindowPosition()
+  local wLeft = 100
+  local wTop = 100
+  local wWidth = DEFAULT_WIDTH
+  local wHeight = DEFAULT_HEIGHT
+  if r.HasExtState(scriptID, 'windowRect') then
+    local rectStr = r.GetExtState(scriptID, 'windowRect')
+    local rectTab = {}
+    for word in string.gmatch(rectStr, '([^,]+)') do
+      table.insert(rectTab, word)
+    end
+    if rectTab[1] then wLeft = rectTab[1] end
+    if rectTab[2] then wTop = rectTab[2] end
+    if rectTab[3] then wWidth = rectTab[3] end
+    if rectTab[4] then wHeight = rectTab[4] end
+  end
+  return wLeft, wTop, wWidth, wHeight
+end
 
 local function updateFonts()
-  local new_font_size = math.floor(13 * canvas_scale)
-  local new_font_size_small = math.floor(11 * canvas_scale)
+  local new_font_size = math.floor(13 * canvasScale)
+  local new_font_size_small = math.floor(11 * canvasScale)
 
   if font_size ~= new_font_size then
     if sans_serif then r.ImGui_Detach(ctx, sans_serif) end
@@ -1110,7 +1149,9 @@ local function checkShortcuts()
 end
 
 local function openWindow()
-  r.ImGui_SetNextWindowSize(ctx, ww, wh, r.ImGui_Cond_FirstUseEver())
+  r.ImGui_SetNextWindowSize(ctx, windowWidth, windowHeight, r.ImGui_Cond_Appearing())
+  r.ImGui_SetNextWindowPos(ctx, windowLeft, windowTop, r.ImGui_Cond_Appearing())
+
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
   -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
 
@@ -1120,7 +1161,11 @@ local function openWindow()
   r.ImGui_PopFont(ctx)
 
   r.ImGui_PushFont(ctx, sans_serif_titlebar)
-  local visible, open = r.ImGui_Begin(ctx, 'Event Editor', true, r.ImGui_WindowFlags_TopMost() + r.ImGui_WindowFlags_NoScrollWithMouse() + r.ImGui_WindowFlags_NoScrollbar()) -- + r.ImGui_WindowFlags_NoResize())
+  local visible, open = r.ImGui_Begin(ctx, titleBarText, true,
+                                        r.ImGui_WindowFlags_TopMost()
+                                      + r.ImGui_WindowFlags_NoScrollWithMouse()
+                                      + r.ImGui_WindowFlags_NoScrollbar()
+                                      + r.ImGui_WindowFlags_NoSavedSettings())
   r.ImGui_PopFont(ctx)
 
   return visible, open
@@ -1141,16 +1186,16 @@ local function loop()
   --   end
   -- end
 
-  --local wscale = ww / DEFAULT_WIDTH
-  --local hscale =  wh / DEFAULT_HEIGHT
+  --local wscale = windowWidth / DEFAULT_WIDTH
+  --local hscale =  windowHeight / DEFAULT_HEIGHT
 
   if isClosing then
     doClose()
     return
   end
 
-  canvas_scale = ww / DEFAULT_WIDTH
-  if canvas_scale > 1.5 then canvas_scale = 1.5 end
+  canvasScale = windowWidth / DEFAULT_WIDTH
+  if canvasScale > 1.5 then canvasScale = 1.5 end
 
   updateFonts()
 
@@ -1163,7 +1208,8 @@ local function loop()
     r.ImGui_PopFont(ctx)
 
     -- ww, wh = r.ImGui_Viewport_GetSize(r.ImGui_GetWindowViewport(ctx)) -- TODO docking
-    ww, wh = r.ImGui_GetWindowSize(ctx)
+    updateWindowPosition()
+
     r.ImGui_End(ctx)
   end
 
@@ -1173,5 +1219,7 @@ local function loop()
 
   r.defer(function() xpcall(loop, onCrash) end)
 end
+
+windowLeft, windowTop, windowWidth, windowHeight = initializeWindowPosition()
 
 r.defer(function() xpcall(loop, onCrash) end)

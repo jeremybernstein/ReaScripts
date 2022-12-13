@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.6
+-- @version 1.0.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -18,7 +18,9 @@ local r = reaper
 dofile(r.GetResourcePath() ..
        '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 
-local ctx = r.ImGui_CreateContext('sockmonkey72_EventEditor')
+local scriptID = 'sockmonkey72_EventEditor'
+
+local ctx = r.ImGui_CreateContext(scriptID)
 local sans_serif = r.ImGui_CreateFont('sans-serif', 13)
 local sans_serif_small = r.ImGui_CreateFont('sans-serif', 11)
 local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', 11)
@@ -67,9 +69,9 @@ local function windowFn()
   local CC_TYPE = 1
   local NOTE_FILTER = 0x90
   local changedParameter = nil
-  local wantsOverlapCorrection = r.GetExtState('sockmonkey72_EventEditor', 'correctOverlaps') == '1'
-  local wantsBBU = r.GetExtState('sockmonkey72_EventEditor', 'bbu') == '1'
-
+  local wantsOverlapCorrection = r.GetExtState(scriptID, 'correctOverlaps') == '1'
+  local wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
+  local reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
   local allEvents = {}
   local selectedEvents = {}
 
@@ -309,14 +311,20 @@ local function windowFn()
     r.ImGui_Separator(ctx)
     local rv, v = r.ImGui_Checkbox(ctx, 'Correct Overlapped Notes', wantsOverlapCorrection)
     if rv then
-      r.SetExtState('sockmonkey72_EventEditor', 'correctOverlaps', v and '1' or '0', true)
+      r.SetExtState(scriptID, 'correctOverlaps', v and '1' or '0', true)
       wantsOverlapCorrection = v
       r.ImGui_CloseCurrentPopup(ctx)
     end
     local rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
     if rv then
-      r.SetExtState('sockmonkey72_EventEditor', 'bbu', v and '1' or '0', true)
+      r.SetExtState(scriptID, 'bbu', v and '1' or '0', true)
       wantsBBU = v
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+    local rv, v = r.ImGui_Checkbox(ctx, 'Reverse Scroll Direction', reverseScroll)
+    if rv then
+      r.SetExtState(scriptID, 'reverseScroll', v and '1' or '0', true)
+      reverseScroll = v
       r.ImGui_CloseCurrentPopup(ctx)
     end
 
@@ -503,6 +511,12 @@ local function windowFn()
     end
   end
 
+  function kbdEntryIsCompleted()
+    return (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
+            or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
+            or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()))
+  end
+
   function makeTextInput(name, label, more, wid)
     local timeval = isTimeValue(name)
     r.ImGui_SameLine(ctx)
@@ -521,7 +535,7 @@ local function windowFn()
 
     local str = val ~= INVALID and tostring(val) or '-'
     local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
-    if rt and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())) then
+    if rt and kbdEntryIsCompleted() then
       if processString(name, nstr) then
         if timeval then recalcEventTimes = true else rv = true end
       end
@@ -665,7 +679,7 @@ local function windowFn()
     end
 
     local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
-    if rt and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())) then
+    if rt and kbdEntryIsCompleted() then
       if processTimeString(name, nstr) then
         recalcSelectionTimes = true
         changedParameter = name
@@ -702,6 +716,7 @@ local function windowFn()
 
   local v, _ = r.ImGui_GetMouseWheel(ctx)
   local adjust = v > 0 and -1 or v < 0 and 1 or 0
+  if reverseScroll then adjust = adjust * -1 end
 
   local posx, posy = r.ImGui_GetMousePos(ctx)
   posx = posx - vx

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="a73d7ff0527541aa0b1ecc1e130f64e6b241efc0">
+<index version="1" name="sockmonkey72 Scripts" commit="f81340005e59b48607ab3196ffaefebc15519a3c">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -143,6 +143,10 @@
       <version name="1.0.5" author="sockmonkey72" time="2022-12-13T09:19:57Z">
         <changelog><![CDATA[- initial]]></changelog>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/a73d7ff0527541aa0b1ecc1e130f64e6b241efc0/MIDI/sockmonkey72_EventEditor.lua</source>
+      </version>
+      <version name="1.0.6" author="sockmonkey72" time="2022-12-13T09:29:35Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/f81340005e59b48607ab3196ffaefebc15519a3c/MIDI/sockmonkey72_EventEditor.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_ExtendMIDIItemToNearestBars.lua" type="script" desc="Extend MIDI Item to Nearest Bars">

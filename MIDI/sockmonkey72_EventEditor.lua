@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.4
+-- @version 1.0.8-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -21,9 +21,14 @@ local scriptID = 'sockmonkey72_EventEditor'
 
 local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnable()) -- TODO docking
 --r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1) -- TODO docking
+local appVersion = r.GetAppVersion()
+local isWin32 = string.match(appVersion, '/') == nil
+local isWin64 = string.match(appVersion, '/x64') ~= nil
+local isWindows = isWin32 or isWin64
+
 local sans_serif = r.ImGui_CreateFont('sans-serif', 13)
 local sans_serif_small = r.ImGui_CreateFont('sans-serif', 11)
-local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', 11)
+local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', isWindows and 13 or 11)
 
 r.ImGui_Attach(ctx, sans_serif)
 r.ImGui_Attach(ctx, sans_serif_small)
@@ -61,6 +66,10 @@ local function paramCanScale(name)
   return canscale
 end
 
+local ppqToTime -- forward declaration to avoid vs.code warning
+local performOperation -- forward declaration
+local doPerformOperation -- forward declaration
+
 local function windowFn()
   local rv
   local popupLabel = 'Note'
@@ -77,10 +86,6 @@ local function windowFn()
   local allEvents = {}
   local selectedEvents = {}
   local selectedNotes = {}
-
-  local ppqToTime -- forward declaration to avoid vs.code warning
-  local performOperation -- forward declaration
-  local doPerformOperation -- forward declaration
 
   local take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
   if not take then return end
@@ -115,7 +120,7 @@ local function windowFn()
     return math.floor(ppqpos)
   end
 
-  local function ppqToTime(ppqpos)
+  function ppqToTime(ppqpos)
     local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, ppqpos))
     local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
 
@@ -814,7 +819,7 @@ local function windowFn()
     return false, INVALID
   end
 
-  local function doPerformOperation(name, baseval, op, opval, opval2)
+  function doPerformOperation(name, baseval, op, opval, opval2)
     local plusone = 0
     if (op == OP_MUL or op == OP_DIV) and (name == 'chan' or name == 'beats') then
       plusone = 1
@@ -844,7 +849,7 @@ local function windowFn()
     return false, INVALID
   end
 
-  local function performOperation(name, e)
+  function performOperation(name, e)
     if name == 'ppqpos' or name == 'endppqpos' then return performTimeSelectionOperation(name, e) end
 
     local op = userValues[name]
@@ -858,8 +863,7 @@ local function windowFn()
     local rv, val = performOperation(name, e)
     if rv then
       if name == 'chan' then val = val < 0 and 0 or val > 15 and 15 or val
-      elseif name == 'measures' then val = val < 1 and 1 or val
-      elseif name == 'beats' or name == 'ticks' then val = val
+      elseif name == 'measures' or name == 'beats' or name == 'ticks' then val = val
       elseif name == 'vel' then val = val < 1 and 1 or val > 127 and 127 or val
       elseif name == 'pitch' or name == 'ccnum' then val = val < 0 and 0 or val > 127 and 127 or val
       elseif name == 'ccval' then

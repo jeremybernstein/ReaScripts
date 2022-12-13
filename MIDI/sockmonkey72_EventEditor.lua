@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.4
+-- @version 1.0.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -18,7 +18,7 @@ local r = reaper
 dofile(r.GetResourcePath() ..
        '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 
-local ctx = r.ImGui_CreateContext('sockmonkey72_Event_Editor')
+local ctx = r.ImGui_CreateContext('sockmonkey72_EventEditor')
 local sans_serif = r.ImGui_CreateFont('sans-serif', 13)
 local sans_serif_small = r.ImGui_CreateFont('sans-serif', 11)
 local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', 11)
@@ -36,9 +36,19 @@ local popupFilter = 0x90 -- note default
 local canvas_scale = 1.0
 local DEFAULT_ITEM_WIDTH = 60
 
+function post(...)
+  local args = {...}
+  local str = ''
+  for i, v in ipairs(args) do
+    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
+  end
+  str = str .. '\n'
+  r.ShowConsoleMsg(str)
+end
+
 function paramCanScale(name)
   local canscale = false
-  for _, v in pairs(scaleOpWhitelist) do
+  for _, v in ipairs(scaleOpWhitelist) do
     if name == v then
       canscale = true
       break
@@ -47,7 +57,7 @@ function paramCanScale(name)
   return canscale
 end
 
-local function myWindow()
+local function windowFn()
   local rv
   local popupLabel = 'Note'
   local cc2byte = false
@@ -57,12 +67,26 @@ local function myWindow()
   local CC_TYPE = 1
   local NOTE_FILTER = 0x90
   local changedParameter = nil
+  local wantsOverlapCorrection = r.GetExtState('sockmonkey72_EventEditor', 'correctOverlaps') == '1'
+  local wantsBBU = r.GetExtState('sockmonkey72_EventEditor', 'bbu') == '1'
 
   local allEvents = {}
   local selectedEvents = {}
 
   local take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
   if not take then return end
+
+  function getPPQ()
+    local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
+    local qn2 = qn1 + 1
+    return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
+  end
+
+  local PPQ = getPPQ()
+
+  function needsBBUConversion(name)
+    return wantsBBU and (name == 'ticks' or name == 'notedur')
+  end
 
   function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
     if not measures then measures = 0 end
@@ -115,16 +139,15 @@ local function myWindow()
 
   local newNotes = {}
 
-  local noteEventsCount = 0
-  local CCEventsCount = 0
-  local FNG_take = r.FNG_AllocMidiTake(take)
+  -- local FNG_take = r.FNG_AllocMidiTake(take)
   local _, notecnt, cccnt = r.MIDI_CountEvts(take)
   for noteidx = 0, notecnt - 1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
-    _, e.selected, e.muted, e.ppqpos, _, e.chan, e.pitch, e.vel = r.MIDI_GetNote(take, noteidx)
+    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = r.MIDI_GetNote(take, noteidx)
+    e.notedur = e.endppqpos - e.ppqpos
     e.chanmsg = 0x90
-    local FNG_note = r.FNG_GetMidiNote(FNG_take, noteidx)
-    e.notedur = r.FNG_GetMidiNoteIntProperty(FNG_note, 'LENGTH') -- necessary to get the 'editor length', can still be wrong
+    -- local FNG_note = r.FNG_GetMidiNote(FNG_take, noteidx)
+    -- e.notedur = r.FNG_GetMidiNoteIntProperty(FNG_note, 'LENGTH') -- necessary to get the 'editor length', can still be wrong
     -- r.ShowConsoleMsg('e.notedur: '..e.notedur..', alt: '..(endppqpos - e.ppqpos)..'\n')
     e.endppqpos = e.ppqpos + e.notedur
     if e.selected then
@@ -162,9 +185,9 @@ local function myWindow()
   local resetFilter = false
   if #newNotes ~= #selectedNotes then resetFilter = true
   else
-    for _, v in pairs(newNotes) do
+    for _, v in ipairs(newNotes) do
       local foundit = false
-      for _, n in pairs(selectedNotes) do
+      for _, n in ipairs(selectedNotes) do
         if n == v then
           foundit = true
           break
@@ -199,12 +222,12 @@ local function myWindow()
   ccTypes[0xD0] = { val = 0xD0, label = 'ChanAT', exists = false }
   ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 
-  for _, v in pairs(selectedEvents) do
+  for _, v in ipairs(selectedEvents) do
     if v.chanmsg and v.chanmsg ~= 0 then ccTypes[v.chanmsg].exists = true end
   end
   if popupFilter ~= 0 and not ccTypes[popupFilter].exists then popupFilter = 0 end
   if popupFilter == 0 then
-    for _, v in pairs(selectedEvents) do
+    for _, v in ipairs(selectedEvents) do
       if v.chanmsg and v.chanmsg ~= 0 then
         popupFilter = v.chanmsg
         break
@@ -222,7 +245,7 @@ local function myWindow()
   end
 
   function commonUnionEntries(e)
-    for _, v in pairs(commonEntries) do
+    for _, v in ipairs(commonEntries) do
       unionEntry(v, e[v], e)
     end
 
@@ -238,7 +261,7 @@ local function myWindow()
 
   union.selposticks = -INVALID
   union.selendticks = INVALID
-  for _, v in pairs(selectedEvents) do
+  for _, v in ipairs(selectedEvents) do
     commonUnionEntries(v)
     if v.type == NOTE_TYPE then
       unionEntry('notedur', v.notedur, v)
@@ -265,26 +288,16 @@ local function myWindow()
   currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
   currentRect.right = currentRect.right + 20 * canvas_scale -- add some spacing after the button
 
-  local hasTypes = false
-  local typeCt = 0
-  for _, v in pairs(ccTypes) do
-    if v.exists then typeCt = typeCt + 1 end
-    if typeCt > 1 then
-      hasTypes = true
-      break
-    end
-  end
-
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
-  if (hasTypes and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'context menu')
   end
 
   local bail = false
   if r.ImGui_BeginPopup(ctx, 'context menu') then
     r.ImGui_PushFont(ctx, sans_serif_small)
-    for _, v in pairs(ccTypes) do
+    for _, v in ipairs(ccTypes) do
       if v.exists then
         local rv, selected = r.ImGui_Selectable(ctx, v.label)
         if rv and selected then
@@ -293,6 +306,22 @@ local function myWindow()
         end
       end
     end
+    r.ImGui_Separator(ctx)
+    local rv, v = r.ImGui_Checkbox(ctx, 'Correct Overlapped Notes', wantsOverlapCorrection)
+    if rv then
+      r.SetExtState('sockmonkey72_EventEditor', 'correctOverlaps', v and '1' or '0', true)
+      wantsOverlapCorrection = v
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+    local rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
+    if rv then
+      r.SetExtState('sockmonkey72_EventEditor', 'bbu', v and '1' or '0', true)
+      wantsBBU = v
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+    r.ImGui_Indent(ctx)
+    r.ImGui_Text(ctx, 'PPQ = '..PPQ)
+
     r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
   end
@@ -308,7 +337,7 @@ local function myWindow()
   end
 
   function commonValueEntries()
-    for _, v in pairs(commonEntries) do
+    for _, v in ipairs(commonEntries) do
       userValues[v] = makeValueEntry(v)
     end
     userValues.selposticks = { operation = OP_ABS, opval = union.selposticks }
@@ -336,10 +365,27 @@ local function myWindow()
     itemBounds[#itemBounds + 1] = { name = name, hitx = { ix1 - vx, ix2 - vx }, hity = { iy1 - vy, iy2 - vy }, recalc = recalc and true or false }
   end
 
-  function makeVal(name, str, op)
+  function stringToValue(name, str, op)
     local val = tonumber(str)
     if val then
-      if name == 'chan' or name == 'beats' then val = val - 1 end
+      if (not op or op == OP_ABS)
+        and (name == 'chan' or name == 'beats')
+      then
+          val = val - 1
+      elseif (wantsBBU
+        and (not op or op == OP_ABS or op == OP_ADD or op == OP_SUB)
+        and (name == 'ticks' or name == 'notedur'))
+      then
+        val = math.floor((val * 0.01) * PPQ)
+      end
+      return val
+    end
+    return nil
+  end
+
+  function makeVal(name, str, op)
+    local val = stringToValue(name, str, op)
+    if val then
       userValues[name] = { operation = op and op or OP_ABS, opval = val }
       return true
     end
@@ -362,6 +408,10 @@ local function myWindow()
 
       local first, second = str:sub(2):match('([-+]?%d+)[%s%-]+([-+]?%d+)')
       if first and second then
+        if needsBBUConversion(name) then
+          first = (first * 0.01) * PPQ
+          second = (second * 0.01) * PPQ
+        end
         userValues[name] = { operation = char, opval = first, opval2 = second }
         return true
       else return false
@@ -386,7 +436,7 @@ local function myWindow()
     if not ranges[name] then
       local rangeLo = 0xFFFF
       local rangeHi = -0xFFFF
-      for _, v in pairs(selectedEvents) do
+      for _, v in ipairs(selectedEvents) do
         if v.chanmsg == popupFilter then
           if v[name] and v[name] ~= INVALID then
             if v[name] < rangeLo then rangeLo = v[name] end
@@ -397,6 +447,15 @@ local function myWindow()
       ranges[name] = { lo = math.floor(rangeLo), hi = math.floor(rangeHi) }
     end
     return ranges[name].lo, ranges[name].hi
+  end
+
+  function getCurrentRangeForDisplay(name)
+    local lo, hi = getCurrentRange(name)
+    if needsBBUConversion(name) then
+      lo = math.floor((lo / PPQ) * 100)
+      hi = math.floor((hi / PPQ) * 100)
+    end
+    return lo, hi
   end
 
   function generateLabel(label)
@@ -422,7 +481,7 @@ local function myWindow()
 
     if not paramCanScale(name) then return end
 
-    local lo, hi = getCurrentRange(name)
+    local lo, hi = getCurrentRangeForDisplay(name)
     if lo ~= hi then
       local ix, iy = currentRect.left, currentRect.bottom
       r.ImGui_PushFont(ctx, sans_serif_small)
@@ -452,7 +511,12 @@ local function myWindow()
     r.ImGui_PushFont(ctx, sans_serif)
 
     local val = userValues[name].opval
-    if ((name == 'chan' or name == 'beats') and val ~= INVALID) then val = val + 1 end
+    if val ~= INVALID then
+      if (name == 'chan' or name == 'beats') then val = val + 1
+      elseif needsBBUConversion(name) then val = math.floor((val / PPQ) * 100)
+      end
+    end
+
     local str = val ~= INVALID and tostring(val) or '-'
     local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
     if rt and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())) then
@@ -470,6 +534,25 @@ local function myWindow()
     r.ImGui_EndGroup(ctx)
   end
 
+  function generateUnitsLabel(name)
+
+    local ix, iy = currentRect.left, currentRect.bottom
+    r.ImGui_PushFont(ctx, sans_serif_small)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFBF)
+    local text =  '(bars.beats.'..(wantsBBU and 'percent' or 'ticks')..')'
+    local tw, th = r.ImGui_CalcTextSize(ctx, text)
+    local fp = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding()) / 2
+    local minx = ix
+    local miny = iy + 3
+    r.ImGui_DrawList_AddRectFilled(r.ImGui_GetWindowDrawList(ctx), minx - fp, miny - fp, minx + tw + fp + 2, miny + th + fp + 2, 0x333355BF)
+    minx = minx - vx
+    miny = miny - vy
+    r.ImGui_SetCursorPos(ctx, minx + 1, miny + 2)
+    r.ImGui_Text(ctx, text)
+    r.ImGui_PopStyleColor(ctx)
+    r.ImGui_PopFont(ctx)
+  end
+
   function timeStringToTime(timestr, ispos)
     local a = 1
     local dots = {}
@@ -485,7 +568,7 @@ local function myWindow()
     if #dots ~= 0 then
         local str = timestr:sub(1, dots[1] - 1)
         table.insert(nums, str)
-        for k, v in pairs(dots) do
+        for k, v in ipairs(dots) do
             str = timestr:sub(v + 1, k ~= #dots and dots[k + 1] - 1 or nil)
             table.insert(nums, str)
         end
@@ -495,7 +578,13 @@ local function myWindow()
 
     local measures = (not nums[1] or nums[1] == '') and 0 or math.floor(tonumber(nums[1]))
     local beats = (not nums[2] or nums[2] == '') and (ispos and 1 or 0) or math.floor(tonumber(nums[2]))
-    local ticks = (not nums[3] or nums[3] == '') and 0 or math.floor(tonumber(nums[3]))
+    local ticks
+    if wantsBBU then
+      local units = (not nums[3] or nums[3] == '') and 0 or tonumber(nums[3])
+      ticks = math.floor((units * 0.01) * PPQ)
+    else
+      ticks = (not nums[3] or nums[3] == '') and 0 or math.floor(tonumber(nums[3]))
+     end
 
     if ispos then
       beats = beats - 1
@@ -509,7 +598,6 @@ local function myWindow()
     local ppqpos = nil
     local measures, beats, ticks = timeStringToTime(str, name == 'selposticks')
     if measures and beats and ticks then
-      local timebeats
       if name == 'selposticks' then
         ppqpos = BBTToPPQ(measures, beats, ticks)
       elseif name == 'seldurticks' then
@@ -567,7 +655,11 @@ local function myWindow()
       else
         measures, beats, _, ticks = ppqToTime(userValues[name].opval)
       end
-      str = measures..'.'..(beats + beatsOffset)..'.'..ticks
+      if wantsBBU then
+        str = measures..'.'..(beats + beatsOffset)..string.format('%.2f', (ticks / PPQ)):sub(2)
+      else
+        str = measures..'.'..(beats + beatsOffset)..'.'..ticks
+      end
     end
 
     local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
@@ -582,6 +674,7 @@ local function myWindow()
     r.ImGui_PopFont(ctx)
     -- registerItem(name, true) -- no scrolling support
     generateLabel(label)
+    generateUnitsLabel()
     -- generateRangeLabel(name) -- no range support
     r.ImGui_EndGroup(ctx)
   end
@@ -590,13 +683,13 @@ local function myWindow()
 
   makeTextInput('measures', 'Bars')
   makeTextInput('beats', 'Beats')
-  makeTextInput('ticks', 'Ticks')
+  makeTextInput('ticks', wantsBBU and 'Percent' or 'Ticks')
   makeTextInput('chan', 'Chan', true)
 
   if popupFilter == NOTE_FILTER then
     makeTextInput('pitch', 'Pitch')
     makeTextInput('vel', 'Velocity')
-    makeTextInput('notedur', 'Length (ticks)', true, DEFAULT_ITEM_WIDTH * 2)
+    makeTextInput('notedur', 'Length '..(wantsBBU and '(beat %)' or '(ticks)'), true, DEFAULT_ITEM_WIDTH * 2)
   elseif popupFilter ~= 0 then
     if not cc2byte then makeTextInput('ccnum', 'Ctrlr') end
     makeTextInput('ccval', 'Value')
@@ -617,7 +710,7 @@ local function myWindow()
     if shiftdown then
       adjust = adjust * 3
     end
-    for _, v in pairs(itemBounds) do
+    for _, v in ipairs(itemBounds) do
       if userValues[v.name].operation == OP_ABS -- and userValues[v.name].opval ~= INVALID
       and posy > v.hity[1] and posy < v.hity[2]
       and posx > v.hitx[1] and posx < v.hitx[2]
@@ -630,6 +723,7 @@ local function myWindow()
 
         userValues[v.name].operation = OP_ADD
         userValues[v.name].opval = adjust
+        changedParameter = v.name
         if v.recalc then recalcEventTimes = true
         else rv = true end
 
@@ -676,6 +770,10 @@ local function myWindow()
   end
 
   function doPerformOperation(name, baseval, op, opval, opval2)
+    local plusone = 0
+    if (op == OP_MUL or op == OP_DIV) and (name == 'chan' or name == 'beats') then
+      plusone = 1
+    end
     if op == OP_ABS then
       if opval ~= INVALID then return true, opval
       else return true, baseval end
@@ -684,9 +782,9 @@ local function myWindow()
     elseif op == OP_SUB then
       return true, baseval - opval
     elseif op == OP_MUL then
-      return true, baseval * opval
+      return true, ((baseval + plusone) * opval) - plusone
     elseif op == OP_DIV then
-      return true, baseval / opval
+      return true, ((baseval + plusone) / opval) - plusone
     elseif op == OP_SCL and name and opval2 then
       local inlo, inhi = getCurrentRange(name)
       local outlo, outhi = opval, opval2
@@ -716,7 +814,7 @@ local function myWindow()
     if rv then
       if name == 'chan' then val = val < 0 and 0 or val > 15 and 15 or val
       elseif name == 'measures' then val = val < 1 and 1 or val
-      elseif name == 'beats' then val = val < 0 and 0 or val >= e.beatsmax and e.beatsmax -1 or val
+      elseif name == 'beats' or name == 'ticks' then val = val
       elseif name == 'vel' then val = val < 1 and 1 or val > 127 and 127 or val
       elseif name == 'pitch' or name == 'ccnum' then val = val < 0 and 0 or val > 127 and 127 or val
       elseif name == 'ccval' then
@@ -776,17 +874,28 @@ local function myWindow()
   if rv then
     r.Undo_BeginBlock2(0)
 
-    r.MIDI_DisableSort(take)
-    for i = #selectedEvents, 1, -1 do
-      if popupFilter == selectedEvents[i].chanmsg and selectedEvents[i].selected then
-        if popupFilter == NOTE_FILTER then
-          r.MIDI_DeleteNote(take, selectedEvents[i].idx)
-        elseif popupFilter ~= 0 then
-          r.MIDI_DeleteCC(take, selectedEvents[i].idx)
+    function correctOverlapForEvent(constEvent, mutableEvent)
+      local modified = 0
+      if constEvent.type == NOTE_TYPE
+        and constEvent.chan == mutableEvent.chan
+        and constEvent.pitch == mutableEvent.pitch
+      then
+        local saveppq, saveendppq = mutableEvent.ppqpos, mutableEvent.endppqpos
+        if constEvent.ppqpos > mutableEvent.ppqpos and constEvent.ppqpos < mutableEvent.endppqpos then
+          mutableEvent.endppqpos = constEvent.ppqpos
+          modified = modified + 1
+        end
+        if constEvent.endppqpos > mutableEvent.ppqpos and constEvent.endppqpos < mutableEvent.endppqpos then
+          mutableEvent.ppqpos = constEvent.endppqpos
+          modified = modified + 1
+        end
+        if modified == 2 then -- it's in the middle, don't change it
+          modified = 0
+          mutableEvent.ppqpos, mutableEvent.endppqpos = saveppq, saveendppq
         end
       end
-    end
-    r.MIDI_Sort(take)
+      return modified ~= 0
+  end
 
     function correctOverlaps(event)
       -- find input event
@@ -802,26 +911,11 @@ local function myWindow()
 
       -- look backward
       for i = idx - 1, 1, -1 do
-        local v = allEvents[i]
-        if v.type == NOTE_TYPE and v.pitch == event.pitch and v.endppqpos > event.ppqpos then
-          event.ppqpos = v.endppqpos
-          break
-        end
+        if correctOverlapForEvent(allEvents[i], event) then break end
       end
       -- look forward
       for i = idx + 1, #allEvents do
-        local v = allEvents[i]
-        if v.type == NOTE_TYPE and v.pitch == event.pitch and v.ppqpos < event.endppqpos then
-          event.endppqpos = v.ppqpos
-          break
-        end
-      end
-    end
-
-    r.MIDI_DisableSort(take)
-    for _, v in pairs(selectedEvents) do
-      if popupFilter == v.chanmsg then
-        updateValuesForEvent(v) -- first update the values
+        if correctOverlapForEvent(allEvents[i], event) then break end
       end
     end
 
@@ -832,7 +926,9 @@ local function myWindow()
       local extents = {}
       extents.item = item
       extents.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, item_pos)
+      extents.ppqpos_cache = extents.ppqpos
       extents.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, item_pos + item_len)
+      extents.endppqpos_cache = extents.endppqpos
       extents.ppqpos_changed = false
       extents.endppqpos_changed = false
       return extents
@@ -855,10 +951,12 @@ local function myWindow()
         local extentStart = r.MIDI_GetProjQNFromPPQPos(take, extents.ppqpos)
         if extents.ppqpos_changed then
           extentStart = math.floor(extentStart) -- extent to previous beat
+          extents.ppqpos = r.MIDI_GetPPQPosFromProjQN(take, extentStart) -- write it back, we need it below
         end
         local extentEnd = r.MIDI_GetProjQNFromPPQPos(take, extents.endppqpos)
         if extents.endppqpos_changed then
-          extendEnd = math.floor(extentEnd + 1) -- extend to next beat
+          extentEnd = math.floor(extentEnd + 1) -- extend to next beat
+          extents.endppqpos = r.MIDI_GetPPQPosFromProjQN(take, extentEnd) -- write it back, we need it below
         end
         r.MIDI_SetItemExtents(extents.item, extentStart, extentEnd)
       end
@@ -867,26 +965,58 @@ local function myWindow()
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
 
-    for _, v in pairs(selectedEvents) do
+    r.MIDI_DisableSort(take)
+    for _, v in ipairs(selectedEvents) do
       if popupFilter == v.chanmsg then
-        if popupFilter == NOTE_FILTER then
-          correctOverlaps(v) -- then perform overlap correction etc.
-          r.MIDI_InsertNote(take, v.selected, v.muted, v.ppqpos, v.endppqpos, v.chan, v.pitch, v.vel)
-        elseif popupFilter ~= 0 then
-          r.MIDI_InsertCC(take, v.selected, v.muted, v.ppqpos, v.chanmsg, v.chan, v.msg2, v.msg3)
-          _, _, ccevtcnt = r.MIDI_CountEvts(take) -- get latest count to reapply the shape
-          r.MIDI_SetCCShape(take, ccevtcnt - 1, v.shape, v.beztension)
-        end
+        updateValuesForEvent(v) -- first update the values
         correctItemExtents(item_extents, v)
       end
     end
 
     updateItemExtents(item_extents)
 
+    -- we shifted the extents backward, we'll need to offset any values by that amount
+    local extents_offset = 0
+    if item_extents.ppqpos_cache > item_extents.ppqpos then
+      extents_offset = item_extents.ppqpos_cache - item_extents.ppqpos
+    end
+
+    local recalced = recalcEventTimes or recalcSelectionTimes
+    for _, v in ipairs(selectedEvents) do
+      if popupFilter == v.chanmsg then
+        if popupFilter == NOTE_FILTER then
+          if wantsOverlapCorrection then correctOverlaps(v) end -- then perform overlap correction etc.
+          local ppqpos = recalced and v.ppqpos or nil
+          local endppqpos = recalced and v.endppqpos or nil
+          if ppqpos and extents_offset ~= 0 then
+            ppqpos = ppqpos + extents_offset
+            endppqpos = endppqpos + extents_offset
+          end
+          local chan = changedParameter == 'chan' and v.chan or nil
+          local pitch = changedParameter == 'pitch' and v.pitch or nil
+          local vel = changedParameter == 'vel' and v.vel or nil
+          r.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
+        elseif popupFilter ~= 0 then
+          local ppqpos = recalced and v.ppqpos or nil
+          local chan = changedParameter == 'chan' and v.chan or nil
+          local msg2 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg2 or nil
+          local msg3 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg3 or nil
+          r.MIDI_SetCC(take, v.idx, nil, nil, ppqpos, nil, chan, msg2, msg3)
+        end
+      end
+    end
+
     r.MIDI_Sort(take)
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
     r.Undo_EndBlock2(0, 'Edit CC(s)', -1)
   end
+end
+
+function doExit()
+end
+
+function onCrash(err)
+  r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
 end
 
 local font_size = 13
@@ -898,8 +1028,20 @@ local wh = DEFAULT_HEIGHT
 
 local function loop()
 
+  -- -- I want to only show the window if a MIDI editor is frontmost, this doesn't work yet
+  -- if not r.ImGui_IsWindowFocused(ctx) then
+  --   local hwnd = r.MIDIEditor_GetActive()
+  --   if not hwnd or r.JS_Window_GetFocus() ~= hwnd then
+  --     post(hwnd and 'no match' or 'no hwnd')
+  --     r.ImGui_IsWindowAppearing(ctx) -- keep the ctx alive
+  --     r.defer(function() xpcall(loop, onCrash) end)
+  --     return
+  --   end
+  -- end
+
   --local wscale = ww / DEFAULT_WIDTH
   --local hscale =  wh / DEFAULT_HEIGHT
+
   canvas_scale = ww / DEFAULT_WIDTH
   if canvas_scale > 1.5 then canvas_scale = 1.5 end
 
@@ -942,15 +1084,16 @@ local function loop()
     end
     r.ImGui_PopFont(ctx)
     r.ImGui_PushFont(ctx, sans_serif)
-    myWindow()
+    windowFn()
     ww, wh = r.ImGui_GetWindowSize(ctx)
     r.ImGui_End(ctx)
   end
   r.ImGui_PopFont(ctx)
 
   if open then
-    r.defer(loop)
+    r.defer(function() xpcall(loop, onCrash) end)
   end
 end
 
-r.defer(loop)
+-- r.atexit(doExit)
+r.defer(function() xpcall(loop, onCrash) end)

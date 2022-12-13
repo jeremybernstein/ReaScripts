@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.7
+-- @version 1.0.8-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -15,12 +15,12 @@
 
 local r = reaper
 
-dofile(r.GetResourcePath() ..
-       '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
+dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 
 local scriptID = 'sockmonkey72_EventEditor'
 
-local ctx = r.ImGui_CreateContext(scriptID)
+local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnable()) -- TODO docking
+--r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1) -- TODO docking
 local sans_serif = r.ImGui_CreateFont('sans-serif', 13)
 local sans_serif_small = r.ImGui_CreateFont('sans-serif', 11)
 local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', 11)
@@ -33,12 +33,12 @@ local commonEntries = { 'measures', 'beats', 'ticks', 'chan' }
 local scaleOpWhitelist = { 'pitch', 'channel', 'vel', 'notedur', 'ccnum', 'ccval' }
 
 local INVALID = -0xFFFFFFFF
-local selectedNotes = {}
-local popupFilter = 0x90 -- note default
-local canvas_scale = 1.0
 local DEFAULT_ITEM_WIDTH = 60
 
-function post(...)
+local popupFilter = 0x90 -- note default
+local canvas_scale = 1.0
+
+local function post(...)
   local args = {...}
   local str = ''
   for i, v in ipairs(args) do
@@ -48,7 +48,7 @@ function post(...)
   r.ShowConsoleMsg(str)
 end
 
-function paramCanScale(name)
+local function paramCanScale(name)
   local canscale = false
   for _, v in ipairs(scaleOpWhitelist) do
     if name == v then
@@ -74,23 +74,29 @@ local function windowFn()
   local reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
   local allEvents = {}
   local selectedEvents = {}
+  local selectedNotes = {}
+
+  local ppqToTime -- forward declaration to avoid vs.code warning
+  local performOperation -- forward declaration
+  local doPerformOperation -- forward declaration
 
   local take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
   if not take then return end
 
-  function getPPQ()
+  local function getPPQ()
     local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
     local qn2 = qn1 + 1
     return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
   end
 
   local PPQ = getPPQ()
+  local PPQCent = math.floor(PPQ * 0.01)
 
-  function needsBBUConversion(name)
+  local function needsBBUConversion(name)
     return wantsBBU and (name == 'ticks' or name == 'notedur')
   end
 
-  function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
+  local function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
     if not measures then measures = 0 end
     if not beats then beats = 0 end
     if not ticks then ticks = 0 end
@@ -105,7 +111,7 @@ local function windowFn()
     return math.floor(ppqpos)
   end
 
-  function ppqToTime(ppqpos)
+  local function ppqToTime(ppqpos)
     local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, ppqpos))
     local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
 
@@ -117,7 +123,7 @@ local function windowFn()
     return measures, beats, beatsmax, ticks
   end
 
-  function ppqToLength(ppqpos, ppqlen)
+  local function ppqToLength(ppqpos, ppqlen)
     -- REAPER, why is this so difficult?
     -- get the PPQ position of the nearest measure start (to ensure that we're dealing with round values)
     local _, startMeasures, _, startBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
@@ -135,7 +141,7 @@ local function windowFn()
     return measures, beats, ticks
   end
 
-  function calcMIDITime(e)
+  local function calcMIDITime(e)
     e.measures, e.beats, e.beatsmax, e.ticks = ppqToTime(e.ppqpos)
   end
 
@@ -239,14 +245,14 @@ local function windowFn()
   popupLabel = ccTypes[popupFilter].label
   if popupFilter == 0xD0 or popupFilter == 0xE0 then cc2byte = true end
 
-  function unionEntry(name, val, entry)
+  local function unionEntry(name, val, entry)
     if entry.chanmsg == popupFilter then
       if not union[name] then union[name] = val
       elseif union[name] ~= val then union[name] = INVALID end
     end
   end
 
-  function commonUnionEntries(e)
+  local function commonUnionEntries(e)
     for _, v in ipairs(commonEntries) do
       unionEntry(v, e[v], e)
     end
@@ -306,6 +312,7 @@ local function windowFn()
           popupFilter = v.val
           bail = true
         end
+        r.ImGui_Spacing(ctx)
       end
     end
     r.ImGui_Separator(ctx)
@@ -342,11 +349,11 @@ local function windowFn()
 
   local userValues = {}
 
-  function makeValueEntry(name)
+  local function makeValueEntry(name)
     return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and math.floor(union[name]) or INVALID }
   end
 
-  function commonValueEntries()
+  local function commonValueEntries()
     for _, v in ipairs(commonEntries) do
       userValues[v] = makeValueEntry(v)
     end
@@ -369,13 +376,13 @@ local function windowFn()
   local recalcEventTimes = false
   local recalcSelectionTimes = false
 
-  function registerItem(name, recalc)
+  local function registerItem(name, recalc)
     local ix1, ix2 = currentRect.left, currentRect.right
     local iy1, iy2 = currentRect.top, currentRect.bottom
     itemBounds[#itemBounds + 1] = { name = name, hitx = { ix1 - vx, ix2 - vx }, hity = { iy1 - vy, iy2 - vy }, recalc = recalc and true or false }
   end
 
-  function stringToValue(name, str, op)
+  local function stringToValue(name, str, op)
     local val = tonumber(str)
     if val then
       if (not op or op == OP_ABS)
@@ -393,7 +400,7 @@ local function windowFn()
     return nil
   end
 
-  function makeVal(name, str, op)
+  local function makeVal(name, str, op)
     local val = stringToValue(name, str, op)
     if val then
       userValues[name] = { operation = op and op or OP_ABS, opval = val }
@@ -402,7 +409,7 @@ local function windowFn()
     return false
   end
 
-  function processString(name, str)
+  local function processString(name, str)
     local char = str:byte(1)
     local val
 
@@ -433,7 +440,7 @@ local function windowFn()
     return makeVal(name, str)
   end
 
-  function isTimeValue(name)
+  local function isTimeValue(name)
     if name == 'measures' or name == 'beats' or name == 'ticks' or name == 'notedur' then
       return true
     end
@@ -442,7 +449,7 @@ local function windowFn()
 
   local ranges = {}
 
-  function getCurrentRange(name)
+  local function getCurrentRange(name)
     if not ranges[name] then
       local rangeLo = 0xFFFF
       local rangeHi = -0xFFFF
@@ -459,7 +466,7 @@ local function windowFn()
     return ranges[name].lo, ranges[name].hi
   end
 
-  function getCurrentRangeForDisplay(name)
+  local function getCurrentRangeForDisplay(name)
     local lo, hi = getCurrentRange(name)
     if needsBBUConversion(name) then
       lo = math.floor((lo / PPQ) * 100)
@@ -468,7 +475,7 @@ local function windowFn()
     return lo, hi
   end
 
-  function generateLabel(label)
+  local function generateLabel(label)
     local ix, iy = currentRect.left, currentRect.top
     r.ImGui_PushFont(ctx, sans_serif_small)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFEF)
@@ -487,7 +494,7 @@ local function windowFn()
 
   local range = {}
 
-  function generateRangeLabel(name)
+  local function generateRangeLabel(name)
 
     if not paramCanScale(name) then return end
 
@@ -511,13 +518,13 @@ local function windowFn()
     end
   end
 
-  function kbdEntryIsCompleted()
+  local function kbdEntryIsCompleted()
     return (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
             or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
             or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()))
   end
 
-  function makeTextInput(name, label, more, wid)
+  local function makeTextInput(name, label, more, wid)
     local timeval = isTimeValue(name)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
@@ -550,7 +557,7 @@ local function windowFn()
     r.ImGui_EndGroup(ctx)
   end
 
-  function generateUnitsLabel(name)
+  local function generateUnitsLabel(name)
 
     local ix, iy = currentRect.left, currentRect.bottom
     r.ImGui_PushFont(ctx, sans_serif_small)
@@ -569,7 +576,7 @@ local function windowFn()
     r.ImGui_PopFont(ctx)
   end
 
-  function timeStringToTime(timestr, ispos)
+  local function timeStringToTime(timestr, ispos)
     local a = 1
     local dots = {}
     repeat
@@ -592,14 +599,18 @@ local function windowFn()
 
     if #nums == 0 then table.insert(nums, timestr) end
 
-    local measures = (not nums[1] or nums[1] == '') and 0 or math.floor(tonumber(nums[1]))
-    local beats = (not nums[2] or nums[2] == '') and (ispos and 1 or 0) or math.floor(tonumber(nums[2]))
+    local measures = (not nums[1] or nums[1] == '') and 0 or tonumber(nums[1])
+    measures = measures and math.floor(measures) or 0
+    local beats = (not nums[2] or nums[2] == '') and (ispos and 1 or 0) or tonumber(nums[2])
+    beats = beats and math.floor(beats) or 0
+
     local ticks
     if wantsBBU then
       local units = (not nums[3] or nums[3] == '') and 0 or tonumber(nums[3])
       ticks = math.floor((units * 0.01) * PPQ)
     else
-      ticks = (not nums[3] or nums[3] == '') and 0 or math.floor(tonumber(nums[3]))
+      ticks = (not nums[3] or nums[3] == '') and 0 or tonumber(nums[3])
+      ticks = ticks and math.floor(ticks) or 0
      end
 
     if ispos then
@@ -610,7 +621,7 @@ local function windowFn()
     return measures, beats, ticks
   end
 
-  function parseTimeString(name, str)
+  local function parseTimeString(name, str)
     local ppqpos = nil
     local measures, beats, ticks = timeStringToTime(str, name == 'selposticks')
     if measures and beats and ticks then
@@ -624,7 +635,7 @@ local function windowFn()
     return math.floor(ppqpos)
   end
 
-  function processTimeString(name, str)
+  local function processTimeString(name, str)
     local char = str:byte(1)
     local ppqpos = nil
 
@@ -651,7 +662,7 @@ local function windowFn()
     return false
   end
 
-  function makeTimeInput(name, label, more, wid)
+  local function makeTimeInput(name, label, more, wid)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
     r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvas_scale) or (DEFAULT_ITEM_WIDTH * canvas_scale))
@@ -715,31 +726,43 @@ local function windowFn()
   makeTimeInput('seldurticks', 'Sel. Duration', true, DEFAULT_ITEM_WIDTH * 2)
 
   local v, _ = r.ImGui_GetMouseWheel(ctx)
-  local adjust = v > 0 and -1 or v < 0 and 1 or 0
-  if reverseScroll then adjust = adjust * -1 end
+  local mScrollAdjust = v > 0 and -1 or v < 0 and 1 or 0
+  if reverseScroll then mScrollAdjust = mScrollAdjust * -1 end
 
   local posx, posy = r.ImGui_GetMousePos(ctx)
   posx = posx - vx
   posy = posy - vy
-  if adjust ~= 0 then
-    local mods = r.ImGui_GetKeyMods(ctx)
-    local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
+  if mScrollAdjust ~= 0 then
+    -- note that the mod is only captured if the window is explicitly focused
+    -- with a click. not sure how to fix this yet. TODO
+    -- local mods = r.ImGui_GetKeyMods(ctx)
+    -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
+
+    -- current 'fix' is using the JS extension
+    local mods = r.JS_Mouse_GetState(8) -- shift key
+    local shiftdown = mods ~= 0
+
     if shiftdown then
-      adjust = adjust * 3
+      mScrollAdjust = mScrollAdjust * 3
     end
+
     for _, v in ipairs(itemBounds) do
       if userValues[v.name].operation == OP_ABS -- and userValues[v.name].opval ~= INVALID
       and posy > v.hity[1] and posy < v.hity[2]
       and posx > v.hitx[1] and posx < v.hitx[2]
       then
         if v.name == 'ticks' and shiftdown then
-          adjust = adjust > 1 and 5 or -5
+          mScrollAdjust = mScrollAdjust > 1 and 5 or -5
         elseif v.name == 'notedur' and shiftdown then
-          adjust = adjust > 1 and 10 or -10
+          mScrollAdjust = mScrollAdjust > 1 and 10 or -10
+        end
+
+        if needsBBUConversion(v.name) then
+          mScrollAdjust = mScrollAdjust * PPQCent
         end
 
         userValues[v.name].operation = OP_ADD
-        userValues[v.name].opval = adjust
+        userValues[v.name].opval = mScrollAdjust
         changedParameter = v.name
         if v.recalc then recalcEventTimes = true
         else rv = true end
@@ -754,7 +777,7 @@ local function windowFn()
   local cachedSelPosTicks = nil
   local cachedSelDurTicks = nil
 
-  function performTimeSelectionOperation(name, e)
+  local function performTimeSelectionOperation(name, e)
     local rv = true
     if changedParameter == 'seldurticks' then
       local newdur = cachedSelDurTicks
@@ -786,7 +809,7 @@ local function windowFn()
     return false, INVALID
   end
 
-  function doPerformOperation(name, baseval, op, opval, opval2)
+  local function doPerformOperation(name, baseval, op, opval, opval2)
     local plusone = 0
     if (op == OP_MUL or op == OP_DIV) and (name == 'chan' or name == 'beats') then
       plusone = 1
@@ -816,7 +839,7 @@ local function windowFn()
     return false, INVALID
   end
 
-  function performOperation(name, e)
+  local function performOperation(name, e)
     if name == 'ppqpos' or name == 'endppqpos' then return performTimeSelectionOperation(name, e) end
 
     local op = userValues[name]
@@ -826,7 +849,7 @@ local function windowFn()
     return false, INVALID
   end
 
-  function getEventValue(name, e, vals)
+  local function getEventValue(name, e, vals)
     local rv, val = performOperation(name, e)
     if rv then
       if name == 'chan' then val = val < 0 and 0 or val > 15 and 15 or val
@@ -846,7 +869,7 @@ local function windowFn()
     return INVALID
   end
 
-  function updateValuesForEvent(e)
+  local function updateValuesForEvent(e)
     if e.chanmsg ~= popupFilter then return {} end
 
     e.measures = getEventValue('measures', e)
@@ -891,7 +914,7 @@ local function windowFn()
   if rv then
     r.Undo_BeginBlock2(0)
 
-    function correctOverlapForEvent(constEvent, mutableEvent)
+    local function correctOverlapForEvent(constEvent, mutableEvent)
       local modified = 0
       if constEvent.type == NOTE_TYPE
         and constEvent.chan == mutableEvent.chan
@@ -914,7 +937,7 @@ local function windowFn()
       return modified ~= 0
   end
 
-    function correctOverlaps(event)
+  local function correctOverlaps(event)
       -- find input event
       local idx
       for i = 1, #allEvents do
@@ -937,7 +960,7 @@ local function windowFn()
     end
 
     -- item extents management, currently disabled
-    function getItemExtents(item)
+    local function getItemExtents(item)
       local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
       local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
       local extents = {}
@@ -951,7 +974,7 @@ local function windowFn()
       return extents
     end
 
-    function correctItemExtents(extents, v)
+    local function correctItemExtents(extents, v)
       if v.ppqpos < extents.ppqpos then
         extents.ppqpos = v.ppqpos
         extents.ppqpos_changed = true
@@ -962,7 +985,7 @@ local function windowFn()
       end
     end
 
-    function updateItemExtents(extents)
+    local function updateItemExtents(extents)
       if extents.ppqpos_changed or extents.endppqpos_changed then
         -- to nearest beat
         local extentStart = r.MIDI_GetProjQNFromPPQPos(take, extents.ppqpos)
@@ -1029,12 +1052,21 @@ local function windowFn()
   end
 end
 
-function doExit()
+-----------------------------------------------------------------------------
+
+local function doClose()
+  r.ImGui_Detach(ctx, sans_serif)
+  r.ImGui_Detach(ctx, sans_serif_small)
+  r.ImGui_Detach(ctx, sans_serif_titlebar)
+  r.ImGui_DestroyContext(ctx)
+  ctx = nil
 end
 
-function onCrash(err)
+local function onCrash(err)
   r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
 end
+
+-----------------------------------------------------------------------------
 
 local font_size = 13
 local font_size_small = 11
@@ -1042,6 +1074,59 @@ local DEFAULT_WIDTH = 825
 local DEFAULT_HEIGHT = 89
 local ww = DEFAULT_WIDTH
 local wh = DEFAULT_HEIGHT
+
+local function updateFonts()
+  local new_font_size = math.floor(13 * canvas_scale)
+  local new_font_size_small = math.floor(11 * canvas_scale)
+
+  if font_size ~= new_font_size then
+    if sans_serif then r.ImGui_Detach(ctx, sans_serif) end
+    sans_serif = r.ImGui_CreateFont('sans-serif', new_font_size)
+    r.ImGui_Attach(ctx, sans_serif)
+    font_size = new_font_size
+  end
+
+  if font_size_small ~= new_font_size_small then
+    if sans_serif_small then r.ImGui_Detach(ctx, sans_serif_small) end
+    sans_serif_small = r.ImGui_CreateFont('sans-serif', new_font_size_small)
+    r.ImGui_Attach(ctx, sans_serif_small)
+    font_size_small = new_font_size_small
+  end
+end
+
+local function checkShortcuts()
+  local keyMods = r.ImGui_GetKeyMods(ctx)
+  local modKey = keyMods == r.ImGui_Mod_Shortcut()
+  local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
+  local noMod = keyMods == 0
+
+  if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
+    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40013)
+  elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
+    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40014)
+  elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
+    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40016)
+  end
+end
+
+local function openWindow()
+  r.ImGui_SetNextWindowSize(ctx, ww, wh, r.ImGui_Cond_FirstUseEver())
+  r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
+  -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
+
+  r.ImGui_PushFont(ctx, sans_serif)
+  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 4
+  r.ImGui_SetNextWindowSizeConstraints(ctx, DEFAULT_WIDTH, winheight, DEFAULT_WIDTH * 3, winheight)
+  r.ImGui_PopFont(ctx)
+
+  r.ImGui_PushFont(ctx, sans_serif_titlebar)
+  local visible, open = r.ImGui_Begin(ctx, 'Event Editor', true, r.ImGui_WindowFlags_TopMost() + r.ImGui_WindowFlags_NoScrollWithMouse() + r.ImGui_WindowFlags_NoScrollbar()) -- + r.ImGui_WindowFlags_NoResize())
+  r.ImGui_PopFont(ctx)
+
+  return visible, open
+end
+
+local isClosing = false
 
 local function loop()
 
@@ -1059,58 +1144,34 @@ local function loop()
   --local wscale = ww / DEFAULT_WIDTH
   --local hscale =  wh / DEFAULT_HEIGHT
 
+  if isClosing then
+    doClose()
+    return
+  end
+
   canvas_scale = ww / DEFAULT_WIDTH
   if canvas_scale > 1.5 then canvas_scale = 1.5 end
 
-  local new_font_size = math.floor(13 * canvas_scale)
-  local new_font_size_small = math.floor(11 * canvas_scale)
+  updateFonts()
 
-  if font_size ~= new_font_size then
-    if sans_serif then r.ImGui_Detach(ctx, sans_serif) end
-    sans_serif = r.ImGui_CreateFont('sans-serif', new_font_size)
-    r.ImGui_Attach(ctx, sans_serif)
-    font_size = new_font_size
-  end
-
-  if font_size_small ~= new_font_size_small then
-    if sans_serif_small then r.ImGui_Detach(ctx, sans_serif_small) end
-    sans_serif_small = r.ImGui_CreateFont('sans-serif', new_font_size_small)
-    r.ImGui_Attach(ctx, sans_serif_small)
-    font_size_small = new_font_size_small
-  end
-
-  r.ImGui_SetNextWindowSize(ctx, ww, wh, r.ImGui_Cond_FirstUseEver())
-  r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
-
-  r.ImGui_PushFont(ctx, sans_serif)
-
-  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 4
-  r.ImGui_SetNextWindowSizeConstraints(ctx, DEFAULT_WIDTH, winheight, DEFAULT_WIDTH * 3, winheight)
-  r.ImGui_PopFont(ctx)
-
-  r.ImGui_PushFont(ctx, sans_serif_titlebar)
-
-  local visible, open = r.ImGui_Begin(ctx, 'Event Editor', true, r.ImGui_WindowFlags_TopMost() + r.ImGui_WindowFlags_NoScrollWithMouse() + r.ImGui_WindowFlags_NoScrollbar()) -- + r.ImGui_WindowFlags_NoResize())
+  local visible, open = openWindow()
   if visible then
-    local modKey = r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Shortcut()
-    local modShiftKey = r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
-    if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then
-      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40013)
-    elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then
-      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40014)
-    end
-    r.ImGui_PopFont(ctx)
+    checkShortcuts()
+
     r.ImGui_PushFont(ctx, sans_serif)
     windowFn()
+    r.ImGui_PopFont(ctx)
+
+    -- ww, wh = r.ImGui_Viewport_GetSize(r.ImGui_GetWindowViewport(ctx)) -- TODO docking
     ww, wh = r.ImGui_GetWindowSize(ctx)
     r.ImGui_End(ctx)
   end
-  r.ImGui_PopFont(ctx)
 
-  if open then
-    r.defer(function() xpcall(loop, onCrash) end)
+  if not open then
+    isClosing = true -- will close out on the next frame
   end
+
+  r.defer(function() xpcall(loop, onCrash) end)
 end
 
--- r.atexit(doExit)
 r.defer(function() xpcall(loop, onCrash) end)

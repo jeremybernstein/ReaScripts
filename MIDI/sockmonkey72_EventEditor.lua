@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.3
+-- @version 1.0.8-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -1043,6 +1043,9 @@ local function windowFn()
           r.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
         elseif popupFilter ~= 0 then
           local ppqpos = recalced and v.ppqpos or nil
+          if ppqpos and extents_offset ~= 0 then
+            ppqpos = ppqpos + extents_offset
+          end
           local chan = changedParameter == 'chan' and v.chan or nil
           local msg2 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg2 or nil
           local msg3 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg3 or nil

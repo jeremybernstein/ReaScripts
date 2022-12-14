@@ -1,5 +1,5 @@
 -- @description Harmonize MIDI
--- @version 1.4
+-- @version 1.4.1
 -- @author sockmonkey72
 -- @about
 --   # Harmonize MIDI

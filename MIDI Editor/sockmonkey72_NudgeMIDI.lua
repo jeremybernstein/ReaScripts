@@ -1,5 +1,5 @@
 -- @description Nudge MIDI
--- @version 1.5
+-- @version 1.5.1
 -- @author sockmonkey72
 -- @about
 --   # Nudge MIDI

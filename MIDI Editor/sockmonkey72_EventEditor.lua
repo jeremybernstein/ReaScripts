@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.8
+-- @version 1.0.8-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -37,8 +37,6 @@ local DEFAULT_ITEM_WIDTH = 60
 
 local windowInfo
 local fontInfo
-local staticSansSerif
-local staticSansSerif_small
 
 local commonEntries = { 'measures', 'beats', 'ticks', 'chan' }
 local scaleOpWhitelist = { 'pitch', 'channel', 'vel', 'notedur', 'ccnum', 'ccval' }
@@ -104,16 +102,12 @@ local function prepWindowAndFont()
     wantsResizeUpdate = false
   }
 
-  staticSansSerif = r.ImGui_CreateFont('sans-serif', FONTSIZE_LARGE)
-  r.ImGui_Attach(ctx, staticSansSerif)
-
-  staticSansSerif_small = r.ImGui_CreateFont('sans-serif', FONTSIZE_SMALL)
-  r.ImGui_Attach(ctx, staticSansSerif_small)
-
   fontInfo = {
-    large = staticSansSerif, largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
-    small = staticSansSerif_small, smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL
+    large = r.ImGui_CreateFont('sans-serif', FONTSIZE_LARGE), largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
+    small = r.ImGui_CreateFont('sans-serif', FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL
   }
+  r.ImGui_Attach(ctx, fontInfo.large)
+  r.ImGui_Attach(ctx, fontInfo.small)
 
   local baseFontSize = tonumber(r.GetExtState(scriptID, 'baseFont'))
   if baseFontSize then
@@ -1182,8 +1176,8 @@ end
 --------------------------------- CLEANUP -----------------------------------
 
 local function doClose()
-  r.ImGui_Detach(ctx, staticSansSerif)
-  r.ImGui_Detach(ctx, staticSansSerif_small)
+  r.ImGui_Detach(ctx, fontInfo.large)
+  r.ImGui_Detach(ctx, fontInfo.small)
   r.ImGui_DestroyContext(ctx)
   ctx = nil
 end
@@ -1270,7 +1264,7 @@ local function openWindow()
   r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winheight, windowInfo.defaultWidth * 3, winheight)
   r.ImGui_PopFont(ctx)
 
-  r.ImGui_PushFont(ctx, fontInfo.small) --staticSansSerif_small) -- 11pt
+  r.ImGui_PushFont(ctx, fontInfo.small)
   local visible, open = r.ImGui_Begin(ctx, titleBarText, true,
                                         r.ImGui_WindowFlags_TopMost()
                                       + r.ImGui_WindowFlags_NoScrollWithMouse()

@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.5
+-- @version 1.0.8-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -21,24 +21,69 @@ local scriptID = 'sockmonkey72_EventEditor'
 
 local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnable()) -- TODO docking
 --r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1) -- TODO docking
-local appVersion = r.GetAppVersion()
-local isWin32 = string.match(appVersion, '/') == nil
-local isWin64 = string.match(appVersion, '/x64') ~= nil
-local isWindows = isWin32 or isWin64
 
-local sans_serif = r.ImGui_CreateFont('sans-serif', 13)
-local sans_serif_small = r.ImGui_CreateFont('sans-serif', 11)
-local sans_serif_titlebar = r.ImGui_CreateFont('sans-serif', isWindows and 13 or 11)
+local FONTSIZE_LARGE = 13
+local FONTSIZE_SMALL = 11
+local DEFAULT_WIDTH = 64 * FONTSIZE_LARGE
+local DEFAULT_HEIGHT = 7 * FONTSIZE_LARGE
+local DEFAULT_ITEM_WIDTH = 60
 
-r.ImGui_Attach(ctx, sans_serif)
-r.ImGui_Attach(ctx, sans_serif_small)
-r.ImGui_Attach(ctx, sans_serif_titlebar)
+local windowInfo
+local fontInfo
+
+local staticSansSerif
+local staticSansSerif_small
+
+local function processBaseFontUpdate(baseFontSize)
+  FONTSIZE_LARGE = baseFontSize
+  FONTSIZE_SMALL = math.floor(baseFontSize * (11/13))
+  fontInfo.largeDefaultSize = FONTSIZE_LARGE
+  fontInfo.smallDefaultSize = FONTSIZE_SMALL
+
+  windowInfo.defaultWidth = 64 * fontInfo.largeDefaultSize
+  windowInfo.defaultHeight = 7 * fontInfo.smallDefaultSize
+  DEFAULT_ITEM_WIDTH = 4.6 * FONTSIZE_LARGE
+  windowInfo.width = windowInfo.defaultWidth -- * canvasScale
+  windowInfo.height = windowInfo.defaultHeight -- * canvasScale
+  windowInfo.wantsResize = true
+end
+
+local function prepWindowAndFont()
+  windowInfo = {
+    defaultWidth = DEFAULT_WIDTH,
+    defaultHeight = DEFAULT_HEIGHT,
+    width = DEFAULT_WIDTH,
+    height = DEFAULT_HEIGHT,
+    left = 100,
+    top = 100,
+    wantsResize = false,
+    wantsResizeUpdate = false
+  }
+
+  staticSansSerif = r.ImGui_CreateFont('sans-serif', FONTSIZE_LARGE)
+  r.ImGui_Attach(ctx, staticSansSerif)
+
+  staticSansSerif_small = r.ImGui_CreateFont('sans-serif', FONTSIZE_SMALL)
+  r.ImGui_Attach(ctx, staticSansSerif_small)
+
+  fontInfo = {
+    large = staticSansSerif, largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
+    small = staticSansSerif_small, smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL
+  }
+
+  local baseFontSize = tonumber(r.GetExtState(scriptID, 'baseFont'))
+  if baseFontSize then
+    FONTSIZE_LARGE = math.floor(baseFontSize)
+    if FONTSIZE_LARGE < 10 then FONTSIZE_LARGE = 10 end
+    FONTSIZE_SMALL = math.floor(FONTSIZE_LARGE * (11/13))
+    processBaseFontUpdate(FONTSIZE_LARGE)
+  end
+end
 
 local commonEntries = { 'measures', 'beats', 'ticks', 'chan' }
 local scaleOpWhitelist = { 'pitch', 'channel', 'vel', 'notedur', 'ccnum', 'ccval' }
 
 local INVALID = -0xFFFFFFFF
-local DEFAULT_ITEM_WIDTH = 60
 
 local popupFilter = 0x90 -- note default
 local canvasScale = 1.0
@@ -99,7 +144,7 @@ local function windowFn()
   local PPQ = getPPQ()
   local PPQCent = math.floor(PPQ * 0.01)
 
-  titleBarText = DEFAULT_TITLEBAR_TEXT..' (PPQ='..PPQ..')'
+  titleBarText = DEFAULT_TITLEBAR_TEXT..' (PPQ='..PPQ..')' --..' DPI=('..r.ImGui_GetWindowDpiScale(ctx)..')'
 
   local function needsBBUConversion(name)
     return wantsBBU and (name == 'ticks' or name == 'notedur')
@@ -313,7 +358,7 @@ local function windowFn()
 
   local bail = false
   if r.ImGui_BeginPopup(ctx, 'context menu') then
-    r.ImGui_PushFont(ctx, sans_serif_small)
+    r.ImGui_PushFont(ctx, fontInfo.small)
     for _, v in pairs(ccTypes) do
       if v.exists then
         local rv, selected = r.ImGui_Selectable(ctx, v.label)
@@ -342,6 +387,17 @@ local function windowFn()
       r.SetExtState(scriptID, 'reverseScroll', v and '1' or '0', true)
       reverseScroll = v
       r.ImGui_CloseCurrentPopup(ctx)
+    end
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+    local rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue() + r.ImGui_InputTextFlags_CharsDecimal())
+    if rv then
+      v = tonumber(v)
+      if v then
+        v = v < 10 and 10 or v > 48 and 48 or v
+        r.SetExtState(scriptID, 'baseFont', tostring(v), true)
+        processBaseFontUpdate(v)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
     end
 
     -- r.ImGui_Separator(ctx)
@@ -486,7 +542,7 @@ local function windowFn()
 
   local function generateLabel(label)
     local ix, iy = currentRect.left, currentRect.top
-    r.ImGui_PushFont(ctx, sans_serif_small)
+    r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFEF)
     local tw, th = r.ImGui_CalcTextSize(ctx, label)
     local fp = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding()) / 2
@@ -510,7 +566,7 @@ local function windowFn()
     local lo, hi = getCurrentRangeForDisplay(name)
     if lo ~= hi then
       local ix, iy = currentRect.left, currentRect.bottom
-      r.ImGui_PushFont(ctx, sans_serif_small)
+      r.ImGui_PushFont(ctx, fontInfo.small)
       r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFBF)
       local text =  '['..lo..'-'..hi..']'
       local tw, th = r.ImGui_CalcTextSize(ctx, text)
@@ -540,7 +596,7 @@ local function windowFn()
     r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale))
     r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
 
-    r.ImGui_PushFont(ctx, sans_serif)
+    r.ImGui_PushFont(ctx, fontInfo.large)
 
     local val = userValues[name].opval
     if val ~= INVALID then
@@ -570,7 +626,7 @@ local function windowFn()
   local function generateUnitsLabel(name)
 
     local ix, iy = currentRect.left, currentRect.bottom
-    r.ImGui_PushFont(ctx, sans_serif_small)
+    r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFBF)
     local text =  '(bars.beats.'..(wantsBBU and 'percent' or 'ticks')..')'
     local tw, th = r.ImGui_CalcTextSize(ctx, text)
@@ -678,7 +734,7 @@ local function windowFn()
     r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale))
     r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
 
-    r.ImGui_PushFont(ctx, sans_serif)
+    r.ImGui_PushFont(ctx, fontInfo.large)
 
     local beatsOffset = name == 'seldurticks' and 0 or 1
     local val = userValues[name].opval
@@ -1067,9 +1123,8 @@ end
 -----------------------------------------------------------------------------
 
 local function doClose()
-  r.ImGui_Detach(ctx, sans_serif)
-  r.ImGui_Detach(ctx, sans_serif_small)
-  r.ImGui_Detach(ctx, sans_serif_titlebar)
+  r.ImGui_Detach(ctx, staticSansSerif)
+  r.ImGui_Detach(ctx, staticSansSerif_small)
   r.ImGui_DestroyContext(ctx)
   ctx = nil
 end
@@ -1080,33 +1135,28 @@ end
 
 -----------------------------------------------------------------------------
 
-local font_size = 13
-local font_size_small = 11
-local DEFAULT_WIDTH = 825
-local DEFAULT_HEIGHT = 89
-local windowWidth = DEFAULT_WIDTH
-local windowHeight = DEFAULT_HEIGHT
-local windowLeft, windowTop
-
 local function updateWindowPosition()
   local curWindowWidth, curWindowHeight = r.ImGui_GetWindowSize(ctx)
   local curWindowLeft, curWindowTop = r.ImGui_GetWindowPos(ctx)
 
-  if curWindowWidth ~= windowWidth
-    or curWindowHeight ~= windowHeight
-    or curWindowLeft ~= windowLeft
-    or curWindowTop ~= windowTop
+  if not windowInfo.wantsResize
+    and (windowInfo.wantsResizeUpdate
+      or curWindowWidth ~= windowInfo.width
+      or curWindowHeight ~= windowInfo.height
+      or curWindowLeft ~= windowInfo.left
+      or curWindowTop ~= windowInfo.top)
   then
     r.SetExtState(scriptID, 'windowRect', math.floor(curWindowLeft)..','..math.floor(curWindowTop)..','..math.floor(curWindowWidth)..','..math.floor(curWindowHeight), true)
-    windowLeft, windowTop, windowWidth, windowHeight = curWindowLeft, curWindowTop, curWindowWidth, curWindowHeight
+    windowInfo.left, windowInfo.top, windowInfo.width, windowInfo.height = curWindowLeft, curWindowTop, curWindowWidth, curWindowHeight
+    windowInfo.wantsResizeUpdate = false
   end
 end
 
 local function initializeWindowPosition()
   local wLeft = 100
   local wTop = 100
-  local wWidth = DEFAULT_WIDTH
-  local wHeight = DEFAULT_HEIGHT
+  local wWidth = windowInfo.defaultWidth
+  local wHeight = windowInfo.defaultHeight
   if r.HasExtState(scriptID, 'windowRect') then
     local rectStr = r.GetExtState(scriptID, 'windowRect')
     local rectTab = {}
@@ -1121,23 +1171,37 @@ local function initializeWindowPosition()
   return wLeft, wTop, wWidth, wHeight
 end
 
+local function updateOneFont(name)
+  if not fontInfo[name] then return end
+
+  local newFontSize = math.floor(fontInfo[name..'DefaultSize'] * canvasScale)
+  local fontSize = fontInfo[name..'Size']
+
+  if newFontSize ~= fontSize then
+    -- if fontSize == FONTSIZE_LARGE then
+    --   fontInfo[name] = staticSansSerif
+    -- elseif fontSize == FONTSIZE_SMALL then
+    --   fontInfo[name] = staticSansSerif_small
+    -- else
+    --   if fontInfo[name] ~= staticSansSerif -- don't kill the static fonts
+    --     and fontInfo[name] ~= staticSansSerif_small
+    --   then
+    --     r.ImGui_Detach(ctx, fontInfo[name])
+    --   end
+    --   fontInfo[name] = r.ImGui_CreateFont('sans-serif', newFontSize)
+    --   r.ImGui_Attach(ctx, fontInfo[name])
+    -- end
+    -- fontInfo[name..'Size'] = newFontSize
+    r.ImGui_Detach(ctx, fontInfo[name])
+    fontInfo[name] = r.ImGui_CreateFont('sans-serif', newFontSize)
+    r.ImGui_Attach(ctx, fontInfo[name])
+    fontInfo[name..'Size'] = newFontSize
+  end
+end
+
 local function updateFonts()
-  local new_font_size = math.floor(13 * canvasScale)
-  local new_font_size_small = math.floor(11 * canvasScale)
-
-  if font_size ~= new_font_size then
-    if sans_serif then r.ImGui_Detach(ctx, sans_serif) end
-    sans_serif = r.ImGui_CreateFont('sans-serif', new_font_size)
-    r.ImGui_Attach(ctx, sans_serif)
-    font_size = new_font_size
-  end
-
-  if font_size_small ~= new_font_size_small then
-    if sans_serif_small then r.ImGui_Detach(ctx, sans_serif_small) end
-    sans_serif_small = r.ImGui_CreateFont('sans-serif', new_font_size_small)
-    r.ImGui_Attach(ctx, sans_serif_small)
-    font_size_small = new_font_size_small
-  end
+  updateOneFont('large')
+  updateOneFont('small')
 end
 
 local function checkShortcuts()
@@ -1156,18 +1220,26 @@ local function checkShortcuts()
 end
 
 local function openWindow()
-  r.ImGui_SetNextWindowSize(ctx, windowWidth, windowHeight, r.ImGui_Cond_Appearing())
-  r.ImGui_SetNextWindowPos(ctx, windowLeft, windowTop, r.ImGui_Cond_Appearing())
+  local windowSizeFlag = r.ImGui_Cond_Appearing()
+  if windowInfo.wantsResize then
+    windowSizeFlag = nil
+  end
+  r.ImGui_SetNextWindowSize(ctx, windowInfo.width, windowInfo.height, windowSizeFlag)
+  r.ImGui_SetNextWindowPos(ctx, windowInfo.left, windowInfo.top, windowSizeFlag)
+  if windowInfo.wantsResize then
+    windowInfo.wantsResize = false
+    windowInfo.wantsResizeUpdate = true
+  end
 
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
   -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
 
-  r.ImGui_PushFont(ctx, sans_serif)
+  r.ImGui_PushFont(ctx, fontInfo.large)
   local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 4
-  r.ImGui_SetNextWindowSizeConstraints(ctx, DEFAULT_WIDTH, winheight, DEFAULT_WIDTH * 3, winheight)
+  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winheight, windowInfo.defaultWidth * 3, winheight)
   r.ImGui_PopFont(ctx)
 
-  r.ImGui_PushFont(ctx, sans_serif_titlebar)
+  r.ImGui_PushFont(ctx, fontInfo.small) --staticSansSerif_small) -- 11pt
   local visible, open = r.ImGui_Begin(ctx, titleBarText, true,
                                         r.ImGui_WindowFlags_TopMost()
                                       + r.ImGui_WindowFlags_NoScrollWithMouse()
@@ -1193,16 +1265,16 @@ local function loop()
   --   end
   -- end
 
-  --local wscale = windowWidth / DEFAULT_WIDTH
-  --local hscale =  windowHeight / DEFAULT_HEIGHT
+  --local wscale = windowWidth / windowInfo.defaultWidth
+  --local hscale =  windowHeight / windowInfo.defaultHeight
 
   if isClosing then
     doClose()
     return
   end
 
-  canvasScale = windowWidth / DEFAULT_WIDTH
-  if canvasScale > 1.5 then canvasScale = 1.5 end
+  canvasScale = windowInfo.width / windowInfo.defaultWidth
+  if canvasScale > 2 then canvasScale = 2 end
 
   updateFonts()
 
@@ -1210,7 +1282,7 @@ local function loop()
   if visible then
     checkShortcuts()
 
-    r.ImGui_PushFont(ctx, sans_serif)
+    r.ImGui_PushFont(ctx, fontInfo.large)
     windowFn()
     r.ImGui_PopFont(ctx)
 
@@ -1227,6 +1299,6 @@ local function loop()
   r.defer(function() xpcall(loop, onCrash) end)
 end
 
-windowLeft, windowTop, windowWidth, windowHeight = initializeWindowPosition()
-
+prepWindowAndFont()
+windowInfo.left, windowInfo.top, windowInfo.width, windowInfo.height = initializeWindowPosition()
 r.defer(function() xpcall(loop, onCrash) end)

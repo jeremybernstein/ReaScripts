@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="3c8f34db0adcbc7ac8ec57affef80e871ed36941">
+<index version="1" name="sockmonkey72 Scripts" commit="ef19320d9c4e5e681294c46fcb5119bae930f738">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -109,6 +109,8 @@
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_w32.dll</source>
       </version>
     </reapack>
+  </category>
+  <category name="MIDI Editor">
     <reapack name="sockmonkey72_EventEditor.lua" type="script" desc="MIDI Event Editor">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
@@ -123,61 +125,9 @@
 }
 ]]></description>
       </metadata>
-      <version name="1.0.0" author="sockmonkey72" time="2022-12-11T16:19:49Z">
+      <version name="1.0.8-beta.8" author="sockmonkey72" time="2022-12-14T11:07:52Z">
         <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/4e5e35f1fd28d09f1c6abddcd96832bd437758b5/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.1" author="sockmonkey72" time="2022-12-11T21:55:55Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/eef47aad5cb24e5ff390bc69187bd0cff13d90c2/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.2" author="sockmonkey72" time="2022-12-11T22:57:12Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/85fb594934e7bfbd3d77620fbeeecd0a84cce0ca/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.3" author="sockmonkey72" time="2022-12-11T23:16:16Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/1b179d476916136512bff33b9dd8c1d537b601e6/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.4" author="sockmonkey72" time="2022-12-12T15:54:30Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/01385aa2784708c3219ed9b0bf53ff3a2db722da/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.5" author="sockmonkey72" time="2022-12-13T09:19:57Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/a73d7ff0527541aa0b1ecc1e130f64e6b241efc0/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.6" author="sockmonkey72" time="2022-12-13T09:29:35Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/f81340005e59b48607ab3196ffaefebc15519a3c/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.7" author="sockmonkey72" time="2022-12-13T09:58:15Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/0efb58741877a9d80c988ff0ab11eaf78970ad39/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.8-beta.2" author="sockmonkey72" time="2022-12-13T19:56:22Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/6cc40d8f64dfae24df5efd98c6ff8434585fc1a7/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.8-beta.3" author="sockmonkey72" time="2022-12-13T22:48:25Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/9c71001cd2505787a613dc22035f11f6144fef07/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.8-beta.4" author="sockmonkey72" time="2022-12-13T23:10:00Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/baee52de64c3ebb11a07e34c69b5966792d4df03/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.8-beta.5" author="sockmonkey72" time="2022-12-13T23:48:17Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/b29fd90efb5e180e790ce3a09da23e572898bfac/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.8-beta.6" author="sockmonkey72" time="2022-12-14T09:38:24Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/83c6e457a8249bc3b1cd89312d3e580181d721d3/MIDI/sockmonkey72_EventEditor.lua</source>
-      </version>
-      <version name="1.0.8-beta.7" author="sockmonkey72" time="2022-12-14T11:01:49Z">
-        <changelog><![CDATA[- initial]]></changelog>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/3c8f34db0adcbc7ac8ec57affef80e871ed36941/MIDI/sockmonkey72_EventEditor.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_EventEditor.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_ExtendMIDIItemToNearestBars.lua" type="script" desc="Extend MIDI Item to Nearest Bars">
@@ -191,9 +141,9 @@
 }
 ]]></description>
       </metadata>
-      <version name="1.0" author="sockmonkey72" time="2022-11-08T14:12:21Z">
+      <version name="1.0.1" author="sockmonkey72" time="2022-12-14T11:07:52Z">
         <changelog><![CDATA[initial]]></changelog>
-        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/7c1c0149ea70073ef51c3d4794438c7255def030/MIDI/sockmonkey72_ExtendMIDIItemToNearestBars.lua</source>
+        <source main="midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_ExtendMIDIItemToNearestBars.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_HarmonizeMIDI.lua" type="script" desc="Harmonize MIDI">
@@ -207,33 +157,11 @@
 }
 ]]></description>
       </metadata>
-      <version name="1.0" author="sockmonkey72" time="2022-09-20T08:13:11Z">
-        <changelog><![CDATA[initial upload]]></changelog>
-        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/e00e74f229f30faf21fb986af0012fc9c9dda556/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
-      </version>
-      <version name="1.1" author="sockmonkey72" time="2022-09-20T15:23:02Z">
-        <changelog><![CDATA[initial upload]]></changelog>
-        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/450bc20b8a959507763d3e6f5de5f1afac8d1449/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
-        <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/450bc20b8a959507763d3e6f5de5f1afac8d1449/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
-        <source main="main" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/450bc20b8a959507763d3e6f5de5f1afac8d1449/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
-      </version>
-      <version name="1.2" author="sockmonkey72" time="2022-09-20T15:24:43Z">
-        <changelog><![CDATA[initial upload]]></changelog>
-        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/495c386f391208424f9dff785a37cde01d22471e/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
-        <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/495c386f391208424f9dff785a37cde01d22471e/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
-        <source main="main" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/495c386f391208424f9dff785a37cde01d22471e/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
-      </version>
-      <version name="1.3" author="sockmonkey72" time="2022-09-20T15:36:20Z">
-        <changelog><![CDATA[initial upload]]></changelog>
-        <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
-        <source main="main midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
-        <source main="main midi_editor" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/11cb149a08e80ab636d1dfbdeb9d9e16b9931cf5/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
-      </version>
-      <version name="1.4" author="sockmonkey72" time="2022-09-20T17:24:35Z">
+      <version name="1.4.1" author="sockmonkey72" time="2022-12-14T11:07:52Z">
         <changelog><![CDATA[add support for various MIDI editors]]></changelog>
-        <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
-        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/sockmonkey72_HarmonizeMIDI.lua</source>
-        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9490ff187d0688a0169b8399afae074af2cc14f2/MIDI/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
+        <source file="HarmonizeMIDI/HarmonizeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/HarmonizeMIDI/HarmonizeMIDIUtils.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_HarmonizeMIDI.lua</source>
+        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_HarmonizeMIDIUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_HarmonizeMIDIUsingLastSetting.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_NudgeMIDI.lua" type="script" desc="Nudge MIDI">
@@ -247,48 +175,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="1.0" author="sockmonkey72" time="2022-09-23T16:44:22Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/sockmonkey72_NudgeMIDI.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/eb293f35012560a4c9fe80d4c94f712bd2c96a07/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
-      </version>
-      <version name="1.1" author="sockmonkey72" time="2022-09-23T16:44:24Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDI.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/62920c9f8f0e7f5a65ca4a55811c73b490a45f3d/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
-      </version>
-      <version name="1.2" author="sockmonkey72" time="2022-09-26T13:46:24Z">
-        <changelog><![CDATA[bug fixes, added primitive item extension]]></changelog>
-        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/sockmonkey72_NudgeMIDI.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f1580ce255cf52cb75d168ffe7f6099cc27315f/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
-      </version>
-      <version name="1.3" author="sockmonkey72" time="2022-09-26T14:19:12Z">
-        <changelog><![CDATA[bug fixes, added primitive item extension]]></changelog>
-        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/856668a3b5247232d10688cdeb9be4e9854b5502/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/856668a3b5247232d10688cdeb9be4e9854b5502/MIDI/sockmonkey72_NudgeMIDI.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/856668a3b5247232d10688cdeb9be4e9854b5502/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/856668a3b5247232d10688cdeb9be4e9854b5502/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
-      </version>
-      <version name="1.4" author="sockmonkey72" time="2022-09-28T08:30:19Z">
-        <changelog><![CDATA[bug fixes, improve item extension (and extend to grid)]]></changelog>
-        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/f86a3b65b7a89e20002e28dd35ceee4da10e476a/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/f86a3b65b7a89e20002e28dd35ceee4da10e476a/MIDI/sockmonkey72_NudgeMIDI.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/f86a3b65b7a89e20002e28dd35ceee4da10e476a/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/f86a3b65b7a89e20002e28dd35ceee4da10e476a/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
-      </version>
-      <version name="1.5" author="sockmonkey72" time="2022-09-28T09:02:33Z">
+      <version name="1.5.1" author="sockmonkey72" time="2022-12-14T11:07:52Z">
         <changelog><![CDATA[bug fixes, improve item extension (and extend to grid)
 some refactoring]]></changelog>
-        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/NudgeMIDI/NudgeMIDIUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/sockmonkey72_NudgeMIDI.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/432cb53aab148f9f017df98253a8d0a961f8f4ab/MIDI/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
+        <source file="NudgeMIDI/NudgeMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/NudgeMIDI/NudgeMIDIUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_NudgeMIDI.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_Thin_CCs_Selected.lua" type="script" desc="Thin MIDI CC Events">
@@ -302,86 +195,20 @@ some refactoring]]></changelog>
 }
 ]]></description>
       </metadata>
-      <version name="1.0" author="sockmonkey72" time="2022-11-18T12:08:39Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/af4746236b1f330fcb2c221f0a7f0f0a8b7096f7/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-      </version>
-      <version name="1.1" author="sockmonkey72" time="2022-11-18T12:59:06Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/3a5591a5be27ec51e4e7ef5275c771094b22bab1/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/3a5591a5be27ec51e4e7ef5275c771094b22bab1/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/3a5591a5be27ec51e4e7ef5275c771094b22bab1/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/3a5591a5be27ec51e4e7ef5275c771094b22bab1/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/3a5591a5be27ec51e4e7ef5275c771094b22bab1/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-      </version>
-      <version name="1.2" author="sockmonkey72" time="2022-11-18T13:23:19Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/193ed44e02b918182e740af39ddc7edd02021ed1/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/193ed44e02b918182e740af39ddc7edd02021ed1/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/193ed44e02b918182e740af39ddc7edd02021ed1/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/193ed44e02b918182e740af39ddc7edd02021ed1/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/193ed44e02b918182e740af39ddc7edd02021ed1/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-        <source main="main midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/193ed44e02b918182e740af39ddc7edd02021ed1/MIDI/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
-      </version>
-      <version name="1.3" author="sockmonkey72" time="2022-11-18T13:25:41Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/8a2273f30c868e53b42fcf3c6fb6ff609b2f8364/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/8a2273f30c868e53b42fcf3c6fb6ff609b2f8364/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/8a2273f30c868e53b42fcf3c6fb6ff609b2f8364/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/8a2273f30c868e53b42fcf3c6fb6ff609b2f8364/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/8a2273f30c868e53b42fcf3c6fb6ff609b2f8364/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/8a2273f30c868e53b42fcf3c6fb6ff609b2f8364/MIDI/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
-      </version>
-      <version name="1.4" author="sockmonkey72" time="2022-11-18T23:16:47Z">
-        <changelog><![CDATA[initial]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/345386d7d6f539dc2a85f821348882c6a6066b9b/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/345386d7d6f539dc2a85f821348882c6a6066b9b/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/345386d7d6f539dc2a85f821348882c6a6066b9b/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/345386d7d6f539dc2a85f821348882c6a6066b9b/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/345386d7d6f539dc2a85f821348882c6a6066b9b/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/345386d7d6f539dc2a85f821348882c6a6066b9b/MIDI/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
-      </version>
-      <version name="1.5" author="sockmonkey72" time="2022-11-20T08:46:26Z">
-        <changelog><![CDATA[- add 'main' context script for reducing selected items
-- add new script for only affecting visible items, versus all items in time selection]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua</source>
-        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/a538bc5498eaa438371bef8a74ce8eed70ea0bda/MIDI/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
-      </version>
-      <version name="1.5.1" author="sockmonkey72" time="2022-11-20T12:13:06Z">
-        <changelog><![CDATA[- add 'main' context script for reducing selected items
-- add new script for only affecting visible items, versus all items in time selection
-- fix undo]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua</source>
-        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/4b8d7f3d9dd9fda08632cb27b40c492e027ec141/MIDI/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
-      </version>
-      <version name="1.6.0" author="sockmonkey72" time="2022-11-20T22:08:56Z">
-        <changelog><![CDATA[- add 'main' context script for reducing selected items
-- add new script for only affecting visible items, versus all items in time selection
-- fix undo]]></changelog>
-        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/ThinCCs/RamerDouglasPeucker.lua</source>
-        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/ThinCCs/ThinCCUtils.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_Selected.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_Setup.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_All.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All_Visible.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_All_Visible.lua</source>
-        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua</source>
-        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/21c5d27c2c239f9f775b7243029b6652754c4639/MIDI/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
+      <version name="1.6.1" author="sockmonkey72" time="2022-12-14T11:07:52Z">
+        <changelog><![CDATA[- add new scripts for thinning all and all visible CCs in the item
+- add script for thinning lane under the mouse (requires SWS)
+- (main) context selected items script will respect Razor Edit areas]]></changelog>
+        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/ThinCCs/RamerDouglasPeucker.lua</source>
+        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/ThinCCs/ThinCCUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_Selected.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_Setup.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_All.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All_Visible.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_All_Visible.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua</source>
+        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
       </version>
     </reapack>
   </category>

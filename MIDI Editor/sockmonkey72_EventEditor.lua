@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.9
+-- @version 1.0.8-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -17,7 +17,40 @@
 -- @provides
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
 
+-----------------------------------------------------------------------------
+--------------------------------- STARTUP -----------------------------------
+
 local r = reaper
+
+local function post(...)
+  local args = {...}
+  local str = ''
+  for i, v in ipairs(args) do
+    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
+  end
+  str = str .. '\n'
+  r.ShowConsoleMsg(str)
+end
+
+local function fileExists(name)
+  local f = io.open(name,"r")
+  if f ~= nil then io.close(f) return true else return false end
+end
+
+local canStart = true
+
+local imGuiPath = r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua'
+if not fileExists(imGuiPath) then
+  post('MIDI Event Editor requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
+  canStart = false
+end
+
+if not r.APIExists('JS_Mouse_GetState') then
+  post('MIDI Event Editor requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
+  canStart = false
+end
+
+if not canStart then return end
 
 dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 
@@ -66,17 +99,17 @@ ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
-local function post(...)
-  local args = {...}
-  local str = ''
-  for i, v in ipairs(args) do
-    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
-  end
-  str = str .. '\n'
-  r.ShowConsoleMsg(str)
-end
-
 local function processBaseFontUpdate(baseFontSize)
+
+  if not baseFontSize then return FONTSIZE_LARGE end
+
+  baseFontSize = math.floor(baseFontSize)
+  if baseFontSize < 10 then baseFontSize = 10
+  elseif baseFontSize > 48 then baseFontSize = 48
+  end
+
+  if baseFontSize == FONTSIZE_LARGE then return FONTSIZE_LARGE end
+
   FONTSIZE_LARGE = baseFontSize
   FONTSIZE_SMALL = math.floor(baseFontSize * (11/13))
   fontInfo.largeDefaultSize = FONTSIZE_LARGE
@@ -88,6 +121,8 @@ local function processBaseFontUpdate(baseFontSize)
   windowInfo.width = windowInfo.defaultWidth -- * canvasScale
   windowInfo.height = windowInfo.defaultHeight -- * canvasScale
   windowInfo.wantsResize = true
+
+  return FONTSIZE_LARGE
 end
 
 local function prepWindowAndFont()
@@ -109,13 +144,7 @@ local function prepWindowAndFont()
   r.ImGui_Attach(ctx, fontInfo.large)
   r.ImGui_Attach(ctx, fontInfo.small)
 
-  local baseFontSize = tonumber(r.GetExtState(scriptID, 'baseFont'))
-  if baseFontSize then
-    FONTSIZE_LARGE = math.floor(baseFontSize)
-    if FONTSIZE_LARGE < 10 then FONTSIZE_LARGE = 10 end
-    FONTSIZE_SMALL = math.floor(FONTSIZE_LARGE * (11/13))
-    processBaseFontUpdate(FONTSIZE_LARGE)
-  end
+  processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
 end
 
 -----------------------------------------------------------------------------
@@ -991,16 +1020,12 @@ local function windowFn()
       reverseScroll = v
       r.ImGui_CloseCurrentPopup(ctx)
     end
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+    r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
     rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue() + r.ImGui_InputTextFlags_CharsDecimal())
     if rv then
-      v = tonumber(v)
-      if v then
-        v = v < 10 and 10 or v > 48 and 48 or v
-        r.SetExtState(scriptID, 'baseFont', tostring(v), true)
-        processBaseFontUpdate(v)
-        r.ImGui_CloseCurrentPopup(ctx)
-      end
+      v = processBaseFontUpdate(tonumber(v))
+      r.SetExtState(scriptID, 'baseFont', tostring(v), true)
+      r.ImGui_CloseCurrentPopup(ctx)
     end
 
     r.ImGui_PopFont(ctx)
@@ -1091,6 +1116,12 @@ local function windowFn()
         and posy > hitTest.hity[1] and posy < hitTest.hity[2]
         and posx > hitTest.hitx[1] and posx < hitTest.hitx[2]
       then
+        -- local hwnd = r.JS_Window_GetFocus()
+        -- if hwnd then
+        --   r.JS_WindowMessage_Post(hwnd, 'WM_KEYDOWN', 27, 0,0,0)
+        --   r.JS_WindowMessage_Post(hwnd, 'WM_KEYUP', 27, 0,0,0)
+        -- end
+
         if hitTest.name == 'ticks' and shiftdown then
           mScrollAdjust = mScrollAdjust > 1 and 5 or -5
         elseif hitTest.name == 'notedur' and shiftdown then
@@ -1279,6 +1310,8 @@ end
 -------------------------------- SHORTCUTS ----------------------------------
 
 local function checkShortcuts()
+  if r.ImGui_IsAnyItemActive(ctx) then return end
+
   local keyMods = r.ImGui_GetKeyMods(ctx)
   local modKey = keyMods == r.ImGui_Mod_Shortcut()
   local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()

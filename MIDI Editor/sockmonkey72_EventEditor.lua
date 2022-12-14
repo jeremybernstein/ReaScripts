@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.10
+-- @version 1.0.8-beta.11
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -80,6 +80,7 @@ local popupFilter = 0x90 -- note default
 local canvasScale = 1.0
 DEFAULT_TITLEBAR_TEXT =  'Event Editor'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
+local rewriteIDForAFrame
 
 local OP_ABS = 0
 local OP_ADD = string.byte('+', 1)
@@ -184,6 +185,7 @@ local function windowFn()
   local union = {} -- determine a filter and calculate the union of selected values
   local PPQ
   local vx, vy = r.ImGui_GetWindowPos(ctx)
+  local activeFieldName
 
   ---------------------------------------------------------------------------
   --------------------------- BUNCH OF FUNCTIONS ----------------------------
@@ -195,7 +197,7 @@ local function windowFn()
   end
 
   local function needsBBUConversion(name)
-    return wantsBBU and (name == 'ticks' or name == 'notedur')
+    return wantsBBU and (name == 'ticks' or name == 'notedur' or name == 'selposticks' or name == 'seldurticks')
   end
 
   local function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
@@ -279,10 +281,24 @@ local function windowFn()
   local recalcEventTimes = false
   local recalcSelectionTimes = false
 
-  local function registerItem(name, recalc)
+  local function genItemID(name)
+    local itemID = '##'..name
+    if rewriteIDForAFrame == name then
+      itemID = itemID..'_inactive'
+      rewriteIDForAFrame = nil
+    end
+    return itemID
+  end
+
+  local function registerItem(name, recalcEvent, recalcSelection)
     local ix1, ix2 = currentRect.left, currentRect.right
     local iy1, iy2 = currentRect.top, currentRect.bottom
-    itemBounds[#itemBounds + 1] = { name = name, hitx = { ix1 - vx, ix2 - vx }, hity = { iy1 - vy, iy2 - vy }, recalc = recalc and true or false }
+    itemBounds[#itemBounds + 1] = { name = name,
+                                    hitx = { ix1 - vx, ix2 - vx },
+                                    hity = { iy1 - vy, iy2 - vy },
+                                    recalcEvent = recalcEvent and true or false,
+                                    recalcSelection = recalcSelection and true or false
+                                  }
   end
 
   local function stringToValue(name, str, op)
@@ -451,7 +467,7 @@ local function windowFn()
     end
 
     local str = val ~= INVALID and tostring(val) or '-'
-    local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
+    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
     if rt and kbdEntryIsCompleted() then
       if processString(name, nstr) then
         if timeval then recalcEventTimes = true else canProcess = true end
@@ -466,6 +482,8 @@ local function windowFn()
     generateLabel(label)
     generateRangeLabel(name)
     r.ImGui_EndGroup(ctx)
+
+    if r.ImGui_IsItemActive(ctx) then activeFieldName = name end
   end
 
   local function generateUnitsLabel(name)
@@ -600,7 +618,7 @@ local function windowFn()
       end
     end
 
-    local rt, nstr = r.ImGui_InputText(ctx, '##'..name, str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
+    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
     if rt and kbdEntryIsCompleted() then
       if processTimeString(name, nstr) then
         recalcSelectionTimes = true
@@ -610,11 +628,13 @@ local function windowFn()
     currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
     currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
     r.ImGui_PopFont(ctx)
-    -- registerItem(name, true) -- no scrolling support
+    registerItem(name, false, true)
     generateLabel(label)
     generateUnitsLabel()
     -- generateRangeLabel(name) -- no range support
     r.ImGui_EndGroup(ctx)
+
+    if r.ImGui_IsItemActive(ctx) then activeFieldName = name end
   end
 
   ---------------------------------------------------------------------------
@@ -1103,8 +1123,9 @@ local function windowFn()
     -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
 
     -- current 'fix' is using the JS extension
-    local mods = r.JS_Mouse_GetState(8) -- shift key
-    local shiftdown = mods ~= 0
+    local mods = r.JS_Mouse_GetState(24) -- shift key
+    local shiftdown = mods & 8 ~= 0
+    local optdown = mods & 16 ~= 0
     local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
 
     if shiftdown then
@@ -1116,11 +1137,9 @@ local function windowFn()
         and posy > hitTest.hity[1] and posy < hitTest.hity[2]
         and posx > hitTest.hitx[1] and posx < hitTest.hitx[2]
       then
-        -- local hwnd = r.JS_Window_GetFocus()
-        -- if hwnd then
-        --   r.JS_WindowMessage_Post(hwnd, 'WM_KEYDOWN', 27, 0,0,0)
-        --   r.JS_WindowMessage_Post(hwnd, 'WM_KEYUP', 27, 0,0,0)
-        -- end
+        if hitTest.name == activeFieldName then
+          rewriteIDForAFrame = activeFieldName
+        end
 
         if hitTest.name == 'ticks' and shiftdown then
           mScrollAdjust = mScrollAdjust > 1 and 5 or -5
@@ -1128,14 +1147,17 @@ local function windowFn()
           mScrollAdjust = mScrollAdjust > 1 and 10 or -10
         end
 
-        if needsBBUConversion(hitTest.name) then
+        if hitTest.recalcSelection and optdown then
+          mScrollAdjust = mScrollAdjust * PPQ -- beats instead of ticks
+        elseif needsBBUConversion(hitTest.name) then
           mScrollAdjust = mScrollAdjust * PPQCent
         end
 
         userValues[hitTest.name].operation = OP_ADD
         userValues[hitTest.name].opval = mScrollAdjust
         changedParameter = hitTest.name
-        if hitTest.recalc then recalcEventTimes = true
+        if hitTest.recalcEvent then recalcEventTimes = true
+        elseif hitTest.recalcSelection then recalcSelectionTimes = true
         else canProcess = true end
         break
       end

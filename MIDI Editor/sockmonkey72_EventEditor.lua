@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.11
+-- @version 1.0.8-beta.12
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -612,7 +612,7 @@ local function windowFn()
         measures, beats, _, ticks = ppqToTime(userValues[name].opval)
       end
       if wantsBBU then
-        str = measures..'.'..(beats + beatsOffset)..string.format('%.2f', (ticks / PPQ)):sub(2)
+        str = measures..'.'..(beats + beatsOffset)..'.'..string.format('%.3f', (ticks / PPQ)):sub(3, -2)
       else
         str = measures..'.'..(beats + beatsOffset)..'.'..ticks
       end
@@ -650,6 +650,7 @@ local function windowFn()
       if not newdur then
         local event = { seldurticks = union.seldurticks }
         rv, newdur = performOperation('seldurticks', event)
+        if rv and newdur < 1 then newdur = 1 end
         cachedSelDurTicks = newdur
       end
       if rv then

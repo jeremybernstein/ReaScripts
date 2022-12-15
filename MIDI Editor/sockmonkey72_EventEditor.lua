@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.9
+-- @version 1.0.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -1289,7 +1289,7 @@ local function windowFn()
 
     local _, _, sectionID = r.get_action_context()
     local autoOverlap = r.GetToggleCommandStateEx(sectionID, 40681)
-    if autoOverlap then
+    if autoOverlap == 1 then
       -- r.SetToggleCommandState(sectionID, 40681, 0) -- this doesn't work
       r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
     end
@@ -1370,7 +1370,7 @@ local function windowFn()
 
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
 
-    if autoOverlap then
+    if autoOverlap == 1 then
       -- r.SetToggleCommandState(sectionID, 40681, 1) -- restore state if disabled (doesn't work)
       r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
     end

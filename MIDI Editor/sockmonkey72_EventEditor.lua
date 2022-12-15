@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.14
+-- @version 1.0.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -479,6 +479,7 @@ local function windowFn()
     local str = val ~= INVALID and tostring(val) or '-'
     if focusKeyboardHere == name then
       r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x77FFFF3F)
+      -- r.ImGui_SetKeyboardFocusHere(ctx) -- we could reactivate the input field, but it's pretty good as-is
     end
 
     local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank()

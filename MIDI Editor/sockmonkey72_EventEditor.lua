@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.12
+-- @version 1.0.8-beta.13
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -16,6 +16,15 @@
 --   - initial
 -- @provides
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
+
+-----------------------------------------------------------------------------
+----------------------------------- TODO ------------------------------------
+
+-- TODO
+-- - arrow up/down to change active item (how would I do this so that changes can be seen?)
+--   [see commented code for focusKeyboardHere for current attempts on this]
+-- - transform menu: invert, retrograde (can use selection for center point), quantize?
+-- - help text describing keyboard shortcuts
 
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
@@ -81,6 +90,7 @@ local canvasScale = 1.0
 DEFAULT_TITLEBAR_TEXT =  'Event Editor'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 local rewriteIDForAFrame
+-- local focusKeyboardHere
 
 local OP_ABS = 0
 local OP_ADD = string.byte('+', 1)
@@ -283,7 +293,9 @@ local function windowFn()
 
   local function genItemID(name)
     local itemID = '##'..name
-    if rewriteIDForAFrame == name then
+    if rewriteIDForAFrame == name
+      -- or focusKeyboardHere == name
+    then
       itemID = itemID..'_inactive'
       rewriteIDForAFrame = nil
     end
@@ -293,12 +305,12 @@ local function windowFn()
   local function registerItem(name, recalcEvent, recalcSelection)
     local ix1, ix2 = currentRect.left, currentRect.right
     local iy1, iy2 = currentRect.top, currentRect.bottom
-    itemBounds[#itemBounds + 1] = { name = name,
-                                    hitx = { ix1 - vx, ix2 - vx },
-                                    hity = { iy1 - vy, iy2 - vy },
-                                    recalcEvent = recalcEvent and true or false,
-                                    recalcSelection = recalcSelection and true or false
-                                  }
+    table.insert(itemBounds, { name = name,
+                               hitx = { ix1 - vx, ix2 - vx },
+                               hity = { iy1 - vy, iy2 - vy },
+                               recalcEvent = recalcEvent and true or false,
+                               recalcSelection = recalcSelection and true or false
+                             })
   end
 
   local function stringToValue(name, str, op)
@@ -467,7 +479,13 @@ local function windowFn()
     end
 
     local str = val ~= INVALID and tostring(val) or '-'
-    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
+    -- if focusKeyboardHere == name then
+    --   r.ImGui_SetKeyboardFocusHere(ctx)
+    --   focusKeyboardHere = nil
+    -- end
+    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank()
+                                                                + r.ImGui_InputTextFlags_CharsDecimal()
+                                                                + r.ImGui_InputTextFlags_AutoSelectAll())
     if rt and kbdEntryIsCompleted() then
       if processString(name, nstr) then
         if timeval then recalcEventTimes = true else canProcess = true end
@@ -618,7 +636,9 @@ local function windowFn()
       end
     end
 
-    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_AutoSelectAll())
+    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank()
+                                                                + r.ImGui_InputTextFlags_CharsDecimal()
+                                                                + r.ImGui_InputTextFlags_AutoSelectAll())
     if rt and kbdEntryIsCompleted() then
       if processTimeString(name, nstr) then
         recalcSelectionTimes = true
@@ -1042,7 +1062,8 @@ local function windowFn()
       r.ImGui_CloseCurrentPopup(ctx)
     end
     r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
-    rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue() + r.ImGui_InputTextFlags_CharsDecimal())
+    rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                   + r.ImGui_InputTextFlags_CharsDecimal())
     if rv then
       v = processBaseFontUpdate(tonumber(v))
       r.SetExtState(scriptID, 'baseFont', tostring(v), true)
@@ -1106,6 +1127,29 @@ local function windowFn()
 
   makeTimeInput('selposticks', 'Sel. Position', true, DEFAULT_ITEM_WIDTH * 2)
   makeTimeInput('seldurticks', 'Sel. Duration', true, DEFAULT_ITEM_WIDTH * 2)
+
+
+  ---------------------------------------------------------------------------
+  ------------------------------- ARROW KEYS ------------------------------
+
+  -- local arrowAdjust = r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) and 1
+  --                  or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) and -1
+  --                  or 0
+  -- if arrowAdjust ~= 0 and activeFieldName then
+  --   for _, hitTest in ipairs(itemBounds) do
+  --     if hitTest.name == activeFieldName then
+  --       userValues[hitTest.name].operation = OP_ADD
+  --       userValues[hitTest.name].opval = arrowAdjust
+  --       changedParameter = hitTest.name
+  --       if hitTest.recalcEvent then recalcEventTimes = true
+  --       elseif hitTest.recalcSelection then recalcSelectionTimes = true
+  --       else canProcess = true end
+  --       rewriteIDForAFrame = activeFieldName
+  --       focusKeyboardHere = activeFieldName
+  --       break
+  --     end
+  --   end
+  -- end
 
   ---------------------------------------------------------------------------
   ------------------------------- MOUSE SCROLL ------------------------------

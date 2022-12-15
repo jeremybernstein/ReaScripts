@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8-beta.13
+-- @version 1.0.8-beta.14
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -21,10 +21,10 @@
 ----------------------------------- TODO ------------------------------------
 
 -- TODO
--- - arrow up/down to change active item (how would I do this so that changes can be seen?)
+-- - [x] arrow up/down to change active item (how would I do this so that changes can be seen?)
 --   [see commented code for focusKeyboardHere for current attempts on this]
--- - transform menu: invert, retrograde (can use selection for center point), quantize?
--- - help text describing keyboard shortcuts
+-- - [ ] transform menu: invert, retrograde (can use selection for center point), quantize?
+-- - [ ] help text describing keyboard shortcuts
 
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
@@ -90,7 +90,7 @@ local canvasScale = 1.0
 DEFAULT_TITLEBAR_TEXT =  'Event Editor'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 local rewriteIDForAFrame
--- local focusKeyboardHere
+local focusKeyboardHere
 
 local OP_ABS = 0
 local OP_ADD = string.byte('+', 1)
@@ -293,9 +293,7 @@ local function windowFn()
 
   local function genItemID(name)
     local itemID = '##'..name
-    if rewriteIDForAFrame == name
-      -- or focusKeyboardHere == name
-    then
+    if rewriteIDForAFrame == name then
       itemID = itemID..'_inactive'
       rewriteIDForAFrame = nil
     end
@@ -479,10 +477,10 @@ local function windowFn()
     end
 
     local str = val ~= INVALID and tostring(val) or '-'
-    -- if focusKeyboardHere == name then
-    --   r.ImGui_SetKeyboardFocusHere(ctx)
-    --   focusKeyboardHere = nil
-    -- end
+    if focusKeyboardHere == name then
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x77FFFF3F)
+    end
+
     local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank()
                                                                 + r.ImGui_InputTextFlags_CharsDecimal()
                                                                 + r.ImGui_InputTextFlags_AutoSelectAll())
@@ -493,6 +491,10 @@ local function windowFn()
       changedParameter = name
     end
 
+    if focusKeyboardHere == name then
+      r.ImGui_PopStyleColor(ctx)
+    end
+
     currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
     currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
     r.ImGui_PopFont(ctx)
@@ -501,7 +503,7 @@ local function windowFn()
     generateRangeLabel(name)
     r.ImGui_EndGroup(ctx)
 
-    if r.ImGui_IsItemActive(ctx) then activeFieldName = name end
+    if r.ImGui_IsItemActive(ctx) then activeFieldName = name focusKeyboardHere = name end
   end
 
   local function generateUnitsLabel(name)
@@ -636,6 +638,10 @@ local function windowFn()
       end
     end
 
+    if focusKeyboardHere == name then
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x77FFFF3F)
+    end
+
     local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank()
                                                                 + r.ImGui_InputTextFlags_CharsDecimal()
                                                                 + r.ImGui_InputTextFlags_AutoSelectAll())
@@ -645,6 +651,11 @@ local function windowFn()
         changedParameter = name
       end
     end
+
+    if focusKeyboardHere == name then
+      r.ImGui_PopStyleColor(ctx)
+    end
+
     currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
     currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
     r.ImGui_PopFont(ctx)
@@ -654,7 +665,7 @@ local function windowFn()
     -- generateRangeLabel(name) -- no range support
     r.ImGui_EndGroup(ctx)
 
-    if r.ImGui_IsItemActive(ctx) then activeFieldName = name end
+    if r.ImGui_IsItemActive(ctx) then activeFieldName = name focusKeyboardHere = name end
   end
 
   ---------------------------------------------------------------------------
@@ -1128,28 +1139,55 @@ local function windowFn()
   makeTimeInput('selposticks', 'Sel. Position', true, DEFAULT_ITEM_WIDTH * 2)
   makeTimeInput('seldurticks', 'Sel. Duration', true, DEFAULT_ITEM_WIDTH * 2)
 
+  ---------------------------------------------------------------------------
+  ------------------------------- MOD KEYS ------------------------------
+
+  -- note that the mod is only captured if the window is explicitly focused
+  -- with a click. not sure how to fix this yet. TODO
+  -- local mods = r.ImGui_GetKeyMods(ctx)
+  -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
+
+  -- current 'fix' is using the JS extension
+  local mods = r.JS_Mouse_GetState(24) -- shift key
+  local shiftdown = mods & 8 ~= 0
+  local optdown = mods & 16 ~= 0
+  local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
 
   ---------------------------------------------------------------------------
   ------------------------------- ARROW KEYS ------------------------------
 
-  -- local arrowAdjust = r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) and 1
-  --                  or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) and -1
-  --                  or 0
-  -- if arrowAdjust ~= 0 and activeFieldName then
-  --   for _, hitTest in ipairs(itemBounds) do
-  --     if hitTest.name == activeFieldName then
-  --       userValues[hitTest.name].operation = OP_ADD
-  --       userValues[hitTest.name].opval = arrowAdjust
-  --       changedParameter = hitTest.name
-  --       if hitTest.recalcEvent then recalcEventTimes = true
-  --       elseif hitTest.recalcSelection then recalcSelectionTimes = true
-  --       else canProcess = true end
-  --       rewriteIDForAFrame = activeFieldName
-  --       focusKeyboardHere = activeFieldName
-  --       break
-  --     end
-  --   end
-  -- end
+  -- escape key kills our arrow key focus
+  if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then focusKeyboardHere = nil end
+
+  local arrowAdjust = r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) and 1
+                   or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) and -1
+                   or 0
+  if arrowAdjust ~= 0 and (activeFieldName or focusKeyboardHere) then
+    for _, hitTest in ipairs(itemBounds) do
+      if hitTest.name == focusKeyboardHere
+        or hitTest.name == activeFieldName
+      then
+        if hitTest.recalcSelection and optdown then
+          arrowAdjust = arrowAdjust * PPQ -- beats instead of ticks
+        elseif needsBBUConversion(hitTest.name) then
+          arrowAdjust = arrowAdjust * PPQCent
+        end
+
+        userValues[hitTest.name].operation = OP_ADD
+        userValues[hitTest.name].opval = arrowAdjust
+        changedParameter = hitTest.name
+
+        if hitTest.recalcEvent then recalcEventTimes = true
+        elseif hitTest.recalcSelection then recalcSelectionTimes = true
+        else canProcess = true end
+        if hitTest.name == activeFieldName then
+          rewriteIDForAFrame = hitTest.name
+          focusKeyboardHere = hitTest.name
+        end
+        break
+      end
+    end
+  end
 
   ---------------------------------------------------------------------------
   ------------------------------- MOUSE SCROLL ------------------------------
@@ -1162,17 +1200,6 @@ local function windowFn()
   posx = posx - vx
   posy = posy - vy
   if mScrollAdjust ~= 0 then
-    -- note that the mod is only captured if the window is explicitly focused
-    -- with a click. not sure how to fix this yet. TODO
-    -- local mods = r.ImGui_GetKeyMods(ctx)
-    -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
-
-    -- current 'fix' is using the JS extension
-    local mods = r.JS_Mouse_GetState(24) -- shift key
-    local shiftdown = mods & 8 ~= 0
-    local optdown = mods & 16 ~= 0
-    local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
-
     if shiftdown then
       mScrollAdjust = mScrollAdjust * 3
     end

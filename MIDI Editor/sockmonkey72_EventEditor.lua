@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.8
+-- @version 1.0.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -110,6 +110,36 @@ ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
+local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
+  -- collect the keys
+  local keys = {}
+  for k in pairs(t) do keys[#keys+1] = k end
+
+  -- if order function given, sort by it by passing the table and keys a, b,
+  -- otherwise just sort the keys
+  if order then
+    table.sort(keys, function(a,b) return order(t, a, b) end)
+  else
+    table.sort(keys)
+  end
+
+  -- return the iterator function
+  local i = 0
+  return function()
+    i = i + 1
+    if keys[i] then
+      return keys[i], t[keys[i]]
+    end
+  end
+end
+
+local function prepRandomShit()
+  -- remove deprecated ExtState entries
+  if r.HasExtState(scriptID, 'correctOverlaps') then
+    r.DeleteExtState(scriptID, 'correctOverlaps', true)
+  end
+end
+
 local function processBaseFontUpdate(baseFontSize)
 
   if not baseFontSize then return FONTSIZE_LARGE end
@@ -184,7 +214,7 @@ local function windowFn()
   local CC_TYPE = 1
   local NOTE_FILTER = 0x90
   local changedParameter = nil
-  local wantsOverlapCorrection = r.GetExtState(scriptID, 'correctOverlaps') == '1'
+  local overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
   local wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
   local reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
   local allEvents = {}
@@ -196,6 +226,8 @@ local function windowFn()
   local PPQ
   local vx, vy = r.ImGui_GetWindowPos(ctx)
   local activeFieldName
+  local pitchDirection = 0
+  local touchedEvents = {}
 
   ---------------------------------------------------------------------------
   --------------------------- BUNCH OF FUNCTIONS ----------------------------
@@ -762,6 +794,12 @@ local function windowFn()
       elseif name == 'ppqpos' or name == 'endppqpos' then val = val
       else val = val < 0 and 0 or val
       end
+
+      if name == 'pitch' and changedParameter == 'pitch' then
+        local dir = val < e.pitch and -1 or val > e.pitch and 1 or 0
+        if pitchDirection == 0 and val ~= 0 then pitchDirection = dir end
+      end
+
       return math.floor(val)
     end
     return INVALID
@@ -809,24 +847,29 @@ local function windowFn()
     end
   end
 
-  local function correctOverlapForEvent(constEvent, mutableEvent)
+  -- manual overlap protection for prioritizing selected items
+  local function correctOverlapForEvent(testEvent, selectedEvent)
     local modified = 0
-    if constEvent.type == NOTE_TYPE
-      and constEvent.chan == mutableEvent.chan
-      and constEvent.pitch == mutableEvent.pitch
+    if testEvent.type == NOTE_TYPE
+      and testEvent.chan == selectedEvent.chan
+      and testEvent.pitch == selectedEvent.pitch
     then
-      local saveppq, saveendppq = mutableEvent.ppqpos, mutableEvent.endppqpos
-      if constEvent.ppqpos > mutableEvent.ppqpos and constEvent.ppqpos < mutableEvent.endppqpos then
-        mutableEvent.endppqpos = constEvent.ppqpos
+      local saveppq, saveendppq = selectedEvent.ppqpos, selectedEvent.endppqpos
+      if testEvent.ppqpos > selectedEvent.ppqpos and testEvent.ppqpos < selectedEvent.endppqpos then
+        --selectedEvent.endppqpos = testEvent.ppqpos
+        testEvent.ppqpos = selectedEvent.endppqpos -- again, the opposite
+        table.insert(touchedEvents, testEvent)
         modified = modified + 1
       end
-      if constEvent.endppqpos > mutableEvent.ppqpos and constEvent.endppqpos < mutableEvent.endppqpos then
-        mutableEvent.ppqpos = constEvent.endppqpos
+      if testEvent.endppqpos > selectedEvent.ppqpos and testEvent.endppqpos < selectedEvent.endppqpos then
+        --selectedEvent.ppqpos = testEvent.endppqpos
+        testEvent.endppqpos = selectedEvent.ppqpos -- just the opposite
+        table.insert(touchedEvents, testEvent)
         modified = modified + 1
       end
       if modified == 2 then -- it's in the middle, don't change it
         modified = 0
-        mutableEvent.ppqpos, mutableEvent.endppqpos = saveppq, saveendppq
+        --selectedEvent.ppqpos, selectedEvent.endppqpos = saveppq, saveendppq
       end
     end
     return modified ~= 0
@@ -1055,10 +1098,10 @@ local function windowFn()
       end
     end
     r.ImGui_Separator(ctx)
-    local rv, v = r.ImGui_Checkbox(ctx, 'Correct Overlapped Notes', wantsOverlapCorrection)
+    local rv, v = r.ImGui_Checkbox(ctx, 'Overlap Correction Favors Selected', overlapFavorsSelected)
     if rv then
-      r.SetExtState(scriptID, 'correctOverlaps', v and '1' or '0', true)
-      wantsOverlapCorrection = v
+      r.SetExtState(scriptID, 'overlapFavorsSelected', v and '1' or '0', true)
+      overlapFavorsSelected = v
       r.ImGui_CloseCurrentPopup(ctx)
     end
     rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
@@ -1177,7 +1220,6 @@ local function windowFn()
         userValues[hitTest.name].operation = OP_ADD
         userValues[hitTest.name].opval = arrowAdjust
         changedParameter = hitTest.name
-
         if hitTest.recalcEvent then recalcEventTimes = true
         elseif hitTest.recalcSelection then recalcSelectionTimes = true
         else canProcess = true end
@@ -1193,8 +1235,8 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------- MOUSE SCROLL ------------------------------
 
-  local v = r.ImGui_GetMouseWheel(ctx)
-  local mScrollAdjust = v > 0 and -1 or v < 0 and 1 or 0
+  local vertMouseWheel = r.ImGui_GetMouseWheel(ctx)
+  local mScrollAdjust = vertMouseWheel > 0 and -1 or vertMouseWheel < 0 and 1 or 0
   if reverseScroll then mScrollAdjust = mScrollAdjust * -1 end
 
   local posx, posy = r.ImGui_GetMousePos(ctx)
@@ -1245,6 +1287,12 @@ local function windowFn()
   if canProcess then
     r.Undo_BeginBlock2(0)
 
+    local _, _, sectionID = r.get_action_context()
+    local autoOverlap = r.GetToggleCommandStateEx(sectionID, 40681)
+    if autoOverlap then
+      -- r.SetToggleCommandState(sectionID, 40681, 0) -- this doesn't work
+      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
+    end
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
 
@@ -1264,11 +1312,31 @@ local function windowFn()
       extents_offset = item_extents.ppqpos_cache - item_extents.ppqpos
     end
 
+    if overlapFavorsSelected then
+      for _, v in ipairs(selectedEvents) do
+        correctOverlaps(v) -- then perform overlap correction etc.
+      end
+      if #touchedEvents > 0 then
+        for _, t in ipairs(touchedEvents) do
+          t.touched = true
+          table.insert(selectedEvents, t)
+        end
+      end
+    end
+
     local recalced = recalcEventTimes or recalcSelectionTimes
-    for _, v in ipairs(selectedEvents) do
+    local order = function(t, a, b)
+      if pitchDirection == 0 then
+        return t[a].idx < t[b].idx
+      elseif pitchDirection < 0 then
+        return t[b].pitch > t[a].pitch
+      elseif pitchDirection > 0 then
+        return t[a].pitch > t[b].pitch
+      end
+    end
+    for _, v in spairs(selectedEvents, order) do
       if popupFilter == v.chanmsg then
         if popupFilter == NOTE_FILTER then
-          if wantsOverlapCorrection then correctOverlaps(v) end -- then perform overlap correction etc.
           local ppqpos = recalced and v.ppqpos or nil
           local endppqpos = recalced and v.endppqpos or nil
           if ppqpos and extents_offset ~= 0 then
@@ -1278,7 +1346,11 @@ local function windowFn()
           local chan = changedParameter == 'chan' and v.chan or nil
           local pitch = changedParameter == 'pitch' and v.pitch or nil
           local vel = changedParameter == 'vel' and v.vel or nil
-          r.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
+          if v.touched then
+            r.MIDI_SetNote(take, v.idx, nil, nil, v.ppqpos, v.endppqpos, nil, nil, nil)
+          else
+            r.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
+          end
         elseif popupFilter ~= 0 then
           local ppqpos = recalced and v.ppqpos or nil
           if ppqpos and extents_offset ~= 0 then
@@ -1293,7 +1365,16 @@ local function windowFn()
     end
 
     r.MIDI_Sort(take)
+
+    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40659) -- correct overlaps (always run)
+
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
+
+    if autoOverlap then
+      -- r.SetToggleCommandState(sectionID, 40681, 1) -- restore state if disabled (doesn't work)
+      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
+    end
+
     r.Undo_EndBlock2(0, 'Edit CC(s)', -1)
   end
 end
@@ -1476,6 +1557,7 @@ end
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
+prepRandomShit()
 prepWindowAndFont()
 windowInfo.left, windowInfo.top, windowInfo.width, windowInfo.height = initializeWindowPosition()
 r.defer(function() xpcall(loop, onCrash) end)

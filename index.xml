@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="49baa844dc8c82fee0a13c5b7bca15771a708ddc">
+<index version="1" name="sockmonkey72 Scripts" commit="f90d3e76fe39009192cfcca1677ffff8a6eb2937">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -317,6 +317,9 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       </version>
       <version name="1.7.0-beta.6" author="sockmonkey72" time="2022-11-13T23:20:33Z">
         <source file="Peace_MOD.ReaperThemeZip">https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.0-beta.6/Peace_MOD.ReaperThemeZip</source>
+      </version>
+      <version name="1.7.0" author="sockmonkey72" time="2022-12-19T20:19:45Z">
+        <source file="Peace_MOD.ReaperThemeZip">https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.0/Peace_MOD.ReaperThemeZip</source>
       </version>
     </reapack>
   </category>

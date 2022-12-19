@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.0.10
+-- @version 1.1.0-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -15,6 +15,7 @@
 -- @changelog
 --   - initial
 -- @provides
+--   {MIDIUtils}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
 
 -----------------------------------------------------------------------------
@@ -31,6 +32,9 @@
 
 local r = reaper
 
+package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
+local s = require 'MIDIUtils/MIDIUtils'
+
 local function post(...)
   local args = {...}
   local str = ''
@@ -42,7 +46,7 @@ local function post(...)
 end
 
 local function fileExists(name)
-  local f = io.open(name,"r")
+  local f = io.open(name,'r')
   if f ~= nil then io.close(f) return true else return false end
 end
 
@@ -56,6 +60,10 @@ end
 
 if not r.APIExists('JS_Mouse_GetState') then
   post('MIDI Event Editor requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
+  canStart = false
+end
+
+if not s.CheckDependencies('MIDI Event Editor') then
   canStart = false
 end
 
@@ -87,7 +95,7 @@ local INVALID = -0xFFFFFFFF
 
 local popupFilter = 0x90 -- note default
 local canvasScale = 1.0
-DEFAULT_TITLEBAR_TEXT =  'Event Editor'
+local DEFAULT_TITLEBAR_TEXT = 'Event Editor'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 local rewriteIDForAFrame
 local focusKeyboardHere
@@ -109,29 +117,6 @@ ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
-
-local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
-  -- collect the keys
-  local keys = {}
-  for k in pairs(t) do keys[#keys+1] = k end
-
-  -- if order function given, sort by it by passing the table and keys a, b,
-  -- otherwise just sort the keys
-  if order then
-    table.sort(keys, function(a,b) return order(t, a, b) end)
-  else
-    table.sort(keys)
-  end
-
-  -- return the iterator function
-  local i = 0
-  return function()
-    i = i + 1
-    if keys[i] then
-      return keys[i], t[keys[i]]
-    end
-  end
-end
 
 local function prepRandomShit()
   -- remove deprecated ExtState entries
@@ -195,6 +180,8 @@ local ppqToTime -- forward declaration to avoid vs.code warning
 local performOperation -- forward declaration
 local doPerformOperation -- forward declaration
 
+local done = false
+
 local function windowFn()
   ---------------------------------------------------------------------------
   ---------------------------------- GET TAKE -------------------------------
@@ -210,8 +197,9 @@ local function windowFn()
   local cc2byte = false
   local hasNotes = false
   local hasCCs = false
-  local NOTE_TYPE = 0
-  local CC_TYPE = 1
+  local NOTE_TYPE = s.NOTE_TYPE
+  local NOTEOFF_TYPE = s.NOTEOFF_TYPE
+  local CC_TYPE = s.CC_TYPE
   local NOTE_FILTER = 0x90
   local changedParameter = nil
   local overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
@@ -899,8 +887,8 @@ local function windowFn()
 
   -- item extents management, currently disabled
   local function getItemExtents(item)
-    local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
-    local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+    local item_pos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+    local item_len = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
     local extents = {}
     extents.item = item
     extents.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, item_pos)
@@ -956,17 +944,13 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------ ITERATE EVENTS -----------------------------
 
-  -- local FNG_take = r.FNG_AllocMidiTake(take)
-  local _, notecnt, cccnt = r.MIDI_CountEvts(take)
+  s.Reset() -- reset this each cycle
+  local _, notecnt, cccnt = s.MIDI_CountEvts(take)
   for noteidx = 0, notecnt - 1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
-    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = r.MIDI_GetNote(take, noteidx)
+    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = s.MIDI_GetNote(take, noteidx)
     e.notedur = e.endppqpos - e.ppqpos
     e.chanmsg = 0x90
-    -- local FNG_note = r.FNG_GetMidiNote(FNG_take, noteidx)
-    -- e.notedur = r.FNG_GetMidiNoteIntProperty(FNG_note, 'LENGTH') -- necessary to get the 'editor length', can still be wrong
-    -- r.ShowConsoleMsg('e.notedur: '..e.notedur..', alt: '..(endppqpos - e.ppqpos)..'\n')
-    e.endppqpos = e.ppqpos + e.notedur
     if e.selected then
       calcMIDITime(e)
       hasNotes = true
@@ -978,8 +962,7 @@ local function windowFn()
 
   for ccidx = 0, cccnt - 1 do
     local e = { type = CC_TYPE, idx = ccidx }
-    _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = r.MIDI_GetCC(take, ccidx)
-    _, e.shape, e.beztension = r.MIDI_GetCCShape(take, ccidx)
+    _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = s.MIDI_GetCC(take, ccidx)
 
     if e.chanmsg == 0xE0 then
       e.ccnum = INVALID
@@ -1296,7 +1279,8 @@ local function windowFn()
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
 
-    r.MIDI_DisableSort(take)
+    s.MIDI_OpenSetTransaction(take) -- disables sort
+
     for _, v in ipairs(selectedEvents) do
       if popupFilter == v.chanmsg then
         updateValuesForEvent(v) -- first update the values
@@ -1325,16 +1309,7 @@ local function windowFn()
     end
 
     local recalced = recalcEventTimes or recalcSelectionTimes
-    local order = function(t, a, b)
-      if pitchDirection == 0 then
-        return t[a].idx < t[b].idx
-      elseif pitchDirection < 0 then
-        return t[b].pitch > t[a].pitch
-      elseif pitchDirection > 0 then
-        return t[a].pitch > t[b].pitch
-      end
-    end
-    for _, v in spairs(selectedEvents, order) do
+    for _, v in ipairs(selectedEvents) do
       if popupFilter == v.chanmsg then
         if popupFilter == NOTE_FILTER then
           local ppqpos = recalced and v.ppqpos or nil
@@ -1347,9 +1322,9 @@ local function windowFn()
           local pitch = changedParameter == 'pitch' and v.pitch or nil
           local vel = changedParameter == 'vel' and v.vel or nil
           if v.touched then
-            r.MIDI_SetNote(take, v.idx, nil, nil, v.ppqpos, v.endppqpos, nil, nil, nil)
+            s.MIDI_SetNote(take, v.idx, nil, nil, v.ppqpos, v.endppqpos, nil, nil, nil)
           else
-            r.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
+            s.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
           end
         elseif popupFilter ~= 0 then
           local ppqpos = recalced and v.ppqpos or nil
@@ -1359,14 +1334,14 @@ local function windowFn()
           local chan = changedParameter == 'chan' and v.chan or nil
           local msg2 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg2 or nil
           local msg3 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg3 or nil
-          r.MIDI_SetCC(take, v.idx, nil, nil, ppqpos, nil, chan, msg2, msg3)
+          s.MIDI_SetCC(take, v.idx, nil, nil, ppqpos, nil, chan, msg2, msg3)
         end
       end
     end
 
-    r.MIDI_Sort(take)
+    s.MIDI_CommitSetTransaction(take) -- sorts
 
-    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40659) -- correct overlaps (always run)
+    --r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40659) -- correct overlaps (always run)
 
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
 

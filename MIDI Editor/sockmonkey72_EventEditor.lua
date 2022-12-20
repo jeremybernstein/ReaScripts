@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.2
+-- @version 1.1.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -101,9 +101,14 @@ local rewriteIDForAFrame
 local focusKeyboardHere
 local processTimeout
 
-local wantsOverlapCorrection = 1
+local OVERLAP_MANUAL = 0
+local OVERLAP_AUTO = 1
+local OVERLAP_TIMEOUT = 2
+
+local wantsOverlapCorrection = OVERLAP_AUTO
 local overlapCorrectionTimeout = 1000 -- (ms)
 local overlapFavorsSelected = false
+local disabledAutoOverlap = false
 local wantsBBU = false
 local reverseScroll = false
 
@@ -132,7 +137,7 @@ local function handleExtState()
 
   if r.HasExtState(scriptID, 'wantsOverlapCorrection') then
     local wants = r.GetExtState(scriptID, 'wantsOverlapCorrection')
-    wantsOverlapCorrection = wants == '1' and 1 or wants == '2' and 2 or wants == '0' and 0 or 1
+    wantsOverlapCorrection = wants == '1' and OVERLAP_AUTO or wants == '2' and OVERLAP_TIMEOUT or wants == '0' and OVERLAP_MANUAL or OVERLAP_AUTO
   end
   if r.HasExtState(scriptID, 'overlapCorrectionTimeout') then
     local timeout = tonumber(r.GetExtState(scriptID, 'overlapCorrectionTimeout'))
@@ -149,6 +154,12 @@ local function prepRandomShit()
     r.DeleteExtState(scriptID, 'correctOverlaps', true)
   end
   handleExtState()
+end
+
+local function gooseAutoOverlap()
+  -- r.SetToggleCommandState(sectionID, 40681, 0) -- this doesn't work
+  r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
+  disabledAutoOverlap = not disabledAutoOverlap
 end
 
 local function processBaseFontUpdate(baseFontSize)
@@ -1121,21 +1132,21 @@ local function windowFn()
     r.ImGui_Separator(ctx)
 
     if r.ImGui_BeginMenu(ctx, "Overlap Protection") then
-      local rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Always On', wantsOverlapCorrection == 1 and 1 or 0, 1)
+      local rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Always On', wantsOverlapCorrection == OVERLAP_AUTO and 1 or 0, 1)
       if rv and v == 1 then
         r.SetExtState(scriptID, 'wantsOverlapCorrection', '1', true)
-        wantsOverlapCorrection = 1
+        wantsOverlapCorrection = OVERLAP_AUTO
         -- r.ImGui_CloseCurrentPopup(ctx)
       end
 
-      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection After Timeout', wantsOverlapCorrection == 2 and 2 or 0, 2)
+      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection After Timeout', wantsOverlapCorrection == OVERLAP_TIMEOUT and 2 or 0, 2)
       if rv and v == 2 then
         r.SetExtState(scriptID, 'wantsOverlapCorrection', '2', true)
-        wantsOverlapCorrection = 2
+        wantsOverlapCorrection = OVERLAP_TIMEOUT
         -- r.ImGui_CloseCurrentPopup(ctx)
       end
 
-      if wantsOverlapCorrection ~= 2 then
+      if wantsOverlapCorrection ~= OVERLAP_TIMEOUT then
         r.ImGui_BeginDisabled(ctx)
       end
       r.ImGui_Indent(ctx)
@@ -1150,17 +1161,17 @@ local function windowFn()
         -- r.ImGui_CloseCurrentPopup(ctx)
       end
       r.ImGui_Unindent(ctx)
-      if wantsOverlapCorrection ~= 2 then
+      if wantsOverlapCorrection ~= OVERLAP_TIMEOUT then
         r.ImGui_EndDisabled(ctx)
       end
 
-      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Off (Manual)', wantsOverlapCorrection == 0 and 3 or 0, 3)
+      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Off (Manual)', wantsOverlapCorrection == OVERLAP_MANUAL and 3 or 0, 3)
       if rv and v == 3 then
         r.SetExtState(scriptID, 'wantsOverlapCorrection', '0', true)
-        wantsOverlapCorrection = 0
+        wantsOverlapCorrection = OVERLAP_MANUAL
         -- r.ImGui_CloseCurrentPopup(ctx)
       end
-      if wantsOverlapCorrection ~= 0 then
+      if wantsOverlapCorrection ~= OVERLAP_MANUAL then
         r.ImGui_BeginDisabled(ctx)
       end
       r.ImGui_Indent(ctx)
@@ -1171,12 +1182,12 @@ local function windowFn()
         correctOverlapsNow = true
       end
       r.ImGui_Unindent(ctx)
-      if wantsOverlapCorrection ~= 0 then
+      if wantsOverlapCorrection ~= OVERLAP_MANUAL then
         r.ImGui_EndDisabled(ctx)
       end
 
       r.ImGui_Separator(ctx)
-      rv, v = r.ImGui_Checkbox(ctx, 'Overlap Correction Favors Selected', overlapFavorsSelected)
+      rv, v = r.ImGui_Checkbox(ctx, 'Overlap Correction Favors Selection', overlapFavorsSelected)
       if rv then
         r.SetExtState(scriptID, 'overlapFavorsSelected', v and '1' or '0', true)
         overlapFavorsSelected = v
@@ -1185,12 +1196,6 @@ local function windowFn()
       r.ImGui_EndMenu(ctx)
     end
 
-    -- local rv, v = r.ImGui_Checkbox(ctx, 'Enable Overlap Correction ', wantsOverlapCorrection)
-    -- if rv then
-    --   r.SetExtState(scriptID, 'wantsOverlapCorrection', v and '1' or '0', true)
-    --   wantsOverlapCorrection = v
-    --   r.ImGui_CloseCurrentPopup(ctx)
-    -- end
     local rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
     if rv then
       r.SetExtState(scriptID, 'bbu', v and '1' or '0', true)
@@ -1371,10 +1376,13 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------- PROCESSING --------------------------------
 
-  if not canProcess and processTimeout and wantsOverlapCorrection == 2 then
+  local enableAutoTimeout = false
+  if not canProcess and processTimeout and wantsOverlapCorrection == OVERLAP_TIMEOUT then
     local curtime = r.time_precise() * 1000
     if curtime - processTimeout > overlapCorrectionTimeout then
       correctOverlapsNow = true
+      processTimeout = nil
+      enableAutoTimeout = true
     end
   end
 
@@ -1384,8 +1392,7 @@ local function windowFn()
     local _, _, sectionID = r.get_action_context()
     local autoOverlap = r.GetToggleCommandStateEx(sectionID, 40681)
     if autoOverlap == 1 then
-      -- r.SetToggleCommandState(sectionID, 40681, 0) -- this doesn't work
-      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
+      gooseAutoOverlap()
     end
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
@@ -1401,7 +1408,7 @@ local function windowFn()
 
     updateItemExtents(item_extents)
 
-    if wantsOverlapCorrection == 1 or correctOverlapsNow then
+    if wantsOverlapCorrection == OVERLAP_AUTO or correctOverlapsNow then
       for _, v in ipairs(selectedEvents) do
         correctOverlaps(v, overlapFavorsSelected) -- then perform overlap correction etc.
       end
@@ -1453,9 +1460,10 @@ local function windowFn()
 
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
 
-    if autoOverlap == 1 then
-      -- r.SetToggleCommandState(sectionID, 40681, 1) -- restore state if disabled (doesn't work)
-      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
+    if autoOverlap == 1 or enableAutoTimeout then
+      if not (wantsOverlapCorrection == OVERLAP_TIMEOUT and processTimeout) then
+        gooseAutoOverlap()
+      end
     end
 
     local undoText
@@ -1476,9 +1484,15 @@ local function doClose()
   r.ImGui_Detach(ctx, fontInfo.small)
   r.ImGui_DestroyContext(ctx)
   ctx = nil
+  if disabledAutoOverlap then
+    gooseAutoOverlap()
+  end
 end
 
 local function onCrash(err)
+  if disabledAutoOverlap then
+    gooseAutoOverlap()
+  end
   r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
 end
 

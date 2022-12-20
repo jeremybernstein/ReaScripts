@@ -99,6 +99,13 @@ local DEFAULT_TITLEBAR_TEXT = 'Event Editor'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 local rewriteIDForAFrame
 local focusKeyboardHere
+local processTimeout
+
+local wantsOverlapCorrection = 1
+local overlapCorrectionTimeout = 1000 -- (ms)
+local overlapFavorsSelected = false
+local wantsBBU = false
+local reverseScroll = false
 
 local OP_ABS = 0
 local OP_ADD = string.byte('+', 1)
@@ -118,11 +125,30 @@ ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
+local function handleExtState()
+  overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
+  wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
+  reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
+
+  if r.HasExtState(scriptID, 'wantsOverlapCorrection') then
+    local wants = r.GetExtState(scriptID, 'wantsOverlapCorrection')
+    wantsOverlapCorrection = wants == '1' and 1 or wants == '2' and 2 or wants == '0' and 0 or 1
+  end
+  if r.HasExtState(scriptID, 'overlapCorrectionTimeout') then
+    local timeout = tonumber(r.GetExtState(scriptID, 'overlapCorrectionTimeout'))
+    if timeout then
+      timeout = timeout < 100 and 100 or timeout > 5000 and 5000 or timeout
+      overlapCorrectionTimeout = math.floor(timeout)
+    end
+  end
+end
+
 local function prepRandomShit()
   -- remove deprecated ExtState entries
   if r.HasExtState(scriptID, 'correctOverlaps') then
     r.DeleteExtState(scriptID, 'correctOverlaps', true)
   end
+  handleExtState()
 end
 
 local function processBaseFontUpdate(baseFontSize)
@@ -202,9 +228,6 @@ local function windowFn()
   local CC_TYPE = s.CC_TYPE
   local NOTE_FILTER = 0x90
   local changedParameter = nil
-  local overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
-  local wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
-  local reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
   local allEvents = {}
   local selectedEvents = {}
   local selectedNotes = {}
@@ -216,6 +239,8 @@ local function windowFn()
   local activeFieldName
   local pitchDirection = 0
   local touchedEvents = {}
+  local handledEscape = false
+  local correctOverlapsNow = false
 
   ---------------------------------------------------------------------------
   --------------------------- BUNCH OF FUNCTIONS ----------------------------
@@ -836,34 +861,41 @@ local function windowFn()
   end
 
   -- manual overlap protection for prioritizing selected items
-  local function correctOverlapForEvent(testEvent, selectedEvent)
+  local function correctOverlapForEvent(testEvent, selectedEvent, favorSelection)
     local modified = 0
+    local insertTestEvent = false
     if testEvent.type == NOTE_TYPE
       and testEvent.chan == selectedEvent.chan
       and testEvent.pitch == selectedEvent.pitch
     then
-      local saveppq, saveendppq = selectedEvent.ppqpos, selectedEvent.endppqpos
-      if testEvent.ppqpos > selectedEvent.ppqpos and testEvent.ppqpos < selectedEvent.endppqpos then
-        --selectedEvent.endppqpos = testEvent.ppqpos
-        testEvent.ppqpos = selectedEvent.endppqpos -- again, the opposite
-        table.insert(touchedEvents, testEvent)
+      if testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
+        if favorSelection then
+          testEvent.ppqpos = selectedEvent.endppqpos
+          insertTestEvent = true
+        else
+          selectedEvent.endppqpos = testEvent.ppqpos
+          recalcEventTimes = true
+        end
         modified = modified + 1
       end
-      if testEvent.endppqpos > selectedEvent.ppqpos and testEvent.endppqpos < selectedEvent.endppqpos then
-        --selectedEvent.ppqpos = testEvent.endppqpos
-        testEvent.endppqpos = selectedEvent.ppqpos -- just the opposite
-        table.insert(touchedEvents, testEvent)
+      if testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
+        testEvent.endppqpos = selectedEvent.ppqpos -- selection note-on is always right
+        insertTestEvent = true
         modified = modified + 1
       end
-      if modified == 2 then -- it's in the middle, don't change it
-        modified = 0
-        --selectedEvent.ppqpos, selectedEvent.endppqpos = saveppq, saveendppq
+
+      if modified == 2 then -- it's in the middle, mark it for deletion
+        testEvent.delete = true
+      end
+
+      if insertTestEvent then -- only insert once
+        table.insert(touchedEvents, testEvent)
       end
     end
     return modified ~= 0
   end
 
-  local function correctOverlaps(event)
+  local function correctOverlaps(event, favorSelection)
     -- find input event
     local idx
     for i = 1, #allEvents do
@@ -877,11 +909,11 @@ local function windowFn()
 
     -- look backward
     for i = idx - 1, 1, -1 do
-      if correctOverlapForEvent(allEvents[i], event) then break end
+      if correctOverlapForEvent(allEvents[i], event, favorSelection) then break end
     end
     -- look forward
     for i = idx + 1, #allEvents do
-      if correctOverlapForEvent(allEvents[i], event) then break end
+      if correctOverlapForEvent(allEvents[i], event, favorSelection) then break end
     end
   end
 
@@ -938,13 +970,14 @@ local function windowFn()
   ----------------------------------- SETUP ---------------------------------
 
   PPQ = getPPQ()
-
   titleBarText = DEFAULT_TITLEBAR_TEXT..' (PPQ='..PPQ..')' --..' DPI=('..r.ImGui_GetWindowDpiScale(ctx)..')'
+
+  handleExtState()
 
   ---------------------------------------------------------------------------
   ------------------------------ ITERATE EVENTS -----------------------------
 
-  s.Reset() -- reset this each cycle
+  s.MIDI_InitializeTake(take) -- reset this each cycle
   local _, notecnt, cccnt = s.MIDI_CountEvts(take)
   for noteidx = 0, notecnt - 1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
@@ -1064,11 +1097,17 @@ local function windowFn()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'context menu')
+    r.ImGui_OpenPopup(ctx, 'main menu')
   end
 
   local bail = false
-  if r.ImGui_BeginPopup(ctx, 'context menu') then
+  if r.ImGui_BeginPopup(ctx, 'main menu') then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      if r.ImGui_IsPopupOpen(ctx, 'main menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+        handledEscape = true
+      end
+    end
     r.ImGui_PushFont(ctx, fontInfo.small)
     for _, type in pairs(ccTypes) do
       if type.exists then
@@ -1081,13 +1120,79 @@ local function windowFn()
       end
     end
     r.ImGui_Separator(ctx)
-    local rv, v = r.ImGui_Checkbox(ctx, 'Overlap Correction Favors Selected', overlapFavorsSelected)
-    if rv then
-      r.SetExtState(scriptID, 'overlapFavorsSelected', v and '1' or '0', true)
-      overlapFavorsSelected = v
-      r.ImGui_CloseCurrentPopup(ctx)
+
+    if r.ImGui_BeginMenu(ctx, "Overlap Protection") then
+      local rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Always On', wantsOverlapCorrection == 1 and 1 or 0, 1)
+      if rv and v == 1 then
+        r.SetExtState(scriptID, 'wantsOverlapCorrection', '1', true)
+        wantsOverlapCorrection = 1
+        -- r.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection After Timeout', wantsOverlapCorrection == 2 and 2 or 0, 2)
+      if rv and v == 2 then
+        r.SetExtState(scriptID, 'wantsOverlapCorrection', '2', true)
+        wantsOverlapCorrection = 2
+        -- r.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      if wantsOverlapCorrection ~= 2 then
+        r.ImGui_BeginDisabled(ctx)
+      end
+      r.ImGui_Indent(ctx)
+      r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 1.75) * canvasScale)
+      rv, v = r.ImGui_InputText(ctx, 'ms Timeout', overlapCorrectionTimeout, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                           + r.ImGui_InputTextFlags_CharsDecimal())
+      if rv then
+        v = tonumber(v)
+        if v then
+          r.SetExtState(scriptID, 'overlapCorrectionTimeout', tostring(math.floor(v)), true)
+        end
+        -- r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_Unindent(ctx)
+      if wantsOverlapCorrection ~= 2 then
+        r.ImGui_EndDisabled(ctx)
+      end
+
+      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Off (Manual)', wantsOverlapCorrection == 0 and 3 or 0, 3)
+      if rv and v == 3 then
+        r.SetExtState(scriptID, 'wantsOverlapCorrection', '0', true)
+        wantsOverlapCorrection = 0
+        -- r.ImGui_CloseCurrentPopup(ctx)
+      end
+      if wantsOverlapCorrection ~= 0 then
+        r.ImGui_BeginDisabled(ctx)
+      end
+      r.ImGui_Indent(ctx)
+      -- rv = r.ImGui_Button(ctx, 'Now')
+
+      rv = r.ImGui_SmallButton(ctx, 'Now')
+      if rv then
+        correctOverlapsNow = true
+      end
+      r.ImGui_Unindent(ctx)
+      if wantsOverlapCorrection ~= 0 then
+        r.ImGui_EndDisabled(ctx)
+      end
+
+      r.ImGui_Separator(ctx)
+      rv, v = r.ImGui_Checkbox(ctx, 'Overlap Correction Favors Selected', overlapFavorsSelected)
+      if rv then
+        r.SetExtState(scriptID, 'overlapFavorsSelected', v and '1' or '0', true)
+        overlapFavorsSelected = v
+        -- r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_EndMenu(ctx)
     end
-    rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
+
+    -- local rv, v = r.ImGui_Checkbox(ctx, 'Enable Overlap Correction ', wantsOverlapCorrection)
+    -- if rv then
+    --   r.SetExtState(scriptID, 'wantsOverlapCorrection', v and '1' or '0', true)
+    --   wantsOverlapCorrection = v
+    --   r.ImGui_CloseCurrentPopup(ctx)
+    -- end
+    local rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
     if rv then
       r.SetExtState(scriptID, 'bbu', v and '1' or '0', true)
       wantsBBU = v
@@ -1184,7 +1289,7 @@ local function windowFn()
   ------------------------------- ARROW KEYS ------------------------------
 
   -- escape key kills our arrow key focus
-  if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then focusKeyboardHere = nil end
+  if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then focusKeyboardHere = nil end
 
   local arrowAdjust = r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) and 1
                    or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) and -1
@@ -1267,7 +1372,14 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------- PROCESSING --------------------------------
 
-  if canProcess then
+  if not canProcess and processTimeout and wantsOverlapCorrection == 2 then
+    local curtime = r.time_precise() * 1000
+    if curtime - processTimeout > overlapCorrectionTimeout then
+      correctOverlapsNow = true
+    end
+  end
+
+  if canProcess or correctOverlapsNow then
     r.Undo_BeginBlock2(0)
 
     local _, _, sectionID = r.get_action_context()
@@ -1279,7 +1391,7 @@ local function windowFn()
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
 
-    s.MIDI_OpenSetTransaction(take) -- disables sort
+    s.MIDI_OpenWriteTransaction(take) -- disables sort
 
     for _, v in ipairs(selectedEvents) do
       if popupFilter == v.chanmsg then
@@ -1290,15 +1402,9 @@ local function windowFn()
 
     updateItemExtents(item_extents)
 
-    -- we shifted the extents backward, we'll need to offset any values by that amount
-    local extents_offset = 0
-    if item_extents.ppqpos_cache > item_extents.ppqpos then
-      extents_offset = item_extents.ppqpos_cache - item_extents.ppqpos
-    end
-
-    if overlapFavorsSelected then
+    if wantsOverlapCorrection == 1 or correctOverlapsNow then
       for _, v in ipairs(selectedEvents) do
-        correctOverlaps(v) -- then perform overlap correction etc.
+        correctOverlaps(v, overlapFavorsSelected) -- then perform overlap correction etc.
       end
       if #touchedEvents > 0 then
         for _, t in ipairs(touchedEvents) do
@@ -1306,6 +1412,7 @@ local function windowFn()
           table.insert(selectedEvents, t)
         end
       end
+      correctOverlapsNow = true
     end
 
     local recalced = recalcEventTimes or recalcSelectionTimes
@@ -1314,23 +1421,18 @@ local function windowFn()
         if popupFilter == NOTE_FILTER then
           local ppqpos = recalced and v.ppqpos or nil
           local endppqpos = recalced and v.endppqpos or nil
-          if ppqpos and extents_offset ~= 0 then
-            ppqpos = ppqpos + extents_offset
-            endppqpos = endppqpos + extents_offset
-          end
           local chan = changedParameter == 'chan' and v.chan or nil
           local pitch = changedParameter == 'pitch' and v.pitch or nil
           local vel = changedParameter == 'vel' and v.vel or nil
-          if v.touched then
+          if v.delete then
+            s.MIDI_DeleteNote(take, v.idx)
+          elseif v.touched then
             s.MIDI_SetNote(take, v.idx, nil, nil, v.ppqpos, v.endppqpos, nil, nil, nil)
           else
             s.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
           end
         elseif popupFilter ~= 0 then
           local ppqpos = recalced and v.ppqpos or nil
-          if ppqpos and extents_offset ~= 0 then
-            ppqpos = ppqpos + extents_offset
-          end
           local chan = changedParameter == 'chan' and v.chan or nil
           local msg2 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg2 or nil
           local msg3 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg3 or nil
@@ -1339,9 +1441,16 @@ local function windowFn()
       end
     end
 
-    s.MIDI_CommitSetTransaction(take) -- sorts
+    s.MIDI_CommitWriteTransaction(take) -- sorts
+    if canProcess and popupFilter == NOTE_FILTER then
+      processTimeout = r.time_precise() * 1000
+    else
+      processTimeout = nil
+    end
 
-    --r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40659) -- correct overlaps (always run)
+    if correctOverlapsNow then
+      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40659) -- correct overlaps (always run)
+    end
 
     r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), item)
 
@@ -1350,7 +1459,13 @@ local function windowFn()
       r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
     end
 
-    r.Undo_EndBlock2(0, 'Edit CC(s)', -1)
+    local undoText
+    if not canProcess and correctOverlapsNow then
+      undoText = 'Correct Overlapping Notes'
+    else
+      undoText = popupFilter == NOTE_FILTER and 'Edit Note(s)' or 'Edit CC(s)'
+    end
+    r.Undo_EndBlock2(0, undoText, -1)
   end
 end
 

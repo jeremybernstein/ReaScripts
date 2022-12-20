@@ -27,11 +27,11 @@ USAGE:
 
   reaper.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take))
 
-
   -- 'Read' operations don't require a transaction, and will generally trigger a MIDI_InitializeTake(take)
   --   event slurp if the requested take isn't already in memory.
-  -- Function return values, etc. should match the REAPER API with the exception of MIDI_InsertNote and MIDI_InsertCC
-  --   which return the new note/CC index, in addition to a boolean (simplifies adjusting curves after the fact)
+  -- Function return values, etc. should match the REAPER Reascript API with the exception of MIDI_InsertNote
+  --   and MIDI_InsertCC which return the new note/CC index, in addition to a boolean (simplifies adjusting
+  --   curves after the fact)
   -- Bezier curves are currently unsupported
   -- Sysex, text, meta events are currently unsupported
 
@@ -181,6 +181,7 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take)
   local newMIDIString = ''
   local ppqPos = 0
   for _, event in ipairs(MIDIEvents) do
+    if ppqPos == 0 and event.ppqpos ~= event.offset then event.offset = event.ppqpos end -- special case for first event
     ppqPos = ppqPos + event.offset
     if ppqPos ~= event.ppqpos then
       local offsetEvent = string.pack('i4Bs4', event.ppqpos - ppqPos, 0, '')
@@ -198,6 +199,15 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take)
     end
     newMIDIString = newMIDIString .. event.MIDI
   end
+
+  for _, event in ipairs(MIDIEvents) do
+    if event.type == MIDIUtils.NOTE_TYPE then
+      if not event.noteOffIdx or not MIDIEvents[event.noteOffIdx] or MIDIEvents[event.noteOffIdx].msg2 ~= event.msg2 or event.delete ~= MIDIEvents[event.noteOffIdx].delete then
+        r.ShowConsoleMsg('missing note off\n')
+      end
+    end
+  end
+
   r.MIDI_SetAllEvts(take, newMIDIString .. MIDIStringTail)
   r.MIDI_Sort(take)
   openTransaction = nil

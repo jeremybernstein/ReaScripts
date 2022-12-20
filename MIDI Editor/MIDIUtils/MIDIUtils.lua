@@ -40,9 +40,9 @@ USAGE:
 local r = reaper
 local MIDIUtils = {}
 
-MIDIUtils.NOTE_TYPE = 0
-MIDIUtils.NOTEOFF_TYPE = 1
-MIDIUtils.CC_TYPE = 2
+local NOTE_TYPE = 0
+local NOTEOFF_TYPE = 1
+local CC_TYPE = 2
 
 local MIDIEvents = {}
 local noteCount = 0
@@ -56,6 +56,16 @@ local enumAllIdx = 0
 local MIDIStringTail = ''
 local activeTake
 local openTransaction
+
+local function post(...)
+  local args = {...}
+  local str = ''
+  for i, v in ipairs(args) do
+    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
+  end
+  str = str .. '\n'
+  r.ShowConsoleMsg(str)
+end
 
 local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
   -- collect the keys
@@ -138,19 +148,19 @@ MIDIUtils.MIDI_GetEvents = function(take)
       event.msg3 = msg3
       if chanmsg == 0x90 or chanmsg == 0x80 then -- note on/off
         if chanmsg == 0x90 and event.msg3 ~= 0 then -- note on
-          event.type = MIDIUtils.NOTE_TYPE
+          event.type = NOTE_TYPE
           event.idx = noteCount
           noteCount = noteCount + 1
           event.noteOffIdx = -1
           event.endppqpos = -1
-          table.insert(noteOns, { chan = chan, pitch = event.msg2, ppqpos = event.ppqpos, idx = #MIDIEvents })
+          table.insert(noteOns, { chan = chan, pitch = event.msg2, flags = flags, ppqpos = event.ppqpos, index = #MIDIEvents })
         else
-          event.type = MIDIUtils.NOTEOFF_TYPE
-          event.noteOnPos = -1 -- find last noteon for this pitch/chan
+          event.type = NOTEOFF_TYPE
+          event.noteOnIdx = -1
           -- sorted iterator, ensure that we get the _first_ note on for this note off
           for k, v in spairs(noteOns, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
-            if v.chan == event.chan and v.pitch == event.msg2 then
-              local noteon = MIDIEvents[v.idx]
+            if v.chan == event.chan and v.pitch == event.msg2 and v.flags == event.flags then
+              local noteon = MIDIEvents[v.index]
               event.noteOnIdx = v.idx
               noteon.noteOffIdx = #MIDIEvents
               noteon.endppqpos = event.ppqpos
@@ -160,7 +170,7 @@ MIDIUtils.MIDI_GetEvents = function(take)
           end
         end
       elseif chanmsg >= 0xA0 and chanmsg < 0xF0 then
-        event.type = MIDIUtils.CC_TYPE
+        event.type = CC_TYPE
         event.idx = ccCount
         ccCount = ccCount + 1
       end
@@ -199,15 +209,6 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take)
     end
     newMIDIString = newMIDIString .. event.MIDI
   end
-
-  for _, event in ipairs(MIDIEvents) do
-    if event.type == MIDIUtils.NOTE_TYPE then
-      if not event.noteOffIdx or not MIDIEvents[event.noteOffIdx] or MIDIEvents[event.noteOffIdx].msg2 ~= event.msg2 or event.delete ~= MIDIEvents[event.noteOffIdx].delete then
-        r.ShowConsoleMsg('missing note off\n')
-      end
-    end
-  end
-
   r.MIDI_SetAllEvts(take, newMIDIString .. MIDIStringTail)
   r.MIDI_Sort(take)
   openTransaction = nil
@@ -236,7 +237,7 @@ end
 MIDIUtils.MIDI_GetNote = function(take, idx)
   EnsureTake(take)
   for _, event in ipairs(MIDIEvents) do
-    if event.type == MIDIUtils.NOTE_TYPE and event.idx == idx then
+    if event.type == NOTE_TYPE and event.idx == idx then
       return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false,
         event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3
     end
@@ -253,7 +254,7 @@ MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos,
   if not EnsureTransaction(take) then return end
   local rv = false
   for i, event in ipairs(MIDIEvents) do
-    if event.type == MIDIUtils.NOTE_TYPE and event.idx == idx then
+    if event.type == NOTE_TYPE and event.idx == idx then
       local noteoff = MIDIEvents[event.noteOffIdx]
       if not noteoff then r.ShowConsoleMsg('not noteoff in setnote\n') end
 
@@ -297,7 +298,7 @@ end
 MIDIUtils.MIDI_GetCC = function(take, idx)
   EnsureTake(take)
   for _, event in ipairs(MIDIEvents) do
-    if event.type == MIDIUtils.CC_TYPE and event.idx == idx then
+    if event.type == CC_TYPE and event.idx == idx then
       return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false,
         event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3
     end
@@ -309,7 +310,7 @@ MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, cha
   if not EnsureTransaction(take) then return false end
   local rv = false
   for i, event in ipairs(MIDIEvents) do
-    if event.type == MIDIUtils.CC_TYPE and event.idx == idx then
+    if event.type == CC_TYPE and event.idx == idx then
       if selected then
         if selected ~= 0 then event.flags = event.flags | 1
         else event.flags = event.flags & ~1 end
@@ -345,7 +346,7 @@ end
 MIDIUtils.MIDI_GetCCShape = function(take, idx)
   EnsureTake(take)
   for _, v in ipairs(MIDIEvents) do
-    if v.type == MIDIUtils.CC_TYPE and v.idx == idx then
+    if v.type == CC_TYPE and v.idx == idx then
       return true, ((v.flags & 0xF0) >> 4) & 7, 0.
     end
   end
@@ -355,7 +356,7 @@ end
 MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
   EnsureTransaction(take)
   for _, v in ipairs(MIDIEvents) do
-    if v.type == MIDIUtils.CC_TYPE and v.idx == idx then
+    if v.type == CC_TYPE and v.idx == idx then
       v.flags = v.flags & ~0xF0
       -- flag high 4 bits for CC shape: &16=linear, &32=slow start/end, &16|32=fast start, &64=fast end, &64|16=bezier
       v.flags = v.flags | ((shape & 0x7) << 4)
@@ -380,7 +381,7 @@ MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
   if idx < 0 then enumNoteIdx = 0 end
   for i = enumNoteIdx > 0 and enumNoteIdx + 1 or 1, #MIDIEvents do
     local event = MIDIEvents[i]
-    if event.type == MIDIUtils.NOTE_TYPE and event.flags & 1 ~= 0 then
+    if event.type == NOTE_TYPE and event.flags & 1 ~= 0 then
       enumNoteIdx = i
       return event.idx
     end
@@ -394,7 +395,7 @@ MIDIUtils.MIDI_EnumSelCC = function(take, idx)
   if idx == -1 then enumCCIdx = 0 end
   for i = enumCCIdx > 0 and enumCCIdx + 1 or 1, #MIDIEvents do
     local event = MIDIEvents[i]
-    if event.type == MIDIUtils.CC_TYPE and event.flags & 1 ~= 0 then
+    if event.type == CC_TYPE and event.flags & 1 ~= 0 then
       enumCCIdx = i
       return event.idx
     end
@@ -416,7 +417,7 @@ end
 MIDIUtils.MIDI_DeleteNote = function(take, idx)
   if not EnsureTransaction(take) then return end
   for _, v in ipairs(MIDIEvents) do
-    if v.type == MIDIUtils.NOTE_TYPE and v.idx == idx then
+    if v.type == NOTE_TYPE and v.idx == idx then
       v.delete = true
       MIDIEvents[v.noteOffIdx].delete = true
       return true
@@ -428,7 +429,7 @@ end
 MIDIUtils.MIDI_DeleteCC = function(take, idx)
   if not EnsureTransaction(take) then return end
   for _, v in ipairs(MIDIEvents) do
-    if v.type == MIDIUtils.CC_TYPE and v.idx == idx then
+    if v.type == CC_TYPE and v.idx == idx then
       v.delete = true
       return true
     end
@@ -445,7 +446,7 @@ MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, c
   if not EnsureTransaction(take) then return end
   local lastEvent = MIDIEvents[#MIDIEvents]
   local newNoteOn = {
-    type = MIDIUtils.NOTE_TYPE,
+    type = NOTE_TYPE,
     offset = ppqpos - (lastEvent and lastEvent.ppqpos or 0),
     flags = selected and muted and 3 or selected and 1 or muted and 2 or 0,
     ppqpos = ppqpos,
@@ -470,7 +471,7 @@ MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, c
   table.insert(MIDIEvents, newNoteOn)
 
   local newNoteOff = {
-    type = MIDIUtils.NOTEOFF_TYPE,
+    type = NOTEOFF_TYPE,
     offset = endppqpos - ppqpos,
     flags = newNoteOn.flags,
     ppqpos = endppqpos,
@@ -497,7 +498,7 @@ MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan,
   if not EnsureTransaction(take) then return end
   local lastEvent = MIDIEvents[#MIDIEvents]
   local newCC = {
-    type = MIDIUtils.CC_TYPE,
+    type = CC_TYPE,
     offset = ppqpos - lastEvent.ppqpos,
     flags = selected and muted and 3 or selected and 1 or muted and 2 or 0,
     ppqpos = ppqpos,
@@ -536,5 +537,9 @@ MIDIUtils.MIDI_InsertTextSysexEvt = function(take, selected, muted, ppqpos, type
   r.ShowConsoleMsg('MIDI_InsertTextSysexEvt is not yet supported\n')
   return false
 end
+
+MIDIUtils.NOTE_TYPE = NOTE_TYPE
+MIDIUtils.NOTEOFF_TYPE = NOTEOFF_TYPE
+MIDIUtils.CC_TYPE = CC_TYPE
 
 return MIDIUtils

@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.1
+-- @version 1.1.0-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -862,13 +862,17 @@ local function windowFn()
 
   -- manual overlap protection for prioritizing selected items
   local function correctOverlapForEvent(testEvent, selectedEvent, favorSelection)
-    local modified = 0
+    local modified = false
     local insertTestEvent = false
     if testEvent.type == NOTE_TYPE
       and testEvent.chan == selectedEvent.chan
       and testEvent.pitch == selectedEvent.pitch
     then
-      if testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
+      if testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
+        testEvent.endppqpos = selectedEvent.ppqpos -- selection note-on is always right
+        insertTestEvent = true
+        modified = true
+      elseif testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
         if favorSelection then
           testEvent.ppqpos = selectedEvent.endppqpos
           insertTestEvent = true
@@ -876,15 +880,10 @@ local function windowFn()
           selectedEvent.endppqpos = testEvent.ppqpos
           recalcEventTimes = true
         end
-        modified = modified + 1
-      end
-      if testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
-        testEvent.endppqpos = selectedEvent.ppqpos -- selection note-on is always right
-        insertTestEvent = true
-        modified = modified + 1
+        modified = true
       end
 
-      if modified == 2 then -- it's in the middle, mark it for deletion
+      if testEvent.endppqpos - testEvent.ppqpos < 1 then
         testEvent.delete = true
       end
 
@@ -892,7 +891,7 @@ local function windowFn()
         table.insert(touchedEvents, testEvent)
       end
     end
-    return modified ~= 0
+    return modified
   end
 
   local function correctOverlaps(event, favorSelection)

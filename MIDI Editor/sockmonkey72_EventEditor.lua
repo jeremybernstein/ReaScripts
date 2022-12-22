@@ -980,8 +980,6 @@ local function windowFn()
   ----------------------------------- SETUP ---------------------------------
 
   PPQ = getPPQ()
-  titleBarText = DEFAULT_TITLEBAR_TEXT..' (PPQ='..PPQ..')' --..' DPI=('..r.ImGui_GetWindowDpiScale(ctx)..')'
-
   handleExtState()
 
   ---------------------------------------------------------------------------
@@ -989,6 +987,8 @@ local function windowFn()
 
   s.MIDI_InitializeTake(take) -- reset this each cycle
   local _, notecnt, cccnt = s.MIDI_CountEvts(take)
+  local selnotecnt = 0
+  local selcccnt = 0
   for noteidx = 0, notecnt - 1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
     _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = s.MIDI_GetNote(take, noteidx)
@@ -996,7 +996,7 @@ local function windowFn()
     e.chanmsg = 0x90
     if e.selected then
       calcMIDITime(e)
-      hasNotes = true
+      selnotecnt = selnotecnt + 1
       table.insert(selectedEvents, e)
       table.insert(newNotes, e.idx)
     end
@@ -1019,12 +1019,14 @@ local function windowFn()
     end
     if e.selected then
       calcMIDITime(e)
-      hasCCs = true
+      selcccnt = selcccnt + 1
       table.insert(selectedEvents, e)
     end
     table.insert(allEvents, e)
   end
 
+  -- this determines if we need to switch the view back
+  -- to notes (did the note selection change?)
   local resetFilter = false
   if #newNotes ~= #selectedNotes then resetFilter = true
   else
@@ -1045,7 +1047,17 @@ local function windowFn()
   if resetFilter then popupFilter = 0x90 end
   selectedNotes = newNotes
 
-  if #selectedEvents == 0 or not (hasNotes or hasCCs) then return end
+  if #selectedEvents == 0 or not (selnotecnt > 0 or selcccnt > 0) then return end
+
+  ---------------------------------------------------------------------------
+  ------------------------------ TITLEBAR TEXT ------------------------------
+
+  local selectedText = ''
+  if selnotecnt > 0 then selectedText = selectedText..selnotecnt..'/'..notecnt..' note(s) selected' end
+  if selcccnt > 0 and selnotecnt > 0 then selectedText = selectedText..' :: ' end
+  if selcccnt > 0 then selectedText = selectedText..selcccnt..'/'..cccnt..' CC(s) selected' end
+  if selectedText ~= '' then selectedText = ': '..selectedText end
+  titleBarText = DEFAULT_TITLEBAR_TEXT..selectedText..' (PPQ='..PPQ..')' --..' DPI=('..r.ImGui_GetWindowDpiScale(ctx)..')'
 
   ---------------------------------------------------------------------------
   ------------------------------ SETUP FILTER -------------------------------

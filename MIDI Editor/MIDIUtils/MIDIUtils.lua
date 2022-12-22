@@ -32,8 +32,6 @@ USAGE:
   -- Function return values, etc. should match the REAPER Reascript API with the exception of MIDI_InsertNote
   --   and MIDI_InsertCC which return the new note/CC index, in addition to a boolean (simplifies adjusting
   --   curves after the fact)
-  -- Bezier curves are currently unsupported
-  -- Sysex, text, meta events are currently unsupported
 
 --]]
 
@@ -43,8 +41,13 @@ local MIDIUtils = {}
 local NOTE_TYPE = 0
 local NOTEOFF_TYPE = 1
 local CC_TYPE = 2
+local SYSEX_TYPE = 3
+local META_TYPE = 4
+local OTHER_TYPE = 5
 
 local MIDIEvents = {}
+local bezTable = {}
+
 local noteCount = 0
 local ccCount = 0
 local evtCount = 0
@@ -98,6 +101,7 @@ end
 
 MIDIUtils.Reset = function()
   MIDIEvents = {}
+  bezTable = {}
   noteCount = 0
   ccCount = 0
   evtCount = 0
@@ -130,18 +134,31 @@ MIDIUtils.MIDI_GetEvents = function(take)
     if not (msg and newStringPos) then return false end
 
     local selected = flags & 1 ~= 0
-    local chanmsg = msg:byte(1) & 0xF0
-    local chan = msg:byte(1) & 0xF
+    local msg1 = msg:byte(1)
+    local chanmsg = msg1 & 0xF0
+    local chan = msg1 & 0xF
     local msg2 = msg:byte(2)
     local msg3 = msg:byte(3)
 
     ppqTime = ppqTime + offset -- current PPQ time for this event
 
-    -- could also index events by stringPos for easier finding later?
+    -- in the event of special messages, the remaining bytes will be in msg (use string.len() to get the data size)
+    -- if chanmsg >= 0xF0 then
+    --   for i = 1, msg:len() do
+    --     local byte = msg:byte(i)
+    --     if (byte) then
+    --       r.ShowConsoleMsg(byte..', ')
+    --     else
+    --       break
+    --     end
+    --   end
+    -- end
+    -- post('')
+
     table.insert(MIDIEvents, { MIDI = MIDIString:sub(stringPos, newStringPos - 1), ppqpos = ppqTime, offset = offset, flags = flags, msg = msg })
 
+    local event = MIDIEvents[#MIDIEvents]
     if chanmsg >= 0x80 and chanmsg < 0xF0 then -- note & CC events
-      local event = MIDIEvents[#MIDIEvents]
       event.chanmsg = chanmsg
       event.chan = chan
       event.msg2 = msg2
@@ -174,10 +191,42 @@ MIDIUtils.MIDI_GetEvents = function(take)
         event.idx = ccCount
         ccCount = ccCount + 1
       end
+    elseif msg1 == 0xF0 then
+      event.type = SYSEX_TYPE
+      event.idx = evtCount
+      evtCount = evtCount + 1
+    elseif msg1 == 0xFF then
+      event.type = META_TYPE
+      event.idx = evtCount
+      event.chanmsg = 0xFF
+      event.msg2 = event.msg:byte(2) -- 1-14=text, 15='reaper notation' or bezier
+      evtCount = evtCount + 1
+    else
+      event.type = OTHER_TYPE
+      event.idx = evtCount
+      event.chanmsg = 0
+      evtCount = evtCount + 1
     end
     stringPos = newStringPos
   end
   MIDIStringTail = MIDIString:sub(-12)
+
+  -- for k, v in ipairs(MIDIEvents) do
+  --   if v.type == CC_TYPE then
+  --     local metaevent = MIDIEvents[k + 1]
+  --     if metaevent and metaevent.type == META_TYPE and metaevent.msg2 == 0xF then
+  --       post('got meta msg')
+  --       local metadata = string.sub(metaevent.msg, 3) -- cut off 0xFF 0x0F
+  --       if string.sub(metadata, 1, 5) == 'CCBZ ' then
+  --         post('got bez data')
+  --         local beztype = metadata:byte(6)
+  --         local bezten = string.unpack('f', string.sub(metadata, 7))
+  --         post('beztype', beztype, 'bezten', bezten)
+  --       end
+  --     end
+  --   end
+  -- end
+
   return true
 end
 
@@ -186,11 +235,25 @@ MIDIUtils.MIDI_OpenWriteTransaction = function(take)
   openTransaction = take
 end
 
-MIDIUtils.MIDI_CommitWriteTransaction = function(take)
-  if not EnsureTransaction(take) then return end
+local function textSysexToMIDIString(event)
+  local str = event.msg
+  if event.type == SYSEX_TYPE then
+    str = table.concat({
+      string.char(0xF0),
+      event.msg,
+      string.char(0xF7)
+    })
+  elseif event.type == META_TYPE then
+    return str
+  end
+  return str
+end
+
+MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh)
+  if not EnsureTransaction(take) then return false end
   local newMIDIString = ''
   local ppqPos = 0
-  for _, event in ipairs(MIDIEvents) do
+  for k, event in ipairs(MIDIEvents) do
     if ppqPos == 0 and event.ppqpos ~= event.offset then event.offset = event.ppqpos end -- special case for first event
     ppqPos = ppqPos + event.offset
     if ppqPos ~= event.ppqpos then
@@ -201,17 +264,42 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take)
     if event.delete then
       event.MIDI = string.pack('i4Bs4', event.offset, 0, '')
     elseif event.recalc then
-      local b1 = string.char(event.chanmsg | event.chan)
-      local b2 = string.char(event.msg2)
-      local b3 = string.char(event.msg3)
-      event.msg = table.concat({ b1, b2, b3 })
-      event.MIDI = string.pack('i4Bs4', event.offset, event.flags, event.msg)
+      local MIDIStr = ''
+      if event.type == NOTE_TYPE or event.type == NOTEOFF_TYPE or event.type == CC_TYPE then
+        local b1 = string.char(event.chanmsg | event.chan)
+        local b2 = string.char(event.msg2)
+        local b3 = string.char(event.msg3)
+        event.msg = table.concat({ b1, b2, b3 })
+        MIDIStr = event.msg
+      elseif event.type == SYSEX_TYPE or event.type == META_TYPE then
+        MIDIStr = textSysexToMIDIString(event)
+      elseif event.type == OTHER_TYPE then
+        MIDIStr = event.msg -- not sure what to do here, there don't appear to really be OTHER_TYPE events in the wild
+      end
+      event.MIDI = string.pack('i4Bs4', event.offset, event.flags, MIDIStr)
     end
     newMIDIString = newMIDIString .. event.MIDI
+
+    -- only do this if the bezEvent is in the aux table, otherwise we'll get it on the next loop
+    if event.type == CC_TYPE and event.bezIdx and event.bezIdx < 0 then
+      local bezIdx = math.abs(event.bezIdx)
+      if bezIdx <= #bezTable then
+        local bezEvent = bezTable[bezIdx]
+        if bezEvent and bezEvent.ccPos == k then
+          local bezString = bezEvent.MIDI --string.pack('i4Bs4', bezEvent.offset, bezEvent.flags, bezEvent.msg)
+          newMIDIString = newMIDIString .. bezString
+        end
+      end
+    end
+
   end
+
   r.MIDI_SetAllEvts(take, newMIDIString .. MIDIStringTail)
   r.MIDI_Sort(take)
   openTransaction = nil
+
+  if refresh then MIDIUtils.MIDI_InitializeTake(take) end -- update the tables based on the new data
+  return true
 end
 
 function EnsureTake(take)
@@ -251,12 +339,12 @@ local function MIDI_AdjustNoteOff(noteoff, param, val)
 end
 
 MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
-  if not EnsureTransaction(take) then return end
+  if not EnsureTransaction(take) then return false end
   local rv = false
-  for i, event in ipairs(MIDIEvents) do
+  for _, event in ipairs(MIDIEvents) do
     if event.type == NOTE_TYPE and event.idx == idx then
       local noteoff = MIDIEvents[event.noteOffIdx]
-      if not noteoff then r.ShowConsoleMsg('not noteoff in setnote\n') end
+      --if not noteoff then r.ShowConsoleMsg('not noteoff in setnote\n') end
 
       if selected then
         if selected ~= 0 then event.flags = event.flags | 1
@@ -320,7 +408,6 @@ MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, cha
         else event.flags = event.flags & ~2 end
       end
       if ppqpos then
-        local diff = ppqpos - event.ppqpos
         event.ppqpos = ppqpos -- bounds checking?
       end
       if chanmsg then
@@ -343,11 +430,101 @@ MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, cha
   return rv
 end
 
+local function findBezierData(idx, event)
+  local bezEvent
+  local bezIdx = idx + 1
+  if event.type == CC_TYPE and bezIdx <= #MIDIEvents then
+    bezEvent = MIDIEvents[bezIdx]
+  end
+  if not (bezEvent and bezEvent.type == META_TYPE and bezEvent.msg2 == 0xF) then
+    bezEvent = nil
+    for k, v in ipairs(bezTable) do
+      if v.ccIdx == idx then
+        bezEvent = v
+        bezIdx = -k
+        break
+      end
+    end
+  end
+  if bezEvent then return true, bezEvent, bezIdx
+  else return false
+  end
+end
+
+local function getBezierData(idx, event)
+  local rv, bezEvent = findBezierData(idx, event)
+  if rv and bezEvent then
+    local metadata = string.sub(bezEvent.msg, 3)
+    if string.sub(metadata, 1, 5) == 'CCBZ ' then
+      local beztype = metadata:byte(6)
+      local beztension = string.unpack('f', string.sub(metadata, 7))
+      return true, beztype, beztension
+    end
+  end
+  return false
+end
+
+local function setBezierData(idx, event, beztype, beztension)
+  local rv, bezEvent, bezIdx = findBezierData(idx, event)
+  if not rv then
+    bezEvent = {
+      type = META_TYPE,
+      ppqpos = event.ppqpos,
+      chanmsg = 0xFF,
+      chan = 0,
+      msg2 = 0xF,
+      msg3 = 0,
+      offset = 0,
+      flags = 0,
+      ccPos = idx,
+      msg = nil,
+      MIDI = nil
+    }
+    table.insert(bezTable, bezEvent)
+    bezIdx = -(#bezTable)
+  end
+
+  if bezEvent then
+    bezEvent.msg = table.concat({
+      string.char(0xFF),
+      string.char(0xF),
+      'CCBZ ',
+      string.char(beztype), -- should be 0
+      string.pack('f', beztension)
+    })
+    bezEvent.MIDI = string.pack('i4Bs4', bezEvent.offset, bezEvent.flags, bezEvent.msg)
+    event.bezIdx = bezIdx -- negative in aux table, positive in MIDIEvents
+    return true
+  end
+  return false
+end
+
+local function deleteBezierData(idx, event)
+  local rv, bezEvent, bezIdx = findBezierData(idx, event)
+  if rv and bezEvent and bezIdx then
+    rv = false
+    if bezIdx > 0 then bezEvent.delete = true
+    elseif bezIdx < 0 then
+      bezIdx = math.abs(bezIdx)
+      for _, event in ipairs(MIDIEvents) do
+        if event.type == CC_TYPE and event.idx == bezEvent.ccIdx and event.bezIdx == bezIdx then
+          event.bezIdx = nil
+          table.remove(bezTable, bezIdx)
+          rv = true
+          break
+        end
+      end
+    end
+  end
+  return rv
+end
+
 MIDIUtils.MIDI_GetCCShape = function(take, idx)
   EnsureTake(take)
-  for _, v in ipairs(MIDIEvents) do
-    if v.type == CC_TYPE and v.idx == idx then
-      return true, ((v.flags & 0xF0) >> 4) & 7, 0.
+  for k, event in ipairs(MIDIEvents) do
+    if event.type == CC_TYPE and event.idx == idx then
+      local rv, _, bztension = getBezierData(k, event)
+      return true, ((event.flags & 0xF0) >> 4) & 7, rv and bztension or 0.
     end
   end
   return false
@@ -355,15 +532,16 @@ end
 
 MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
   EnsureTransaction(take)
-  for _, v in ipairs(MIDIEvents) do
-    if v.type == CC_TYPE and v.idx == idx then
-      v.flags = v.flags & ~0xF0
+  for k, event in ipairs(MIDIEvents) do
+    if event.type == CC_TYPE and event.idx == idx then
+      event.flags = event.flags & ~0xF0
       -- flag high 4 bits for CC shape: &16=linear, &32=slow start/end, &16|32=fast start, &64=fast end, &64|16=bezier
-      v.flags = v.flags | ((shape & 0x7) << 4)
-      v.recalc = true
-      if beztension and beztension ~= 0 then
-        -- write this to an auxilliary table and insert on commit
-        r.ShowConsoleMsg('MIDI_SetCCShape: bezier tension is not yet supported\n')
+      event.flags = event.flags | ((shape & 0x7) << 4)
+      event.recalc = true
+      if shape == 5 and beztension then
+        return setBezierData(k, event, 0, beztension)
+      else
+        deleteBezierData(k, event)
       end
       return true
     end
@@ -371,9 +549,84 @@ MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
   return false
 end
 
-MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
-  r.ShowConsoleMsg('MIDI_SetEvt is not yet supported\n')
+-- these two operate just on the raw index into the array, not based on type
+MIDIUtils.MIDI_GetEvt = function(take, idx)
+  EnsureTake(take)
+  if idx >= 1 and idx <= #MIDIEvents then
+    local event = MIDIEvents[idx]
+    if event then
+      return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false, event.ppqpos, event.msg
+    end
+  end
   return false
+end
+
+MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
+  if not EnsureTransaction(take) then return false end
+  if idx >= 1 and idx <= #MIDIEvents then
+    local event = MIDIEvents[idx]
+    if event then
+      if selected then
+        if selected ~= 0 then event.flags = event.flags | 1
+        else event.flags = event.flags & ~1 end
+      end
+      if muted then
+        if muted ~= 0 then event.flags = event.flags | 2
+        else event.flags = event.flags & ~2 end
+      end
+      if ppqpos then
+        event.ppqpos = ppqpos
+      end
+      if msg then
+        event.msg = msg
+      end
+      event.recalc = true
+      return true
+    end
+  end
+  return false
+end
+
+MIDIUtils.MIDI_GetTextSysexEvt = function(take, idx)
+  EnsureTake(take)
+  for _, event in ipairs(MIDIEvents) do
+    if (event.type == SYSEX_TYPE or event.type == META_TYPE or event.type == OTHER_TYPE) and event.idx == idx then
+      return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false, event.ppqpos,
+      event.chanmsg == 0xF0 and -1 or event.chanmsg == 0xFF and event.msg2 or -2, event.msg
+    end
+  end
+  return false
+end
+
+MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, type, msg)
+  if not EnsureTransaction(take) then return false end
+  local rv = false
+  for _, event in ipairs(MIDIEvents) do
+    if (event.type == SYSEX_TYPE or event.type == META_TYPE or event.type == OTHER_TYPE) and event.idx == idx then
+      if selected then
+        if selected ~= 0 then event.flags = event.flags | 1
+        else event.flags = event.flags & ~1 end
+      end
+      if muted then
+        if muted ~= 0 then event.flags = event.flags | 2
+        else event.flags = event.flags & ~2 end
+      end
+      if ppqpos then
+        event.ppqpos = ppqpos
+      end
+      if type then
+        local type = type
+        event.chanmsg = type == -1 and 0xF0 or (type >= 1 and type <= 15) and 0xFF or 0
+      end
+      if msg then
+        event.msg = msg
+      end
+      event.recalc = true
+      rv = true
+      break
+    end
+  end
+  return rv
 end
 
 MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
@@ -381,7 +634,7 @@ MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
   if idx < 0 then enumNoteIdx = 0 end
   for i = enumNoteIdx > 0 and enumNoteIdx + 1 or 1, #MIDIEvents do
     local event = MIDIEvents[i]
-    if event.type == NOTE_TYPE and event.flags & 1 ~= 0 then
+    if event and event.type == NOTE_TYPE and event.flags & 1 ~= 0 then
       enumNoteIdx = i
       return event.idx
     end
@@ -405,21 +658,39 @@ MIDIUtils.MIDI_EnumSelCC = function(take, idx)
 end
 
 MIDIUtils.MIDI_EnumSelEvts = function(take, idx)
-  r.ShowConsoleMsg('MIDI_EnumSelEvts is not yet supported\n')
+  EnsureTake(take)
+  if idx < 0 then enumAllIdx = 0 end
+  for i = enumAllIdx > 0 and enumAllIdx + 1 or 1, #MIDIEvents do
+    local event = MIDIEvents[i]
+    if event.flags & 1 ~= 0 then
+      enumAllIdx = i
+      return i
+    end
+  end
+  enumAllIdx = 0
   return -1
 end
 
 MIDIUtils.MIDI_EnumSelTextSysexEvts = function(take, idx)
-  r.ShowConsoleMsg('MIDI_EnumSelTextSysexEvts is not yet supported\n')
+  EnsureTake(take)
+  if idx < 0 then enumSyxIdx = 0 end
+  for i = enumSyxIdx > 0 and enumSyxIdx + 1 or 1, #MIDIEvents do
+    local event = MIDIEvents[i]
+    if (event.type == SYSEX_TYPE or event.type == META_TYPE or event.type == OTHER_TYPE) and event.flags & 1 ~= 0 then
+      enumSyxIdx = i
+      return event.idx
+    end
+  end
+  enumSyxIdx = 0
   return -1
 end
 
 MIDIUtils.MIDI_DeleteNote = function(take, idx)
-  if not EnsureTransaction(take) then return end
-  for _, v in ipairs(MIDIEvents) do
-    if v.type == NOTE_TYPE and v.idx == idx then
-      v.delete = true
-      MIDIEvents[v.noteOffIdx].delete = true
+  if not EnsureTransaction(take) then return false end
+  for _, event in ipairs(MIDIEvents) do
+    if event.type == NOTE_TYPE and event.idx == idx then
+      event.delete = true
+      MIDIEvents[event.noteOffIdx].delete = true
       return true
     end
   end
@@ -427,10 +698,10 @@ MIDIUtils.MIDI_DeleteNote = function(take, idx)
 end
 
 MIDIUtils.MIDI_DeleteCC = function(take, idx)
-  if not EnsureTransaction(take) then return end
-  for _, v in ipairs(MIDIEvents) do
-    if v.type == CC_TYPE and v.idx == idx then
-      v.delete = true
+  if not EnsureTransaction(take) then return false end
+  for _, event in ipairs(MIDIEvents) do
+    if event.type == CC_TYPE and event.idx == idx then
+      event.delete = true
       return true
     end
   end
@@ -438,12 +709,30 @@ MIDIUtils.MIDI_DeleteCC = function(take, idx)
 end
 
 MIDIUtils.MIDI_DeleteEvt = function(take, idx)
-  r.ShowConsoleMsg('MIDI_DeleteEvt is not yet supported\n')
+  if not EnsureTransaction(take) then return false end
+  if idx >= 1 and idx <= #MIDIEvents then
+    local event = MIDIEvents[idx]
+    if event then
+      event.delete = true
+      return true
+    end
+  end
+  return false
+end
+
+MIDIUtils.MIDI_DeleteTextSysexEvt = function(take, idx)
+  if not EnsureTransaction(take) then return false end
+  for i, event in ipairs(MIDIEvents) do
+    if (event.type == SYSEX_TYPE or event.type == META_TYPE or event.type == OTHER_TYPE) and event.idx == idx then
+      event.delete = true
+      return true
+    end
+  end
   return false
 end
 
 MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
-  if not EnsureTransaction(take) then return end
+  if not EnsureTransaction(take) then return false end
   local lastEvent = MIDIEvents[#MIDIEvents]
   local newNoteOn = {
     type = NOTE_TYPE,
@@ -495,7 +784,7 @@ MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, c
 end
 
 MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
-  if not EnsureTransaction(take) then return end
+  if not EnsureTransaction(take) then return false end
   local lastEvent = MIDIEvents[#MIDIEvents]
   local newCC = {
     type = CC_TYPE,
@@ -533,9 +822,57 @@ MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan,
   return true, newCC.idx
 end
 
+-- TODO: this is not 100% complete, in that it doesn't hook stuff up (noteoffs for noteons, bezier curves for CC events)
+-- OTOH, ... WTFC -- if you're using this function, you know what you're doing
+MIDIUtils.MIDI_InsertEvt = function(take, selected, muted, ppqpos, bytestr)
+  local b1 = bytestr:byte(1)
+  local b2 = bytestr:byte(2)
+  local b3 = bytestr:byte(3)
+  local type = b1 == 0xFF and META_TYPE
+    or b1 <= 0x7F and SYSEX_TYPE
+    or (b1 >= 0x90 and b1 < 0xA0 and b2 ~= 0) and NOTE_TYPE
+    or (b1 >= 0x80 and b1 < 0xA0) and NOTEOFF_TYPE
+    or (b1 >= 0xA0 and b1 < 0xF0) and CC_TYPE
+    or OTHER_TYPE
+  local newEvt = {
+    type = type,
+    ppqpos = ppqpos,
+    offset = ppqpos - MIDIEvents[#MIDIEvents].ppqpos,
+    flags = selected and muted and 3 or selected and 1 or muted and 2 or 0,
+    msg = bytestr,
+    MIDI = nil,
+    chanmsg = type == META_TYPE and 0xFF or type == SYSEX_TYPE and 0xF0 or (b1 & 0xF0),
+    chan = type == NOTE_TYPE or type == CC_TYPE or type == NOTEOFF_TYPE and (b1 & 0x0F) or 0,
+    msg2 = type == NOTE_TYPE or type == CC_TYPE or type == NOTEOFF_TYPE or type == META_TYPE and b2 or 0,
+    msg3 = type == NOTE_TYPE or type == CC_TYPE or type == NOTEOFF_TYPE and b3 or 0
+  }
+  -- if it's a noteon, look for the noteoff
+  -- if it's a noteoff, look for the noteon
+  table.insert(MIDIEvents, newEvt)
+  return true, #MIDIEvents
+end
+
 MIDIUtils.MIDI_InsertTextSysexEvt = function(take, selected, muted, ppqpos, type, bytestr)
-  r.ShowConsoleMsg('MIDI_InsertTextSysexEvt is not yet supported\n')
-  return false
+  if not EnsureTransaction(take) then return false end
+  local lastEvent = MIDIEvents[#MIDIEvents]
+  local newTextSysex = {
+    type = type == -1 and SYSEX_TYPE or (type >= 1 and type <= 15) and META_TYPE or OTHER_TYPE,
+    offset = ppqpos - lastEvent.ppqpos,
+    flags = selected and muted and 3 or selected and 1 or muted and 2 or 0,
+    ppqpos = ppqpos,
+    chan = 0,
+    msg2 = 0,
+    msg3 = 0,
+    msg = bytestr,
+    idx = evtCount
+  }
+  evtCount = evtCount + 1
+  newTextSysex.chanmsg = newTextSysex.type == SYSEX_TYPE and 0xF0 or newTextSysex.type == META_TYPE and 0xFF or 0
+
+  local MIDIStr = textSysexToMIDIString(newTextSysex)
+  newTextSysex.MIDI = string.pack('i4Bs4', newTextSysex.offset, newTextSysex.flags, MIDIStr)
+  table.insert(MIDIEvents, newTextSysex)
+  return true, newTextSysex.idx
 end
 
 MIDIUtils.NOTE_TYPE = NOTE_TYPE

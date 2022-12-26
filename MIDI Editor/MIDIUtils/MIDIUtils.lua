@@ -1122,7 +1122,7 @@ MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum)
   local notename = noteNames[notenum % 12 + 1]
   local octave = math.floor((notenum / 12)) - 1
   local noteOffset = r.SNM_GetIntConfigVar('midioctoffs', -0xFF) - 1 -- 1 == 0 in the interface (C4)
-  if noteOffset ~= 0xFF then
+  if noteOffset ~= -0xFF then
     octave = octave + noteOffset
   end
   return notename..octave

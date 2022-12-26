@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.3
+-- @version 1.1.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -32,8 +32,13 @@
 
 local r = reaper
 
-package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
-local s = require 'MIDIUtils/MIDIUtils'
+-- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
+-- local s = require 'MIDIUtils/MIDIUtils'
+
+-- Set package path to find MIDIUtils installed via ReaPack
+package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI Editor/MIDIUtils/?.lua'
+local s = require('MIDIUtils')
+s.ENFORCE_ARGS = false -- turn off type checking
 
 local function post(...)
   local args = {...}
@@ -235,7 +240,6 @@ local function windowFn()
   local hasNotes = false
   local hasCCs = false
   local NOTE_TYPE = s.NOTE_TYPE
-  local NOTEOFF_TYPE = s.NOTEOFF_TYPE
   local CC_TYPE = s.CC_TYPE
   local NOTE_FILTER = 0x90
   local changedParameter = nil
@@ -490,12 +494,17 @@ local function windowFn()
 
     if not paramCanScale(name) then return end
 
+    local text
     local lo, hi = getCurrentRangeForDisplay(name)
     if lo ~= hi then
+      text = '['..lo..'-'..hi..']'
+    elseif name == 'pitch' then
+      text = '<'..s.MIDI_NoteNumberToNoteName(lo)..'>'
+    end
+    if text then
       local ix, iy = currentRect.left, currentRect.bottom
       r.ImGui_PushFont(ctx, fontInfo.small)
       r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFBF)
-      local text =  '['..lo..'-'..hi..']'
       local tw, th = r.ImGui_CalcTextSize(ctx, text)
       local fp = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding()) / 2
       local minx = ix
@@ -1053,9 +1062,9 @@ local function windowFn()
   ------------------------------ TITLEBAR TEXT ------------------------------
 
   local selectedText = ''
-  if selnotecnt > 0 then selectedText = selectedText..selnotecnt..'/'..notecnt..' note(s) selected' end
+  if selnotecnt > 0 then selectedText = selectedText..selnotecnt..' of '..notecnt..' note(s) selected' end
   if selcccnt > 0 and selnotecnt > 0 then selectedText = selectedText..' :: ' end
-  if selcccnt > 0 then selectedText = selectedText..selcccnt..'/'..cccnt..' CC(s) selected' end
+  if selcccnt > 0 then selectedText = selectedText..selcccnt..' of '..cccnt..' CC(s) selected' end
   if selectedText ~= '' then selectedText = ': '..selectedText end
   titleBarText = DEFAULT_TITLEBAR_TEXT..selectedText..' (PPQ='..PPQ..')' --..' DPI=('..r.ImGui_GetWindowDpiScale(ctx)..')'
 

@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.5
+-- @version 1.1.0-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -239,8 +239,8 @@ local function windowFn()
   local cc2byte = false
   local hasNotes = false
   local hasCCs = false
-  local NOTE_TYPE = s.NOTE_TYPE
-  local CC_TYPE = s.CC_TYPE
+  local NOTE_TYPE = 0
+  local CC_TYPE = 1
   local NOTE_FILTER = 0x90
   local changedParameter = nil
   local allEvents = {}
@@ -998,7 +998,8 @@ local function windowFn()
   local _, notecnt, cccnt = s.MIDI_CountEvts(take)
   local selnotecnt = 0
   local selcccnt = 0
-  for noteidx = 0, notecnt - 1 do
+  local noteidx = s.MIDI_EnumNotes(take, -1)
+  while noteidx ~= -1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
     _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = s.MIDI_GetNote(take, noteidx)
     e.notedur = e.endppqpos - e.ppqpos
@@ -1010,9 +1011,11 @@ local function windowFn()
       table.insert(newNotes, e.idx)
     end
     table.insert(allEvents, e)
+    noteidx = s.MIDI_EnumNotes(take, noteidx)
   end
 
-  for ccidx = 0, cccnt - 1 do
+  local ccidx = s.MIDI_EnumCC(take, -1)
+  while ccidx ~= -1 do
     local e = { type = CC_TYPE, idx = ccidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = s.MIDI_GetCC(take, ccidx)
 
@@ -1032,6 +1035,7 @@ local function windowFn()
       table.insert(selectedEvents, e)
     end
     table.insert(allEvents, e)
+    ccidx = s.MIDI_EnumCC(take, ccidx)
   end
 
   -- this determines if we need to switch the view back
@@ -1418,7 +1422,7 @@ local function windowFn()
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
 
-    s.MIDI_OpenWriteTransaction(take) -- disables sort
+    s.MIDI_OpenWriteTransaction(take)
 
     for _, v in ipairs(selectedEvents) do
       if popupFilter == v.chanmsg then

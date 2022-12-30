@@ -61,10 +61,9 @@ local OTHER_TYPE = 6
 local MIDIEvents = {}
 local bezTable = {}
 
-local MIDIIndices = {} -- some reverse lookup tables for speed
-local noteIndices = {}
-local ccIndices = {}
-local syxIndices = {}
+local noteEvents = {}
+local ccEvents = {}
+local syxEvents = {}
 
 local enumNoteIdx = 0
 local enumCCIdx = 0
@@ -76,12 +75,26 @@ local MIDIStringTail = ''
 local activeTake
 local openTransaction
 
-MIDIUtils.CheckDependencies = function(scriptName)
+local OnError = function (err)
+  r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
+end
+
+local function CheckDependencies(scriptName)
   if not r.APIExists('SNM_GetIntConfigVar') then
     r.ShowConsoleMsg(scriptName .. ' requires the \'SWS\' extension (install from https://www.sws-extension.org)\n')
     return false
   end
   return true
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.SetOnError = function(fn)
+  OnError = fn
+end
+
+MIDIUtils.CheckDependencies = function(scriptName)
+  return select(2, xpcall(CheckDependencies, OnError, scriptName))
 end
 
 -----------------------------------------------------------------------------
@@ -182,18 +195,6 @@ end
 
 local function FlagsFromSelMute(selected, muted)
   return selected and muted and 3 or selected and 1 or muted and 2 or 0
-end
-
-local function GetMIDIString(type, subtype, msg)
-  local newMsg = msg
-  if type == SYSEX_TYPE then
-    newMsg = string.char(0xF0)..msg..string.char(0xF7)
-  elseif type == META_TYPE then
-    newMsg = string.char(0xFF)..string.char(subtype)..msg
-  elseif type == CC_TYPE and msg:len() == 2 then
-    newMsg = msg..string.char(0)
-  end
-  return newMsg
 end
 
 -----------------------------------------------------------------------------
@@ -313,8 +314,8 @@ function NoteOnEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   self.endppqpos = -1
   self.noteOffIdx = -1
   if count == nil or count then
-    self.idx = #noteIndices
-    table.insert(noteIndices, self)
+    self.idx = #noteEvents
+    table.insert(noteEvents, self)
   end
 end
 
@@ -339,8 +340,8 @@ function CCEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   ChannelEvent.init(self, ppqpos, offset, flags, msg, MIDI)
   self.bezIdx = 0
   if count == nil or count then
-    self.idx = #ccIndices
-    table.insert(ccIndices, self)
+    self.idx = #ccEvents
+    table.insert(ccEvents, self)
   end
 end
 
@@ -373,8 +374,8 @@ local TextSysexEvent = class(Event)
 function TextSysexEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   Event.init(self, ppqpos, offset, flags, msg, MIDI)
   if count == nil or count then
-    self.idx = #syxIndices
-    table.insert(syxIndices, self)
+    self.idx = #syxEvents
+    table.insert(syxEvents, self)
   end
 end
 function TextSysexEvent:IsAllEvt() return true end
@@ -461,41 +462,10 @@ local function MakeEvent(ppqpos, offset, flags, msg, MIDI, count)
 end
 
 -----------------------------------------------------------------------------
----------------------------------- BASICS -----------------------------------
-
-function EnsureTake(take)
-  if take ~= activeTake then
-    MIDIUtils.MIDI_GetEvents(take)
-    activeTake = take
-  end
-end
-
-function EnsureTransaction(take)
-  if openTransaction ~= take then
-    post('MIDIUtils: cannot modify MIDI stream without an open WRITE transaction for this take')
-    return false
-  end
-  return true
-end
-
------------------------------------------------------------------------------
------------------------------------- API ------------------------------------
-
-MIDIUtils.MIDI_InitializeTake = function(take, enforceargs)
-  if enforceargs ~= nil then MIDIUtils.ENFORCE_ARGS = enforceargs end
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(enforceargs, 'boolean', true)
-  )
-  MIDIUtils.MIDI_GetEvents(take)
-end
-
------------------------------------------------------------------------------
 ----------------------------------- PARSE -----------------------------------
 
 local function Reset()
   MIDIEvents = {}
-  MIDIIndices = {}
   bezTable = {}
   enumNoteIdx = 0
   enumCCIdx = 0
@@ -506,27 +476,31 @@ local function Reset()
   activeTake = nil
   openTransaction = nil
 
-  noteIndices = {}
-  ccIndices = {}
-  syxIndices = {}
+  noteEvents = {}
+  ccEvents = {}
+  syxEvents = {}
 end
 
 local function InsertMIDIEvent(event)
   table.insert(MIDIEvents, event)
-  MIDIIndices[MIDIEvents[#MIDIEvents]] = #MIDIEvents
+  event.MIDIidx = #MIDIEvents
   return event, #MIDIEvents
 end
 
 local function ReplaceMIDIEvent(event, newEvent)
-  local k = MIDIIndices[event]
   newEvent.idx = event.idx
-  MIDIEvents[k] = newEvent
-  MIDIIndices[newEvent] = k
-  MIDIIndices[event] = nil
+  newEvent.MIDIidx = event.MIDIidx
+  MIDIEvents[event.MIDIidx] = newEvent
+  if newEvent.idx then
+    if newEvent:is_a(NoteOnEvent) then noteEvents[newEvent.idx + 1] = newEvent
+    elseif newEvent:is_a(CCEvent) then ccEvents[newEvent.idx + 1] = newEvent
+    elseif newEvent:is_a(TextSysexEvent) then syxEvents[newEvent.idx + 1] = newEvent
+    end
+  end
   return newEvent
 end
 
-MIDIUtils.MIDI_GetEvents = function(take)
+local function GetEvents(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
@@ -568,19 +542,38 @@ MIDIUtils.MIDI_GetEvents = function(take)
   return true
 end
 
-MIDIUtils.MIDI_CountEvts = function(take)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
-  )
+-----------------------------------------------------------------------------
+---------------------------------- BASICS -----------------------------------
+
+function EnsureTake(take)
+  if take ~= activeTake then
+    GetEvents(take)
+    activeTake = take
+  end
+end
+
+function EnsureTransaction(take)
+  if openTransaction ~= take then
+    post('MIDIUtils: cannot modify MIDI stream without an open WRITE transaction for this take')
+    return false
+  end
+  return true
+end
+
+-----------------------------------------------------------------------------
+------------------------------------ API ------------------------------------
+
+local function MIDI_InitializeTake(take, enforceargs)
+  GetEvents(take)
+end
+
+local function MIDI_CountEvts(take)
   EnsureTake(take)
-  return true, #noteIndices, #ccIndices, #syxIndices
+  return true, #noteEvents, #ccEvents, #syxEvents
 end
 
 -- cache this, or store it in the event for faster lookup?
-MIDIUtils.MIDI_CountAllEvts = function(take)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
-  )
+local function MIDI_CountAllEvts(take)
   EnsureTake(take)
   local allcnt = 0
   for _, event in ipairs(MIDIEvents) do
@@ -590,21 +583,39 @@ MIDIUtils.MIDI_CountAllEvts = function(take)
 end
 
 -----------------------------------------------------------------------------
-------------------------------- TRANSACTIONS --------------------------------
 
-MIDIUtils.MIDI_OpenWriteTransaction = function(take)
+MIDIUtils.MIDI_InitializeTake = function(take, enforceargs)
+  if enforceargs ~= nil then MIDIUtils.ENFORCE_ARGS = enforceargs end
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(enforceargs, 'boolean', true)
+  )
+  return select(2, xpcall(MIDI_InitializeTake, OnError, take, enforceargs))
+end
+
+MIDIUtils.MIDI_CountEvts = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
+  return select(2, xpcall(MIDI_CountEvts, OnError, take))
+end
+
+MIDIUtils.MIDI_CountAllEvts = function(take)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
+  )
+  return select(2, xpcall(MIDI_CountAllEvts, OnError, take))
+end
+
+-----------------------------------------------------------------------------
+------------------------------- TRANSACTIONS --------------------------------
+
+local function MIDI_OpenWriteTransaction(take)
   EnsureTake(take)
   openTransaction = take
 end
 
-MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(refresh, 'boolean', true)
-  )
+local function MIDI_CommitWriteTransaction(take, refresh)
   if not EnsureTransaction(take) then return false end
 
   local newMIDIString = ''
@@ -619,7 +630,6 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh)
     end
     if event.delete then
       event.MIDI = string.pack('i4Bs4', event.offset, 0, '')
-      if MIDIIndices[event] then MIDIIndices[event] = nil end
     elseif event.recalcMIDI then
       local MIDIStr = ''
       if event:IsChannelEvt() then
@@ -661,15 +671,28 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh)
 end
 
 -----------------------------------------------------------------------------
------------------------------------ NOTES -----------------------------------
 
-MIDIUtils.MIDI_GetNote = function(take, idx)
+MIDIUtils.MIDI_OpenWriteTransaction = function(take)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
+  )
+  return select(2, xpcall(MIDI_OpenWriteTransaction, OnError, take))
+end
+
+MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
+    MakeTypedArg(refresh, 'boolean', true)
   )
+  return select(2, xpcall(MIDI_CommitWriteTransaction, OnError, take, refresh))
+end
+
+-----------------------------------------------------------------------------
+----------------------------------- NOTES -----------------------------------
+
+local function MIDI_GetNote(take, idx)
   EnsureTake(take)
-  local event = noteIndices[idx + 1]
+  local event = noteEvents[idx + 1]
   if event and event:is_a(NoteOnEvent) and event.idx == idx and not event.delete then
     return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false,
       event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3
@@ -682,21 +705,10 @@ local function AdjustNoteOff(noteoff, param, val)
   noteoff.recalcMIDI = true
 end
 
-MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number'),
-    MakeTypedArg(selected, 'boolean', true),
-    MakeTypedArg(muted, 'boolean', true),
-    MakeTypedArg(ppqpos, 'number', true),
-    MakeTypedArg(endppqpos, 'number', true),
-    MakeTypedArg(chan, 'number', true),
-    MakeTypedArg(pitch, 'number', true),
-    MakeTypedArg(vel, 'number', true)
-  )
+local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
   if not EnsureTransaction(take) then return false end
   local rv = false
-  local event = noteIndices[idx + 1]
+  local event = noteEvents[idx + 1]
   if event and event:is_a(NoteOnEvent) and event.idx == idx and not event.delete then
     local noteoff = MIDIEvents[event.noteOffIdx]
     --if not noteoff then r.ShowConsoleMsg('not noteoff in setnote\n') end
@@ -737,18 +749,7 @@ MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos,
   return rv
 end
 
-MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(selected, 'boolean'),
-    MakeTypedArg(muted, 'boolean'),
-    MakeTypedArg(ppqpos, 'number'),
-    MakeTypedArg(endppqpos, 'number'),
-    MakeTypedArg(chan, 'number'),
-    MakeTypedArg(pitch, 'number'),
-    MakeTypedArg(vel, 'number')
-  )
-
+local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
   if not EnsureTransaction(take) then return false end
   local lastEvent = MIDIEvents[#MIDIEvents]
   local newNoteOn = NoteOnEvent(ppqpos,
@@ -776,19 +777,62 @@ MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, c
   return true, newNoteOn.idx
 end
 
-MIDIUtils.MIDI_DeleteNote = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_DeleteNote(take, idx)
   if not EnsureTransaction(take) then return false end
-  local event = noteIndices[idx + 1]
+  local event = noteEvents[idx + 1]
   if event and event:is_a(NoteOnEvent) and event.idx == idx then
     event.delete = true
     MIDIEvents[event.noteOffIdx].delete = true
     return true
   end
   return false
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_GetNote = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_GetNote, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number'),
+    MakeTypedArg(selected, 'boolean', true),
+    MakeTypedArg(muted, 'boolean', true),
+    MakeTypedArg(ppqpos, 'number', true),
+    MakeTypedArg(endppqpos, 'number', true),
+    MakeTypedArg(chan, 'number', true),
+    MakeTypedArg(pitch, 'number', true),
+    MakeTypedArg(vel, 'number', true)
+  )
+  return select(2, xpcall(MIDI_SetNote, OnError, take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel))
+end
+
+MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(selected, 'boolean'),
+    MakeTypedArg(muted, 'boolean'),
+    MakeTypedArg(ppqpos, 'number'),
+    MakeTypedArg(endppqpos, 'number'),
+    MakeTypedArg(chan, 'number'),
+    MakeTypedArg(pitch, 'number'),
+    MakeTypedArg(vel, 'number')
+  )
+  return select(2, xpcall(MIDI_InsertNote, OnError, take, selected, muted, ppqpos, endppqpos, chan, pitch, vel))
+end
+
+MIDIUtils.MIDI_DeleteNote = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_DeleteNote, OnError, take, idx))
 end
 
 -----------------------------------------------------------------------------
@@ -875,13 +919,9 @@ end
 -----------------------------------------------------------------------------
 ------------------------------------ CCS ------------------------------------
 
-MIDIUtils.MIDI_GetCC = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_GetCC(take, idx)
   EnsureTake(take)
-  local event = ccIndices[idx + 1]
+  local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
     return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false,
       event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3
@@ -889,21 +929,10 @@ MIDIUtils.MIDI_GetCC = function(take, idx)
   return false, false, false, 0, 0, 0, 0, 0
 end
 
-MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number'),
-    MakeTypedArg(selected, 'boolean', true),
-    MakeTypedArg(muted, 'boolean', true),
-    MakeTypedArg(ppqpos, 'number', true),
-    MakeTypedArg(chanmsg, 'number', true),
-    MakeTypedArg(chan, 'number', true),
-    MakeTypedArg(msg2, 'number', true),
-    MakeTypedArg(msg3, 'number', true)
-  )
+local function MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
   if not EnsureTransaction(take) then return false end
   local rv = false
-  local event = ccIndices[idx + 1]
+  local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
     if selected ~= nil then
       if selected then event.flags = event.flags | 1
@@ -935,58 +964,36 @@ MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, cha
   return rv
 end
 
-MIDIUtils.MIDI_GetCCShape = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_GetCCShape(take, idx)
   EnsureTake(take)
-  local event = ccIndices[idx + 1]
+  local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
-    local k = MIDIIndices[event]
-    local rv, _, bztension = GetBezierData(k, event)
+    local rv, _, bztension = GetBezierData(event.MIDIidx, event)
     return true, ((event.flags & 0xF0) >> 4) & 7, rv and bztension or 0.
   end
   return false, 0, 0.
 end
 
-MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number'),
-    MakeTypedArg(shape, 'number'),
-    MakeTypedArg(beztension, 'number', true)
-  )
+local function MIDI_SetCCShape(take, idx, shape, beztension)
   EnsureTransaction(take)
-  local event = ccIndices[idx + 1]
+  local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
-    local k = MIDIIndices[event]
+    local MIDIidx = event.MIDIidx
     event.flags = event.flags & ~0xF0
     -- flag high 4 bits for CC shape: &16=linear, &32=slow start/end, &16|32=fast start, &64=fast end, &64|16=bezier
     event.flags = event.flags | ((shape & 0x7) << 4)
     event.recalcMIDI = true
     if shape == 5 and beztension then
-      return SetBezierData(k, event, 0, beztension)
+      return SetBezierData(MIDIidx, event, 0, beztension)
     else
-      DeleteBezierData(k, event)
+      DeleteBezierData(MIDIidx, event)
     end
     return true
   end
   return false
 end
 
-MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(selected, 'boolean'),
-    MakeTypedArg(muted, 'boolean'),
-    MakeTypedArg(ppqpos, 'number'),
-    MakeTypedArg(chanmsg, 'number'),
-    MakeTypedArg(chan, 'number'),
-    MakeTypedArg(msg2, 'number'),
-    MakeTypedArg(msg3, 'number')
-  )
-
+local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
   if not EnsureTransaction(take) then return false end
   local lastEvent = MIDIEvents[#MIDIEvents]
   chanmsg = chanmsg < 0xA0 or chanmsg >= 0xF0 and 0xB0 or chanmsg
@@ -1011,32 +1018,98 @@ MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan,
   return true, newCC.idx
 end
 
-MIDIUtils.MIDI_DeleteCC = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_DeleteCC(take, idx)
   if not EnsureTransaction(take) then return false end
-  local event = ccIndices[idx + 1]
+  local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx then
-    local k = MIDIIndices[event]
     event.delete = true
-    DeleteBezierData(k, event)
+    DeleteBezierData(event.MIDIidx, event)
     return true
   end
   return false
 end
 
 -----------------------------------------------------------------------------
--------------------------------- TEXT / SYSEX -------------------------------
 
-MIDIUtils.MIDI_GetTextSysexEvt = function(take, idx)
+MIDIUtils.MIDI_GetCC = function(take, idx)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
+  return select(2, xpcall(MIDI_GetCC, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number'),
+    MakeTypedArg(selected, 'boolean', true),
+    MakeTypedArg(muted, 'boolean', true),
+    MakeTypedArg(ppqpos, 'number', true),
+    MakeTypedArg(chanmsg, 'number', true),
+    MakeTypedArg(chan, 'number', true),
+    MakeTypedArg(msg2, 'number', true),
+    MakeTypedArg(msg3, 'number', true)
+  )
+  return select(2, xpcall(MIDI_SetCC, OnError, take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3))
+end
+
+MIDIUtils.MIDI_GetCCShape = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_GetCCShape, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number'),
+    MakeTypedArg(shape, 'number'),
+    MakeTypedArg(beztension, 'number', true)
+  )
+  return select(2, xpcall(MIDI_SetCCShape, OnError, take, idx, shape, beztension))
+end
+
+MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(selected, 'boolean'),
+    MakeTypedArg(muted, 'boolean'),
+    MakeTypedArg(ppqpos, 'number'),
+    MakeTypedArg(chanmsg, 'number'),
+    MakeTypedArg(chan, 'number'),
+    MakeTypedArg(msg2, 'number'),
+    MakeTypedArg(msg3, 'number')
+  )
+  return select(2, xpcall(MIDI_InsertCC, OnError, take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3))
+end
+
+MIDIUtils.MIDI_DeleteCC = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_DeleteCC, OnError, take, idx))
+end
+
+-----------------------------------------------------------------------------
+-------------------------------- TEXT / SYSEX -------------------------------
+
+local function GetMIDIStringForTextSysex(type, msg)
+  local newMsg = msg
+  if type == -1 then
+    newMsg = string.char(0xF0)..msg..string.char(0xF7)
+  elseif type >= 1 and type <= 15 then
+    newMsg = string.char(0xFF)..string.char(type)..msg
+  end
+  return newMsg
+end
+
+local function MIDI_GetTextSysexEvt(take, idx)
   EnsureTake(take)
-  local event = syxIndices[idx + 1]
+  local event = syxEvents[idx + 1]
   if event and (event:is_a(SysexEvent) or event:is_a(MetaEvent)) and event.idx == idx and not event.delete then
     return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false, event.ppqpos,
     event.chanmsg == 0xF0 and -1 or event.chanmsg == 0xFF and event.msg2 or 0, event.msg
@@ -1044,19 +1117,10 @@ MIDIUtils.MIDI_GetTextSysexEvt = function(take, idx)
   return false, false, false, 0, 0, ''
 end
 
-MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, type, msg)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number'),
-    MakeTypedArg(selected, 'boolean', true),
-    MakeTypedArg(muted, 'boolean', true),
-    MakeTypedArg(ppqpos, 'number', true),
-    MakeTypedArg(type, 'number', true),
-    MakeTypedArg(msg, 'string', true)
-  )
+local function MIDI_SetTextSysexEvt(take, idx, selected, muted, ppqpos, type, msg)
   if not EnsureTransaction(take) then return false end
   local rv = false
-  local event = syxIndices[idx + 1]
+  local event = syxEvents[idx + 1]
   if event and (event:is_a(SysexEvent) or event:is_a(MetaEvent)) and event.idx == idx and not event.delete then
     if selected ~= nil then
       if selected then event.flags = event.flags | 1
@@ -1070,9 +1134,7 @@ MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, ty
       event.ppqpos = ppqpos
     end
     if type and msg then
-      local newEvt = MakeEvent(event.ppqpos, event.offset, event.flags,
-                               GetMIDIString(type == -1 and SYSEX_TYPE or (type >= 1 and type <= 15) and META_TYPE or OTHER_TYPE,
-                                 (type >= 1 and type <= 15) and type, msg), nil, false)
+      local newEvt = MakeEvent(event.ppqpos, event.offset, event.flags, GetMIDIStringForTextSysex(type, msg), nil, false)
       event = ReplaceMIDIEvent(event, newEvt)
     end
     event.recalcMIDI = true
@@ -1081,25 +1143,20 @@ MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, ty
   return rv
 end
 
-MIDIUtils.MIDI_InsertTextSysexEvt = function(take, selected, muted, ppqpos, type, bytestr)
+local function MIDI_InsertTextSysexEvt(take, selected, muted, ppqpos, type, bytestr)
   if not EnsureTransaction(take) then return false end
   local lastEvent = MIDIEvents[#MIDIEvents]
   local newTextSysex = MakeEvent(ppqpos,
                                  ppqpos - lastEvent.ppqpos,
                                  FlagsFromSelMute(selected, muted),
-                                 GetMIDIString(type == -1 and SYSEX_TYPE or (type >= 1 and type <= 15) and META_TYPE or OTHER_TYPE,
-                                   (type >= 1 and type <= 15) and type, bytestr))
+                                 GetMIDIStringForTextSysex(type, bytestr))
   InsertMIDIEvent(newTextSysex)
   return true, newTextSysex.idx
 end
 
-MIDIUtils.MIDI_DeleteTextSysexEvt = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_DeleteTextSysexEvt(take, idx)
   if not EnsureTransaction(take) then return false end
-  local event = syxIndices[idx + 1]
+  local event = syxEvents[idx + 1]
   if event and (event:is_a(SysexEvent) or event:is_a(MetaEvent)) and event.idx == idx then
     event.delete = true
     return true
@@ -1108,14 +1165,53 @@ MIDIUtils.MIDI_DeleteTextSysexEvt = function(take, idx)
 end
 
 -----------------------------------------------------------------------------
------------------------------------- EVTS -----------------------------------
 
--- these operate just on the raw index into the array, not based on type
-MIDIUtils.MIDI_GetEvt = function(take, idx)
+MIDIUtils.MIDI_GetTextSysexEvt = function(take, idx)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
+  return select(2, xpcall(MIDI_GetTextSysexEvt, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, type, msg)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number'),
+    MakeTypedArg(selected, 'boolean', true),
+    MakeTypedArg(muted, 'boolean', true),
+    MakeTypedArg(ppqpos, 'number', true),
+    MakeTypedArg(type, 'number', true),
+    MakeTypedArg(msg, 'string', true)
+  )
+  return select(2, xpcall(MIDI_SetTextSysexEvt, OnError, take, idx, selected, muted, ppqpos, type, msg))
+end
+
+MIDIUtils.MIDI_InsertTextSysexEvt = function(take, selected, muted, ppqpos, type, bytestr)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(selected, 'boolean'),
+    MakeTypedArg(muted, 'boolean'),
+    MakeTypedArg(ppqpos, 'number'),
+    MakeTypedArg(type, 'number'),
+    MakeTypedArg(bytestr, 'string')
+  )
+  return select(2, xpcall(MIDI_InsertTextSysexEvt, OnError, take, selected, muted, ppqpos, type, bytestr))
+end
+
+MIDIUtils.MIDI_DeleteTextSysexEvt = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_DeleteTextSysexEvt, OnError, take, idx))
+end
+
+-----------------------------------------------------------------------------
+------------------------------------ EVTS -----------------------------------
+
+-- these operate just on the raw index into the array, not based on type
+local function MIDI_GetEvt(take, idx)
   EnsureTake(take)
   local allcnt = 0
   for _, event in ipairs(MIDIEvents) do
@@ -1129,15 +1225,7 @@ MIDIUtils.MIDI_GetEvt = function(take, idx)
   return false, false, false, 0, ''
 end
 
-MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number'),
-    MakeTypedArg(selected, 'boolean', true),
-    MakeTypedArg(muted, 'boolean', true),
-    MakeTypedArg(ppqpos, 'number', true),
-    MakeTypedArg(msg, 'string', true)
-  )
+local function MIDI_SetEvt(take, idx, selected, muted, ppqpos, msg)
   if not EnsureTransaction(take) then return false end
 
   local allcnt = 0
@@ -1168,35 +1256,9 @@ MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
   return false
 end
 
-MIDIUtils.MIDI_DeleteEvt = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
-  if not EnsureTransaction(take) then return false end
-  local allcnt = 0
-  for _, event in ipairs(MIDIEvents) do
-    if event:IsAllEvt() then
-      if idx == allcnt then
-        event.delete = true
-        return true
-      end
-      allcnt = allcnt + 1
-    end
-  end
-  return false
-end
-
 -- TODO: this is not 100% complete, in that it doesn't hook stuff up (noteoffs for noteons, bezier curves for CC events)
 -- OTOH, ... WTFC -- if you're using this function, you know what you're doing
-MIDIUtils.MIDI_InsertEvt = function(take, selected, muted, ppqpos, bytestr)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(selected, 'boolean'),
-    MakeTypedArg(muted, 'muted'),
-    MakeTypedArg(ppqpos, 'number'),
-    MakeTypedArg(bytestr, 'str')
-  )
+local function MIDI_InsertEvt(take, selected, muted, ppqpos, bytestr)
   if not EnsureTransaction(take) then return false end
   local newFlags = FlagsFromSelMute(selected, muted)
   local newOffset = ppqpos - MIDIEvents[#MIDIEvents].ppqpos
@@ -1215,10 +1277,65 @@ MIDIUtils.MIDI_InsertEvt = function(take, selected, muted, ppqpos, bytestr)
   return false
 end
 
+local function MIDI_DeleteEvt(take, idx)
+  if not EnsureTransaction(take) then return false end
+  local allcnt = 0
+  for _, event in ipairs(MIDIEvents) do
+    if event:IsAllEvt() then
+      if idx == allcnt then
+        event.delete = true
+        return true
+      end
+      allcnt = allcnt + 1
+    end
+  end
+  return false
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_GetEvt = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_GetEvt, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number'),
+    MakeTypedArg(selected, 'boolean', true),
+    MakeTypedArg(muted, 'boolean', true),
+    MakeTypedArg(ppqpos, 'number', true),
+    MakeTypedArg(msg, 'string', true)
+  )
+  return select(2, xpcall(MIDI_SetEvt, OnError, take, idx, selected, muted, ppqpos, msg))
+end
+
+MIDIUtils.MIDI_InsertEvt = function(take, selected, muted, ppqpos, bytestr)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(selected, 'boolean'),
+    MakeTypedArg(muted, 'muted'),
+    MakeTypedArg(ppqpos, 'number'),
+    MakeTypedArg(bytestr, 'str')
+  )
+  return select(2, xpcall(MIDI_InsertEvt, OnError, take, selected, muted, ppqpos, bytestr))
+end
+
+MIDIUtils.MIDI_DeleteEvt = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_DeleteEvt, OnError, take, idx))
+end
+
 -----------------------------------------------------------------------------
 ------------------------------------ ENUM -----------------------------------
 
--- TODO: this for CCs, syx and all
 local function EnumNotesImpl(take, idx, selectedOnly)
   if idx < 0 then enumNoteIdx = 0 end
   for i = enumNoteIdx > 0 and enumNoteIdx + 1 or 1, #MIDIEvents do
@@ -1232,20 +1349,12 @@ local function EnumNotesImpl(take, idx, selectedOnly)
   return -1
 end
 
-MIDIUtils.MIDI_EnumNotes = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_EnumNotes(take, idx)
   EnsureTake(take)
   return EnumNotesImpl(take, idx, false)
 end
 
-MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_EnumSelNotes(take, idx)
   EnsureTake(take)
   return EnumNotesImpl(take, idx, true)
 end
@@ -1263,20 +1372,12 @@ local function EnumCCImpl(take, idx, selectedOnly)
   return -1
 end
 
-MIDIUtils.MIDI_EnumCC = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_EnumCC(take, idx)
   EnsureTake(take)
   return EnumCCImpl(take, idx, false)
 end
 
-MIDIUtils.MIDI_EnumSelCC = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_EnumSelCC(take, idx)
   EnsureTake(take)
   return EnumCCImpl(take, idx, true)
 end
@@ -1294,20 +1395,12 @@ local function EnumTextSysexImpl(take, idx, selectedOnly)
   return -1
 end
 
-MIDIUtils.MIDI_EnumTextSysexEvts = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_EnumTextSysexEvts(take, idx)
   EnsureTake(take)
   return EnumTextSysexImpl(take, idx, false)
 end
 
-MIDIUtils.MIDI_EnumSelTextSysexEvts = function(take, idx)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(idx, 'number')
-  )
+local function MIDI_EnumSelTextSysexEvts(take, idx)
   EnsureTake(take)
   return EnumTextSysexImpl(take, idx, true)
 end
@@ -1336,13 +1429,72 @@ local function EnumEvtsImpl(take, idx, selectedOnly)
   return -1
 end
 
+local function MIDI_EnumEvts(take, idx)
+  EnsureTake(take)
+  return EnumEvtsImpl(take, idx, false)
+end
+
+local function MIDI_EnumSelEvts(take, idx)
+  EnsureTake(take)
+  return EnumEvtsImpl(take, idx, true)
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_EnumNotes = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_EnumNotes, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_EnumSelNotes, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_EnumCC = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_EnumCC, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_EnumSelCC = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_EnumSelCC, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_EnumTextSysexEvts = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_EnumTextSysexEvts, OnError, take, idx))
+end
+
+MIDIUtils.MIDI_EnumSelTextSysexEvts = function(take, idx)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(idx, 'number')
+  )
+  return select(2, xpcall(MIDI_EnumSelTextSysexEvts, OnError, take, idx))
+end
+
 MIDIUtils.MIDI_EnumEvts = function(take, idx)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  EnsureTake(take)
-  return EnumEvtsImpl(take, idx, false)
+  return select(2, xpcall(MIDI_EnumEvts, OnError, take, idx))
 end
 
 MIDIUtils.MIDI_EnumSelEvts = function(take, idx)
@@ -1350,21 +1502,34 @@ MIDIUtils.MIDI_EnumSelEvts = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  EnsureTake(take)
-  return EnumEvtsImpl(take, idx, true)
+  return select(2, xpcall(MIDI_EnumSelEvts, OnError, take, idx))
 end
+
+-----------------------------------------------------------------------------
+------------------------------------ MISC -----------------------------------
 
 local noteNames = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' }
 
-MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum)
+local function MIDI_NoteNumberToNoteName(notenum, names)
   notenum = math.abs(notenum) % 128
-  local notename = noteNames[notenum % 12 + 1]
+  names = names or noteNames
+  local notename = names[notenum % 12 + 1]
   local octave = math.floor((notenum / 12)) - 1
   local noteOffset = r.SNM_GetIntConfigVar('midioctoffs', -0xFF) - 1 -- 1 == 0 in the interface (C4)
   if noteOffset ~= -0xFF then
     octave = octave + noteOffset
   end
   return notename..octave
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
+  EnforceArgs(
+    MakeTypedArg(notenum, 'number'),
+    MakeTypedArg(names, 'table', true)
+  )
+  return select(2, xpcall(MIDI_NoteNumberToNoteName, OnError, notenum, names))
 end
 
 -----------------------------------------------------------------------------

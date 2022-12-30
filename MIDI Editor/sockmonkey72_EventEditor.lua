@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.6
+-- @version 1.1.0-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor

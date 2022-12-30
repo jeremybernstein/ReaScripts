@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="625166ef897358c2eac990fb9c2121f0604a5947">
+<index version="1" name="sockmonkey72 Scripts" commit="fed125cf819ab2601b9e3bee8f79d6bbe7e89488">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -107,6 +107,23 @@
         <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset.so</source>
         <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_x64.dll</source>
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
+    </reapack>
+    <reapack name="MIDIUtils.lua" type="script" desc="MIDI Utils API">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 MIDI Utils API\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Drop-in replacement for REAPER's high-level MIDI API\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0-beta.1" author="sockmonkey72" time="2022-12-30T15:14:11Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source>https://github.com/jeremybernstein/ReaScripts/raw/fed125cf819ab2601b9e3bee8f79d6bbe7e89488/MIDI/MIDIUtils.lua</source>
+        <source file="MIDIUtils/TestMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/fed125cf819ab2601b9e3bee8f79d6bbe7e89488/MIDI/MIDIUtils/TestMIDIUtils.lua</source>
       </version>
     </reapack>
   </category>

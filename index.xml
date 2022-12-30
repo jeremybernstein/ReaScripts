@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="56ea86a4075583b27507ea046a965b45f748e675">
+<index version="1" name="sockmonkey72 Scripts" commit="625166ef897358c2eac990fb9c2121f0604a5947">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -195,6 +195,12 @@
         <source file="MIDIUtils/MIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/56ea86a4075583b27507ea046a965b45f748e675/MIDI%20Editor/MIDIUtils/MIDIUtils.lua</source>
         <source file="MIDIUtils/TestMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/56ea86a4075583b27507ea046a965b45f748e675/MIDI%20Editor/MIDIUtils/TestMIDIUtils.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/56ea86a4075583b27507ea046a965b45f748e675/MIDI%20Editor/sockmonkey72_EventEditor.lua</source>
+      </version>
+      <version name="1.1.0-beta.7" author="sockmonkey72" time="2022-12-30T15:01:51Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source file="MIDIUtils/MIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/625166ef897358c2eac990fb9c2121f0604a5947/MIDI%20Editor/MIDIUtils/MIDIUtils.lua</source>
+        <source file="MIDIUtils/TestMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/625166ef897358c2eac990fb9c2121f0604a5947/MIDI%20Editor/MIDIUtils/TestMIDIUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/625166ef897358c2eac990fb9c2121f0604a5947/MIDI%20Editor/sockmonkey72_EventEditor.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_ExtendMIDIItemToNearestBars.lua" type="script" desc="Extend MIDI Item to Nearest Bars">

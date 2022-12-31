@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.7
+-- @version 1.1.0-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -15,7 +15,7 @@
 -- @changelog
 --   - initial
 -- @provides
---   {MIDIUtils}/*
+--   EventEditor/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
 
 -----------------------------------------------------------------------------
@@ -32,12 +32,8 @@
 
 local r = reaper
 
--- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
--- local s = require 'MIDIUtils/MIDIUtils'
-
--- Set package path to find MIDIUtils installed via ReaPack
-package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI Editor/MIDIUtils/?.lua'
-local s = require('MIDIUtils')
+package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'EventEditor/?.lua'
+local s = require 'MIDIUtils'
 s.ENFORCE_ARGS = false -- turn off type checking
 
 local function post(...)

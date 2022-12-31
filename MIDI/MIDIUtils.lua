@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.0-beta.1
+-- @version 0.1.0-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -15,9 +15,9 @@
 USAGE:
 
   -- get the package path to MIDIUtils in my repository
-  package.path = reaper.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI Editor/MIDIUtils/?.lua'
+  package.path = reaper.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
   local mu = require 'MIDIUtils'
-  mu.ENFORCE_ARGS = false -- true by default, enabling argument type-checking, turn off for 'production' code
+  -- mu.ENFORCE_ARGS = false -- true by default, enabling argument type-checking, turn off for 'production' code
 
   if not mu.CheckDependencies('My Script') then return end -- return early if something is missing
 

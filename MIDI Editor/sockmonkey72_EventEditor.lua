@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.9
+-- @version 1.1.0-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -118,6 +118,8 @@ ccTypes[0xC0] = { val = 0xC0, label = 'PrgCh', exists = false }
 ccTypes[0xD0] = { val = 0xD0, label = 'ChanAT', exists = false }
 ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
 
+local selectedNotes = {} -- interframe cache
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
@@ -231,7 +233,6 @@ local function windowFn()
   local changedParameter = nil
   local allEvents = {}
   local selectedEvents = {}
-  local selectedNotes = {}
   local newNotes = {}
   local userValues = {}
   local union = {} -- determine a filter and calculate the union of selected values

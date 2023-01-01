@@ -14,6 +14,7 @@ r.Undo_BeginBlock2(0)
 
 local take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
 if take then
+  local rv
 
   --mu.MIDI_OpenWriteTransaction(take)
   --mu.MIDI_SetCCShape(take, 14, 5, -0.66)
@@ -23,14 +24,38 @@ if take then
   -------------------------------------------
   -- TEST DELETERS
 
+  -- mu.post('pre:', mu.MIDI_DebugInfo(take))
+
   mu.MIDI_OpenWriteTransaction(take)
-  local delidx = 0
-   rv = true
-  while rv do
-    rv = mu.MIDI_DeleteEvt(take, delidx)
-    delidx = delidx + 1
+
+  local _, ctnote, ctcc, ctsyx = mu.MIDI_CountEvts(take)
+  for i = 0, ctnote - 1 do
+    mu.MIDI_DeleteNote(take, i)
   end
+  for i = 0, ctcc - 1 do
+    mu.MIDI_DeleteCC(take, i)
+  end
+  for i = 0, ctsyx - 1 do
+    mu.MIDI_DeleteTextSysexEvt(take, i)
+  end
+
+  -- local delidx = 0
+  --  rv = true
+  -- while rv do
+  --   rv = mu.MIDI_DeleteEvt(take, delidx)
+  --   delidx = delidx + 1
+  -- end
+
+
   mu.MIDI_CommitWriteTransaction(take, true)
+
+  -- mu.post('post:', mu.MIDI_DebugInfo(take))
+
+  local noteons, noteoffs, ccs, sysexes, metas, beziers, unknowns = mu.MIDI_DebugInfo(take)
+  if noteons ~= 0 or noteoffs ~= 0 or ccs ~= 0 or sysexes ~= 0 or metas ~= 0 or beziers ~= 0 or unknowns ~= 0 then
+    error('not all events deleted')
+  end
+  
   if mu.MIDI_CountAllEvts(take) ~= 0 then
     error('not all events deleted')
   end
@@ -327,7 +352,4 @@ if take then
 
 end
 
-
 r.Undo_EndBlock2(0, 'MIDIUtils Test', -1)
-
-

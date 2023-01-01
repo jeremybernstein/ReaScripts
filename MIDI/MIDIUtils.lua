@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.0-beta.2
+-- @version 0.1.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -135,6 +135,14 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
     end
   end
 end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.post = function(...)
+  return select(2, xpcall(post, OnError, ...))
+end
+
+MIDIUtils.p = MIDIUtils.post
 
 -----------------------------------------------------------------------------
 ------------------------------- ARG CHECKING --------------------------------
@@ -343,7 +351,7 @@ function NoteOffEvent:type() return NOTEOFF_TYPE end
 local CCEvent = class(ChannelEvent)
 function CCEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   ChannelEvent.init(self, ppqpos, offset, flags, msg, MIDI)
-  self.bezIdx = 0
+  self.hasBezier = nil
   if count == nil or count then
     self.idx = #ccEvents
     table.insert(ccEvents, self)
@@ -373,17 +381,25 @@ end
 function CCEvent:type() return CC_TYPE end
 
 -----------------------------------------------------------------------------
+------------------------------- ALLEVT EVENT -------------------------------
+
+local AllEvtEvent = class(Event)
+function AllEvtEvent:init(ppqpos, offset, flags, msg, MIDI, count)
+  Event.init(self, ppqpos, offset, flags, msg, MIDI)
+end
+function AllEvtEvent:IsAllEvt() return true end
+
+-----------------------------------------------------------------------------
 ------------------------------- TEXTSYX EVENT -------------------------------
 
-local TextSysexEvent = class(Event)
+local TextSysexEvent = class(AllEvtEvent)
 function TextSysexEvent:init(ppqpos, offset, flags, msg, MIDI, count)
-  Event.init(self, ppqpos, offset, flags, msg, MIDI)
+  AllEvtEvent.init(self, ppqpos, offset, flags, msg, MIDI)
   if count == nil or count then
     self.idx = #syxEvents
     table.insert(syxEvents, self)
   end
 end
-function TextSysexEvent:IsAllEvt() return true end
 
 -----------------------------------------------------------------------------
 --------------------------------- SYSEX EVENT -------------------------------
@@ -433,7 +449,8 @@ function MetaEvent:type() return META_TYPE end
 local BezierEvent = class(Event)
 function BezierEvent:init(ppqpos, offset, flags, msg, MIDI)
   Event.init(self, ppqpos, offset, flags, msg, MIDI)
-  self.ccIdx = #MIDIEvents - 1 -- previous event
+  self.ccIdx = #ccEvents - 1 -- previous event, ignore if -1
+
 end
 
 function BezierEvent:type() return BEZIER_TYPE end
@@ -487,9 +504,15 @@ local function Reset()
 end
 
 local function InsertMIDIEvent(event)
-  table.insert(MIDIEvents, event)
-  event.MIDIidx = #MIDIEvents
-  return event, #MIDIEvents
+  if event:is_a(BezierEvent) then -- special case for BezierEvents
+    bezTable[event.ccIdx + 1] = event
+    ccEvents[event.ccIdx + 1].hasBezier = true
+    return nil, #MIDIEvents
+  else
+    table.insert(MIDIEvents, event)
+    event.MIDIidx = #MIDIEvents
+    return event, #MIDIEvents
+  end
 end
 
 local function ReplaceMIDIEvent(event, newEvent)
@@ -525,19 +548,21 @@ local function GetEvents(take)
 
     ppqTime = ppqTime + offset -- current PPQ time for this event
 
-    -- next step is to subclass the individual types, but this is ok for now
+    -- TODO: don't add bezier events to the main table, put all in the aux table for simplicity
     local event = InsertMIDIEvent(MakeEvent(ppqTime, offset, flags, msg, MIDIString:sub(stringPos, newStringPos - 1)))
-    if event:is_a(NoteOnEvent) then
-      table.insert(noteOns, { chan = event.chan, pitch = event.msg2, flags = event.flags, ppqpos = event.ppqpos, index = #MIDIEvents })
-    elseif event:is_a(NoteOffEvent) then
-      for k, v in spairs(noteOns, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
-        if v.chan == event.chan and v.pitch == event.msg2 and v.flags == event.flags then
-          local noteon = MIDIEvents[v.index]
-          event.noteOnIdx = k
-          noteon.noteOffIdx = #MIDIEvents
-          noteon.endppqpos = event.ppqpos
-          noteOns[k] = nil -- remove it
-          break
+    if event then
+      if event:is_a(NoteOnEvent) then
+        table.insert(noteOns, { chan = event.chan, pitch = event.msg2, flags = event.flags, ppqpos = event.ppqpos, index = #MIDIEvents })
+      elseif event:is_a(NoteOffEvent) then
+        for k, v in spairs(noteOns, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
+          if v.chan == event.chan and v.pitch == event.msg2 and v.flags == event.flags then
+            local noteon = MIDIEvents[v.index]
+            event.noteOnIdx = k
+            noteon.noteOffIdx = #MIDIEvents
+            noteon.endppqpos = event.ppqpos
+            noteOns[k] = nil -- remove it
+            break
+          end
         end
       end
     end
@@ -620,12 +645,12 @@ local function MIDI_OpenWriteTransaction(take)
   openTransaction = take
 end
 
-local function MIDI_CommitWriteTransaction(take, refresh)
+local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   if not EnsureTransaction(take) then return false end
 
   local newMIDIString = ''
   local ppqPos = 0
-  for k, event in ipairs(MIDIEvents) do
+  for _, event in ipairs(MIDIEvents) do
     if ppqPos == 0 and event.ppqpos ~= event.offset then event.offset = event.ppqpos end -- special case for first event
     ppqPos = ppqPos + event.offset
     if ppqPos ~= event.ppqpos then
@@ -652,15 +677,12 @@ local function MIDI_CommitWriteTransaction(take, refresh)
     end
     newMIDIString = newMIDIString .. event.MIDI
 
-    -- only do this if the bezEvent is in the aux table, otherwise we'll get it on the next loop
-    if event:is_a(CCEvent) and event.bezIdx and event.bezIdx < 0 then
-      local bezIdx = math.abs(event.bezIdx)
-      if bezIdx <= #bezTable then
-        local bezEvent = bezTable[bezIdx]
-        if bezEvent and bezEvent.ccPos == k then
-          local bezString = bezEvent.MIDI --string.pack('i4Bs4', bezEvent.offset, bezEvent.flags, bezEvent.msg)
-          newMIDIString = newMIDIString .. bezString
-        end
+    -- handle any BezierEvents
+    if event:is_a(CCEvent) and event.hasBezier then
+      local bezEvent = bezTable[event.idx + 1]
+      if bezEvent and bezEvent.ccIdx == event.idx then
+        local bezString = bezEvent.MIDI --string.pack('i4Bs4', bezEvent.offset, bezEvent.flags, bezEvent.msg)
+        newMIDIString = newMIDIString .. bezString
       end
     end
 
@@ -672,6 +694,8 @@ local function MIDI_CommitWriteTransaction(take, refresh)
   openTransaction = nil
 
   if refresh then MIDIUtils.MIDI_InitializeTake(take) end -- update the tables based on the new data
+  if dirty then r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take)) end
+
   return true
 end
 
@@ -684,12 +708,13 @@ MIDIUtils.MIDI_OpenWriteTransaction = function(take)
   return select(2, xpcall(MIDI_OpenWriteTransaction, OnError, take))
 end
 
-MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh)
+MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh, dirty)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
-    MakeTypedArg(refresh, 'boolean', true)
+    MakeTypedArg(refresh, 'boolean', true),
+    MakeTypedArg(dirty, 'boolean', true)
   )
-  return select(2, xpcall(MIDI_CommitWriteTransaction, OnError, take, refresh))
+  return select(2, xpcall(MIDI_CommitWriteTransaction, OnError, take, refresh, dirty))
 end
 
 -----------------------------------------------------------------------------
@@ -756,9 +781,9 @@ end
 
 local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
   if not EnsureTransaction(take) then return false end
-  local lastEvent = MIDIEvents[#MIDIEvents]
+  local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
   local newNoteOn = NoteOnEvent(ppqpos,
-                                ppqpos - (lastEvent and lastEvent.ppqpos or 0),
+                                ppqpos - lastEventPPQ,
                                 FlagsFromSelMute(selected, muted),
                                 table.concat({
                                   string.char(0x90 | (chan & 0xF)),
@@ -845,23 +870,20 @@ end
 
 local function FindBezierData(idx, event)
   local bezEvent
-  local bezIdx = idx + 1
-  if event:is_a(CCEvent) and bezIdx <= #MIDIEvents then
-    bezEvent = MIDIEvents[bezIdx]
+  if event.hasBezier then
+   bezEvent = bezTable[event.idx + 1]
+  --  if not bezEvent then
+  --   -- this would be catastrophic, but just for debugging
+  --   for k, v in pairs(bezTable) do -- use pairs, indices may be non-contiguous
+  --     if v.ccIdx == idx then
+  --       bezEvent = v
+  --       event.hasBezier = true
+  --       break
+  --     end
+  --   end
   end
-  if not (bezEvent and bezEvent:is_a(BezierEvent)) then
-    bezEvent = nil
-    for k, v in ipairs(bezTable) do
-      if v.ccIdx == idx then
-        bezEvent = v
-        bezIdx = -k
-        break
-      end
-    end
-  end
-  if bezEvent then return true, bezEvent, bezIdx
-  else return false
-  end
+  if bezEvent then return true, bezEvent end
+  return false
 end
 
 local function GetBezierData(idx, event)
@@ -885,37 +907,32 @@ local function SetBezierData(idx, event, beztype, beztension)
     string.char(beztype), -- should be 0
     string.pack('f', beztension)
   })
-  local rv, bezEvent, bezIdx = FindBezierData(idx, event)
+  local rv, bezEvent = FindBezierData(idx, event)
   if rv and bezEvent then
     bezEvent.msg = bezMsg -- update in place
     bezEvent.MIDI = string.pack('i4Bs4', bezEvent.offset, bezEvent.flags, bezEvent.msg)
-    event.bezIdx = bezIdx -- negative in aux table, positive in MIDIEvents
+    bezEvent.ccIdx = idx
+    event.hasBezier = true
     return true
   else
     bezEvent = BezierEvent(event.ppqpos, 0, 0, bezMsg)
-    bezEvent.ccPos = idx
-    table.insert(bezTable, bezEvent)
-    event.bezIdx = -(#bezTable)
+    bezEvent.ccIdx = idx
+    bezTable[idx + 1] = bezEvent
+    event.hasBezier = true
     return true
   end
   return false
 end
 
 local function DeleteBezierData(idx, event)
-  local rv, bezEvent, bezIdx = FindBezierData(idx, event)
-  if rv and bezEvent and bezIdx then
+  local rv, bezEvent = FindBezierData(idx, event)
+  if rv and bezEvent then
     rv = false
-    if bezIdx > 0 then bezEvent.delete = true
-    elseif bezIdx < 0 then
-      bezIdx = math.abs(bezIdx)
-      for _, ev in ipairs(MIDIEvents) do
-        if ev:is_a(CCEvent) and ev.idx == bezEvent.ccIdx and ev.bezIdx == bezIdx then
-          ev.bezIdx = nil
-          table.remove(bezTable, bezIdx)
-          rv = true
-          break
-        end
-      end
+    local ev = ccEvents[bezEvent.ccIdx + 1]
+    if ev:is_a(CCEvent) and ev.idx == bezEvent.ccIdx and ev.hasBezier then
+      bezTable[ev.idx + 1] = nil
+      ev.hasBezier = nil
+      rv = true
     end
   end
   return rv
@@ -973,7 +990,7 @@ local function MIDI_GetCCShape(take, idx)
   EnsureTake(take)
   local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
-    local rv, _, bztension = GetBezierData(event.MIDIidx, event)
+    local rv, _, bztension = GetBezierData(idx, event)
     return true, ((event.flags & 0xF0) >> 4) & 7, rv and bztension or 0.
   end
   return false, 0, 0.
@@ -983,15 +1000,14 @@ local function MIDI_SetCCShape(take, idx, shape, beztension)
   EnsureTransaction(take)
   local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
-    local MIDIidx = event.MIDIidx
     event.flags = event.flags & ~0xF0
     -- flag high 4 bits for CC shape: &16=linear, &32=slow start/end, &16|32=fast start, &64=fast end, &64|16=bezier
     event.flags = event.flags | ((shape & 0x7) << 4)
     event.recalcMIDI = true
     if shape == 5 and beztension then
-      return SetBezierData(MIDIidx, event, 0, beztension)
+      return SetBezierData(idx, event, 0, beztension)
     else
-      DeleteBezierData(MIDIidx, event)
+      DeleteBezierData(idx, event)
     end
     return true
   end
@@ -1000,7 +1016,7 @@ end
 
 local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
   if not EnsureTransaction(take) then return false end
-  local lastEvent = MIDIEvents[#MIDIEvents]
+  local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
   chanmsg = chanmsg < 0xA0 or chanmsg >= 0xF0 and 0xB0 or chanmsg
   local newFlags = FlagsFromSelMute(selected, muted)
   local defaultCCShape = r.SNM_GetIntConfigVar('midiccenv', -1)
@@ -1012,7 +1028,7 @@ local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2,
   end
 
   local newCC = CCEvent(ppqpos,
-                        ppqpos - lastEvent.ppqpos,
+                        ppqpos - lastEventPPQ,
                         newFlags,
                         table.concat({
                           string.char((chanmsg & 0xF0) | (chan & 0xF)),
@@ -1028,7 +1044,7 @@ local function MIDI_DeleteCC(take, idx)
   local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx then
     event.delete = true
-    DeleteBezierData(event.MIDIidx, event)
+    DeleteBezierData(idx, event)
     return true
   end
   return false
@@ -1150,9 +1166,9 @@ end
 
 local function MIDI_InsertTextSysexEvt(take, selected, muted, ppqpos, type, bytestr)
   if not EnsureTransaction(take) then return false end
-  local lastEvent = MIDIEvents[#MIDIEvents]
+  local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
   local newTextSysex = MakeEvent(ppqpos,
-                                 ppqpos - lastEvent.ppqpos,
+                                 ppqpos - lastEventPPQ,
                                  FlagsFromSelMute(selected, muted),
                                  GetMIDIStringForTextSysex(type, bytestr))
   InsertMIDIEvent(newTextSysex)
@@ -1266,7 +1282,8 @@ end
 local function MIDI_InsertEvt(take, selected, muted, ppqpos, bytestr)
   if not EnsureTransaction(take) then return false end
   local newFlags = FlagsFromSelMute(selected, muted)
-  local newOffset = ppqpos - MIDIEvents[#MIDIEvents].ppqpos
+  local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
+  local newOffset = ppqpos - lastEventPPQ
   local newEvt = MakeEvent(ppqpos, newOffset, newFlags, bytestr)
   InsertMIDIEvent(newEvt)
 
@@ -1527,6 +1544,33 @@ local function MIDI_NoteNumberToNoteName(notenum, names)
   return notename..octave
 end
 
+local function MIDI_DebugInfo(take)
+  EnsureTake(take)
+  local noteon = 0
+  local noteoff = 0
+  local cc = 0
+  local sysex = 0
+  local text = 0
+  local bezier = 0
+  local unknown = 0
+  for _, event in ipairs(MIDIEvents) do
+    if event:is_a(NoteOnEvent) then noteon = noteon + 1
+    elseif event:is_a(NoteOffEvent) then noteoff = noteoff + 1
+    elseif event:is_a(CCEvent) then
+      cc = cc + 1
+      local _, bezEvt = FindBezierData(event.idx, event)
+      if bezEvt then
+        bezier = bezier + 1
+      end
+    elseif event:is_a(SysexEvent) then sysex = sysex + 1
+    elseif event:is_a(MetaEvent) then text = text + 1
+    elseif event:is_a(BezierEvent) then bezier = bezier + 1
+    else unknown = unknown + 1
+    end
+  end
+  return noteon, noteoff, cc, sysex, text, bezier, unknown
+end
+
 -----------------------------------------------------------------------------
 
 MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
@@ -1535,6 +1579,13 @@ MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
     MakeTypedArg(names, 'table', true)
   )
   return select(2, xpcall(MIDI_NoteNumberToNoteName, OnError, notenum, names))
+end
+
+MIDIUtils.MIDI_DebugInfo = function(take)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
+  )
+  return select(2, xpcall(MIDI_DebugInfo, OnError, take))
 end
 
 -----------------------------------------------------------------------------

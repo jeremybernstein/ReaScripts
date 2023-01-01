@@ -1,0 +1,639 @@
+--[[
+   * Author: sockmonkey72 / Jeremy Bernstein
+   * Licence: MIT
+   * Version: 1.00
+   * NoIndex: true
+--]]
+
+--[[
+
+USAGE:
+
+  -- get the package path to MIDIUtils in my repository
+  package.path = reaper.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
+  local mu = require 'MIDIUtils'
+  -- mu.ENFORCE_ARGS = false -- true by default, enabling argument type-checking, turn off for 'production' code
+
+  if not mu.CheckDependencies('My Script') then return end -- return early if something is missing
+
+  local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive())
+  if not take then return end
+
+  mu.MIDI_InitializeTake(take) -- acquire events from take (can pass true/false as 2nd arg to enable/disable ENFORCE_ARGS)
+  mu.MIDI_OpenWriteTransaction(take) -- inform the library that we'll be writing to this take
+  mu.MIDI_InsertNote(take, true, false, 960, 1920, 0, 64, 64) -- insert a note
+  mu.MIDI_InsertCC(take, true, false, 960, 0xB0, 0, 1, 64) -- insert a CC (using default CC curve)
+  local _, newidx = mu.MIDI_InsertCC(take, true, false, 1200, 0xB0, 0, 1, 96) -- insert a CC, get new index (using default CC curve)
+  mu.MIDI_InsertCC(take, true, false, 1440, 0xB0, 0, 1, 127) -- insert another CC (using default CC curve)
+  mu.MIDI_SetCCShape(take, newidx, 5, 0.66) -- change the CC shape of the 2nd CC to bezier with a 0.66 tension
+  mu.MIDI_CommitWriteTransaction(take) -- commit the transaction to the take
+                                       -- by default, this won't reacquire the MIDI events and update the
+                                       -- take data in memory, pass 'true' as a 2nd argument if you want that
+
+  reaper.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take))
+
+  -- API 'Write' operations don't write back to REAPER until MIDI_CommitWriteTransaction() is called.
+  -- API 'Read' operations are based on the data in memory, not the data in the take. If updates are
+  --   potentially occuring in REAPER 'behind the back' of the API (such as in a defer script), call
+  --   MIDI_InitializeTake() every frame, or whenever you need to resync the in-memory data with the
+  --   actual state of the take in REAPER.
+  -- 'Read' operations don't require a transaction, and will generally trigger a MIDI_InitializeTake(take)
+  --   event slurp if the requested take isn't already in memory.
+  -- Function return values, etc. should match the REAPER Reascript API with the exception of the MIDI_InsertXXX
+  --   functions, which return the new note/CC index, in addition to a boolean (simplifies adjusting
+  --   curves after the fact, for instance)
+
+--]]
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.SetOnError(fn)
+--[[
+    SetOnError: set an optional error callback for xpcall(), otherwise a
+    traceback will be posted to the REAPER console window by default.
+
+    Return value: none
+--]]
+
+boolean rv =
+MIDIUtils.CheckDependencies(callerScriptName)
+--[[
+    CheckDependencies: check whether all MIDIUtils dependencies are met,
+    pass the name of your script as an argument, will be used as an identifier in
+    any error message generated.
+
+    Return value:
+      boolean rv: true if dependencies are met, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_InitializeTake(take, enforceargs = true)
+--[[
+    MIDI_InitializeTake: gather the events in a MediaItem_Take* for use with
+    MIDIUtils. Practically, this call is optional -- API calls will automatically
+    call MIDI_InitializeTake internally if the provided take is not already
+    prepared. The optional 'enforceargs' argument can be used to disable
+    API argument type enforcement for efficiency in production code.
+
+    Arguments:
+      take: the MediaItem_Take* provided by REAPER
+
+    Return value: none
+--]]
+
+boolean rv, number notecnt, number ccevtcnt, number textsyxevtcnt =
+MIDIUtils.MIDI_CountEvts(take)
+--[[
+    MIDI_CountEvts: provide a count of take events by type.
+
+    Arguments:
+      take: the MediaItem_Take* provided by REAPER
+
+    Return values:
+      boolean rv: true if successful, false otherwise
+      number notecnt: count of note-on events
+      number ccevtcnt: count of CC, pitch bend, program change, aftertouch events
+      number textsyxevtcnt: count of meta and system exclusive events (not including bezier curves)
+--]]
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_OpenWriteTransaction(take)
+--[[
+    MIDI_OpenWriteTransaction: start a 'write' transaction. MIDIUtils performs all
+    of its MIDI data manipulation in memory. Unlike Cockos' high-level MIDI API, there
+    are no 'immediately sorted' API calls. To make changes to the data, you are required to
+    open a transaction, make all changes, and then commit the transaction, which will write
+    all changes in a single bulk set action.
+
+    Arguments:
+      take: the MediaItem_Take* provided by REAPER
+
+    Return value: none
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_CommitWriteTransaction(take, refresh, dirty)
+--[[
+    MIDI_CommitWriteTransaction: end a 'write' transaction and commit the data to the take.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean refresh: when true, MIDIUtils will re-initialize the take after commit
+                       this is useful if you intend to perform further manipulation on the data post-commit
+      boolean dirty: when true, MIDIUtils will dirty the take post-commit
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+boolean rv, boolean selected, boolean muted, number ppqpos, number endppqpos, number chan, number pitch, number vel, number relvel =
+MIDIUtils.MIDI_GetNote(take, idx)
+--[[
+    MIDI_GetNote: Get MIDI note properties.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: note index (see MIDI_CountEvts for the number of MIDI notes)
+
+    Return values:
+      boolean rv: true on success, false otherwise
+      boolean selected: true if note is selected
+      boolean muted: true if note is muted
+      number ppqpos: note-on PPQ position
+      number endppqpos: note-off PPQ position
+      number chan: MIDI channel (0 - 15)
+      number pitch: MIDI note number (0 - 127)
+      number vel: note-on velocity (0 - 127)
+      number relvel: note-off velocity (0 - 127)
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
+--[[
+    MIDI_SetNote: Set MIDI note properties for an existing event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: note index to modify (see MIDI_CountEvts for the number of MIDI notes)
+      boolean selected: true if note is selected [optional]
+      boolean muted: true if note is muted [optional]
+      number ppqpos: note-on PPQ position [optional]
+      number endppqpos: note-off PPQ position [optional]
+      number chan: MIDI channel (0 - 15) [optional]
+      number pitch: MIDI note number (0 - 127) [optional]
+      number vel: note-on velocity (0 - 127) [optional]
+      number relvel: note-off velocity (0 - 127) [optional]
+
+    Return value: true on success, false otherwise
+--]]
+
+boolean rv, idx =
+MIDIUtils.MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
+--[[
+    MIDI_InsertNote: Create a new MIDI note event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean selected: true if note is selected
+      boolean muted: true if note is muted
+      number ppqpos: note-on PPQ position
+      number endppqpos: note-off PPQ position
+      number chan: MIDI channel (0 - 15)
+      number pitch: MIDI note number (0 - 127)
+      number vel: note-on velocity (0 - 127)
+      number relvel: note-off velocity (0 - 127) [optional, 0 if not provided]
+
+    Return value:
+      boolean rv: true on success, false otherwise
+      number idx: new note index
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_DeleteNote(take, idx)
+--[[
+    MIDI_DeleteNote: Delete a note event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: note index to delete (see MIDI_CountEvts for the number of MIDI notes)
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+boolean rv, boolean selected, boolean muted, number ppqpos, number chanmsg, number chan, number msg2, number msg3 =
+MIDIUtils.MIDI_GetCC(take, idx)
+--[[
+    MIDI_GetCC: Get CC/channel message properties.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: note index (see MIDI_CountEvts for the number of MIDI notes)
+
+    Return values:
+      boolean rv: true on success, false otherwise
+      boolean selected: true if event is selected
+      boolean muted: true if event is muted
+      number ppqpos: event PPQ position
+      number chanmsg: message type:
+        0xA0 - poly pressure / aftertouch
+        0xB0 - continuous controller
+        0xC0 - program change [* only requres 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xE0 - pitch bend
+      number chan: MIDI channel (0 - 15)
+      number msg2: 2nd message byte (0 - 127)
+      number msg3: 3rd message byte (0 - 127)
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
+--[[
+    MIDI_SetCC: Set CC/channel message properties for an existing event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: CC event index to modify (see MIDI_CountEvts for the number of CC-like events)
+      boolean selected: true if event is selected [optional]
+      boolean muted: true if event is muted [optional]
+      number ppqpos: event PPQ position [optional]
+      number chanmsg: message type [optional]:
+        0xA0 - poly pressure / aftertouch
+        0xB0 - continuous controller
+        0xC0 - program change [* only requres 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xE0 - pitch bend
+      number chan: MIDI channel (0 - 15) [optional]
+      number msg2: 2nd message byte (0 - 127) [optional]
+      number msg3: 3rd message byte (0 - 127) [optional]
+
+    Return value: true on success, false otherwise
+--]]
+
+boolean rv, number idx =
+MIDIUtils.MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
+--[[
+    MIDI_InsertCC: Create a new CC/channel message event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean selected: true if event is selected
+      boolean muted: true if event is muted
+      number ppqpos: PPQ position
+      number chanmsg: message type:
+        0xA0 - poly pressure / aftertouch
+        0xB0 - continuous controller
+        0xC0 - program change [* only requres 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xE0 - pitch bend
+      number chan: MIDI channel (0 - 15)
+      number msg2: 2nd message byte (0 - 127)
+      number msg3: 3rd message byte (0 - 127)
+
+    Return value:
+      boolean rv: true on success, false otherwise
+      number idx: new CC event index
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_DeleteCC(take, idx)
+--[[
+    MIDI_DeleteCC: Delete a CC/channel message event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: CC event index to delete (see MIDI_CountEvts for the number of CC-like events)
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+boolean rv, number shape, number beztension =
+MIDIUtils.MIDI_GetCCShape(take, idx)
+--[[
+    MIDI_GetCCShape: Get CC shape and bezier tension.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: CC event index to query
+
+    Return values:
+      boolean rv: true on success, false otherwise
+      number shape: curve shape
+        0 - square
+        1 - linear
+        2 - slow start/end
+        3 - fast start
+        4 - fast end
+        5 - bezier
+      number beztension: bezier tension
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_SetCCShape(take, idx, shape, beztension)
+--[[
+    MIDI_SetCCShape: Set CC shape and bezier tension.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: CC event index to query
+      number shape: curve shape
+        0 - square
+        1 - linear
+        2 - slow start/end
+        3 - fast start
+        4 - fast end
+        5 - bezier
+      number beztension: bezier tension [required for shape 5 (bezier)]
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+boolean rv, boolean selected, boolean muted, number ppqpos, number type, string msg =
+MIDIUtils.MIDI_GetTextSysexEvt(take, idx)
+--[[
+    MIDI_GetTextSysexEvt: Get meta / system exclusive message properties.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (see MIDI_CountEvts for the number of meta / sysex events)
+
+    Return values:
+      boolean rv: true on success, false otherwise
+      boolean selected: true if event is selected
+      boolean muted: true if event is muted
+      number ppqpos: event PPQ position
+      number type: message type
+        -1 - system exclusive
+        1 - 15: meta text event:
+          1 - text
+          2 - copyright notice
+          3 - track name
+          4 - instrument name
+          5 - lyrics
+          6 - marker
+          7 - cue point
+          8 - program name
+          9 - device name
+          10 - 14: REAPER-specific, undocumented
+        15: REAPER notation event
+      string msg: message payload (no header or footer bytes)
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_SetTextSysexEvt(take, idx, selected, muted, ppqpos, type, msg)
+--[[
+    MIDI_SetTextSysexEvt: Set meta / system exclusive message properties for an existing event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (see MIDI_CountEvts for the number of meta / sysex events)
+      boolean selected: true if event is selected [optional]
+      boolean muted: true if event is muted [optional]
+      number ppqpos: event PPQ position [optional]
+      number type: message type [optional, required if msg is provided]
+        -1 - system exclusive
+        1 - 15: meta text event:
+          1 - text
+          2 - copyright notice
+          3 - track name
+          4 - instrument name
+          5 - lyrics
+          6 - marker
+          7 - cue point
+          8 - program name
+          9 - device name
+          10 - 14: REAPER-specific, undocumented
+        15: REAPER notation event
+      string msg: message payload (no header or footer bytes) [optional, required if type is provided]
+
+    Return values:
+      boolean rv: true on success, false otherwise
+--]]
+
+boolean rv, number idx =
+MIDIUtils.MIDI_InsertTextSysexEvt(take, selected, muted, ppqpos, type, bytestr)
+--[[
+    MIDI_InsertTextSysexEvt: Create a new meta / system exclusive message event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean selected: true if event is selected
+      boolean muted: true if event is muted
+      number ppqpos: PPQ position
+      number type: message type
+        -1 - system exclusive
+        1 - 14: meta text event:
+          1 - text
+          2 - copyright notice
+          3 - track name
+          4 - instrument name
+          5 - lyrics
+          6 - marker
+          7 - cue point
+          8 - program name
+          9 - device name
+          10 - 14: REAPER-specific, undocumented
+        15: REAPER notation event
+      string msg: message payload (no header or footer bytes)
+
+    Return value:
+      boolean rv: true on success, false otherwise
+      number idx: new CC event index
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_DeleteTextSysexEvt(take, idx)
+--[[
+    MIDI_DeleteTextSysexEvt: Delete a meta / system exclusive message event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index to delete (see MIDI_CountEvts for the number of meta / sysex events)
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+boolean rv, boolean selected, boolean muted, number ppqpos, string msg =
+MIDIUtils.MIDI_GetEvt(take, idx)
+--[[
+    MIDI_GetEvt: Get event properties.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (see MIDI_CountEvts for event count)
+
+    Return values:
+      boolean rv: true on success, false otherwise
+      boolean selected: true if event is selected
+      boolean muted: true if event is muted
+      number ppqpos: event PPQ position
+      string msg: complete message payload (incl. status, header and/or footer bytes)
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_SetEvt(take, idx, selected, muted, ppqpos, msg)
+--[[
+    MIDI_SetEvt: Set event properties for an existing event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (see MIDI_CountEvts for event count)
+      boolean selected: true if event is selected [optional]
+      boolean muted: true if event is muted [optional]
+      number ppqpos: event PPQ position [optional]
+      string msg: complete message payload (incl. status, header and/or footer bytes) [optional]
+
+    Return value: true on success, false otherwise
+--]]
+
+boolean rv, number idx =
+MIDIUtils.MIDI_InsertEvt(take, selected, muted, ppqpos, bytestr)
+--[[
+    MIDI_SetEvt: Insert new event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean selected: true if event is selected
+      boolean muted: true if event is muted
+      number ppqpos: event PPQ position
+      string msg: complete message payload (incl. status, header and/or footer bytes)
+
+    Return value: true on success, false otherwise
+--]]
+
+boolean rv =
+MIDIUtils.MIDI_DeleteEvt(take, idx)
+--[[
+    MIDI_DeleteEvt: Delete an event.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (see MIDI_CountEvts for event count)
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+number idx =
+MIDIUtils.MIDI_EnumSelNotes(take, idx)
+--[[
+    MIDI_EnumSelNotes: Returns the index of the next selected MIDI note event after idx (-1 if there are no more selected events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first selected note event)
+
+    Return value: index of next selected MIDI Note event
+--]]
+
+number idx =
+MIDIUtils.MIDI_EnumSelCC(take, idx)
+--[[
+    MIDI_EnumSelCC: Returns the index of the next selected MIDI CC event after idx (-1 if there are no more selected events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first selected CC event)
+
+    Return value: index of next selected MIDI CC event
+--]]
+
+number idx =
+MIDIUtils.MIDI_EnumSelTextSysexEvts(take, idx)
+--[[
+    MIDI_EnumSelCC: Returns the index of the next selected MIDI meta / system exclusive event after idx (-1 if there are no more selected events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first selected meta / sysex event)
+
+    Return value: index of next selected MIDI meta / sysex event
+--]]
+
+number idx =
+MIDIUtils.MIDI_EnumSelEvts(take, idx)
+--[[
+    MIDI_EnumSelCC: Returns the index of the next selected event after idx (-1 if there are no more selected events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first selected event)
+
+    Return value: index of next selected event of any type (note-on, note-off, CC, meta/sysex)
+--]]
+
+-----------------------------------------------------------------------------
+
+number allcnt =
+MIDIUtils.MIDI_CountAllEvts(take)
+--[[
+    MIDI_CountEvts: provide a count of all take events.
+
+    Arguments:
+      take: the MediaItem_Take* provided by REAPER
+
+    Return values:
+      number allcnt: count of all events (note-on, note-off, CC, meta/sysex)
+--]]
+
+-----------------------------------------------------------------------------
+
+number idx =
+MIDIUtils.MIDI_EnumNotes(take, idx)
+--[[
+    MIDI_EnumNotes: Returns the index of the next MIDI note event after idx (-1 if there are no more events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first note event)
+
+    Return value: index of next MIDI Note event
+--]]
+
+number idx =
+MIDIUtils.MIDI_EnumCC(take, idx)
+--[[
+    MIDI_EnumCC: Returns the index of the next MIDI CC event after idx (-1 if there are no more events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first CC event)
+
+    Return value: index of next MIDI CC event
+--]]
+
+number idx =
+MIDIUtils.MIDI_EnumTextSysexEvts(take, idx)
+--[[
+    MIDI_EnumTextSysexEvts: Returns the index of the next MIDI meta / system exclusive event after idx (-1 if there are no more events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first meta/sysex event)
+
+    Return value: index of next MIDI meta/sysex event
+--]]
+
+number idx =
+MIDIUtils.MIDI_EnumEvts(take, idx)
+--[[
+    MIDI_EnumEvts: Returns the index of the next event after idx (-1 if there are no more events).
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number idx: event index (pass -1 to get the first event)
+
+    Return value: index of next event of any type (note-on, note-off, CC, meta/sysex)
+--]]
+
+-----------------------------------------------------------------------------
+
+string notename =
+MIDIUtils.MIDI_NoteNumberToNoteName(notenum, names = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' })
+--[[
+    MIDI_NoteNumberToNoteName: Returns the note name + octave (i.e. A3, D#-1) of the provided MIDI note number.
+    Takes REAPER's MIDI octave name display offset preference into account.
+
+    Arguments:
+      number notenum: MIDI note number (0 - 127)
+      number names: table of 12 pitch class names, from C - B, as they should be used for display [optional]
+
+    Return value: note name + octave string for the input value
+--]]
+
+MIDIUtils.post(...)
+MIDIUtils.p(...)
+--[[
+    Convenience method to post a message (or comma-delimited messages) to the REAPER console.
+--]]

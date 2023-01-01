@@ -55,7 +55,7 @@ if take then
   if noteons ~= 0 or noteoffs ~= 0 or ccs ~= 0 or sysexes ~= 0 or metas ~= 0 or beziers ~= 0 or unknowns ~= 0 then
     error('not all events deleted')
   end
-  
+
   if mu.MIDI_CountAllEvts(take) ~= 0 then
     error('not all events deleted')
   end
@@ -65,8 +65,8 @@ if take then
 
   mu.MIDI_OpenWriteTransaction(take)
   mu.MIDI_InsertNote(take, true, false, 480, 960, 0, 60, 92)
-  mu.MIDI_InsertNote(take, false, true, 960, 1440, 0, 64, 32)
-  mu.MIDI_InsertNote(take, true, false, 1460, 1960, 1, 68, 257)
+  mu.MIDI_InsertNote(take, false, true, 960, 1440, 0, 64, 32, 96)
+  mu.MIDI_InsertNote(take, true, false, 1460, 1960, 1, 68, 257, 0)
 
   _, idx = mu.MIDI_InsertCC(take, true, false, 480, 0xB0, 0, 1, 32)
   mu.MIDI_SetCCShape(take, idx, 5, -0.66)

@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.0-beta.3
+-- @version 0.1.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -724,8 +724,9 @@ local function MIDI_GetNote(take, idx)
   EnsureTake(take)
   local event = noteEvents[idx + 1]
   if event and event:is_a(NoteOnEvent) and event.idx == idx and not event.delete then
+    local noteoff = MIDIEvents[event.noteOffIdx]
     return true, event.flags & 1 ~= 0 and true or false, event.flags & 2 ~= 0 and true or false,
-      event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3
+      event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, noteoff and noteoff.msg3 or 0
   end
   return false, false, false, 0, 0, 0, 0, 0
 end
@@ -735,7 +736,7 @@ local function AdjustNoteOff(noteoff, param, val)
   noteoff.recalcMIDI = true
 end
 
-local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
+local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
   if not EnsureTransaction(take) then return false end
   local rv = false
   local event = noteEvents[idx + 1]
@@ -773,13 +774,16 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
       event.msg3 = vel & 0x7F
       if event.msg3 < 1 then event.msg3 = 1 end
     end
+    if relvel then
+      AdjustNoteOff(noteoff, 'msg3', relvel & 0x7F)
+    end
     event.recalcMIDI = true
     rv = true
   end
   return rv
 end
 
-local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
+local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
   if not EnsureTransaction(take) then return false end
   local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
   local newNoteOn = NoteOnEvent(ppqpos,
@@ -800,7 +804,7 @@ local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, p
                                   table.concat({
                                     string.char(0x80 | newNoteOn.chan),
                                     string.char(newNoteOn.msg2),
-                                    string.char(0)
+                                    string.char(relvel and (relvel & 0x7F) or 0)
                                   }))
   newNoteOff.noteOnIdx = #MIDIEvents
   _, newNoteOn.noteOffIdx = InsertMIDIEvent(newNoteOff)
@@ -828,7 +832,7 @@ MIDIUtils.MIDI_GetNote = function(take, idx)
   return select(2, xpcall(MIDI_GetNote, OnError, take, idx))
 end
 
-MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
+MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number'),
@@ -838,12 +842,13 @@ MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos,
     MakeTypedArg(endppqpos, 'number', true),
     MakeTypedArg(chan, 'number', true),
     MakeTypedArg(pitch, 'number', true),
-    MakeTypedArg(vel, 'number', true)
+    MakeTypedArg(vel, 'number', true),
+    MakeTypedArg(relvel, 'number', true)
   )
-  return select(2, xpcall(MIDI_SetNote, OnError, take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel))
+  return select(2, xpcall(MIDI_SetNote, OnError, take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel))
 end
 
-MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel)
+MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(selected, 'boolean'),
@@ -852,9 +857,10 @@ MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, c
     MakeTypedArg(endppqpos, 'number'),
     MakeTypedArg(chan, 'number'),
     MakeTypedArg(pitch, 'number'),
-    MakeTypedArg(vel, 'number')
+    MakeTypedArg(vel, 'number'),
+    MakeTypedArg(relvel, 'number', true)
   )
-  return select(2, xpcall(MIDI_InsertNote, OnError, take, selected, muted, ppqpos, endppqpos, chan, pitch, vel))
+  return select(2, xpcall(MIDI_InsertNote, OnError, take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel))
 end
 
 MIDIUtils.MIDI_DeleteNote = function(take, idx)

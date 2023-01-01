@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0-beta.8
+-- @version 1.1.0-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -36,16 +36,6 @@ package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Event
 local s = require 'MIDIUtils'
 s.ENFORCE_ARGS = false -- turn off type checking
 
-local function post(...)
-  local args = {...}
-  local str = ''
-  for i, v in ipairs(args) do
-    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
-  end
-  str = str .. '\n'
-  r.ShowConsoleMsg(str)
-end
-
 local function fileExists(name)
   local f = io.open(name,'r')
   if f ~= nil then io.close(f) return true else return false end
@@ -55,12 +45,12 @@ local canStart = true
 
 local imGuiPath = r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua'
 if not fileExists(imGuiPath) then
-  post('MIDI Event Editor requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
+  s.post('MIDI Event Editor requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
   canStart = false
 end
 
 if not r.APIExists('JS_Mouse_GetState') then
-  post('MIDI Event Editor requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
+  s.post('MIDI Event Editor requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
   canStart = false
 end
 
@@ -1637,7 +1627,7 @@ local function loop()
   -- if not r.ImGui_IsWindowFocused(ctx) then
   --   local hwnd = r.MIDIEditor_GetActive()
   --   if not hwnd or r.JS_Window_GetFocus() ~= hwnd then
-  --     post(hwnd and 'no match' or 'no hwnd')
+  --     s.post(hwnd and 'no match' or 'no hwnd')
   --     r.ImGui_IsWindowAppearing(ctx) -- keep the ctx alive
   --     r.defer(function() xpcall(loop, onCrash) end)
   --     return

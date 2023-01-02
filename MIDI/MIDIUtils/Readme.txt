@@ -1,11 +1,41 @@
 --[[
    * Author: sockmonkey72 / Jeremy Bernstein
    * Licence: MIT
-   * Version: 1.00
+   * Version: 0.1.0
    * NoIndex: true
 --]]
 
 --[[
+
+MIDI Utils API:
+
+This project began as an attempt to rewrite Cockos' high-level ReaScript MIDI API, correcting some bugs and improving
+some (at least from my perspective) less than ideal behaviors and restrictions.
+
+* With some minor exceptions, this API is drop-in compatible with Cockos' API -- they can be used in parallel if
+  necessary. I've gone to some trouble to ensure that the behaviors, return values, etc. remain consistent.
+* MIDI_GetNote() start and end ppq positions should be consistent with how REAPER itself handles note-on/note-off
+  matching and duration determination.
+* MIDI_SetNote() will no longer arbitrarily truncate or elongate overlapping notes under certain circumstances
+* MIDI_GetEvt() doesn't confuse note-on and note-off messages under certain circumstances
+* MIDI_Get/Set/InsertNote() support release velocity
+* Write operations (set/insert/delete) are by definition unsorted, as they occur in memory. The optional 'unsorted'
+  argument to several API functions has been dropped (will be ignored), and in the case of the note operations,
+  has been replaced with a release velocity argument. Sorting occurs automatically post-commit.
+* API 'Write' operations don't write back to REAPER until MIDI_CommitWriteTransaction() is called.
+* API 'Read' operations are based on the data in memory, not the data in the take. If updates are
+  potentially occuring in REAPER 'behind the back' of the API (such as in a defer script), call
+  MIDI_InitializeTake() every frame, or whenever you need to resync the in-memory data with the
+  actual state of the take in REAPER.
+* 'Read' operations don't require a transaction, and will generally trigger a MIDI_InitializeTake(take)
+   event slurp if the requested take isn't already in memory.
+* There is an SWS dependency for reading a couple of preferences out of reaper.ini, this may go away at some point.
+
+My hope is that this replacement becomes obsolete at some point, when Cockos circles around to working on MIDI stuff
+again in some uncertain future. Until then, I hope this provides a useful interim solution to scripters struggling
+with the behavior and reliability of the native API.
+
+-----------------------------------------------------------------------------
 
 USAGE:
 
@@ -16,7 +46,7 @@ USAGE:
 
   if not mu.CheckDependencies('My Script') then return end -- return early if something is missing
 
-  local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive())
+  local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive()) -- pass false as 2nd arg to disable argument type-checks
   if not take then return end
 
   mu.MIDI_InitializeTake(take) -- acquire events from take (can pass true/false as 2nd arg to enable/disable ENFORCE_ARGS)
@@ -30,18 +60,9 @@ USAGE:
                                        -- by default, this won't reacquire the MIDI events and update the
                                        -- take data in memory, pass 'true' as a 2nd argument if you want that
 
-  reaper.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take))
-
-  -- API 'Write' operations don't write back to REAPER until MIDI_CommitWriteTransaction() is called.
-  -- API 'Read' operations are based on the data in memory, not the data in the take. If updates are
-  --   potentially occuring in REAPER 'behind the back' of the API (such as in a defer script), call
-  --   MIDI_InitializeTake() every frame, or whenever you need to resync the in-memory data with the
-  --   actual state of the take in REAPER.
-  -- 'Read' operations don't require a transaction, and will generally trigger a MIDI_InitializeTake(take)
-  --   event slurp if the requested take isn't already in memory.
-  -- Function return values, etc. should match the REAPER Reascript API with the exception of the MIDI_InsertXXX
-  --   functions, which return the new note/CC index, in addition to a boolean (simplifies adjusting
-  --   curves after the fact, for instance)
+  reaper.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take)) -- pass 'true' as a 3rd argument
+                                                                                            -- to MIDI_CommitWriteTransaction()
+                                                                                            -- to do this automatically
 
 --]]
 
@@ -352,7 +373,7 @@ MIDIUtils.MIDI_GetTextSysexEvt(take, idx)
       number ppqpos: event PPQ position
       number type: message type
         -1 - system exclusive
-        1 - 15: meta text event:
+        1 - 14: meta text event:
           1 - text
           2 - copyright notice
           3 - track name
@@ -380,7 +401,7 @@ MIDIUtils.MIDI_SetTextSysexEvt(take, idx, selected, muted, ppqpos, type, msg)
       number ppqpos: event PPQ position [optional]
       number type: message type [optional, required if msg is provided]
         -1 - system exclusive
-        1 - 15: meta text event:
+        1 - 14: meta text event:
           1 - text
           2 - copyright notice
           3 - track name

@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.0-beta.4
+-- @version 0.1.0
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API

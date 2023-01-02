@@ -1,7 +1,7 @@
 --[[
    * Author: sockmonkey72 / Jeremy Bernstein
    * Licence: MIT
-   * Version: 0.1.0
+   * Version: 0.1.1
    * NoIndex: true
 --]]
 
@@ -9,11 +9,13 @@
 
 MIDI Utils API:
 
-This project began as an attempt to rewrite Cockos' high-level ReaScript MIDI API, correcting some bugs and improving
-some (at least from my perspective) less than ideal behaviors and restrictions.
+This project began as an attempt to rewrite some parts of Cockos' high-level ReaScript MIDI API, correcting some bugs
+and improving some (at least from my perspective) less than ideal behaviors and restrictions. Once I finished the
+subset of features I needed for one of my recent projects, I decided to keep going and just do the rest.
 
-* With some minor exceptions, this API is drop-in compatible with Cockos' API -- they can be used in parallel if
-  necessary. I've gone to some trouble to ensure that the behaviors, return values, etc. remain consistent.
+With some minor exceptions, this API is drop-in compatible with Cockos' API -- they can be used in parallel if necessary.
+I've gone to some trouble to ensure that the behaviors, return values, etc. remain consistent (with some documented exceptions).
+
 * MIDI_GetNote() start and end ppq positions should be consistent with how REAPER itself handles note-on/note-off
   matching and duration determination.
 * MIDI_SetNote() will no longer arbitrarily truncate or elongate overlapping notes under certain circumstances
@@ -31,9 +33,17 @@ some (at least from my perspective) less than ideal behaviors and restrictions.
    event slurp if the requested take isn't already in memory.
 * There is an SWS dependency for reading a couple of preferences out of reaper.ini, this may go away at some point.
 
-My hope is that this replacement becomes obsolete at some point, when Cockos circles around to working on MIDI stuff
-again in some uncertain future. Until then, I hope this provides a useful interim solution to scripters struggling
-with the behavior and reliability of the native API.
+In general, for many projects, dropping down to the low-level Get/SetAllEvts() API is overkill and, for many developers,
+a terra incognita of status and data bytes in a 40-year-old serial specification. The high-level API is fairly
+well-designed and easily applicable to many, if not most MIDI scripting problems. But it's buggy and there doesn't
+appear to be much dev interest in solving these problems (some of which have been in the docket since 2016ish)
+at the present time. So to make a long story short, I took some time to reimplement the very useful API in what I
+hope is more usable form (because fixed).
+
+If the native API worked 100% correctly, there would be no point to this project, of course. My hope is that this
+replacement becomes obsolete at some point, when Cockos circles around to working on MIDI stuff again in some uncertain
+future. Until then, I hope this provides a useful interim solution to scripters struggling with the behavior and
+reliability of the native API.
 
 -----------------------------------------------------------------------------
 
@@ -91,14 +101,14 @@ MIDIUtils.CheckDependencies(callerScriptName)
 
 MIDIUtils.MIDI_InitializeTake(take, enforceargs = true)
 --[[
-    MIDI_InitializeTake: gather the events in a MediaItem_Take* for use with
+    MIDI_InitializeTake: gather the events in a MediaItem_Take for use with
     MIDIUtils. Practically, this call is optional -- API calls will automatically
     call MIDI_InitializeTake internally if the provided take is not already
     prepared. The optional 'enforceargs' argument can be used to disable
     API argument type enforcement for efficiency in production code.
 
     Arguments:
-      take: the MediaItem_Take* provided by REAPER
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
 
     Return value: none
 --]]
@@ -109,7 +119,7 @@ MIDIUtils.MIDI_CountEvts(take)
     MIDI_CountEvts: provide a count of take events by type.
 
     Arguments:
-      take: the MediaItem_Take* provided by REAPER
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
 
     Return values:
       boolean rv: true if successful, false otherwise
@@ -129,7 +139,7 @@ MIDIUtils.MIDI_OpenWriteTransaction(take)
     all changes in a single bulk set action.
 
     Arguments:
-      take: the MediaItem_Take* provided by REAPER
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
 
     Return value: none
 --]]
@@ -582,7 +592,7 @@ MIDIUtils.MIDI_CountAllEvts(take)
     MIDI_CountEvts: provide a count of all take events.
 
     Arguments:
-      take: the MediaItem_Take* provided by REAPER
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
 
     Return values:
       number allcnt: count of all events (note-on, note-off, CC, meta/sysex)

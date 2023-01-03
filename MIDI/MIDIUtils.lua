@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.1
+-- @version 0.1.2-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -678,7 +678,7 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
   return modified
 end
 
-local function CorrectOverlaps(take, event, favorSelection)
+local function DoCorrectOverlaps(take, event, favorSelection)
 -- look backward
   local idx = event.idx + 1
   for i = idx - 1, 1, -1 do
@@ -688,6 +688,26 @@ local function CorrectOverlaps(take, event, favorSelection)
   for i = idx + 1, #noteEvents do
     if CorrectOverlapForEvent(take, noteEvents[i], event, favorSelection) then break end
   end
+end
+
+local function CorrectOverlaps(take, favorSelection)
+  if not EnsureTransaction(take) then return false end
+  for _, event in ipairs(noteEvents) do
+    if event:IsSelected() then
+      DoCorrectOverlaps(take, event, favorSelection)
+    end
+  end
+  return true
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_CorrectOverlaps = function (take, favorSelection)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(favorSelection, 'boolean', true)
+  )
+  return select(2, xpcall(CorrectOverlaps, OnError, take, favorSelection or false))
 end
 
 -----------------------------------------------------------------------------
@@ -702,11 +722,7 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   if not EnsureTransaction(take) then return false end
 
   if MIDIUtils.CORRECT_OVERLAPS then
-    for _, event in ipairs(noteEvents) do
-      if event:IsSelected() then
-        CorrectOverlaps(take, event, MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION)
-      end
-    end
+    CorrectOverlaps(take, MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION)
   end
   local newMIDIString = ''
   local lastPPQPos = 0

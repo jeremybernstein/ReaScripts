@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.1
+-- @version 1.1.2-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -32,11 +32,11 @@
 
 local r = reaper
 
--- package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'EventEditor/?.lua'
+package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
+-- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'EventEditor/?.lua'
 local s = require 'MIDIUtils'
 s.ENFORCE_ARGS = false -- turn off type checking
-s.CORRECT_OVERLAPS = false -- use native correction for now
+s.CORRECT_OVERLAPS = false -- manual correction
 
 local function fileExists(name)
   local f = io.open(name,'r')
@@ -869,62 +869,6 @@ local function windowFn()
     end
   end
 
-  -- manual overlap protection for prioritizing selected items
-  local function correctOverlapForEvent(testEvent, selectedEvent, favorSelection)
-    local modified = false
-    local insertTestEvent = false
-    if testEvent.type == NOTE_TYPE
-      and testEvent.chan == selectedEvent.chan
-      and testEvent.pitch == selectedEvent.pitch
-    then
-      if testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
-        testEvent.endppqpos = selectedEvent.ppqpos -- selection note-on is always right
-        insertTestEvent = true
-        modified = true
-      elseif testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
-        if favorSelection then
-          testEvent.ppqpos = selectedEvent.endppqpos
-          insertTestEvent = true
-        else
-          selectedEvent.endppqpos = testEvent.ppqpos
-          recalcEventTimes = true
-        end
-        modified = true
-      end
-
-      if testEvent.endppqpos - testEvent.ppqpos < 1 then
-        testEvent.delete = true
-      end
-
-      if insertTestEvent then -- only insert once
-        table.insert(touchedEvents, testEvent)
-      end
-    end
-    return modified
-  end
-
-  local function correctOverlaps(event, favorSelection)
-    -- find input event
-    local idx
-    for i = 1, #allEvents do
-      if allEvents[i].type == event.type and allEvents[i].idx == event.idx then
-        idx = i
-        break
-      end
-    end
-
-    if not idx then return end
-
-    -- look backward
-    for i = idx - 1, 1, -1 do
-      if correctOverlapForEvent(allEvents[i], event, favorSelection) then break end
-    end
-    -- look forward
-    for i = idx + 1, #allEvents do
-      if correctOverlapForEvent(allEvents[i], event, favorSelection) then break end
-    end
-  end
-
   -- item extents management, currently disabled
   local function getItemExtents(item)
     local item_pos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
@@ -1423,15 +1367,6 @@ local function windowFn()
     updateItemExtents(item_extents)
 
     if wantsOverlapCorrection == OVERLAP_AUTO or correctOverlapsNow then
-      for _, v in ipairs(selectedEvents) do
-        correctOverlaps(v, overlapFavorsSelected) -- then perform overlap correction etc.
-      end
-      if #touchedEvents > 0 then
-        for _, t in ipairs(touchedEvents) do
-          t.touched = true
-          table.insert(selectedEvents, t)
-        end
-      end
       correctOverlapsNow = true
     end
 
@@ -1460,6 +1395,8 @@ local function windowFn()
         end
       end
     end
+
+    if correctOverlapsNow then s.MIDI_CorrectOverlaps(take, overlapFavorsSelected) end
 
     s.MIDI_CommitWriteTransaction(take) -- sorts
     if canProcess and popupFilter == NOTE_FILTER then

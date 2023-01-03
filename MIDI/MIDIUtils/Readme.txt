@@ -698,3 +698,24 @@ MIDIUtils.p(...)
 --[[
     Convenience method to post a message (or comma-delimited messages) to the REAPER console.
 --]]
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.ENFORCE_ARGS = true
+--[
+  Flag to enable/disable argument type-checking. When enabled, submitting the wrong argument type(s) to MIDIUtils
+  functions will cause an error, useful for debugging code. Disable in production code, since the type checking
+  adds some minimal overhead. On by default, see also MIDIUtils.InitializeTake(), where this can be set.
+--]
+
+MIDIUtils.CORRECT_OVERLAPS = false
+--[
+  Flag to enable/disable overlap correction on commit. Off by default, but may be desirable if the option "Correct
+  overlapping notes while editing" is enabled, or for the Inline MIDI Editor (where that option is always active).
+--]
+
+MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
+--[
+  If CORRECT_OVERLAPS is enabled, CORRECT_OVERLAPS_FAVOR_SELECTION determines whether the selection's note-off takes
+  precedence over an unselected note-on when performing the overlap correction. Off by default.
+--]

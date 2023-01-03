@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.1-beta.1
+-- @version 1.1.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -36,6 +36,7 @@ local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'EventEditor/?.lua'
 local s = require 'MIDIUtils'
 s.ENFORCE_ARGS = false -- turn off type checking
+s.CORRECT_OVERLAPS = false -- use native correction for now
 
 local function fileExists(name)
   local f = io.open(name,'r')

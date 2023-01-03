@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.1-beta.1
+-- @version 0.1.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -54,6 +54,8 @@ local r = reaper
 local MIDIUtils = {}
 
 MIDIUtils.ENFORCE_ARGS = true -- turn off for efficiency
+MIDIUtils.CORRECT_OVERLAPS = false
+MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
 
 local NOTE_TYPE = 0
 local NOTEOFF_TYPE = 1
@@ -300,6 +302,7 @@ end
 
 function Event:IsChannelEvt() return false end
 function Event:IsAllEvt() return false end
+function Event:IsSelected() return self.flags & 1 ~= 0 end
 
 function Event:GetMIDIString()
   return self.msg
@@ -649,6 +652,45 @@ MIDIUtils.MIDI_CountAllEvts = function(take)
 end
 
 -----------------------------------------------------------------------------
+------------------------------ OVERLAP CORRECT ------------------------------
+
+local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelection)
+  local modified = false
+  if testEvent.chan == selectedEvent.chan
+    and testEvent.msg2 == selectedEvent.msg2
+  then
+    if testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
+      MIDIUtils.MIDI_SetNote(take, testEvent.idx, nil, nil, nil, selectedEvent.ppqpos, nil, nil, nil)
+      modified = true
+    elseif testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
+      if favorSelection then
+        MIDIUtils.MIDI_SetNote(take, testEvent.idx, nil, nil, selectedEvent.endppqpos, nil, nil, nil, nil)
+      else
+        MIDIUtils.MIDI_SetNote(take, selectedEvent.idx, nil, nil, nil, testEvent.ppqpos, nil, nil, nil)
+      end
+      modified = true
+    end
+
+    if testEvent.endppqpos - testEvent.ppqpos < 1 then
+      testEvent.delete = true
+    end
+  end
+  return modified
+end
+
+local function CorrectOverlaps(take, event, favorSelection)
+-- look backward
+  local idx = event.idx + 1
+  for i = idx - 1, 1, -1 do
+    if CorrectOverlapForEvent(take, noteEvents[i], event, favorSelection) then break end
+  end
+  -- look forward
+  for i = idx + 1, #noteEvents do
+    if CorrectOverlapForEvent(take, noteEvents[i], event, favorSelection) then break end
+  end
+end
+
+-----------------------------------------------------------------------------
 ------------------------------- TRANSACTIONS --------------------------------
 
 local function MIDI_OpenWriteTransaction(take)
@@ -659,20 +701,25 @@ end
 local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   if not EnsureTransaction(take) then return false end
 
-  local newMIDIString = ''
-  local ppqPos = 0
-  for _, event in ipairs(MIDIEvents) do
-    if ppqPos == 0 and event.ppqpos ~= event.offset then event.offset = event.ppqpos end -- special case for first event
-    ppqPos = ppqPos + event.offset
-    if ppqPos ~= event.ppqpos then
-      local offsetEvent = string.pack('i4Bs4', event.ppqpos - ppqPos, 0, '')
-      newMIDIString = newMIDIString .. offsetEvent
-      ppqPos = event.ppqpos
+  if MIDIUtils.CORRECT_OVERLAPS then
+    for _, event in ipairs(noteEvents) do
+      if event:IsSelected() then
+        CorrectOverlaps(take, event, MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION)
+      end
     end
+  end
+  local newMIDIString = ''
+  local lastPPQPos = 0
+  -- sort the events
+  for _, event in spairs(MIDIEvents, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
+    --if ppqPos == 0 and event.ppqpos ~= event.offset then event.offset = event.ppqpos end -- special case for first event
+    event.offset = event.ppqpos - lastPPQPos
+    lastPPQPos = event.ppqpos
+    local MIDIStr = event.msg
     if event.delete then
-      event.MIDI = string.pack('i4Bs4', event.offset, 0, '')
+      event.flags = 0
+      MIDIStr = ''
     elseif event.recalcMIDI then
-      local MIDIStr = ''
       if event:IsChannelEvt() then
         local b1 = string.char(event.chanmsg | event.chan)
         local b2 = string.char(event.msg2)
@@ -684,8 +731,8 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
       else
         MIDIStr = event.msg -- not sure what to do here, there don't appear to really be OTHER_TYPE events in the wild
       end
-      event.MIDI = string.pack('i4Bs4', event.offset, event.flags, MIDIStr)
     end
+    event.MIDI = string.pack('i4Bs4', event.offset, event.flags, MIDIStr)
     newMIDIString = newMIDIString .. event.MIDI
 
     -- handle any BezierEvents
@@ -767,8 +814,7 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
     end
     if ppqpos then
       local diff = ppqpos - event.ppqpos
-      event.ppqpos = ppqpos -- bounds checking?
-      AdjustNoteOff(noteoff, 'ppqpos', noteoff.ppqpos + diff)
+      event.ppqpos = ppqpos
     end
     if endppqpos then
       AdjustNoteOff(noteoff, 'ppqpos', endppqpos)

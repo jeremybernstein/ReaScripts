@@ -31,14 +31,13 @@ I've gone to some trouble to ensure that the behaviors, return values, etc. rema
   actual state of the take in REAPER.
 * 'Read' operations don't require a transaction, and will generally trigger a MIDI_InitializeTake(take)
    event slurp if the requested take isn't already in memory.
-* There is an SWS dependency for reading a couple of preferences out of reaper.ini, this may go away at some point.
 
 In general, for many projects, dropping down to the low-level Get/SetAllEvts() API is overkill and, for many developers,
 a terra incognita of status and data bytes in a 40-year-old serial specification. The high-level API is fairly
 well-designed and easily applicable to many, if not most MIDI scripting problems. But it's buggy and there doesn't
 appear to be much dev interest in solving these problems (some of which have been in the docket since 2016ish)
 at the present time. So to make a long story short, I took some time to reimplement the very useful API in what I
-hope is more usable form (because fixed).
+hope is a more usable form (because fixed).
 
 If the native API worked 100% correctly, there would be no point to this project, of course. My hope is that this
 replacement becomes obsolete at some point, when Cockos circles around to working on MIDI stuff again in some uncertain
@@ -49,32 +48,63 @@ reliability of the native API.
 
 USAGE:
 
-  -- get the package path to MIDIUtils in my repository
+    -- get the package path to MIDIUtils in my repository
   package.path = reaper.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
   local mu = require 'MIDIUtils'
-  -- mu.ENFORCE_ARGS = false -- true by default, enabling argument type-checking, turn off for 'production' code
 
-  if not mu.CheckDependencies('My Script') then return end -- return early if something is missing
+    -- true by default, enabling argument type-checking, turn off for 'production' code
+-- mu.ENFORCE_ARGS = false -- or use mu.MIDI_InitializeTake(), see below
 
-  local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive()) -- pass false as 2nd arg to disable argument type-checks
+    -- return early if something is missing (currently no dependencies)
+  if not mu.CheckDependencies('My Script') then return end
+
+    -- pass false as 2nd arg to disable argument type-checks
+  local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive())
   if not take then return end
 
-  mu.MIDI_InitializeTake(take) -- acquire events from take (can pass true/false as 2nd arg to enable/disable ENFORCE_ARGS)
-  mu.MIDI_OpenWriteTransaction(take) -- inform the library that we'll be writing to this take
-  mu.MIDI_InsertNote(take, true, false, 960, 1920, 0, 64, 64) -- insert a note
-  mu.MIDI_InsertCC(take, true, false, 960, 0xB0, 0, 1, 64) -- insert a CC (using default CC curve)
-  local _, newidx = mu.MIDI_InsertCC(take, true, false, 1200, 0xB0, 0, 1, 96) -- insert a CC, get new index (using default CC curve)
-  mu.MIDI_InsertCC(take, true, false, 1440, 0xB0, 0, 1, 127) -- insert another CC (using default CC curve)
-  mu.MIDI_SetCCShape(take, newidx, 5, 0.66) -- change the CC shape of the 2nd CC to bezier with a 0.66 tension
-  mu.MIDI_CommitWriteTransaction(take) -- commit the transaction to the take
-                                       -- by default, this won't reacquire the MIDI events and update the
-                                       -- take data in memory, pass 'true' as a 2nd argument if you want that
+    -- acquire events from take (can pass true/false as 2nd arg to enable/disable ENFORCE_ARGS)
+  mu.MIDI_InitializeTake(take)
 
-  reaper.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take)) -- pass 'true' as a 3rd argument
-                                                                                            -- to MIDI_CommitWriteTransaction()
-                                                                                            -- to do this automatically
+    -- inform the library that we'll be writing to this take
+  mu.MIDI_OpenWriteTransaction(take)
 
+    -- insert a note
+  mu.MIDI_InsertNote(take, true, false, 960, 1920, 0, 64, 64)
+
+    -- insert a CC (using default CC curve)
+  mu.MIDI_InsertCC(take, true, false, 960, 0xB0, 0, 1, 64)
+
+    -- insert a CC, get new index (using default CC curve)
+  local _, newidx = mu.MIDI_InsertCC(take, true, false, 1200, 0xB0, 0, 1, 96)
+
+    -- insert another CC (using default CC curve)
+  mu.MIDI_InsertCC(take, true, false, 1440, 0xB0, 0, 1, 127)
+
+    -- change the CC shape of the 2nd CC to bezier with a 0.66 tension
+  mu.MIDI_SetCCShape(take, newidx, 5, 0.66)
+
+    -- commit the transaction to the take
+    --   by default, this won't reacquire the MIDI events and update the
+    --   take data in memory, pass 'true' as a 2nd argument if you want that
+  mu.MIDI_CommitWriteTransaction(take)
+
+    -- pass 'true' as a 3rd argument to MIDI_CommitWriteTransaction()
+    --   to do this automatically
+  reaper.MarkTrackItemsDirty(
+    reaper.GetMediaItemTake_Track(take),
+    reaper.GetMediaItemTake_Item(take))
 --]]
+
+-----------------------------------------------------------------------------
+
+from ReaPack projects, you can include a copy of MIDIUtils.lua like this
+
+-- @provides
+--   MyScriptFolder/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
+
+which will grab the latest version of MIDIUtils.lua and place it in a project-specific folder
+(the folder will be created if it doesn't already exist). If you include MIDIUtils like this,
+I would be happy for an acknowledgement of usage in your README.
 
 -----------------------------------------------------------------------------
 

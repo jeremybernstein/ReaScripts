@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.0
+-- @version 1.1.1-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -32,6 +32,7 @@
 
 local r = reaper
 
+-- package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'EventEditor/?.lua'
 local s = require 'MIDIUtils'
 s.ENFORCE_ARGS = false -- turn off type checking

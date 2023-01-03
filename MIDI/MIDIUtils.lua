@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.0
+-- @version 0.1.1-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -79,16 +79,14 @@ local enumAllLastCt = -1
 local MIDIStringTail = ''
 local activeTake
 local openTransaction
+local configVarCache = {}
 
 local OnError = function (err)
   r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
 end
 
 local function CheckDependencies(scriptName)
-  if not r.APIExists('SNM_GetIntConfigVar') then
-    r.ShowConsoleMsg(scriptName .. ' requires the \'SWS\' extension (install from https://www.sws-extension.org)\n')
-    return false
-  end
+  -- no dependencies at the moment
   return true
 end
 
@@ -134,6 +132,19 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
       return keys[i], t[keys[i]]
     end
   end
+end
+
+local function ReadREAPERConfigVar_Int(name)
+  if configVarCache[name] then return configVarCache[name] end
+  for line in io.lines(r.GetResourcePath()..'/reaper.ini') do
+    local match = string.match(line, name..'='..'(%d+)$')
+    if match then
+      match = math.floor(match)
+      configVarCache[name] = match
+      return match
+    end
+  end
+  return nil
 end
 
 -----------------------------------------------------------------------------
@@ -1025,8 +1036,8 @@ local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2,
   local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
   chanmsg = chanmsg < 0xA0 or chanmsg >= 0xF0 and 0xB0 or chanmsg
   local newFlags = FlagsFromSelMute(selected, muted)
-  local defaultCCShape = r.SNM_GetIntConfigVar('midiccenv', -1)
-  if defaultCCShape ~= 0 then
+  local defaultCCShape = ReadREAPERConfigVar_Int('midiccenv') or 0
+  if defaultCCShape ~= -1 then
     defaultCCShape = defaultCCShape & 7
     if defaultCCShape >= 0 and defaultCCShape <= 5 then
       newFlags = newFlags | (defaultCCShape << 4)
@@ -1543,8 +1554,9 @@ local function MIDI_NoteNumberToNoteName(notenum, names)
   names = names or noteNames
   local notename = names[notenum % 12 + 1]
   local octave = math.floor((notenum / 12)) - 1
-  local noteOffset = r.SNM_GetIntConfigVar('midioctoffs', -0xFF) - 1 -- 1 == 0 in the interface (C4)
+  local noteOffset = ReadREAPERConfigVar_Int('midioctoffs') or -0xFF
   if noteOffset ~= -0xFF then
+    noteOffset = noteOffset - 1 -- 1 == 0 in the interface (C4)
     octave = octave + noteOffset
   end
   return notename..octave

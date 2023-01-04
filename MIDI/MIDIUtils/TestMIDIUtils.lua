@@ -14,7 +14,6 @@ r.Undo_BeginBlock2(0)
 
 local take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
 if take then
-  local rv
 
   --mu.MIDI_OpenWriteTransaction(take)
   --mu.MIDI_SetCCShape(take, 14, 5, -0.66)
@@ -51,7 +50,7 @@ if take then
 
   -- mu.post('post:', mu.MIDI_DebugInfo(take))
 
-  local noteons, noteoffs, ccs, sysexes, metas, beziers, unknowns = mu.MIDI_DebugInfo(take)
+   noteons, noteoffs, ccs, sysexes, metas, beziers, unknowns = mu.MIDI_DebugInfo(take)
   if noteons ~= 0 or noteoffs ~= 0 or ccs ~= 0 or sysexes ~= 0 or metas ~= 0 or beziers ~= 0 or unknowns ~= 0 then
     error('not all events deleted')
   end
@@ -295,13 +294,13 @@ if take then
 
   rv, selected, muted, ppqpos, chanmsg, chan, msg2, msg3 = mu.MIDI_GetCC(take, 1)
   mu.MIDI_OpenWriteTransaction(take)
-  mu.MIDI_SetCC(take, 1, not selected, not muted, ppqpos + 960, chanmsg + 0x30, chan + 1, msg2 + 1, msg3 + 10)
+  mu.MIDI_SetCC(take, 1, not selected, not muted, ppqpos + 960, chanmsg - 0x30, chan + 1, msg2 + 1, msg3 + 10)
   mu.MIDI_CommitWriteTransaction(take, true)
-  rv2, selected2, muted2, ppqpos2, chanmsg2, chan2, msg2_2, msg3_2 = r.MIDI_GetCC(take, 4) -- it moved, of course
+  rv2, selected2, muted2, ppqpos2, chanmsg2, chan2, msg2_2, msg3_2 = r.MIDI_GetCC(take, 7) -- it moved, of course
   if selected2 ~= not selected
     or muted2 ~= not muted
     or ppqpos2 ~= ppqpos + 960
-    or chanmsg2 ~= chanmsg + 0x30
+    or chanmsg2 ~= chanmsg - 0x30
     or chan2 ~= chan + 1
     or msg2_2 ~= msg2 + 1
     or msg3_2 ~= msg3 + 10

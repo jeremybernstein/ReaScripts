@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.2-beta.1
+-- @version 0.1.2-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -304,6 +304,11 @@ function Event:IsChannelEvt() return false end
 function Event:IsAllEvt() return false end
 function Event:IsSelected() return self.flags & 1 ~= 0 end
 
+function Event:SetMIDIString(msg)
+  self.msg = self:PurifyMsg(msg)
+  return self:GetMIDIString()
+end
+
 function Event:GetMIDIString()
   return self.msg
 end
@@ -426,7 +431,7 @@ function SysexEvent:init(ppqpos, offset, flags, msg, MIDI, count)
 end
 
 function SysexEvent:GetMIDIString()
-  return string.char(0xF0)..self.msg..string.char(0xF7)
+  return self.msg == '' and '' or string.char(0xF0)..self.msg..string.char(0xF7)
 end
 
 function SysexEvent:PurifyMsg(msg)
@@ -447,7 +452,7 @@ function MetaEvent:init(ppqpos, offset, flags, msg, MIDI, count)
 end
 
 function MetaEvent:GetMIDIString()
-  return string.char(0xFF)..string.char(self.msg2)..self.msg
+  return self.msg == '' and '' or string.char(0xFF)..string.char(self.msg2)..self.msg
 end
 
 function MetaEvent:PurifyMsg(msg)
@@ -726,26 +731,20 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   end
   local newMIDIString = ''
   local lastPPQPos = 0
-  -- sort the events
+  -- iterate sorted to avoid (REAPER Inline MIDI Editor) problems with offset calculation
   for _, event in spairs(MIDIEvents, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
-    --if ppqPos == 0 and event.ppqpos ~= event.offset then event.offset = event.ppqpos end -- special case for first event
     event.offset = event.ppqpos - lastPPQPos
     lastPPQPos = event.ppqpos
-    local MIDIStr = event.msg
+    local MIDIStr = event:GetMIDIString()
     if event.delete then
       event.flags = 0
-      MIDIStr = ''
+      MIDIStr = event:SetMIDIString('')
     elseif event.recalcMIDI then
       if event:IsChannelEvt() then
         local b1 = string.char(event.chanmsg | event.chan)
         local b2 = string.char(event.msg2)
         local b3 = string.char(event.msg3)
-        event.msg = event:PurifyMsg(table.concat({ b1, b2, b3 }))
-        MIDIStr = event.msg
-      elseif event:is_a(SysexEvent) or event:is_a(MetaEvent) then
-        MIDIStr = event:GetMIDIString()
-      else
-        MIDIStr = event.msg -- not sure what to do here, there don't appear to really be OTHER_TYPE events in the wild
+        MIDIStr = event:SetMIDIString(table.concat({ b1, b2, b3 }))
       end
     end
     event.MIDI = string.pack('i4Bs4', event.offset, event.flags, MIDIStr)
@@ -759,7 +758,6 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
         newMIDIString = newMIDIString .. bezString
       end
     end
-
   end
 
   r.MIDI_DisableSort(take)

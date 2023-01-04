@@ -1,7 +1,7 @@
 --[[
    * Author: sockmonkey72 / Jeremy Bernstein
    * Licence: MIT
-   * Version: 0.1.1
+   * Version: 0.1.2
    * NoIndex: true
 --]]
 
@@ -184,6 +184,25 @@ MIDIUtils.MIDI_CommitWriteTransaction(take, refresh, dirty)
       boolean refresh: when true, MIDIUtils will re-initialize the take after commit
                        this is useful if you intend to perform further manipulation on the data post-commit
       boolean dirty: when true, MIDIUtils will dirty the take post-commit
+
+    Return value: true on success, false otherwise
+--]]
+
+-----------------------------------------------------------------------------
+
+boolean rv =
+MIDIUtils.MIDI_CorrectOverlaps(take, favorSelection)
+--[[
+    MIDI_CorrectOverlaps: manually apply overlap correction to the current take. See also
+                          MIDIUtils.CORRECT_OVERLAPS and MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION
+                          for automatic overlap correction options.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean favorSelection: when true, overlap correction will attempt to leave any selected
+                              notes untouched (the note-on of position unselected note events will
+                              be changed). When false (or missing), overlap correction will preserve
+                              note-on positions and move note-offs to prevent MIDI overlaps. [optional]
 
     Return value: true on success, false otherwise
 --]]

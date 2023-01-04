@@ -53,7 +53,7 @@ USAGE:
   local mu = require 'MIDIUtils'
 
     -- true by default, enabling argument type-checking, turn off for 'production' code
--- mu.ENFORCE_ARGS = false -- or use mu.MIDI_InitializeTake(), see below
+  -- mu.ENFORCE_ARGS = false -- or use mu.MIDI_InitializeTake(), see below
 
     -- return early if something is missing (currently no dependencies)
   if not mu.CheckDependencies('My Script') then return end
@@ -63,6 +63,8 @@ USAGE:
   if not take then return end
 
     -- acquire events from take (can pass true/false as 2nd arg to enable/disable ENFORCE_ARGS)
+    -- you will want to do this once per defer cycle in persistent scripts to ensure that the
+    -- internal state matches the current take state
   mu.MIDI_InitializeTake(take)
 
     -- inform the library that we'll be writing to this take
@@ -111,7 +113,7 @@ I would be happy for an acknowledgement of usage in your README.
 MIDIUtils.SetOnError(fn)
 --[[
     SetOnError: set an optional error callback for xpcall(), otherwise a
-    traceback will be posted to the REAPER console window by default.
+                traceback will be posted to the REAPER console window by default.
 
     Return value: none
 --]]
@@ -120,8 +122,8 @@ boolean rv =
 MIDIUtils.CheckDependencies(callerScriptName)
 --[[
     CheckDependencies: check whether all MIDIUtils dependencies are met,
-    pass the name of your script as an argument, will be used as an identifier in
-    any error message generated.
+                       pass the name of your script as an argument, will be used as an
+                       identifier in any error message generated.
 
     Return value:
       boolean rv: true if dependencies are met, false otherwise
@@ -132,10 +134,16 @@ MIDIUtils.CheckDependencies(callerScriptName)
 MIDIUtils.MIDI_InitializeTake(take, enforceargs = true)
 --[[
     MIDI_InitializeTake: gather the events in a MediaItem_Take for use with
-    MIDIUtils. Practically, this call is optional -- API calls will automatically
-    call MIDI_InitializeTake internally if the provided take is not already
-    prepared. The optional 'enforceargs' argument can be used to disable
-    API argument type enforcement for efficiency in production code.
+                         MIDIUtils. In simple usage, this call is optional -- API calls
+                         will automatically call MIDI_InitializeTake() internally if the
+                         provided take is not already prepared.
+
+                         NOTE: if using MIDIUtils in a defer() script, you will want to
+                         either call this once per defer cycle to ensure that the MIDIUtils
+                         internal state is synced with the take state.
+
+                         The optional 'enforceargs' argument can be used to disable API argument
+                         type enforcement for efficiency in production code.
 
     Arguments:
       MediaItem_Take take: the MediaItem_Take provided by REAPER
@@ -163,10 +171,11 @@ MIDIUtils.MIDI_CountEvts(take)
 MIDIUtils.MIDI_OpenWriteTransaction(take)
 --[[
     MIDI_OpenWriteTransaction: start a 'write' transaction. MIDIUtils performs all
-    of its MIDI data manipulation in memory. Unlike Cockos' high-level MIDI API, there
-    are no 'immediately sorted' API calls. To make changes to the data, you are required to
-    open a transaction, make all changes, and then commit the transaction, which will write
-    all changes in a single bulk set action.
+                               of its MIDI data manipulation in memory. Unlike Cockos'
+                               high-level MIDI API, there are no 'immediately sorted'
+                               API calls. To make changes to the data, you are required to
+                               open a transaction, make all changes, and then commit the
+                               transaction, which will write all changes in a single bulk set action.
 
     Arguments:
       MediaItem_Take take: the MediaItem_Take provided by REAPER
@@ -703,7 +712,7 @@ string notename =
 MIDIUtils.MIDI_NoteNumberToNoteName(notenum, names = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' })
 --[[
     MIDI_NoteNumberToNoteName: Returns the note name + octave (i.e. A3, D#-1) of the provided MIDI note number.
-    Takes REAPER's MIDI octave name display offset preference into account.
+                               Takes REAPER's MIDI octave name display offset preference into account.
 
     Arguments:
       number notenum: MIDI note number (0 - 127)

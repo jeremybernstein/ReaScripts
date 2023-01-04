@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.2
+-- @version 0.1.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -832,6 +832,7 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
     end
     if endppqpos then
       AdjustNoteOff(noteoff, 'ppqpos', endppqpos)
+      event.endppqpos = noteoff.ppqpos
     end
     if chan then
       event.chan = chan & 0x0F

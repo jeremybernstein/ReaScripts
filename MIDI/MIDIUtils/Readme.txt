@@ -55,6 +55,12 @@ USAGE:
     -- true by default, enabling argument type-checking, turn off for 'production' code
   -- mu.ENFORCE_ARGS = false -- or use mu.MIDI_InitializeTake(), see below
 
+    -- enable overlap correction
+  mu.CORRECT_OVERLAPS = true
+    -- by default, note-ons take precedence when calculating overlap correction
+    -- turn this on to favor selected notes' note-off instead
+  -- mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true
+
     -- return early if something is missing (currently no dependencies)
   if not mu.CheckDependencies('My Script') then return end
 
@@ -139,7 +145,7 @@ MIDIUtils.MIDI_InitializeTake(take, enforceargs = true)
                          provided take is not already prepared.
 
                          NOTE: if using MIDIUtils in a defer() script, you will want to
-                         either call this once per defer cycle to ensure that the MIDIUtils
+                         call this once per defer cycle to ensure that the MIDIUtils
                          internal state is synced with the take state.
 
                          The optional 'enforceargs' argument can be used to disable API argument

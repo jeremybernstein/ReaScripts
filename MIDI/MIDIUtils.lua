@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.3
+-- @version 0.1.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -12,41 +12,8 @@
 
 --[[
 
-USAGE:
-
-  -- get the package path to MIDIUtils in my repository
-  package.path = reaper.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-  local mu = require 'MIDIUtils'
-  -- mu.ENFORCE_ARGS = false -- true by default, enabling argument type-checking, turn off for 'production' code
-
-  if not mu.CheckDependencies('My Script') then return end -- return early if something is missing
-
-  local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive())
-  if not take then return end
-
-  mu.MIDI_InitializeTake(take) -- acquire events from take (can pass true/false as 2nd arg to enable/disable ENFORCE_ARGS)
-  mu.MIDI_OpenWriteTransaction(take) -- inform the library that we'll be writing to this take
-  mu.MIDI_InsertNote(take, true, false, 960, 1920, 0, 64, 64) -- insert a note
-  mu.MIDI_InsertCC(take, true, false, 960, 0xB0, 0, 1, 64) -- insert a CC (using default CC curve)
-  local _, newidx = mu.MIDI_InsertCC(take, true, false, 1200, 0xB0, 0, 1, 96) -- insert a CC, get new index (using default CC curve)
-  mu.MIDI_InsertCC(take, true, false, 1440, 0xB0, 0, 1, 127) -- insert another CC (using default CC curve)
-  mu.MIDI_SetCCShape(take, newidx, 5, 0.66) -- change the CC shape of the 2nd CC to bezier with a 0.66 tension
-  mu.MIDI_CommitWriteTransaction(take) -- commit the transaction to the take
-                                      -- by default, this won't reacquire the MIDI events and update the
-                                      -- take data in memory, pass 'true' as a 2nd argument if you want that
-
-  reaper.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take))
-
-  -- API 'Write' operations don't write back to REAPER until MIDI_CommitWriteTransaction() is called.
-  -- API 'Read' operations are based on the data in memory, not the data in the take. If updates are
-  --   potentially occuring in REAPER 'behind the back' of the API (such as in a defer script), call
-  --   MIDI_InitializeTake() every frame, or whenever you need to resync the in-memory data with the
-  --   actual state of the take in REAPER.
-  -- 'Read' operations don't require a transaction, and will generally trigger a MIDI_InitializeTake(take)
-  --   event slurp if the requested take isn't already in memory.
-  -- Function return values, etc. should match the REAPER Reascript API with the exception of the MIDI_InsertXXX
-  --   functions, which return the new note/CC index, in addition to a boolean (simplifies adjusting
-  --   curves after the fact, for instance)
+  See the Readme.txt document in the MIDIUtils/ subdirectory for full documentation,
+  or view the latest version online: https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils/Readme.txt
 
 --]]
 

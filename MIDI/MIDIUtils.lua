@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.4
+-- @version 0.1.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -193,18 +193,45 @@ end
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
 
-local function class(base, init) -- http://lua-users.org/wiki/SimpleLuaClasses
+local DEBUG_CLASS = false -- enable to check whether we're using known object properties
+
+local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaClasses
   local c = {}    -- a new class instance
   if not init and type(base) == 'function' then
     init = base
     base = nil
   elseif type(base) == 'table' then
    -- our new class is a shallow copy of the base class!
-    for i,v in pairs(base) do
+    for i, v in pairs(base) do
       c[i] = v
     end
     c._base = base
   end
+  if DEBUG_CLASS then
+    c.names = {}
+    if setup then
+      for i, v in pairs(setup) do
+        c.names[i] = true
+      end
+    end
+    -- this isn't working quite right, bezier
+    c.__newindex = function(table, key, value)
+      local found = false
+      if table.names[key] then found = true
+      else
+        local m = getmetatable(table)
+        while (m) do
+          if m.names[key] then found = true break end
+          m = m._base
+        end
+      end
+      if not found then
+        error("unknown property: ".. key)
+      else rawset(table, key, value)
+      end
+    end
+  end
+
   -- the class will be the metatable for all its objects,
   -- and they will look up their methods in it.
   c.__index = c
@@ -212,17 +239,17 @@ local function class(base, init) -- http://lua-users.org/wiki/SimpleLuaClasses
   -- expose a constructor which can be called by <classname>(<args>)
   local mt = {}
   mt.__call = function(class_tbl, ...)
-  local obj = {}
-  setmetatable(obj, c)
-  if class_tbl.init then
-    class_tbl.init(obj,...)
-  else
-    -- make sure that any stuff from the base class is initialized!
-    if base and base.init then
-      base.init(obj, ...)
+    local obj = {}
+    setmetatable(obj, c)
+    if class_tbl.init then
+      class_tbl.init(obj,...)
+    else
+      -- make sure that any stuff from the base class is initialized!
+      if base and base.init then
+        base.init(obj, ...)
+      end
     end
-  end
-  return obj
+    return obj
   end
   c.init = init
   c.is_a = function(self, klass)
@@ -240,7 +267,7 @@ end
 -----------------------------------------------------------------------------
 ----------------------------------- EVENT -----------------------------------
 
-local Event = class()
+local Event = class(nil, { ppqpos = 0, offset = 0, flags = 0, msg1 = 0, msg2 = 0, msg3 = 0, chanmsg = 0, chan = 0, msg = '', MIDI = '', recalcMIDI = false, MIDIidx = 0, delete = false })
 function Event:init(ppqpos, offset, flags, msg, MIDI)
   self.ppqpos = ppqpos
   self.offset = offset
@@ -307,7 +334,7 @@ function ChannelEvent:IsAllEvt() return true end
 -----------------------------------------------------------------------------
 -------------------------------- NOTEON EVENT -------------------------------
 
-local NoteOnEvent = class(ChannelEvent)
+local NoteOnEvent = class(ChannelEvent, { endppqpos = 0, noteOffIdx = 0, idx = 0 })
 function NoteOnEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   ChannelEvent.init(self, ppqpos, offset, flags, msg, MIDI)
   self.endppqpos = -1
@@ -323,7 +350,7 @@ function NoteOnEvent:type() return NOTE_TYPE end
 -----------------------------------------------------------------------------
 -------------------------------- NOTEOFF EVENT ------------------------------
 
-local NoteOffEvent = class(ChannelEvent)
+local NoteOffEvent = class(ChannelEvent, { noteOnIdx = 0 })
 function NoteOffEvent:init(ppqpos, offset, flags, msg, MIDI)
   ChannelEvent.init(self, ppqpos, offset, flags, msg, MIDI)
   self.noteOnIdx = -1
@@ -334,10 +361,10 @@ function NoteOffEvent:type() return NOTEOFF_TYPE end
 -----------------------------------------------------------------------------
 ----------------------------------- CC EVENT --------------------------------
 
-local CCEvent = class(ChannelEvent)
+local CCEvent = class(ChannelEvent, { hasBezier = false, idx = 0 })
 function CCEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   ChannelEvent.init(self, ppqpos, offset, flags, msg, MIDI)
-  self.hasBezier = nil
+  self.hasBezier = false
   if count == nil or count then
     self.idx = #ccEvents
     table.insert(ccEvents, self)
@@ -378,7 +405,7 @@ function AllEvtEvent:IsAllEvt() return true end
 -----------------------------------------------------------------------------
 ------------------------------- TEXTSYX EVENT -------------------------------
 
-local TextSysexEvent = class(AllEvtEvent)
+local TextSysexEvent = class(AllEvtEvent, { idx = 0 })
 function TextSysexEvent:init(ppqpos, offset, flags, msg, MIDI, count)
   AllEvtEvent.init(self, ppqpos, offset, flags, msg, MIDI)
   if count == nil or count then
@@ -432,11 +459,10 @@ function MetaEvent:type() return META_TYPE end
 -----------------------------------------------------------------------------
 -------------------------------- BEZIER EVENT -------------------------------
 
-local BezierEvent = class(Event)
+local BezierEvent = class(Event, { ccIdx = 0 })
 function BezierEvent:init(ppqpos, offset, flags, msg, MIDI)
   Event.init(self, ppqpos, offset, flags, msg, MIDI)
   self.ccIdx = #ccEvents - 1 -- previous event, ignore if -1
-
 end
 
 function BezierEvent:type() return BEZIER_TYPE end
@@ -786,12 +812,12 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
     if selected ~= nil then
       if selected then event.flags = event.flags | 1
       else event.flags = event.flags & ~1 end
-      AdjustNoteOff(noteoff, 'selected', event.flags)
+      AdjustNoteOff(noteoff, 'flags', event.flags)
     end
     if muted ~= nil then
       if muted then event.flags = event.flags | 2
       else event.flags = event.flags & ~2 end
-      AdjustNoteOff(noteoff, 'muted', event.flags)
+      AdjustNoteOff(noteoff, 'flags', event.flags)
     end
     if ppqpos then
       local diff = ppqpos - event.ppqpos
@@ -916,7 +942,7 @@ end
 local function FindBezierData(idx, event)
   local bezEvent
   if event.hasBezier then
-   bezEvent = bezTable[event.idx + 1]
+    bezEvent = bezTable[event.idx + 1]
   --  if not bezEvent then
   --   -- this would be catastrophic, but just for debugging
   --   for k, v in pairs(bezTable) do -- use pairs, indices may be non-contiguous
@@ -976,7 +1002,7 @@ local function DeleteBezierData(idx, event)
     local ev = ccEvents[bezEvent.ccIdx + 1]
     if ev:is_a(CCEvent) and ev.idx == bezEvent.ccIdx and ev.hasBezier then
       bezTable[ev.idx + 1] = nil
-      ev.hasBezier = nil
+      ev.hasBezier = false
       rv = true
     end
   end

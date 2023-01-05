@@ -64,7 +64,6 @@ USAGE:
     -- return early if something is missing (currently no dependencies)
   if not mu.CheckDependencies('My Script') then return end
 
-    -- pass false as 2nd arg to disable argument type-checks
   local take = reaper.MIDIEditor_GetTake(MIDIEditor_GetActive())
   if not take then return end
 

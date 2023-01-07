@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.6-beta.2
+-- @version 0.1.6-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -193,10 +193,10 @@ function MakeTypedArg(val, type, optional, reapertype)
   return typedArg
 end
 
-local function TypeFromBytes(b1, b2)
+local function TypeFromBytes(b1, b2, b3)
   if b1 == 0xFF then return META_TYPE, 0xFF
   elseif b1 == 0xF0 then return SYSEX_TYPE, 0xF0
-  elseif (b1 >= 0x90 and b1 < 0xA0 and b2 ~= 0) then return NOTE_TYPE, 0x90
+  elseif (b1 >= 0x90 and b1 < 0xA0 and b3 ~= 0) then return NOTE_TYPE, 0x90
   elseif (b1 >= 0x80 and b1 < 0xA0) then return NOTEOFF_TYPE, 0x80
   elseif (b1 >= 0xA0 and b1 < 0xF0) then return CC_TYPE, b1 & 0xF0
   else return OTHER_TYPE, 0
@@ -295,7 +295,7 @@ function Event:init(ppqpos, offset, flags, msg, MIDI)
   self.msg2 = (msg and msg:byte(2)) or 0
   self.msg3 = (msg and msg:byte(3)) or 0
 
-  _, self.chanmsg = TypeFromBytes(self.msg1, self.msg2)
+  _, self.chanmsg = TypeFromBytes(self.msg1, self.msg2, self.msg3)
   self.chan = self:IsChannelEvt() and self.msg1 & 0x0F or 0
 
   self.msg = self:PurifyMsg(msg)
@@ -492,7 +492,8 @@ local function MakeEvent(ppqpos, offset, flags, msg, MIDI, count)
   if msg then
     local b1 = msg:byte(1)
     local b2 = msg:byte(2)
-    local type = TypeFromBytes(b1, b2)
+    local b3 = msg:byte(3)
+    local type = TypeFromBytes(b1, b2, b3)
     if type == NOTE_TYPE then
       return NoteOnEvent(ppqpos, offset, flags, msg, MIDI, count)
     elseif type == NOTEOFF_TYPE then
@@ -559,9 +560,6 @@ local function ReplaceMIDIEvent(event, newEvent)
 end
 
 local function GetEvents(take)
-  EnforceArgs(
-    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
-  )
   local ppqTime = 0
   local stringPos = 1
   local noteOns = {}
@@ -623,7 +621,7 @@ end
 -----------------------------------------------------------------------------
 ------------------------------------ API ------------------------------------
 
-local function MIDI_InitializeTake(take, enforceargs)
+local function MIDI_InitializeTake(take)
   GetEvents(take)
 end
 
@@ -650,7 +648,7 @@ MIDIUtils.MIDI_InitializeTake = function(take, enforceargs)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(enforceargs, 'boolean', true)
   )
-  return select(2, xpcall(MIDI_InitializeTake, OnError, take, enforceargs))
+  return select(2, xpcall(MIDI_InitializeTake, OnError, take))
 end
 
 MIDIUtils.MIDI_CountEvts = function(take)
@@ -825,7 +823,7 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
   local event = noteEvents[idx + 1]
   if event and event:is_a(NoteOnEvent) and event.idx == idx and not event.delete then
     local noteoff = MIDIEvents[event.noteOffIdx]
-    --if not noteoff then r.ShowConsoleMsg('not noteoff in setnote\n') end
+    -- if not noteoff then post('missing noteoff in setnote') end
 
     if selected ~= nil then
       if selected then event.flags = event.flags | 1

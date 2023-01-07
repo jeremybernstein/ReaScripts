@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="9f52c4e89c46ba956dec78fb13564bcec323cfb5">
+<index version="1" name="sockmonkey72 Scripts" commit="c90c57000927a9d8638e32599b1b954728137aea">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -205,6 +205,13 @@
         <source file="MIDIUtils/Readme.txt">https://github.com/jeremybernstein/ReaScripts/raw/9f52c4e89c46ba956dec78fb13564bcec323cfb5/MIDI/MIDIUtils/Readme.txt</source>
         <source file="MIDIUtils/TestMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f52c4e89c46ba956dec78fb13564bcec323cfb5/MIDI/MIDIUtils/TestMIDIUtils.lua</source>
         <source file="MIDIUtils/TestMIDIUtils2.lua">https://github.com/jeremybernstein/ReaScripts/raw/9f52c4e89c46ba956dec78fb13564bcec323cfb5/MIDI/MIDIUtils/TestMIDIUtils2.lua</source>
+      </version>
+      <version name="0.1.6-beta.2" author="sockmonkey72" time="2023-01-07T13:33:32Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source>https://github.com/jeremybernstein/ReaScripts/raw/c90c57000927a9d8638e32599b1b954728137aea/MIDI/MIDIUtils.lua</source>
+        <source file="MIDIUtils/Readme.txt">https://github.com/jeremybernstein/ReaScripts/raw/c90c57000927a9d8638e32599b1b954728137aea/MIDI/MIDIUtils/Readme.txt</source>
+        <source file="MIDIUtils/TestMIDIUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/c90c57000927a9d8638e32599b1b954728137aea/MIDI/MIDIUtils/TestMIDIUtils.lua</source>
+        <source file="MIDIUtils/TestMIDIUtils2.lua">https://github.com/jeremybernstein/ReaScripts/raw/c90c57000927a9d8638e32599b1b954728137aea/MIDI/MIDIUtils/TestMIDIUtils2.lua</source>
       </version>
     </reapack>
   </category>

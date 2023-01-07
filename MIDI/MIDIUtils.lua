@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.5
+-- @version 0.1.6-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -144,6 +144,20 @@ local function tprint (tbl, indent)
   end
 end
 
+function IsValidNumber(val)
+  if type(val) == 'number' then
+    if val == math.huge
+      or val == -math.huge
+      or val ~= val
+      or not (val > -math.huge and val < math.huge)
+    then
+        return false
+    end
+    return true
+  end
+  return false
+end
+
 function EnforceArgs(...)
   if not MIDIUtils.ENFORCE_ARGS then return true end
   local fnName = debug.getinfo(2).name
@@ -159,6 +173,9 @@ function EnforceArgs(...)
     elseif args[i].reapertype and not r.ValidatePtr(args[i].val, args[i].reapertype) then
       error(fnName..': bad type for argument #'..i..
         ', expected \''..args[i].reapertype..'\'', 3)
+      return false
+    elseif args[i].type == 'number' and not ((args[i].optional and args[i].val == nil) or IsValidNumber(args[i].val)) then
+      error(fnName..': invalid number #'..i, 3)
       return false
     end
   end
@@ -208,25 +225,25 @@ local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaCl
     c._base = base
   end
   if DEBUG_CLASS then
-    c.names = {}
+    c._names = {}
     if setup then
       for i, v in pairs(setup) do
-        c.names[i] = true
+        c._names[i] = true
       end
     end
-    -- this isn't working quite right, bezier
+
     c.__newindex = function(table, key, value)
       local found = false
-      if table.names[key] then found = true
+      if table._names and table._names[key] then found = true
       else
         local m = getmetatable(table)
         while (m) do
-          if m.names[key] then found = true break end
+          if m._names[key] then found = true break end
           m = m._base
         end
       end
       if not found then
-        error("unknown property: ".. key)
+        error("unknown property: "..key, 3)
       else rawset(table, key, value)
       end
     end
@@ -267,7 +284,8 @@ end
 -----------------------------------------------------------------------------
 ----------------------------------- EVENT -----------------------------------
 
-local Event = class(nil, { ppqpos = 0, offset = 0, flags = 0, msg1 = 0, msg2 = 0, msg3 = 0, chanmsg = 0, chan = 0, msg = '', MIDI = '', recalcMIDI = false, MIDIidx = 0, delete = false })
+local Event = class(nil, { ppqpos = 0, offset = 0, flags = 0, msg1 = 0, msg2 = 0, msg3 = 0,
+                           chanmsg = 0, chan = 0, msg = '', MIDI = '', recalcMIDI = false, MIDIidx = 0, delete = false })
 function Event:init(ppqpos, offset, flags, msg, MIDI)
   self.ppqpos = ppqpos
   self.offset = offset

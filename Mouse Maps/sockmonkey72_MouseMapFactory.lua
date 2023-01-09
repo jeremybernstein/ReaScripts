@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.2
+-- @version 0.0.1-beta.3
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -14,6 +14,8 @@ local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
 local scriptName = 'Mouse Map Factory'
+
+-- overwrite protection
 
 local function fileExists(name)
   local f = io.open(name,'r')
@@ -59,11 +61,19 @@ local statusTime = nil
 local statusContext = 0
 
 local contexts = mm.UniqueContexts()
-local showFilter = false
+local useFilter = false
 local filtered = {}
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
+
+local function getFilterNames()
+  local filterNames = {}
+  for k, v in mm.spairs(filtered, function (t, a, b) return a < b end) do
+    table.insert(filterNames, k)
+  end
+  return filterNames
+end
 
 local function handleExtState()
   if not r.HasExtState(scriptID, 'backupSet') then
@@ -71,7 +81,16 @@ local function handleExtState()
   end
   local filterStr = r.GetExtState(scriptID, 'filteredCats')
   if filterStr and filterStr ~= '' then
-    filtered = mm.Deserialize(filterStr)
+    local filterNames = mm.Deserialize(filterStr)
+    if filterNames then
+      for _, v in ipairs(filterNames) do
+        filtered[v] = true
+      end
+    end
+  end
+  local useFilterStr = r.GetExtState(scriptID, 'useFilter')
+  if useFilterStr then
+    useFilter = tonumber(useFilterStr) == 1 and true or false
   end
 end
 
@@ -204,28 +223,39 @@ local function MakeGearPopup()
       r.ImGui_CloseCurrentPopup(ctx)
     end
 
-    if showFilter then
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_Spacing(ctx)
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_Spacing(ctx)
 
-      if r.ImGui_BeginMenu(ctx, 'Filter') then
-        r.ImGui_PushFont(ctx, fontInfo.small)
-        for cxkey, context in mm.spairs(contexts, function (t, a, b) return t[a].label < t[b].label end) do
-          if context.label and context.label ~= '' then
-            local f_retval, f_v = r.ImGui_Checkbox(ctx, context.label, filtered[cxkey] and true or false)
-            if f_retval then
-              filtered[cxkey] = f_v and true or nil
-              for _, subval in ipairs(context) do
-                filtered[subval.key] = f_v and true or nil
-              end
-              r.SetExtState(scriptID, 'filteredCats', mm.Serialize(filtered, nil, true), true)
+    if r.ImGui_BeginMenu(ctx, 'Filter') then
+      r.ImGui_PushFont(ctx, fontInfo.small)
+      local f_retval, f_v = r.ImGui_Checkbox(ctx, "Enable Filter", useFilter and true or false)
+      if f_retval then
+        useFilter = f_v
+        r.SetExtState(scriptID, 'useFilter', useFilter and '1' or '0', true)
+      end
+      if not useFilter then
+        r.ImGui_BeginDisabled(ctx)
+      end
+      r.ImGui_Indent(ctx)
+      for cxkey, context in mm.spairs(contexts, function (t, a, b) return t[a].label < t[b].label end) do
+        if context.label and context.label ~= '' then
+          f_retval, f_v = r.ImGui_Checkbox(ctx, context.label, filtered[cxkey] and true or false)
+          if f_retval then
+            filtered[cxkey] = f_v and true or nil
+            for _, subval in ipairs(context) do
+              filtered[subval.key] = f_v and true or nil
             end
+            r.SetExtState(scriptID, 'filteredCats', mm.Serialize(getFilterNames(), nil, true), true)
           end
         end
-        r.ImGui_PopFont(ctx)
-        r.ImGui_EndMenu(ctx)
       end
+      r.ImGui_Unindent(ctx)
+      if not useFilter then
+        r.ImGui_EndDisabled(ctx)
+      end
+      r.ImGui_PopFont(ctx)
+      r.ImGui_EndMenu(ctx)
     end
     r.ImGui_EndPopup(ctx)
   end
@@ -269,7 +299,7 @@ local function MakeLoadPopup()
       if not cherry then Spacing() end
       local rv, selected = r.ImGui_Selectable(ctx, fn)
       if rv and selected then
-        local restored = mm.RestoreStateFromFile(r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap')
+        local restored = mm.RestoreStateFromFile(r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap', useFilter and getFilterNames() or nil)
         statusMsg = (restored and 'Loaded' or 'Failed to load')..' '..fn..'.ReaperMouseMap'
         statusTime = r.time_precise()
         statusContext = 1
@@ -284,6 +314,18 @@ local function MakeLoadPopup()
   r.ImGui_PopStyleColor(ctx)
 end
 
+local function CheckForOverwrite(path, fname)
+  if fileExists(path) then
+    local rv = r.MB('Overwrite file '..fname..'?', 'Overwrite File?', 1)
+    if rv == 1 then return true
+    else return false
+    end
+  end
+  return true
+end
+
+local lastInputTextBuffer = ''
+
 local function MakeSavePopup()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'SAVE: ')
@@ -294,29 +336,39 @@ local function MakeSavePopup()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'writepreset menu')
+    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.6)
+    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+    r.ImGui_OpenPopup(ctx, 'Write Preset')
+    lastInputTextBuffer = ''
   end
 
-  if r.ImGui_BeginPopup(ctx, 'writepreset menu') then
+  if r.ImGui_BeginPopupModal(ctx, 'Write Preset') then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      if r.ImGui_IsPopupOpen(ctx, 'writepreset menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+      if r.ImGui_IsPopupOpen(ctx, 'Write Preset', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Preset Name')
-    Spacing()
+    r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
+    r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', lastInputTextBuffer, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                                                      + r.ImGui_InputTextFlags_AutoSelectAll())
     if retval and buf then
+      lastInputTextBuffer = buf
       if not buf:match('%.ReaperMouseMap$') then buf = buf..'.ReaperMouseMap' end
-      local saved = mm.SaveCurrentStateToFile(r.GetResourcePath()..'/MouseMaps/'..buf)
-      statusMsg = (saved and 'Saved' or 'Failed to save')..' '..buf
-      statusTime = r.time_precise()
-      statusContext = 2
-      buf = buf:gsub('%.ReaperMouseMap$', '')
-      popupLabel = buf
-      r.ImGui_CloseCurrentPopup(ctx)
+      local path = r.GetResourcePath()..'/MouseMaps/'..buf
+      if CheckForOverwrite(path, buf) then
+        local saved = mm.SaveCurrentStateToFile(path, useFilter and getFilterNames() or nil)
+        statusMsg = (saved and 'Saved' or 'Failed to save')..' '..buf
+        statusTime = r.time_precise()
+        statusContext = 2
+        buf = buf:gsub('%.ReaperMouseMap$', '')
+        popupLabel = buf
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
     end
     -- r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
@@ -331,46 +383,58 @@ function MakeToggleActionPopup()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'writetoggle menu')
+    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.85)
+    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+    r.ImGui_OpenPopup(ctx, 'Build a Toggle Action')
+    lastInputTextBuffer = ''
   end
 
-  if r.ImGui_BeginPopup(ctx, 'writetoggle menu') then
+  if r.ImGui_BeginPopupModal(ctx, 'Build a Toggle Action') then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      if r.ImGui_IsPopupOpen(ctx, 'writetoggle menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+      if r.ImGui_IsPopupOpen(ctx, 'Build a Toggle Action', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Toggle Action Name')
-    Spacing()
+    r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##toggleaction', 'Untitled Toggle Action', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
+    r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##toggleaction', 'Untitled Toggle Action', lastInputTextBuffer, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                                                                      + r.ImGui_InputTextFlags_AutoSelectAll())
     if retval and buf then
       local path = r.GetResourcePath()..'/Scripts/MouseMapActions/'
       if not r.file_exists(path) then r.RecursiveCreateDirectory(path, 0) end
       if r.file_exists(path) then
         local actionName = buf..'_MouseMap.lua'
-        local rv = mm.SaveToggleActionToFile(path..actionName, wantsUngrouped)
-        wantsUngrouped = false
-        r.ImGui_CloseCurrentPopup(ctx)
-        if rv then
-          r.AddRemoveReaScript(true, 0, path..actionName, true)
-          statusMsg = 'Wrote and registered '..actionName
-        else
-          statusMsg = 'Error writing '..actionName
+        if CheckForOverwrite(path..actionName, actionName) then
+          local rv = mm.SaveToggleActionToFile(path..actionName, wantsUngrouped, useFilter and getFilterNames() or nil)
+          wantsUngrouped = false
+          r.ImGui_CloseCurrentPopup(ctx)
+          if rv then
+            r.AddRemoveReaScript(true, 0, path..actionName, true)
+            statusMsg = 'Wrote and registered '..actionName
+          else
+            statusMsg = 'Error writing '..actionName
+          end
+          statusTime = r.time_precise()
+          statusContext = 3
         end
       else
         statusMsg = 'Could not find or create directory'
+        statusTime = r.time_precise()
+        statusContext = 3
       end
-      statusTime = r.time_precise()
-      statusContext = 3
     end
 
-    r.ImGui_SameLine(ctx)
+    r.ImGui_Spacing(ctx)
+    --r.ImGui_Indent(ctx)
     local retval2, v = r.ImGui_Checkbox(ctx, 'Ungrouped', wantsUngrouped)
     if retval2 then
       wantsUngrouped = v
     end
+    --r.ImGui_Unindent(ctx)
     -- r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
   end
@@ -384,38 +448,48 @@ local function MakeOneShotActionPopup()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'writeoneshot menu')
+    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.6)
+    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+    r.ImGui_OpenPopup(ctx, 'Build a One-shot Action')
+    lastInputTextBuffer = ''
   end
 
-  if r.ImGui_BeginPopup(ctx, 'writeoneshot menu') then
+  if r.ImGui_BeginPopupModal(ctx, 'Build a One-shot Action') then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      if r.ImGui_IsPopupOpen(ctx, 'writeoneshot menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+      if r.ImGui_IsPopupOpen(ctx, 'Build a One-shot Action', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'One-Shot Action Name')
-    Spacing()
+    r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##oneshotaction', 'Untitled One-Shot Action', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
+    r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##oneshotaction', 'Untitled One-Shot Action', lastInputTextBuffer, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                                                                         + r.ImGui_InputTextFlags_AutoSelectAll())
     if retval and buf then
       local path = r.GetResourcePath()..'/Scripts/MouseMapActions/'
       if not r.file_exists(path) then r.RecursiveCreateDirectory(path, 0) end
       if r.file_exists(path) then
         local actionName = buf..'_MouseMap.lua'
-        local rv = mm.SaveOneShotActionToFile(path..actionName)
-        r.ImGui_CloseCurrentPopup(ctx)
-        if rv then
-          r.AddRemoveReaScript(true, 0, path..actionName, true)
-          statusMsg = 'Wrote and registered '..actionName
-        else
-          statusMsg = 'Error writing '..actionName
+        if CheckForOverwrite(path..actionName, actionName) then
+          local rv = mm.SaveOneShotActionToFile(path..actionName, useFilter and getFilterNames() or nil)
+          r.ImGui_CloseCurrentPopup(ctx)
+          if rv then
+            r.AddRemoveReaScript(true, 0, path..actionName, true)
+            statusMsg = 'Wrote and registered '..actionName
+          else
+            statusMsg = 'Error writing '..actionName
+          end
+          statusTime = r.time_precise()
+          statusContext = 4
         end
       else
         statusMsg = 'Could not find or create directory'
+        statusTime = r.time_precise()
+        statusContext = 4
       end
-      statusTime = r.time_precise()
-      statusContext = 4
     end
     -- r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
@@ -544,6 +618,11 @@ local function openWindow()
     windowInfo.wantsResizeUpdate = true
   end
 
+  -- r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_InputTextEnterKeepActive(), 1)
+
+  if useFilter then
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(), 0x330000FF)
+  end
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
   -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
   r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight * 2)
@@ -555,6 +634,9 @@ local function openWindow()
                                       + r.ImGui_WindowFlags_NoScrollbar()
                                       + r.ImGui_WindowFlags_NoSavedSettings())
   r.ImGui_PopFont(ctx)
+  if useFilter then
+    r.ImGui_PopStyleColor(ctx)
+  end
 
   return visible, open
 end

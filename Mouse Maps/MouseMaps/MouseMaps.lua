@@ -81,6 +81,14 @@ local contexts = {
   MM_CTX_TRACK_CLK = 'Track (left click)',
 }
 
+local function getContextNames()
+  local contextNames = {}
+  for k in pairs(contexts) do
+    table.insert(contextNames, k)
+  end
+  return contextNames
+end
+
 local function post(...)
   local args = {...}
   local str = ''
@@ -108,6 +116,10 @@ local function tprint (tbl, indent)
   end
 end
 
+local function OrderByKey(t, a, b)
+  return a < b
+end
+
 local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
   -- collect the keys
   local keys = {}
@@ -132,7 +144,7 @@ end
 -- could use this for a filter function implementation
 local function UniqueContexts()
   local unique = {}
-  for k, v in spairs(contexts, function(t, a, b) return a < b end) do
+  for k, v in spairs(contexts, OrderByKey) do
     local base = k:match('^(.*)_[RM]MOUSE_CLK$')
     if not base then base = k:match('^(.*)_(.*)CLK$') end
     if not base then base = k:match('^(.*)_[RM]MOUSE') end
@@ -153,6 +165,13 @@ end
 
 local function ReadStateFromFile(path, filtered)
   local state = {}
+  local ctx
+  if filtered then
+    ctx = {}
+    for _, v in ipairs(filtered) do
+      ctx[v] = true
+    end
+  end
   local current, currentctx
   if not r.file_exists(path) then return false end
   for line in io.lines(path) do
@@ -162,10 +181,17 @@ local function ReadStateFromFile(path, filtered)
         current = nil
         currentctx = nil
       else
-        if not filtered or filtered[newcontext] then
+        local append = true
+        if filtered then
+          append = ctx[newcontext] and true or false
+        end
+        if append then
           if not state[newcontext] then state[newcontext] = {} end
           currentctx = newcontext
           current = state[newcontext]
+        else
+          current = nil
+          currentctx = nil
         end
       end
     end
@@ -190,15 +216,19 @@ local function GetCurrentState(filtered)
   return ReadStateFromFile(r.GetResourcePath()..'/reaper-mouse.ini', filtered)
 end
 
-local function RestoreState(state, ctx)
+local function RestoreState(state, filtered)
   if not state then return false end
-  if not ctx then ctx = contexts
-  elseif ctx == 0 then ctx = nil
+  local rawCtx = filtered
+  if not rawCtx then rawCtx = getContextNames() end
+
+  local ctx = {}
+  for _, v in ipairs(rawCtx) do
+    ctx[v] = true
   end
 
   -- set everything to -1
   if ctx then
-    for k, v in pairs(ctx) do
+    for k in pairs(ctx) do
       for i = 0, 15 do
         r.SetMouseModifier(k, i, '-1')
       end
@@ -206,7 +236,8 @@ local function RestoreState(state, ctx)
   end
 
   for k, v in pairs(state) do
-    local known = (ctx and ctx[k]) and true or false
+    -- filtered will not restored unknown cats
+    local known = filtered and true or (ctx and ctx[k]) and true or false
     for i = 0, 15 do
       if v[i] then
         r.SetMouseModifier(k, i, v[i])
@@ -218,14 +249,14 @@ local function RestoreState(state, ctx)
   return true
 end
 
-local function RestoreStateFromFile(path)
+local function RestoreStateFromFile(path, filtered)
   local state = ReadStateFromFile(path)
-  return RestoreState(state)
+  return RestoreState(state, filtered)
 end
 
 local function PrintState(state)
   local str = ''
-  for k, v in spairs(state, function(t, a, b) return a < b end ) do
+  for k, v in spairs(state, OrderByKey) do
     local cherry = true
     for i = 0, 15 do
       if v[i] then
@@ -263,7 +294,7 @@ local function Serialize(val, name, skipnewlines, depth)
   end
   if type(val) == 'table' then
       tmp = tmp .. '{' .. (not skipnewlines and '\n' or '')
-      for k, v in spairs(val, function(t, a, b) return a < b end) do
+      for k, v in spairs(val, OrderByKey) do
           tmp =  tmp .. Serialize(v, k, skipnewlines, depth + 1) .. ',' .. (not skipnewlines and '\n' or '')
       end
       tmp = tmp .. string.rep(' ', depth) .. '}'
@@ -303,8 +334,8 @@ local function SaveStateToFile(state, path)
   return false
 end
 
-local function SaveCurrentStateToFile(path)
-  return SaveStateToFile(GetCurrentState(), path)
+local function SaveCurrentStateToFile(path, filtered)
+  return SaveStateToFile(GetCurrentState(filtered), path)
 end
 
 local function PrintToggleActionForState(state, wantsUngrouped, filtered)
@@ -318,7 +349,8 @@ local function PrintToggleActionForState(state, wantsUngrouped, filtered)
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
     ..'local '..Serialize(state, 'data')..'\n\n'
-    ..'mm.HandleToggleAction('..actionName..', '..'data, '..(filtered and 'true' or 'false')..')\n'
+    ..(filtered and ('local '..Serialize(filtered, 'filter')..'\n\n') or '')
+    ..'mm.HandleToggleAction('..actionName..', '..'data'..(filtered and ', filter' or '')..')\n'
     ..'r.TrackList_AdjustWindows(0)\n'
   return str
 end
@@ -339,7 +371,8 @@ local function PrintOneShotActionForState(state, filtered)
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
     ..'local '..Serialize(state, 'data')..'\n\n'
-    ..'mm.RestoreState(data, '..(filtered and 'true' or 'false')..')\n'
+    ..(filtered and ('local '..Serialize(filtered, 'filter')..'\n\n') or '')
+    ..'mm.RestoreState(data'..(filtered and ', filter' or '')..')\n'
   return str
 end
 
@@ -421,12 +454,12 @@ local function RemoveFromGroup(sectionID, cmdID)
   end
 end
 
-local function HandleToggleAction(cmdName, ungrouped, data)
+local function HandleToggleAction(cmdName, data, filtered)
   local _, _, sectionID, cmdID = r.get_action_context()
   local togState = r.GetToggleCommandStateEx(sectionID, cmdID)
-  local commandName = ungrouped and cmdName or CommonName
+  local commandName = cmdName or CommonName
   local extState = r.GetExtState(SectionName, commandName)
-  local common = not ungrouped
+  local common = cmdName and true or false
 
   -- post(cmdName, '"'..(extState and 'hasExt' or 'nil')..'"')
 
@@ -463,7 +496,7 @@ local function HandleToggleAction(cmdName, ungrouped, data)
         r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
       end
       post('toggle on')
-      RestoreState(data)
+      RestoreState(data, filtered)
     else
       togState = 0
       post('restore common state')

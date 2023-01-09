@@ -459,23 +459,23 @@ local function HandleToggleAction(cmdName, data, filtered)
       if common then
         if not extState or extState == '' then
           r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
-          post('set common state')
+          -- post('set common state')
         end
         SwapActiveAction(sectionID, cmdID)
       else
         r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
       end
-      post('toggle on')
+      -- post('toggle on')
       RestoreState(data, filtered)
     else
       togState = 0
-      post('restore common state')
+      -- post('restore common state')
       if extState and extState ~= '' then RestoreState_Serialized(extState) end
       r.DeleteExtState(SectionName, commandName, true)
       if common then
         RemoveActiveAction(sectionID, cmdID)
       end
-      post('toggle off')
+      -- post('toggle off')
     end
   end
   r.SetToggleCommandState(sectionID, cmdID, togState)

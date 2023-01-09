@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.4
+-- @version 0.0.1-beta.5
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory

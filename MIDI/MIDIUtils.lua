@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.6
+-- @version 0.1.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -30,10 +30,12 @@ local CC_TYPE = 2
 local SYSEX_TYPE = 3
 local META_TYPE = 4
 local BEZIER_TYPE = 5
-local OTHER_TYPE = 6
+local TAIL_TYPE = 6
+local OTHER_TYPE = 7
 
 local MIDIEvents = {}
 local bezTable = {}
+local tailEvent
 
 local noteEvents = {}
 local ccEvents = {}
@@ -45,7 +47,6 @@ local enumSyxIdx = 0
 local enumAllIdx = 0
 local enumAllLastCt = -1
 
-local MIDIStringTail = ''
 local activeTake
 local openTransaction
 local configVarCache = {}
@@ -327,6 +328,12 @@ end
 
 function Event:type() return OTHER_TYPE end
 
+local TailEvent = class(Event)
+function TailEvent:init(ppqpos, offset, flags, msg, MIDI)
+  Event.init(self, ppqpos, offset, flags, msg, MIDI)
+end
+function TailEvent:type() return TAIL_TYPE end
+
 local UnknownEvent = class(Event)
 function UnknownEvent:init(ppqpos, offset, flags, msg, MIDI)
   Event.init(self, ppqpos, offset, flags, msg, MIDI)
@@ -525,7 +532,7 @@ local function Reset()
   enumSyxIdx = 0
   enumAllIdx = 0
   enumAllLastCt = -1
-  MIDIStringTail = ''
+  tailEvent = nil
   activeTake = nil
   openTransaction = nil
 
@@ -596,7 +603,9 @@ local function GetEvents(take)
     end
     stringPos = newStringPos
   end
-  MIDIStringTail = MIDIString:sub(-12)
+  local TailMsg = MIDIString:sub(-12)
+  local offset, flags, msg = string.unpack('i4Bs4', TailMsg)
+  tailEvent = TailEvent(ppqTime + offset, offset, flags, msg, TailMsg)
   return true
 end
 
@@ -707,9 +716,7 @@ end
 local function CorrectOverlaps(take, favorSelection)
   if not EnsureTransaction(take) then return false end
   for _, event in ipairs(noteEvents) do
-    if event:IsSelected() then
-      DoCorrectOverlaps(take, event, favorSelection)
-    end
+    DoCorrectOverlaps(take, event, event:IsSelected() and favorSelection or false)
   end
   return true
 end
@@ -742,7 +749,7 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   local lastPPQPos = 0
   -- iterate sorted to avoid (REAPER Inline MIDI Editor) problems with offset calculation
   for _, event in spairs(MIDIEvents, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
-    event.offset = event.ppqpos - lastPPQPos
+    event.offset = math.floor(event.ppqpos - lastPPQPos)
     lastPPQPos = event.ppqpos
     local MIDIStr = event:GetMIDIString()
     if event.delete then
@@ -770,7 +777,9 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   end
 
   r.MIDI_DisableSort(take)
-  r.MIDI_SetAllEvts(take, newMIDIString .. MIDIStringTail)
+  tailEvent.offset = math.floor(tailEvent.ppqpos - lastPPQPos)
+  local TailMsg = string.pack('i4Bs4', tailEvent.offset, tailEvent.flags, tailEvent.msg)
+  r.MIDI_SetAllEvts(take, newMIDIString .. TailMsg)
   r.MIDI_Sort(take)
   openTransaction = nil
 

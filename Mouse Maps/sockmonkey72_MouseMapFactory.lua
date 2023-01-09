@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.1
+-- @version 0.0.1-beta.2
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -43,7 +43,7 @@ local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnabl
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
 local DEFAULT_WIDTH = 36 * FONTSIZE_LARGE
-local DEFAULT_HEIGHT = 18 * FONTSIZE_LARGE
+local DEFAULT_HEIGHT = 19.5 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 60
 
 local windowInfo
@@ -58,25 +58,21 @@ local statusMsg = ''
 local statusTime = nil
 local statusContext = 0
 
+local contexts = mm.UniqueContexts()
+local showFilter = false
+local filtered = {}
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
 local function handleExtState()
-  -- overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
-  -- wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
-  -- reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
-
-  -- if r.HasExtState(scriptID, 'wantsOverlapCorrection') then
-  --   local wants = r.GetExtState(scriptID, 'wantsOverlapCorrection')
-  --   wantsOverlapCorrection = wants == '1' and OVERLAP_AUTO or wants == '2' and OVERLAP_TIMEOUT or wants == '0' and OVERLAP_MANUAL or OVERLAP_AUTO
-  -- end
-  -- if r.HasExtState(scriptID, 'overlapCorrectionTimeout') then
-  --   local timeout = tonumber(r.GetExtState(scriptID, 'overlapCorrectionTimeout'))
-  --   if timeout then
-  --     timeout = timeout < 100 and 100 or timeout > 5000 and 5000 or timeout
-  --     overlapCorrectionTimeout = math.floor(timeout)
-  --   end
-  -- end
+  if not r.HasExtState(scriptID, 'backupSet') then
+    r.SetExtState(scriptID, 'backupSet', mm.GetCurrentState_Serialized(true), true)
+  end
+  local filterStr = r.GetExtState(scriptID, 'filteredCats')
+  if filterStr and filterStr ~= '' then
+    filtered = mm.Deserialize(filterStr)
+  end
 end
 
 local function prepRandomShit()
@@ -100,7 +96,7 @@ local function processBaseFontUpdate(baseFontSize)
   fontInfo.smallDefaultSize = FONTSIZE_SMALL
 
   windowInfo.defaultWidth = 36 * fontInfo.largeDefaultSize
-  windowInfo.defaultHeight = 18 * fontInfo.largeDefaultSize
+  windowInfo.defaultHeight = 19.5 * fontInfo.largeDefaultSize
   DEFAULT_ITEM_WIDTH = 4.6 * FONTSIZE_LARGE
   windowInfo.width = windowInfo.defaultWidth -- * canvasScale
   windowInfo.height = windowInfo.defaultHeight -- * canvasScale
@@ -146,20 +142,99 @@ end
 
 local popupLabel = 'Load a Preset...'
 
-local function mainFn()
-  ---------------------------------------------------------------------------
-  -------------------------------- POPUP MENU -------------------------------
+local function Spacing()
+  local posy = r.ImGui_GetCursorPosY(ctx)
+  r.ImGui_SetCursorPosY(ctx, posy + ((r.ImGui_GetFrameHeight(ctx) / 4) * canvasScale))
+end
 
-  r.ImGui_PushFont(ctx, fontInfo.large)
+local function MakeGearPopup()
+  local x = r.ImGui_GetWindowSize(ctx)
+  local textWidth = r.ImGui_CalcTextSize(ctx, 'Gear')
+  r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+  r.ImGui_Button(ctx, 'Gear')
 
-  r.ImGui_Spacing(ctx)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
-  r.ImGui_Text(ctx, 'PRESETS')
-  r.ImGui_Spacing(ctx)
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    r.ImGui_OpenPopup(ctx, 'gear menu')
+  end
 
+  if r.ImGui_BeginPopup(ctx, 'gear menu') then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      if r.ImGui_IsPopupOpen(ctx, 'gear menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+    local rv, selected, v
+
+    rv, selected = r.ImGui_Selectable(ctx, 'Open Mouse Modifiers Preference')
+    if rv and selected then
+      r.ViewPrefs(466, '')
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_Spacing(ctx)
+
+    rv, selected = r.ImGui_Selectable(ctx, 'Update Backup Set')
+    if rv and selected then
+      local backupStr = mm.GetCurrentState_Serialized(true) -- always get a full set
+      r.SetExtState(scriptID, 'backupSet', backupStr, true)
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+    rv, selected = r.ImGui_Selectable(ctx, 'Restore Backup Set')
+    if rv and selected then
+      local backupStr = r.GetExtState(scriptID, 'backupSet')
+      mm.RestoreState_Serialized(backupStr)
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_Spacing(ctx)
+
+    -- r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
+    rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                   + r.ImGui_InputTextFlags_CharsDecimal())
+    if rv then
+      v = processBaseFontUpdate(tonumber(v))
+      r.SetExtState(scriptID, 'baseFont', tostring(v), true)
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    if showFilter then
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_Spacing(ctx)
+
+      if r.ImGui_BeginMenu(ctx, 'Filter') then
+        r.ImGui_PushFont(ctx, fontInfo.small)
+        for cxkey, context in mm.spairs(contexts, function (t, a, b) return t[a].label < t[b].label end) do
+          if context.label and context.label ~= '' then
+            local f_retval, f_v = r.ImGui_Checkbox(ctx, context.label, filtered[cxkey] and true or false)
+            if f_retval then
+              filtered[cxkey] = f_v and true or nil
+              for _, subval in ipairs(context) do
+                filtered[subval.key] = f_v and true or nil
+              end
+              r.SetExtState(scriptID, 'filteredCats', mm.Serialize(filtered, nil, true), true)
+            end
+          end
+        end
+        r.ImGui_PopFont(ctx)
+        r.ImGui_EndMenu(ctx)
+      end
+    end
+    r.ImGui_EndPopup(ctx)
+  end
+  r.ImGui_PopStyleColor(ctx)
+end
+
+local function MakeLoadPopup()
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Text(ctx, 'LOAD: ')
-  r.ImGui_SameLine(ctx)
+  r.ImGui_Text(ctx, 'LOAD:')
   r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
   r.ImGui_Button(ctx, popupLabel)
   handleStatus(1)
@@ -191,7 +266,7 @@ local function mainFn()
     end
     local cherry = true
     for _, fn in mm.spairs(fnames, function (t, a, b) return t[a] < t[b] end ) do
-      if not cherry then r.ImGui_Spacing(ctx) end
+      if not cherry then Spacing() end
       local rv, selected = r.ImGui_Selectable(ctx, fn)
       if rv and selected then
         local restored = mm.RestoreStateFromFile(r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap')
@@ -207,12 +282,11 @@ local function mainFn()
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
+end
 
-  r.ImGui_Spacing(ctx)
-
+local function MakeSavePopup()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'SAVE: ')
-  r.ImGui_SameLine(ctx)
   r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
   r.ImGui_Button(ctx, 'Write a Preset...')
   handleStatus(2)
@@ -231,13 +305,13 @@ local function mainFn()
     end
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Preset Name')
-    r.ImGui_Spacing(ctx)
+    Spacing()
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
     if retval and buf then
       if not buf:match('%.ReaperMouseMap$') then buf = buf..'.ReaperMouseMap' end
       local saved = mm.SaveCurrentStateToFile(r.GetResourcePath()..'/MouseMaps/'..buf)
-      statusMsg = (saved and 'Saved' or 'Failed to save')..' '..buf..'.ReaperMouseMap'
+      statusMsg = (saved and 'Saved' or 'Failed to save')..' '..buf
       statusTime = r.time_precise()
       statusContext = 2
       buf = buf:gsub('%.ReaperMouseMap$', '')
@@ -248,15 +322,9 @@ local function mainFn()
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
+end
 
-  r.ImGui_NewLine(ctx)
-  r.ImGui_Separator(ctx)
-  r.ImGui_NewLine(ctx)
-
-  -- r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Text(ctx, 'FACTORIES')
-  r.ImGui_Spacing(ctx)
-
+function MakeToggleActionPopup()
   r.ImGui_Button(ctx, 'Build a Toggle Action...')
   handleStatus(3)
 
@@ -274,7 +342,7 @@ local function mainFn()
     end
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Toggle Action Name')
-    r.ImGui_Spacing(ctx)
+    Spacing()
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##toggleaction', 'Untitled Toggle Action', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
     if retval and buf then
@@ -307,8 +375,9 @@ local function mainFn()
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
+end
 
-  r.ImGui_Spacing(ctx)
+local function MakeOneShotActionPopup()
   r.ImGui_Button(ctx, 'Build a One-shot Action...')
   handleStatus(4)
 
@@ -326,9 +395,9 @@ local function mainFn()
     end
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'One-Shot Action Name')
-    r.ImGui_Spacing(ctx)
+    Spacing()
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##oneshotaction', 'Untitled Toggle Action', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##oneshotaction', 'Untitled One-Shot Action', '', r.ImGui_InputTextFlags_EnterReturnsTrue())
     if retval and buf then
       local path = r.GetResourcePath()..'/Scripts/MouseMapActions/'
       if not r.file_exists(path) then r.RecursiveCreateDirectory(path, 0) end
@@ -352,9 +421,43 @@ local function mainFn()
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
+end
+
+local function mainFn()
+  ---------------------------------------------------------------------------
+  -------------------------------- POPUP MENU -------------------------------
+
+  r.ImGui_PushFont(ctx, fontInfo.large)
+
+  Spacing()
+  r.ImGui_AlignTextToFramePadding(ctx)
+  r.ImGui_Text(ctx, 'PRESETS')
+
+  r.ImGui_SameLine(ctx)
+  MakeGearPopup()
+
+  r.ImGui_Separator(ctx)
+
+  Spacing()
+  MakeLoadPopup()
+
+  Spacing()
+  MakeSavePopup()
+  Spacing()
+
+  Spacing()
+  r.ImGui_AlignTextToFramePadding(ctx)
+  r.ImGui_Text(ctx, 'FACTORIES')
+
+  r.ImGui_Separator(ctx)
+
+  Spacing()
+  MakeToggleActionPopup()
+
+  Spacing()
+  MakeOneShotActionPopup()
 
   r.ImGui_PopFont(ctx)
-
 end
 
 -----------------------------------------------------------------------------
@@ -430,7 +533,7 @@ local function updateFonts()
 end
 
 local function openWindow()
-  local windowSizeFlag = r.ImGui_Cond_Always() --r.ImGui_Cond_Appearing()
+  local windowSizeFlag = r.ImGui_Cond_Appearing()
   if windowInfo.wantsResize then
     windowSizeFlag = nil
   end
@@ -443,11 +546,7 @@ local function openWindow()
 
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
   -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
-
-  r.ImGui_PushFont(ctx, fontInfo.large)
-  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 4
-  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth * (canvasScale), windowInfo.defaultHeight, windowInfo.defaultWidth * (canvasScale), windowInfo.defaultHeight * 3)
-  r.ImGui_PopFont(ctx)
+  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight * 2)
 
   r.ImGui_PushFont(ctx, fontInfo.small)
   local visible, open = r.ImGui_Begin(ctx, titleBarText, true,

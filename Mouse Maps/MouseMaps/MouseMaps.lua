@@ -11,7 +11,7 @@ local MouseMaps = {}
 local SectionName = 'sockmonkey72_MouseMaps'
 local CommonName = 'commonInitState'
 
--- known context as of 7. Jan 2023
+-- known contexts as of 7. Jan 2023
 local contexts = {
   MM_CTX_AREASEL = 'Razor edit area (left click)',
   MM_CTX_AREASEL_CLK = 'Razor edit area (left click)',
@@ -129,7 +129,29 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
   end
 end
 
-local function ReadStateFromFile(path)
+-- could use this for a filter function implementation
+local function UniqueContexts()
+  local unique = {}
+  for k, v in spairs(contexts, function(t, a, b) return a < b end) do
+    local base = k:match('^(.*)_[RM]MOUSE_CLK$')
+    if not base then base = k:match('^(.*)_(.*)CLK$') end
+    if not base then base = k:match('^(.*)_[RM]MOUSE') end
+    if not base then base = k end
+    if base then
+      if not unique[base] then
+        unique[base] = {}
+        unique[base].label = v:match('^(.*)%s+%(')
+        if not unique[base].label then unique[base].label = v end
+        -- if not unique[base].label == '' or unique[base].label == '' then error('bad label for '..v, 3) end
+      end
+      table.insert(unique[base], { key = k, value = v })
+    end
+  end
+  -- tprint(unique)
+  return unique
+end
+
+local function ReadStateFromFile(path, filtered)
   local state = {}
   local current, currentctx
   if not r.file_exists(path) then return false end
@@ -140,9 +162,11 @@ local function ReadStateFromFile(path)
         current = nil
         currentctx = nil
       else
-        if not state[newcontext] then state[newcontext] = {} end
-        currentctx = newcontext
-        current = state[newcontext]
+        if not filtered or filtered[newcontext] then
+          if not state[newcontext] then state[newcontext] = {} end
+          currentctx = newcontext
+          current = state[newcontext]
+        end
       end
     end
 
@@ -162,23 +186,32 @@ local function ReadStateFromFile(path)
   return state
 end
 
-local function GetCurrentState()
-  return ReadStateFromFile(r.GetResourcePath()..'/reaper-mouse.ini')
+local function GetCurrentState(filtered)
+  return ReadStateFromFile(r.GetResourcePath()..'/reaper-mouse.ini', filtered)
 end
 
-local function RestoreState(state)
+local function RestoreState(state, ctx)
   if not state then return false end
+  if not ctx then ctx = contexts
+  elseif ctx == 0 then ctx = nil
+  end
+
   -- set everything to -1
-  for k, v in pairs(contexts) do
-    for i = 0, 15 do
-      r.SetMouseModifier(k, i, '-1')
+  if ctx then
+    for k, v in pairs(ctx) do
+      for i = 0, 15 do
+        r.SetMouseModifier(k, i, '-1')
+      end
     end
   end
 
   for k, v in pairs(state) do
+    local known = (ctx and ctx[k]) and true or false
     for i = 0, 15 do
       if v[i] then
         r.SetMouseModifier(k, i, v[i])
+      elseif not known then
+        r.SetMouseModifier(k, i, '-1')
       end
     end
   end
@@ -274,18 +307,24 @@ local function SaveCurrentStateToFile(path)
   return SaveStateToFile(GetCurrentState(), path)
 end
 
-local function PrintToggleActionForState(state, wantsUngrouped)
+local function PrintToggleActionForState(state, wantsUngrouped, filtered)
+  local actionName = 'nil'
+  if wantsUngrouped then
+    local _, filename, sectionID, cmdID = r.get_action_context()
+    actionName = filename
+  end
+
   local str = 'local r = reaper\n\n'
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
     ..'local '..Serialize(state, 'data')..'\n\n'
-    ..'mm.HandleToggleAction("toggleCommandTest", '..(wantsUngrouped and 'true' or 'nil')..', '..'data)\n'
+    ..'mm.HandleToggleAction('..actionName..', '..'data, '..(filtered and 'true' or 'false')..')\n'
     ..'r.TrackList_AdjustWindows(0)\n'
   return str
 end
 
-local function SaveToggleActionToFile(path, wantsUngrouped)
-  local actionStr = PrintToggleActionForState(GetCurrentState(), wantsUngrouped)
+local function SaveToggleActionToFile(path, wantsUngrouped, filtered)
+  local actionStr = PrintToggleActionForState(GetCurrentState(filtered), wantsUngrouped, filtered)
   local f = io.open(path, 'wb')
   if f then
     f:write(actionStr)
@@ -295,17 +334,17 @@ local function SaveToggleActionToFile(path, wantsUngrouped)
   return false
 end
 
-local function PrintOneShotActionForState(state)
+local function PrintOneShotActionForState(state, filtered)
   local str = 'local r = reaper\n\n'
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
     ..'local '..Serialize(state, 'data')..'\n\n'
-    ..'mm.RestoreState(data)\n'
+    ..'mm.RestoreState(data, '..(filtered and 'true' or 'false')..')\n'
   return str
 end
 
-local function SaveOneShotActionToFile(path)
-  local actionStr = PrintOneShotActionForState(GetCurrentState())
+local function SaveOneShotActionToFile(path, filtered)
+  local actionStr = PrintOneShotActionForState(GetCurrentState(filtered), filtered)
   local f = io.open(path, 'wb')
   if f then
     f:write(actionStr)
@@ -322,6 +361,14 @@ local function GetGroup()
   local extState = r.GetExtState(SectionName, 'commonTogIDs')
   if extState then groupState = Deserialize(extState) end
   return groupState
+end
+
+local function IsInGroup(cmdID)
+  local groupState = GetGroup()
+  for _, v in pairs(groupState) do
+    if v == cmdID then return true end
+  end
+  return false
 end
 
 local function PutGroup(groupState)
@@ -385,19 +432,22 @@ local function HandleToggleAction(cmdName, ungrouped, data)
 
   if togState == -1 then -- first run, not set yet (fix this, Cockos!)
     if extState and extState ~= '' then
-      togState = 1
-      if common then
-        AddToGroup(sectionID, cmdID)
+      if not common or IsInGroup(cmdID) then
+        togState = 1
+        if common then
+          AddToGroup(sectionID, cmdID)
+        end
+        post('-1 toggle on')
       end
-      post('-1 toggle on')
     else
       togState = 0
-      if common then
-        RemoveFromGroup(sectionID, cmdID)
-      else
+      if not common or IsInGroup(cmdID) then
         r.DeleteExtState(SectionName, commandName, true)
+        if common then
+          RemoveFromGroup(sectionID, cmdID)
+        end
+        post('-1 toggle off')
       end
-      post('-1 toggle off')
     end
   else -- normal operation
     if togState ~= 1 then
@@ -446,6 +496,12 @@ MouseMaps.PrintOneShotActionForState = PrintOneShotActionForState
 MouseMaps.SaveOneShotActionToFile = SaveOneShotActionToFile
 
 MouseMaps.HandleToggleAction = HandleToggleAction
+
+MouseMaps.UniqueContexts = UniqueContexts
+
+MouseMaps.Serialize = Serialize
+MouseMaps.Deserialize = Deserialize
+MouseMaps.tprint = tprint
 
 MouseMaps.spairs = spairs
 MouseMaps.post = post

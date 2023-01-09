@@ -389,69 +389,42 @@ end
 
 -- TODO: group handling -- register command IDs and disable all but this one when enabling
 
-local function GetGroup()
-  local groupState
-  local extState = r.GetExtState(SectionName, 'commonTogIDs')
-  if extState then groupState = Deserialize(extState) end
-  return groupState
+local function GetActiveAction()
+  return tonumber(r.GetExtState(SectionName, 'activeToggleAction'))
 end
 
-local function IsInGroup(cmdID)
-  local groupState = GetGroup()
-  for _, v in pairs(groupState) do
-    if v == cmdID then return true end
-  end
-  return false
+local function IsActiveAction(cmdID)
+  local activeAction = GetActiveAction()
+  return cmdID == activeAction
 end
 
-local function PutGroup(groupState)
-  if groupState then
-    r.SetExtState(SectionName, 'commonTogIDs', Serialize(groupState, nil, true), 1)
+local function PutActiveAction(cmdID)
+  if cmdID then
+    r.SetExtState(SectionName, 'activeToggleAction', tostring(cmdID), 1)
+  else
+    r.DeleteExtState(SectionName, 'activeToggleAction', 1)
   end
 end
 
-local function DisableAllInGroup(sectionID, cmdID)
-  local groupState = GetGroup()
-  if groupState then
-    for _, v in pairs(groupState) do
-      if v ~= cmdID then
-        -- NOTE: this sets the command state, but doesn't call into the command itself
-        -- which simplifies the logic significantly
-        r.SetToggleCommandState(sectionID, v, 0)
-      end
-    end
+local function SwapActiveAction(sectionID, cmdID)
+  local activeAction = GetActiveAction()
+  if activeAction ~= cmdID then
+      -- NOTE: this sets the command state, but doesn't call into the command itself
+      -- which simplifies the logic significantly
+    if activeAction then r.SetToggleCommandState(sectionID, activeAction, 0) end
+    PutActiveAction(cmdID)
   end
 end
 
-local function AddToGroup(sectionID, cmdID)
-  local found = false
-  local groupState = GetGroup()
-  if groupState then
-    for _, v in pairs(groupState) do
-      if v == cmdID then
-        found = true
-        break
-      end
-    end
-  end
-  if not found then
-    if not groupState then groupState = {} end
-    table.insert(groupState, cmdID)
-    PutGroup(groupState)
+local function SetActiveAction(sectionID, cmdID)
+  local activeAction = GetActiveAction()
+  if activeAction ~= cmdID then
+    PutActiveAction(cmdID)
   end
 end
 
-local function RemoveFromGroup(sectionID, cmdID)
-  local groupState = GetGroup()
-  if groupState then
-    for k, v in pairs(groupState) do
-      if v == cmdID then
-        groupState[k] = nil
-        PutGroup(groupState)
-        return
-      end
-    end
-  end
+local function RemoveActiveAction(sectionID, cmdID)
+  PutActiveAction()
 end
 
 local function HandleToggleAction(cmdName, data, filtered)
@@ -459,27 +432,25 @@ local function HandleToggleAction(cmdName, data, filtered)
   local togState = r.GetToggleCommandStateEx(sectionID, cmdID)
   local commandName = cmdName or CommonName
   local extState = r.GetExtState(SectionName, commandName)
-  local common = cmdName and true or false
-
-  -- post(cmdName, '"'..(extState and 'hasExt' or 'nil')..'"')
+  local common = cmdName and false or true
 
   if togState == -1 then -- first run, not set yet (fix this, Cockos!)
     if extState and extState ~= '' then
-      if not common or IsInGroup(cmdID) then
+      if not common or IsActiveAction(cmdID) then
         togState = 1
         if common then
-          AddToGroup(sectionID, cmdID)
+          SetActiveAction(sectionID, cmdID)
         end
-        post('-1 toggle on')
+        -- post('-1 toggle on')
       end
     else
       togState = 0
-      if not common or IsInGroup(cmdID) then
+      if not common or IsActiveAction(cmdID) then
         r.DeleteExtState(SectionName, commandName, true)
         if common then
-          RemoveFromGroup(sectionID, cmdID)
+          RemoveActiveAction(sectionID, cmdID)
         end
-        post('-1 toggle off')
+        -- post('-1 toggle off')
       end
     end
   else -- normal operation
@@ -490,8 +461,7 @@ local function HandleToggleAction(cmdName, data, filtered)
           r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
           post('set common state')
         end
-        DisableAllInGroup(sectionID, cmdID)
-        AddToGroup(sectionID, cmdID)
+        SwapActiveAction(sectionID, cmdID)
       else
         r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
       end
@@ -503,7 +473,7 @@ local function HandleToggleAction(cmdName, data, filtered)
       if extState and extState ~= '' then RestoreState_Serialized(extState) end
       r.DeleteExtState(SectionName, commandName, true)
       if common then
-        RemoveFromGroup(sectionID, cmdID)
+        RemoveActiveAction(sectionID, cmdID)
       end
       post('toggle off')
     end

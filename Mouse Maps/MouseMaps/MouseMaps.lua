@@ -11,6 +11,9 @@ local MouseMaps = {}
 local SectionName = 'sockmonkey72_MouseMaps'
 local CommonName = 'commonInitState'
 
+-----------------------------------------------------------------------------
+---------------------------------- CONTEXTS ---------------------------------
+
 -- known contexts as of 7. Jan 2023
 local contexts = {
   MM_CTX_AREASEL = 'Razor edit area (left click)',
@@ -83,12 +86,12 @@ local contexts = {
   MM_CTX_TRACK_CLK = 'Track (left click)',
 }
 
-local function getContextNames()
-  local contextNames = {}
-  for k in pairs(contexts) do
-    table.insert(contextNames, k)
-  end
-  return contextNames
+-----------------------------------------------------------------------------
+----------------------------------- UTILS -----------------------------------
+
+local function fileExists(name)
+  local f = io.open(name,'r')
+  if f ~= nil then io.close(f) return true else return false end
 end
 
 local function post(...)
@@ -143,7 +146,53 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
   end
 end
 
--- could use this for a filter function implementation
+local function Deserialize(str)
+  local f, err = load('return '..str)
+  return f ~= nil and f() or nil
+end
+
+local function Serialize(val, name, skipnewlines, depth)
+  skipnewlines = skipnewlines or false
+  depth = depth or 0
+  local tmp = string.rep(' ', depth)
+  if name then
+    if type(name) == 'number' and math.floor(name) == name then
+      name = '[' .. name .. ']'
+    elseif not string.match(name, '^[a-zA-z_][a-zA-Z0-9_]*$') then
+      name = string.gsub(name, "'", "\\'")
+      name = "['".. name .. "']"
+    end
+    tmp = tmp .. name .. ' = '
+  end
+  if type(val) == 'table' then
+    tmp = tmp .. '{' .. (not skipnewlines and '\n' or '')
+    for k, v in spairs(val, OrderByKey) do
+      tmp =  tmp .. Serialize(v, k, skipnewlines, depth + 1) .. ',' .. (not skipnewlines and '\n' or '')
+    end
+    tmp = tmp .. string.rep(' ', depth) .. '}'
+  elseif type(val) == 'number' then
+    tmp = tmp .. tostring(val)
+  elseif type(val) == 'string' then
+    tmp = tmp .. string.format('%q', val)
+  elseif type(val) == 'boolean' then
+    tmp = tmp .. (val and 'true' or 'false')
+  else
+    tmp = tmp .. '"[unknown datatype:' .. type(val) .. ']"'
+  end
+  return tmp
+end
+
+-----------------------------------------------------------------------------
+------------------------------- CONTEXT UTILS -------------------------------
+
+local function getContextNames()
+  local contextNames = {}
+  for k in pairs(contexts) do
+    table.insert(contextNames, k)
+  end
+  return contextNames
+end
+
 local function UniqueContexts()
   local unique = {}
   for k, v in spairs(contexts, OrderByKey) do
@@ -156,14 +205,15 @@ local function UniqueContexts()
         unique[base] = {}
         unique[base].label = v:match('^(.*)%s+%(')
         if not unique[base].label then unique[base].label = v end
-        -- if not unique[base].label == '' or unique[base].label == '' then error('bad label for '..v, 3) end
       end
       table.insert(unique[base], { key = k, value = v })
     end
   end
-  -- tprint(unique)
   return unique
 end
+
+-----------------------------------------------------------------------------
+---------------------------------- READING ----------------------------------
 
 local function ReadStateFromFile(path, filtered)
   local state = {}
@@ -256,6 +306,22 @@ local function RestoreStateFromFile(path, filtered)
   return RestoreState(state, filtered)
 end
 
+local function RestoreState_Serialized(stateStr)
+  local state = Deserialize(stateStr)
+  if state then
+    RestoreState(state)
+  end
+end
+
+local function GetCurrentState_Serialized(skipnewlines)
+  if skipnewlines == nil then skipnewlines = true end
+  local state = GetCurrentState()
+  return Serialize(state, nil, skipnewlines)
+end
+
+-----------------------------------------------------------------------------
+---------------------------------- WRITING ----------------------------------
+
 local function PrintState(state)
   local str = ''
   for k, v in spairs(state, OrderByKey) do
@@ -276,55 +342,6 @@ local function PrintState(state)
   return str
 end
 
-local function Deserialize(str)
-  local f, err = load('return '..str)
-  return f ~= nil and f() or nil
-end
-
-local function Serialize(val, name, skipnewlines, depth)
-  skipnewlines = skipnewlines or false
-  depth = depth or 0
-  local tmp = string.rep(' ', depth)
-  if name then
-      if type(name) == 'number' and math.floor(name) == name then
-          name = '[' .. name .. ']'
-      elseif not string.match(name, '^[a-zA-z_][a-zA-Z0-9_]*$') then
-          name = string.gsub(name, "'", "\\'")
-          name = "['".. name .. "']"
-      end
-      tmp = tmp .. name .. ' = '
-  end
-  if type(val) == 'table' then
-      tmp = tmp .. '{' .. (not skipnewlines and '\n' or '')
-      for k, v in spairs(val, OrderByKey) do
-          tmp =  tmp .. Serialize(v, k, skipnewlines, depth + 1) .. ',' .. (not skipnewlines and '\n' or '')
-      end
-      tmp = tmp .. string.rep(' ', depth) .. '}'
-  elseif type(val) == 'number' then
-      tmp = tmp .. tostring(val)
-  elseif type(val) == 'string' then
-      tmp = tmp .. string.format('%q', val)
-  elseif type(val) == 'boolean' then
-      tmp = tmp .. (val and 'true' or 'false')
-  else
-      tmp = tmp .. '"[unknown datatype:' .. type(val) .. ']"'
-  end
-  return tmp
-end
-
-local function RestoreState_Serialized(stateStr)
-  local state = Deserialize(stateStr)
-  if state then
-    RestoreState(state)
-  end
-end
-
-local function GetCurrentState_Serialized(skipnewlines)
-  if skipnewlines == nil then skipnewlines = true end
-  local state = GetCurrentState()
-  return Serialize(state, nil, skipnewlines)
-end
-
 local function SaveStateToFile(state, path)
   local stateStr = PrintState(state)
   local f = io.open(path, 'wb')
@@ -340,6 +357,9 @@ local function SaveCurrentStateToFile(path, filtered)
   return SaveStateToFile(GetCurrentState(filtered), path)
 end
 
+-----------------------------------------------------------------------------
+---------------------------------- STARTUP ----------------------------------
+
 local function PrintStartupActionScript(actionTable)
   local str = 'local r = reaper\n\n'
     ..'local '..Serialize(actionTable, 'cmdIDs')..'\n\n'
@@ -348,11 +368,6 @@ local function PrintStartupActionScript(actionTable)
     ..'end\n'
     -- ..'r.TrackList_AdjustWindows(0)\n'
   return str
-end
-
-local function fileExists(name)
-  local f = io.open(name,'r')
-  if f ~= nil then io.close(f) return true else return false end
 end
 
 local function CreateOrAppendStartupAction(cmdID, fpath)
@@ -375,14 +390,16 @@ local function CreateOrAppendStartupAction(cmdID, fpath)
   local actionTable
   if existing ~= '' then actionTable = Deserialize(existing) end
   if not actionTable then actionTable = {} end
-  local actionName = '_'..r.ReverseNamedCommandLookup(cmdID)
 
-  local found = false
-  for _, v in ipairs(actionTable) do
-    if v.cmdID == actionName then found = true break end
-  end
-  if not found then
-    table.insert(actionTable, { cmdID = actionName, path = fpath })
+  if cmdID then
+    local actionName = '_'..r.ReverseNamedCommandLookup(cmdID)
+    local found = false
+    for _, v in ipairs(actionTable) do
+      if v.cmdID == actionName then found = true break end
+    end
+    if not found then
+      table.insert(actionTable, { cmdID = actionName, path = fpath })
+    end
   end
 
   -- prune action table for missing files
@@ -431,6 +448,9 @@ local function CreateOrAppendStartupAction(cmdID, fpath)
   end
   return false, 0
 end
+
+-----------------------------------------------------------------------------
+---------------------------------- ACTIONS ----------------------------------
 
 local function PrintToggleActionForState(state, wantsUngrouped, filtered)
   local actionName = 'nil'
@@ -481,7 +501,8 @@ local function SaveOneShotActionToFile(path, filtered)
   return false
 end
 
--- TODO: group handling -- register command IDs and disable all but this one when enabling
+-----------------------------------------------------------------------------
+---------------------------------- RUNTIME ----------------------------------
 
 local function GetActiveAction()
   return tonumber(r.GetExtState(SectionName, 'activeToggleAction'))
@@ -529,6 +550,7 @@ local function HandleToggleAction(cmdName, data, filtered)
   local common = cmdName and false or true
 
   if togState == -1 then -- first run, not set yet (fix this, Cockos!)
+    togState = 0
     if extState and extState ~= '' then
       if not common or IsActiveAction(cmdID) then
         togState = 1
@@ -538,7 +560,6 @@ local function HandleToggleAction(cmdName, data, filtered)
         -- post('-1 toggle on')
       end
     else
-      togState = 0
       if not common or IsActiveAction(cmdID) then
         r.DeleteExtState(SectionName, commandName, true)
         if common then
@@ -588,10 +609,7 @@ MouseMaps.GetCurrentState = GetCurrentState
 MouseMaps.GetCurrentState_Serialized = GetCurrentState_Serialized
 MouseMaps.SaveCurrentStateToFile = SaveCurrentStateToFile
 
-MouseMaps.PrintToggleActionForState = PrintToggleActionForState
 MouseMaps.SaveToggleActionToFile = SaveToggleActionToFile
-
-MouseMaps.PrintOneShotActionForState = PrintOneShotActionForState
 MouseMaps.SaveOneShotActionToFile = SaveOneShotActionToFile
 
 MouseMaps.HandleToggleAction = HandleToggleAction

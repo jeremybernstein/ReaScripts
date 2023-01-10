@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.8
+-- @version 0.0.1-beta.9
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -268,6 +268,23 @@ local function MakeGearPopup()
       r.ImGui_EndMenu(ctx)
     end
 
+    r.ImGui_Spacing(ctx)
+
+    if r.ImGui_BeginMenu(ctx, 'Misc') then
+      rv, selected = r.ImGui_Selectable(ctx, 'Prune Startup Items')
+      if rv and selected then
+        mm.CreateOrAppendStartupAction()
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      -- could enumerate scripts in the folder here and add/remove from startup
+      -- based on presence of HandleToggleAction() in the script? or add context
+      -- menu for each entry to Delete/Add or Remove from startup?
+      -- r.ImGui_Spacing(ctx)
+
+      r.ImGui_EndMenu(ctx)
+    end
+
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
@@ -427,10 +444,12 @@ function MakeToggleActionPopup()
           r.ImGui_CloseCurrentPopup(ctx)
           if rv then
             local newCmdID = r.AddRemoveReaScript(true, 0, path..actionName, true)
-            if runTogglesAtStartup then
-              if newCmdID ~= 0 then
+            if newCmdID ~= 0 then
+              if runTogglesAtStartup then
                 mm.CreateOrAppendStartupAction(newCmdID, path..actionName)
               end
+              -- run it once to jigger the toggle state
+              r.Main_OnCommand(newCmdID, 0)
             end
             statusMsg = 'Wrote and registered '..actionName
           else
@@ -520,10 +539,10 @@ local function MakeOneShotActionPopup()
   r.ImGui_PopStyleColor(ctx)
 end
 
-local function mainFn()
-  ---------------------------------------------------------------------------
-  -------------------------------- POPUP MENU -------------------------------
+---------------------------------------------------------------------------
+----------------------------------- MAINFN --------------------------------
 
+local function mainFn()
   r.ImGui_PushFont(ctx, fontInfo.large)
 
   Spacing()

@@ -504,8 +504,25 @@ end
 -----------------------------------------------------------------------------
 ---------------------------------- RUNTIME ----------------------------------
 
+local function GetActiveToggleAction()
+  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
+  local activeActionTable = Deserialize(activeAction)
+  if activeActionTable then return activeActionTable.cmdID, activeActionTable.path end
+  return nil, nil
+end
+
 local function GetActiveAction()
-  return tonumber(r.GetExtState(SectionName, 'activeToggleAction'))
+  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
+  -- from beta versions, can be removed eventually
+  local cmdIdx = tonumber(activeAction)
+  if cmdIdx then
+    local cmdID = r.ReverseNamedCommandLookup(cmdIdx)
+    if cmdID and cmdID ~= '' then return '_'..cmdID end
+  end
+  -- end beta version support
+  local activeActionTable = Deserialize(activeAction)
+  if activeActionTable then return activeActionTable.cmdID end
+  return ''
 end
 
 local function IsActiveAction(cmdID)
@@ -513,28 +530,28 @@ local function IsActiveAction(cmdID)
   return cmdID == activeAction
 end
 
-local function PutActiveAction(cmdID)
+local function PutActiveAction(cmdID, path)
   if cmdID then
-    r.SetExtState(SectionName, 'activeToggleAction', tostring(cmdID), 1)
+    r.SetExtState(SectionName, 'activeToggleAction', Serialize({ cmdID = cmdID, path = path }, nil, 1), 1)
   else
     r.DeleteExtState(SectionName, 'activeToggleAction', 1)
   end
 end
 
-local function SwapActiveAction(sectionID, cmdID)
+local function SwapActiveAction(sectionID, cmdID, path)
   local activeAction = GetActiveAction()
   if activeAction ~= cmdID then
-      -- NOTE: this sets the command state, but doesn't call into the command itself
-      -- which simplifies the logic significantly
-    if activeAction then r.SetToggleCommandState(sectionID, activeAction, 0) end
-    PutActiveAction(cmdID)
+    -- NOTE: this sets the command state, but doesn't call into the command itself
+    -- which simplifies the logic significantly
+    if activeAction then r.SetToggleCommandState(sectionID, r.NamedCommandLookup(activeAction), 0) end
+    PutActiveAction(cmdID, path)
   end
 end
 
-local function SetActiveAction(sectionID, cmdID)
+local function SetActiveAction(sectionID, cmdID, path)
   local activeAction = GetActiveAction()
   if activeAction ~= cmdID then
-    PutActiveAction(cmdID)
+    PutActiveAction(cmdID, path)
   end
 end
 
@@ -543,11 +560,12 @@ local function RemoveActiveAction(sectionID, cmdID)
 end
 
 local function HandleToggleAction(cmdName, data, filtered)
-  local _, _, sectionID, cmdID = r.get_action_context()
-  local togState = r.GetToggleCommandStateEx(sectionID, cmdID)
+  local _, path, sectionID, cmdIdx = r.get_action_context()
+  local togState = r.GetToggleCommandStateEx(sectionID, cmdIdx)
   local commandName = cmdName or CommonName
   local extState = r.GetExtState(SectionName, commandName)
   local common = cmdName and false or true
+  local cmdID = '_'..r.ReverseNamedCommandLookup(cmdIdx)
 
   if togState == -1 then -- first run, not set yet (fix this, Cockos!)
     togState = 0
@@ -555,7 +573,7 @@ local function HandleToggleAction(cmdName, data, filtered)
       if not common or IsActiveAction(cmdID) then
         togState = 1
         if common then
-          SetActiveAction(sectionID, cmdID)
+          SetActiveAction(sectionID, cmdID, path)
         end
         -- post('-1 toggle on')
       end
@@ -576,7 +594,7 @@ local function HandleToggleAction(cmdName, data, filtered)
           r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
           -- post('set common state')
         end
-        SwapActiveAction(sectionID, cmdID)
+        SwapActiveAction(sectionID, cmdID, path)
       else
         r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
       end
@@ -593,12 +611,13 @@ local function HandleToggleAction(cmdName, data, filtered)
       -- post('toggle off')
     end
   end
-  r.SetToggleCommandState(sectionID, cmdID, togState)
+  r.SetToggleCommandState(sectionID, cmdIdx, togState)
 end
 
 -----------------------------------------------------------------------------
 ----------------------------------- EXPORT ----------------------------------
 
+MouseMaps.GetActiveToggleAction = GetActiveToggleAction
 MouseMaps.CreateOrAppendStartupAction = CreateOrAppendStartupAction
 
 MouseMaps.RestoreState = RestoreState

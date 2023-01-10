@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.10
+-- @version 0.0.1-beta.11
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -65,6 +65,7 @@ local useFilter = false
 local filtered = {}
 
 local runTogglesAtStartup = true
+local activeFname
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
@@ -433,10 +434,10 @@ function MakeToggleActionPopup()
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+    lastInputTextBuffer = activeFname and activeFname or ''
     r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.90)
     r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
     r.ImGui_OpenPopup(ctx, 'Build a Toggle Action')
-    lastInputTextBuffer = ''
   end
 
   if r.ImGui_BeginPopupModal(ctx, 'Build a Toggle Action') then
@@ -679,7 +680,14 @@ local function openWindow()
     windowInfo.wantsResizeUpdate = true
   end
 
-  -- r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_InputTextEnterKeepActive(), 1)
+  local activeCmdID, activePath = mm.GetActiveToggleAction()
+  if activeCmdID and activePath then
+    activeFname = activePath:match('.*/(.*)_MouseMap.lua')
+    titleBarText = DEFAULT_TITLEBAR_TEXT .. ' :: [Running: ' .. activeFname .. ']'
+  else
+    titleBarText = DEFAULT_TITLEBAR_TEXT
+    activeFname = nil
+  end
 
   if useFilter then
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(), 0x330000FF)

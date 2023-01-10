@@ -364,7 +364,7 @@ local function PrintStartupActionScript(actionTable)
   local str = 'local r = reaper\n\n'
     ..'local '..Serialize(actionTable, 'cmdIDs')..'\n\n'
     ..'for _, v in ipairs(cmdIDs) do\n'
-    ..'  reaper.Main_OnCommand(reaper.NamedCommandLookup(v.cmdID), 0)\n'
+    ..'  r.Main_OnCommand(r.NamedCommandLookup(v.cmdID), 0)\n'
     ..'end\n'
     -- ..'r.TrackList_AdjustWindows(0)\n'
   return str

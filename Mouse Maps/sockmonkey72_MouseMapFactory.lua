@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.9
+-- @version 0.0.1-beta.10
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -406,6 +406,25 @@ local function MakeSavePopup()
   r.ImGui_PopStyleColor(ctx)
 end
 
+-- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
+--- Check if a file or directory exists in this path
+local function FilePathExists(file)
+  local ok, err, code = os.rename(file, file)
+  if not ok then
+    if code == 13 then
+    -- Permission denied, but it exists
+      return true
+    end
+  end
+  return ok, err
+end
+
+--- Check if a directory exists in this path
+local function DirExists(path)
+  -- "/" works on both Unix and Windows
+  return FilePathExists(path.."/")
+end
+
 function MakeToggleActionPopup()
   r.ImGui_Button(ctx, 'Build a Toggle Action...')
   handleStatus(3)
@@ -435,8 +454,8 @@ function MakeToggleActionPopup()
                                                                                                                 + r.ImGui_InputTextFlags_AutoSelectAll())
     if retval and buf then
       local path = r.GetResourcePath()..'/Scripts/MouseMapActions/'
-      if not r.file_exists(path) then r.RecursiveCreateDirectory(path, 0) end
-      if r.file_exists(path) then
+      if not DirExists(path) then r.RecursiveCreateDirectory(path, 0) end
+      if DirExists(path) then
         local actionName = buf..'_MouseMap.lua'
         if CheckForOverwrite(path..actionName, actionName) then
           local rv = mm.SaveToggleActionToFile(path..actionName, wantsUngrouped, useFilter and getFilterNames() or nil)
@@ -513,8 +532,8 @@ local function MakeOneShotActionPopup()
                                                                                                                          + r.ImGui_InputTextFlags_AutoSelectAll())
     if retval and buf then
       local path = r.GetResourcePath()..'/Scripts/MouseMapActions/'
-      if not r.file_exists(path) then r.RecursiveCreateDirectory(path, 0) end
-      if r.file_exists(path) then
+      if not DirExists(path) then r.RecursiveCreateDirectory(path, 0) end
+      if DirExists(path) then
         local actionName = buf..'_MouseMap.lua'
         if CheckForOverwrite(path..actionName, actionName) then
           local rv = mm.SaveOneShotActionToFile(path..actionName, useFilter and getFilterNames() or nil)

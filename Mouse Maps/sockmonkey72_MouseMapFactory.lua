@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.6
+-- @version 0.0.1-beta.7
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -304,19 +304,25 @@ local function MakeLoadPopup()
       idx = idx + 1
       fname = r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', idx)
     end
-    local cherry = true
-    for _, fn in mm.spairs(fnames, function (t, a, b) return t[a] < t[b] end ) do
-      if not cherry then Spacing() end
-      local rv, selected = r.ImGui_Selectable(ctx, fn)
-      if rv and selected then
-        local restored = mm.RestoreStateFromFile(r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap', useFilter and getFilterNames() or nil)
-        statusMsg = (restored and 'Loaded' or 'Failed to load')..' '..fn..'.ReaperMouseMap'
-        statusTime = r.time_precise()
-        statusContext = 1
-        r.ImGui_CloseCurrentPopup(ctx)
-        popupLabel = fn
+    if #fnames > 0 then
+      local cherry = true
+      for _, fn in mm.spairs(fnames, function (t, a, b) return t[a] < t[b] end ) do
+        if not cherry then Spacing() end
+        local rv, selected = r.ImGui_Selectable(ctx, fn)
+        if rv and selected then
+          local restored = mm.RestoreStateFromFile(r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap', useFilter and getFilterNames() or nil)
+          statusMsg = (restored and 'Loaded' or 'Failed to load')..' '..fn..'.ReaperMouseMap'
+          statusTime = r.time_precise()
+          statusContext = 1
+          r.ImGui_CloseCurrentPopup(ctx)
+          popupLabel = fn
+        end
+        cherry = false
       end
-      cherry = false
+    else
+      r.ImGui_BeginDisabled(ctx)
+      r.ImGui_Selectable(ctx, 'No presets')
+      r.ImGui_EndDisabled(ctx)
     end
     r.ImGui_EndPopup(ctx)
   end

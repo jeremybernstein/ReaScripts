@@ -338,6 +338,98 @@ local function SaveCurrentStateToFile(path, filtered)
   return SaveStateToFile(GetCurrentState(filtered), path)
 end
 
+local function PrintStartupActionScript(actionTable)
+  local str = 'local r = reaper\n\n'
+    ..'local '..Serialize(actionTable, 'cmdIDs')..'\n\n'
+    ..'for _, v in ipairs(cmdIDs) do\n'
+    ..'  reaper.Main_OnCommand(reaper.NamedCommandLookup(v.cmdID), 0)\n'
+    ..'end\n'
+    -- ..'r.TrackList_AdjustWindows(0)\n'
+  return str
+end
+
+local function fileExists(name)
+  local f = io.open(name,'r')
+  if f ~= nil then io.close(f) return true else return false end
+end
+
+local function CreateOrAppendStartupAction(cmdID, fpath)
+  local path = r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua'
+  local existing = ''
+  local capturing = false
+
+  if fileExists(path) then
+    for line in io.lines(path) do
+      if capturing then
+        existing = existing..' '..line
+        if line:match('^}') then capturing = false break end
+      elseif line:match('^local cmdIDs = {') then
+        existing = '{ '
+        capturing = true
+      end
+    end
+  end
+
+  local actionTable
+  if existing ~= '' then actionTable = Deserialize(existing) end
+  if not actionTable then actionTable = {} end
+  local actionName = '_'..r.ReverseNamedCommandLookup(cmdID)
+
+  local found = false
+  for _, v in ipairs(actionTable) do
+    if v.cmdID == actionName then found = true break end
+  end
+  if not found then
+    table.insert(actionTable, { cmdID = actionName, path = fpath })
+  end
+
+  -- prune action table for missing files
+  for i = #actionTable, 1, -1 do
+    local v = actionTable[i]
+    if not fileExists(v.path) then
+      r.AddRemoveReaScript(false, 0, v.path, true)
+      table.remove(actionTable, i)
+    end
+  end
+
+  local actionStr = PrintStartupActionScript(actionTable)
+  local f = io.open(path, 'w+b')
+  if f then
+    f:write(actionStr)
+    f:close()
+    --r.AddRemoveReaScript(false, 0, path, false) -- remove it if it's there
+    local actionScriptID = r.AddRemoveReaScript(true, 0, path, true)
+    if actionScriptID ~= 0 then
+      local startupFilePath = r.GetResourcePath()..'/Scripts/__startup.lua'
+      local actionScriptName = '_'..r.ReverseNamedCommandLookup(actionScriptID)
+      f = io.open(startupFilePath, 'r')
+      local startupStr
+      if f then
+        startupStr = f:read("*all")
+        f:close()
+      end
+      if startupStr then
+        if not startupStr:match(actionScriptName) then
+          -- make a backup
+          f = io.open(r.GetResourcePath()..'/Scripts/__startup_backup.lua', 'wb')
+          if f then
+            f:write(startupStr)
+            f:close()
+          end
+          -- end backup
+          f = io.open(startupFilePath, 'a+b')
+          if f then
+            f:write('\nreaper.Main_OnCommand(reaper.NamedCommandLookup("'..actionScriptName..'"), 0) -- __startup_MouseMaps.lua\n')
+            f:close()
+          end
+        end
+      end
+    end
+    return true, actionScriptID
+  end
+  return false, 0
+end
+
 local function PrintToggleActionForState(state, wantsUngrouped, filtered)
   local actionName = 'nil'
   if wantsUngrouped then
@@ -483,6 +575,8 @@ end
 
 -----------------------------------------------------------------------------
 ----------------------------------- EXPORT ----------------------------------
+
+MouseMaps.CreateOrAppendStartupAction = CreateOrAppendStartupAction
 
 MouseMaps.RestoreState = RestoreState
 MouseMaps.RestoreState_Serialized = RestoreState_Serialized

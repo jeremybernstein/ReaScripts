@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.5
+-- @version 0.0.1-beta.6
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -10,12 +10,12 @@
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
 
+-- TODO startup manager for toggle actions
+
 local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
 local scriptName = 'Mouse Map Factory'
-
--- overwrite protection
 
 local function fileExists(name)
   local f = io.open(name,'r')
@@ -64,6 +64,8 @@ local contexts = mm.UniqueContexts()
 local useFilter = false
 local filtered = {}
 
+local runTogglesAtStartup = true
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
@@ -89,8 +91,12 @@ local function handleExtState()
     end
   end
   local useFilterStr = r.GetExtState(scriptID, 'useFilter')
-  if useFilterStr then
+  if useFilterStr and useFilter ~= '' then
     useFilter = tonumber(useFilterStr) == 1 and true or false
+  end
+  local runToggles = r.GetExtState(scriptID, 'runTogglesAtStartup')
+  if runToggles and runToggles ~= '' then
+    runTogglesAtStartup = tonumber(runToggles) == 1 and true or false
   end
 end
 
@@ -196,23 +202,6 @@ local function MakeGearPopup()
     r.ImGui_Separator(ctx)
     r.ImGui_Spacing(ctx)
 
-    rv, selected = r.ImGui_Selectable(ctx, 'Update Backup Set')
-    if rv and selected then
-      local backupStr = mm.GetCurrentState_Serialized(true) -- always get a full set
-      r.SetExtState(scriptID, 'backupSet', backupStr, true)
-      r.ImGui_CloseCurrentPopup(ctx)
-    end
-    rv, selected = r.ImGui_Selectable(ctx, 'Restore Backup Set')
-    if rv and selected then
-      local backupStr = r.GetExtState(scriptID, 'backupSet')
-      mm.RestoreState_Serialized(backupStr)
-      r.ImGui_CloseCurrentPopup(ctx)
-    end
-
-    r.ImGui_Spacing(ctx)
-    r.ImGui_Separator(ctx)
-    r.ImGui_Spacing(ctx)
-
     -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
     rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue()
@@ -257,6 +246,28 @@ local function MakeGearPopup()
       r.ImGui_PopFont(ctx)
       r.ImGui_EndMenu(ctx)
     end
+
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_Spacing(ctx)
+
+    if r.ImGui_BeginMenu(ctx, 'Backup') then
+      rv, selected = r.ImGui_Selectable(ctx, 'Update Backup Set')
+      if rv and selected then
+        local backupStr = mm.GetCurrentState_Serialized(true) -- always get a full set
+        r.SetExtState(scriptID, 'backupSet', backupStr, true)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_Spacing(ctx)
+      rv, selected = r.ImGui_Selectable(ctx, 'Restore Backup Set')
+      if rv and selected then
+        local backupStr = r.GetExtState(scriptID, 'backupSet')
+        mm.RestoreState_Serialized(backupStr)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_EndMenu(ctx)
+    end
+
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
@@ -281,7 +292,6 @@ local function MakeLoadPopup()
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
-    -- r.ImGui_PushFont(ctx, fontInfo.small)
     local idx = 0
     local fnames = {}
     r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', -1)
@@ -308,7 +318,6 @@ local function MakeLoadPopup()
       end
       cherry = false
     end
-    -- r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
@@ -349,7 +358,6 @@ local function MakeSavePopup()
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
-    -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Preset Name')
     r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
@@ -370,7 +378,6 @@ local function MakeSavePopup()
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
-    -- r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
@@ -384,7 +391,7 @@ function MakeToggleActionPopup()
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
-    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.85)
+    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.90)
     r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
     r.ImGui_OpenPopup(ctx, 'Build a Toggle Action')
     lastInputTextBuffer = ''
@@ -396,13 +403,13 @@ function MakeToggleActionPopup()
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
-    -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Toggle Action Name')
     r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
     r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##toggleaction', 'Untitled Toggle Action', lastInputTextBuffer, r.ImGui_InputTextFlags_EnterReturnsTrue()
-                                                                                                                      + r.ImGui_InputTextFlags_AutoSelectAll())
+    local retval, buf, v
+    retval, buf = r.ImGui_InputTextWithHint(ctx, '##toggleaction', 'Untitled Toggle Action', lastInputTextBuffer, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                                                                + r.ImGui_InputTextFlags_AutoSelectAll())
     if retval and buf then
       local path = r.GetResourcePath()..'/Scripts/MouseMapActions/'
       if not r.file_exists(path) then r.RecursiveCreateDirectory(path, 0) end
@@ -413,7 +420,12 @@ function MakeToggleActionPopup()
           wantsUngrouped = false
           r.ImGui_CloseCurrentPopup(ctx)
           if rv then
-            r.AddRemoveReaScript(true, 0, path..actionName, true)
+            local newCmdID = r.AddRemoveReaScript(true, 0, path..actionName, true)
+            if runTogglesAtStartup then
+              if newCmdID ~= 0 then
+                mm.CreateOrAppendStartupAction(newCmdID, path..actionName)
+              end
+            end
             statusMsg = 'Wrote and registered '..actionName
           else
             statusMsg = 'Error writing '..actionName
@@ -428,14 +440,21 @@ function MakeToggleActionPopup()
       end
     end
 
+    r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Spacing(ctx)
-    --r.ImGui_Indent(ctx)
-    local retval2, v = r.ImGui_Checkbox(ctx, 'Ungrouped', wantsUngrouped)
-    if retval2 then
+    retval, v = r.ImGui_Checkbox(ctx, 'Refresh At Startup', runTogglesAtStartup)
+    if retval then
+      runTogglesAtStartup = v
+      r.SetExtState(scriptID, 'runTogglesAtStartup', runTogglesAtStartup and '1' or '0', true)
+    end
+
+    r.ImGui_Spacing(ctx)
+    retval, v = r.ImGui_Checkbox(ctx, 'Ungrouped', wantsUngrouped)
+    if retval then
       wantsUngrouped = v
     end
-    --r.ImGui_Unindent(ctx)
-    -- r.ImGui_PopFont(ctx)
+    r.ImGui_PopFont(ctx)
+
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)
@@ -461,7 +480,6 @@ local function MakeOneShotActionPopup()
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
-    -- r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'One-Shot Action Name')
     r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
@@ -491,7 +509,6 @@ local function MakeOneShotActionPopup()
         statusContext = 4
       end
     end
-    -- r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
   end
   r.ImGui_PopStyleColor(ctx)

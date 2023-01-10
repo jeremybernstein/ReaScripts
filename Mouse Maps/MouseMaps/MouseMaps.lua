@@ -404,26 +404,26 @@ local function CreateOrAppendStartupAction(cmdID, fpath)
     if actionScriptID ~= 0 then
       local startupFilePath = r.GetResourcePath()..'/Scripts/__startup.lua'
       local actionScriptName = '_'..r.ReverseNamedCommandLookup(actionScriptID)
+      local startupStr = ''
       f = io.open(startupFilePath, 'r')
-      local startupStr
       if f then
         startupStr = f:read("*all")
         f:close()
       end
-      if startupStr then
-        if not startupStr:match(actionScriptName) then
-          -- make a backup
+      if not startupStr:match(actionScriptName) then
+        -- make a backup
+        if startupStr ~= '' then
           f = io.open(r.GetResourcePath()..'/Scripts/__startup_backup.lua', 'wb')
           if f then
             f:write(startupStr)
             f:close()
           end
-          -- end backup
-          f = io.open(startupFilePath, 'a+b')
-          if f then
-            f:write('\nreaper.Main_OnCommand(reaper.NamedCommandLookup("'..actionScriptName..'"), 0) -- __startup_MouseMaps.lua\n')
-            f:close()
-          end
+        end
+        -- end backup
+        f = io.open(startupFilePath, 'a+b')
+        if f then
+          f:write('\nreaper.Main_OnCommand(reaper.NamedCommandLookup("'..actionScriptName..'"), 0) -- __startup_MouseMaps.lua\n')
+          f:close()
         end
       end
     end

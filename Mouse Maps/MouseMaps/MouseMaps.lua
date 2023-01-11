@@ -213,6 +213,64 @@ local function UniqueContexts()
 end
 
 -----------------------------------------------------------------------------
+------------------------------ ACTIVE ACTIONS -------------------------------
+
+local function GetActiveToggleAction()
+  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
+  local activeActionTable = Deserialize(activeAction)
+  if activeActionTable then return activeActionTable.cmdID, activeActionTable.path end
+  return nil, nil
+end
+
+local function GetActiveAction()
+  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
+  -- from beta versions, can be removed eventually
+  local cmdIdx = tonumber(activeAction)
+  if cmdIdx then
+    local cmdID = r.ReverseNamedCommandLookup(cmdIdx)
+    if cmdID and cmdID ~= '' then return '_'..cmdID end
+  end
+  -- end beta version support
+  local activeActionTable = Deserialize(activeAction)
+  if activeActionTable then return activeActionTable.cmdID end
+  return ''
+end
+
+local function IsActiveAction(cmdID)
+  local activeAction = GetActiveAction()
+  return cmdID == activeAction
+end
+
+local function PutActiveAction(cmdID, path)
+  if cmdID then
+    r.SetExtState(SectionName, 'activeToggleAction', Serialize({ cmdID = cmdID, path = path }, nil, 1), 1)
+  else
+    r.DeleteExtState(SectionName, 'activeToggleAction', 1)
+  end
+end
+
+local function SwapActiveAction(sectionID, cmdID, path)
+  local activeAction = GetActiveAction()
+  if activeAction ~= cmdID then
+    -- NOTE: this sets the command state, but doesn't call into the command itself
+    -- which simplifies the logic significantly
+    if activeAction then r.SetToggleCommandState(sectionID, r.NamedCommandLookup(activeAction), 0) end
+    PutActiveAction(cmdID, path)
+  end
+end
+
+local function SetActiveAction(sectionID, cmdID, path)
+  local activeAction = GetActiveAction()
+  if activeAction ~= cmdID then
+    PutActiveAction(cmdID, path)
+  end
+end
+
+local function RemoveActiveAction(sectionID, cmdID)
+  PutActiveAction()
+end
+
+-----------------------------------------------------------------------------
 ---------------------------------- READING ----------------------------------
 
 local function ReadStateFromFile(path, filtered)
@@ -268,8 +326,14 @@ local function GetCurrentState(filtered)
   return ReadStateFromFile(r.GetResourcePath()..'/reaper-mouse.ini', filtered)
 end
 
-local function RestoreState(state, filtered)
+local function RestoreStateInternal(state, filtered, disableToggles)
   if not state then return false end
+
+  if disableToggles then
+    r.DeleteExtState(SectionName, CommonName, true)
+    SwapActiveAction(0)
+  end
+
   local rawCtx = filtered
   if not rawCtx then rawCtx = getContextNames() end
 
@@ -299,6 +363,10 @@ local function RestoreState(state, filtered)
     end
   end
   return true
+end
+
+local function RestoreState(state, filtered)
+  return RestoreStateInternal(state, filtered, true)
 end
 
 local function RestoreStateFromFile(path, filtered)
@@ -370,7 +438,7 @@ local function PrintStartupActionScript(actionTable)
   return str
 end
 
-local function CreateOrAppendStartupAction(cmdID, fpath)
+local function AddRemoveStartupAction(cmdIdx, fpath, add)
   local path = r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua'
   local existing = ''
   local capturing = false
@@ -391,14 +459,16 @@ local function CreateOrAppendStartupAction(cmdID, fpath)
   if existing ~= '' then actionTable = Deserialize(existing) end
   if not actionTable then actionTable = {} end
 
-  if cmdID then
-    local actionName = '_'..r.ReverseNamedCommandLookup(cmdID)
-    local found = false
-    for _, v in ipairs(actionTable) do
-      if v.cmdID == actionName then found = true break end
+  if cmdIdx then
+    local cmdID = '_'..r.ReverseNamedCommandLookup(cmdIdx)
+    local found = 0
+    for k, v in ipairs(actionTable) do
+      if v.cmdID == cmdID then found = k break end
     end
-    if not found then
-      table.insert(actionTable, { cmdID = actionName, path = fpath })
+    if found == 0 and add then
+      table.insert(actionTable, { cmdID = cmdID, path = fpath })
+    elseif found > 0 and not add then
+      table.remove(actionTable, found)
     end
   end
 
@@ -416,7 +486,6 @@ local function CreateOrAppendStartupAction(cmdID, fpath)
   if f then
     f:write(actionStr)
     f:close()
-    --r.AddRemoveReaScript(false, 0, path, false) -- remove it if it's there
     local actionScriptID = r.AddRemoveReaScript(true, 0, path, true)
     if actionScriptID ~= 0 then
       local startupFilePath = r.GetResourcePath()..'/Scripts/__startup.lua'
@@ -504,61 +573,6 @@ end
 -----------------------------------------------------------------------------
 ---------------------------------- RUNTIME ----------------------------------
 
-local function GetActiveToggleAction()
-  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
-  local activeActionTable = Deserialize(activeAction)
-  if activeActionTable then return activeActionTable.cmdID, activeActionTable.path end
-  return nil, nil
-end
-
-local function GetActiveAction()
-  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
-  -- from beta versions, can be removed eventually
-  local cmdIdx = tonumber(activeAction)
-  if cmdIdx then
-    local cmdID = r.ReverseNamedCommandLookup(cmdIdx)
-    if cmdID and cmdID ~= '' then return '_'..cmdID end
-  end
-  -- end beta version support
-  local activeActionTable = Deserialize(activeAction)
-  if activeActionTable then return activeActionTable.cmdID end
-  return ''
-end
-
-local function IsActiveAction(cmdID)
-  local activeAction = GetActiveAction()
-  return cmdID == activeAction
-end
-
-local function PutActiveAction(cmdID, path)
-  if cmdID then
-    r.SetExtState(SectionName, 'activeToggleAction', Serialize({ cmdID = cmdID, path = path }, nil, 1), 1)
-  else
-    r.DeleteExtState(SectionName, 'activeToggleAction', 1)
-  end
-end
-
-local function SwapActiveAction(sectionID, cmdID, path)
-  local activeAction = GetActiveAction()
-  if activeAction ~= cmdID then
-    -- NOTE: this sets the command state, but doesn't call into the command itself
-    -- which simplifies the logic significantly
-    if activeAction then r.SetToggleCommandState(sectionID, r.NamedCommandLookup(activeAction), 0) end
-    PutActiveAction(cmdID, path)
-  end
-end
-
-local function SetActiveAction(sectionID, cmdID, path)
-  local activeAction = GetActiveAction()
-  if activeAction ~= cmdID then
-    PutActiveAction(cmdID, path)
-  end
-end
-
-local function RemoveActiveAction(sectionID, cmdID)
-  PutActiveAction()
-end
-
 local function HandleToggleAction(cmdName, data, filtered)
   local _, path, sectionID, cmdIdx = r.get_action_context()
   local togState = r.GetToggleCommandStateEx(sectionID, cmdIdx)
@@ -599,7 +613,7 @@ local function HandleToggleAction(cmdName, data, filtered)
         r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
       end
       -- post('toggle on')
-      RestoreState(data, filtered)
+      RestoreStateInternal(data, filtered, false)
     else
       togState = 0
       -- post('restore common state')
@@ -618,7 +632,7 @@ end
 ----------------------------------- EXPORT ----------------------------------
 
 MouseMaps.GetActiveToggleAction = GetActiveToggleAction
-MouseMaps.CreateOrAppendStartupAction = CreateOrAppendStartupAction
+MouseMaps.AddRemoveStartupAction = AddRemoveStartupAction
 
 MouseMaps.RestoreState = RestoreState
 MouseMaps.RestoreState_Serialized = RestoreState_Serialized

@@ -1,6 +1,6 @@
 -- @description Smart item group/ungroup
 -- @author sockmonkey72
--- @version 1.1
+-- @version 1.2
 -- @changelog
 --   * When updating a group, don't change the group index (thanks X-Raym for noticing)
 -- @about
@@ -45,12 +45,10 @@ local function allSelectedItemsAreInTheSameGroup()
 end
 
 local function removeItemsFromAllGroups()
-  r.ShowConsoleMsg('un group\n')
   r.Main_OnCommandEx(40033, 0) -- Ungroup native command
 end
 
 local function updateGroupFromSelection(grpid)
-  r.ShowConsoleMsg('update group\n')
   local count = r.CountSelectedMediaItems(0)
   for i = 0, count - 1 do
     local item = r.GetSelectedMediaItem(0, i)
@@ -61,7 +59,6 @@ local function updateGroupFromSelection(grpid)
 end
 
 local function createGroupFromSelection()
-  r.ShowConsoleMsg('create group\n')
   r.Main_OnCommandEx(40033, 0) -- Ungroup native command
   r.Main_OnCommandEx(40032, 0) -- Group native command
 end

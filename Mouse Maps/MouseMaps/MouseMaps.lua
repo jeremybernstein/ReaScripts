@@ -11,6 +11,18 @@ local MouseMaps = {}
 local SectionName = 'sockmonkey72_MouseMaps'
 local CommonName = 'commonInitState'
 
+local CalcFasterAPI = function ()
+  local appVer = r.GetAppVersion()
+  local major, minor, devrev = appVer:match('(%d+)%.(%d+)([^%d][^+/]*)')
+  if not major then major, minor = appVer:match('(%d+)%.(%d+)') end
+  if devrev then devrev = devrev:match('+dev(%d+)') end
+  major = major and tonumber(major) or 0
+  minor = minor and tonumber(minor) or 0
+  devrev = devrev and tonumber(devrev) or 0
+  return major > 6 or (major == 6 and (minor > 73 or (minor == 73 and devrev and devrev >= 111))), major, minor, devrev
+end
+local UseFasterAPI, major, minor, devrev = CalcFasterAPI()
+
 -----------------------------------------------------------------------------
 ---------------------------------- CONTEXTS ---------------------------------
 
@@ -89,9 +101,28 @@ local contexts = {
 -----------------------------------------------------------------------------
 ----------------------------------- UTILS -----------------------------------
 
-local function fileExists(name)
-  local f = io.open(name,'r')
-  if f ~= nil then io.close(f) return true else return false end
+-- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
+--- Check if a file or directory exists in this path
+local function FilePathExists(file)
+  local ok, err, code = os.rename(file, file)
+  if not ok then
+    if code == 13 then
+    -- Permission denied, but it exists
+      return true
+    end
+  end
+  return ok, err
+end
+
+--- Check if a directory exists in this path
+local function DirExists(path)
+  -- "/" works on both Unix and Windows
+  return FilePathExists(path:match('/$') and path or path..'/')
+end
+
+local function FileExists(path)
+  -- "/" works on both Unix and Windows
+  return FilePathExists(path)
 end
 
 local function post(...)
@@ -283,7 +314,7 @@ local function ReadStateFromFile(path, filtered)
     end
   end
   local current, currentctx
-  if not r.file_exists(path) then return false end
+  if not FileExists(path) then return false end
   for line in io.lines(path) do
     local newcontext = line:match('%[(.*)%]')
     if newcontext and newcontext ~= '' then
@@ -343,10 +374,14 @@ local function RestoreStateInternal(state, filtered, disableToggles)
   end
 
   -- set everything to -1
-  if ctx then
-    for k in pairs(ctx) do
-      for i = 0, 15 do
-        r.SetMouseModifier(k, i, '-1')
+  if UseFasterAPI then
+    r.SetMouseModifier(-1, -1, -1)
+  else
+    if ctx then
+      for k in pairs(ctx) do
+        for i = 0, 15 do
+          r.SetMouseModifier(k, i, '-1')
+        end
       end
     end
   end
@@ -443,7 +478,7 @@ local function AddRemoveStartupAction(cmdIdx, fpath, add)
   local existing = ''
   local capturing = false
 
-  if fileExists(path) then
+  if FileExists(path) then
     for line in io.lines(path) do
       if capturing then
         existing = existing..' '..line
@@ -475,7 +510,7 @@ local function AddRemoveStartupAction(cmdIdx, fpath, add)
   -- prune action table for missing files
   for i = #actionTable, 1, -1 do
     local v = actionTable[i]
-    if not fileExists(v.path) then
+    if not FileExists(v.path) then
       r.AddRemoveReaScript(false, 0, v.path, true)
       table.remove(actionTable, i)
     end
@@ -651,10 +686,14 @@ MouseMaps.UniqueContexts = UniqueContexts
 
 MouseMaps.Serialize = Serialize
 MouseMaps.Deserialize = Deserialize
-MouseMaps.tprint = tprint
 
+MouseMaps.FileExists = FileExists
+MouseMaps.DirExists = DirExists
+MouseMaps.tprint = tprint
 MouseMaps.spairs = spairs
 MouseMaps.post = post
 MouseMaps.p = post
+
+-- post(UseFasterAPI and 'FAST' or 'SLOW', major, minor, devrev)
 
 return MouseMaps

@@ -1,5 +1,5 @@
 -- @description Fuzzy Float Comparison Utility
--- @version 1.2
+-- @version 1.3
 -- @author sockmonkey72
 -- @about
 --   # Fuzzy Float Comparison Utility
@@ -11,6 +11,7 @@
 
 
 -- 32-bit numerical limits
+-- use these in 32-bit REAPER OR if you suspect that REAPER is returning values with 32-bit precision
 --[[
   local float_min_value = 1.175494e-38 -- min finite
   local float_min = 1.4013e-45 -- denorm_min
@@ -19,6 +20,8 @@
 --]]
 
 -- 64-bit numerical limits
+-- these are the most correct for 64-bit systems, but the 32-bit values might be
+-- more appropriate when using the REAPER API.
 local float_min_value = 2.22507e-308 -- min finite
 local float_min = 4.94066e-324 -- denorm_min
 local float_max = 1.79769e308
@@ -51,11 +54,6 @@ local function nearlyEqual(a, b, epsilon)
   end
 end
 
--- test function with default epsilon for the tests
-local function nearlyEqualTest(a, b, epsilon)
-  return nearlyEqual(a, b, epsilon)
-end
-
 -- the tests
 local reaper = reaper
 
@@ -63,7 +61,7 @@ local pass = 0
 local fail = 0
 
 local function testNearlyEqual_WantsTrue(a, b, epsilon)
-  if not nearlyEqualTest(a, b, epsilon) then
+  if not nearlyEqual(a, b, epsilon) then
     reaper.ShowConsoleMsg("FAILED: " .. a .. " != " .. b .. "\n")
     fail = fail + 1
   else
@@ -73,7 +71,7 @@ local function testNearlyEqual_WantsTrue(a, b, epsilon)
 end
 
 local function testNearlyEqual_WantsFalse(a, b, epsilon)
-  if nearlyEqualTest(a, b, epsilon) then
+  if nearlyEqual(a, b, epsilon) then
     reaper.ShowConsoleMsg("FAILED: " .. a .. " == " .. b .. "\n")
     fail = fail + 1
   else

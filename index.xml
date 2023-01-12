@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="44779a394849a57e2b5e5fca40f7a5caf5108923">
+<index version="1" name="sockmonkey72 Scripts" commit="b7182b8ae6d556f1b56e12adff3b8e6c9622c0c2">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -670,6 +670,10 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       <version name="1.1" author="sockmonkey72" time="2023-01-12T09:37:43Z">
         <changelog><![CDATA[initial]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/44779a394849a57e2b5e5fca40f7a5caf5108923/Various/sockmonkey72_FuzzyFloatCmpUtil.lua</source>
+      </version>
+      <version name="1.2" author="sockmonkey72" time="2023-01-12T10:19:32Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/b7182b8ae6d556f1b56e12adff3b8e6c9622c0c2/Various/sockmonkey72_FuzzyFloatCmpUtil.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_Smarter_Zoom.lua" type="script" desc="Smarter Zoom">

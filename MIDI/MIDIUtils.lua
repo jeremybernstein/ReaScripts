@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.7
+-- @version 0.1.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -23,6 +23,7 @@ local MIDIUtils = {}
 MIDIUtils.ENFORCE_ARGS = true -- turn off for efficiency
 MIDIUtils.CORRECT_OVERLAPS = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
+MIDIUtils.ALLSOUNDSOFF_SNAPS_TO_ITEM_END = true
 
 local NOTE_TYPE = 0
 local NOTEOFF_TYPE = 1
@@ -566,6 +567,13 @@ local function ReplaceMIDIEvent(event, newEvent)
   return newEvent
 end
 
+local function GetItemEndPPQPos(take)
+  local item = r.GetMediaItemTake_Item(take)
+  local itempos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+  local itemlen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+  return r.MIDI_GetPPQPosFromProjTime(take, itempos + itemlen)
+end
+
 local function GetEvents(take)
   local ppqTime = 0
   local stringPos = 1
@@ -606,6 +614,9 @@ local function GetEvents(take)
   local TailMsg = MIDIString:sub(-12)
   local offset, flags, msg = string.unpack('i4Bs4', TailMsg)
   tailEvent = TailEvent(ppqTime + offset, offset, flags, msg, TailMsg)
+  -- this is a battle for another day
+  -- local itemEndPPQPos = GetItemEndPPQPos(take)
+  -- tailEvent.allsoundsoff_delta = itemEndPPQPos - tailEvent.ppqpos -- distance from clip end
   return true
 end
 
@@ -777,7 +788,13 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   end
 
   r.MIDI_DisableSort(take)
-  tailEvent.offset = math.floor(tailEvent.ppqpos - lastPPQPos)
+  if MIDIUtils.ALLSOUNDSOFF_SNAPS_TO_ITEM_END then
+    local itemEndPPQPos = GetItemEndPPQPos(take) -- in case it changed
+    -- local ASOPPQPos = itemEndPPQPos - tailEvent.allsoundsoff_delta
+    tailEvent.offset = math.floor(itemEndPPQPos - lastPPQPos)
+  else
+    tailEvent.offset = math.floor(tailEvent.ppqpos - lastPPQPos)
+  end
   local TailMsg = string.pack('i4Bs4', tailEvent.offset, tailEvent.flags, tailEvent.msg)
   r.MIDI_SetAllEvts(take, newMIDIString .. TailMsg)
   r.MIDI_Sort(take)

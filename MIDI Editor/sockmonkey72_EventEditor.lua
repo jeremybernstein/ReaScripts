@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.4
+-- @version 1.1.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -37,6 +37,7 @@ package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Event
 local s = require 'MIDIUtils'
 s.ENFORCE_ARGS = false -- turn off type checking
 s.CORRECT_OVERLAPS = false -- manual correction
+s.ALLSOUNDSOFF_SNAPS_TO_ITEM_END = true
 
 local function fileExists(name)
   local f = io.open(name,'r')

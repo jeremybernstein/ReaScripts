@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.8
+-- @version 0.1.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -23,7 +23,7 @@ local MIDIUtils = {}
 MIDIUtils.ENFORCE_ARGS = true -- turn off for efficiency
 MIDIUtils.CORRECT_OVERLAPS = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
-MIDIUtils.ALLSOUNDSOFF_SNAPS_TO_ITEM_END = true
+MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END = true
 
 local NOTE_TYPE = 0
 local NOTEOFF_TYPE = 1
@@ -616,7 +616,7 @@ local function GetEvents(take)
   tailEvent = TailEvent(ppqTime + offset, offset, flags, msg, TailMsg)
   -- this is a battle for another day
   -- local itemEndPPQPos = GetItemEndPPQPos(take)
-  -- tailEvent.allsoundsoff_delta = itemEndPPQPos - tailEvent.ppqpos -- distance from clip end
+  -- tailEvent.allnotesoff_delta = itemEndPPQPos - tailEvent.ppqpos -- distance from clip end
   return true
 end
 
@@ -788,9 +788,9 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   end
 
   r.MIDI_DisableSort(take)
-  if MIDIUtils.ALLSOUNDSOFF_SNAPS_TO_ITEM_END then
+  if MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END then
     local itemEndPPQPos = GetItemEndPPQPos(take) -- in case it changed
-    -- local ASOPPQPos = itemEndPPQPos - tailEvent.allsoundsoff_delta
+    -- local ASOPPQPos = itemEndPPQPos - tailEvent.allnotesoff_delta
     tailEvent.offset = math.floor(itemEndPPQPos - lastPPQPos)
   else
     tailEvent.offset = math.floor(tailEvent.ppqpos - lastPPQPos)

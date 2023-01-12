@@ -753,9 +753,9 @@ MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
   precedence over an unselected note-on when performing the overlap correction. Off by default.
 --]
 
-MIDIUtils.ALLSOUNDSOFF_SNAPS_TO_ITEM_END = true
+MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END = true
 --[
-  If ALLSOUNDSOFF_SNAPS_TO_ITEM_END is enabled, the "All Sounds Off" event (at the end of every item) will be snapped
+  If ALLNOTESOFF_SNAPS_TO_ITEM_END is enabled, the "All Notes Off" event (CC#123, at the end of every item) will be snapped
   to the end of the item, rather than floating around near the end of the item, or being stuck at the end of the
   last note, or whatever REAPER decides to do with it. On by default.
 --]

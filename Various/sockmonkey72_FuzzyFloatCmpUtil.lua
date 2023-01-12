@@ -1,5 +1,5 @@
 -- @description Fuzzy Float Comparison Utility
--- @version 1.1
+-- @version 1.2
 -- @author sockmonkey72
 -- @about
 --   # Fuzzy Float Comparison Utility
@@ -10,7 +10,7 @@
 --   initial
 
 
--- using 32-bit numerical limits
+-- 32-bit numerical limits
 --[[
   local float_min_value = 1.175494e-38 -- min finite
   local float_min = 1.4013e-45 -- denorm_min
@@ -24,7 +24,7 @@ local float_min = 4.94066e-324 -- denorm_min
 local float_max = 1.79769e308
 local float_small = 4.940656e-312
 
-local float_epsilon = 0.00001 -- not FLT_EPSILON, but a relative amount to compare by. Here, 0.01%
+local float_epsilon = 0.00001 -- not FLT_EPSILON, but a relative amount to compare by. Here, 0.001%
 local NaN = 0/0
 
 ---------------------------------------------------------------------

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="859deff7af8c86d34fa9703b3b66e9416b8bb364">
+<index version="1" name="sockmonkey72 Scripts" commit="464db53216c010cc9ef317c2f69470c2bfde58f9">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -569,6 +569,16 @@ some refactoring]]></changelog>
         <changelog><![CDATA[- initial]]></changelog>
         <source file="MouseMaps/MouseMaps.lua">https://github.com/jeremybernstein/ReaScripts/raw/72305745a869bda45cdd1dd3774bfb40b0bc06f7/Mouse%20Maps/MouseMaps/MouseMaps.lua</source>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/72305745a869bda45cdd1dd3774bfb40b0bc06f7/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
+      </version>
+      <version name="0.0.1-beta.14" author="sockmonkey72" time="2023-01-16T00:19:38Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source file="MouseMaps/MouseMaps.lua">https://github.com/jeremybernstein/ReaScripts/raw/e875ad54a584e50e166b557b71dd470662e43222/Mouse%20Maps/MouseMaps/MouseMaps.lua</source>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/e875ad54a584e50e166b557b71dd470662e43222/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
+      </version>
+      <version name="0.0.1-beta.15" author="sockmonkey72" time="2023-01-16T21:51:15Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source file="MouseMaps/MouseMaps.lua">https://github.com/jeremybernstein/ReaScripts/raw/464db53216c010cc9ef317c2f69470c2bfde58f9/Mouse%20Maps/MouseMaps/MouseMaps.lua</source>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/464db53216c010cc9ef317c2f69470c2bfde58f9/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
       </version>
     </reapack>
   </category>

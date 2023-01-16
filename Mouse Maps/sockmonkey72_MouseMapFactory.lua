@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.14
+-- @version 0.0.1-beta.15
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -65,6 +65,10 @@ local runTogglesAtStartup = true
 local activeFname
 local actionNames = {}
 local inOKDialog = false
+local deletePresetPath
+local rebuildActionsMenu = false
+
+local viewPort
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
@@ -168,6 +172,21 @@ end
 local popupLabel = 'Load a Preset...'
 local lastInputTextBuffer
 
+local function PositionModalWindow(wScale, yOff)
+  local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+  local winHgt = winWid * (windowInfo.height / windowInfo.width) * wScale
+  r.ImGui_SetNextWindowSize(ctx, winWid, winHgt)
+  local winPosX, winPosY = r.ImGui_Viewport_GetPos(viewPort)
+  local winSizeX, winSizeY = r.ImGui_Viewport_GetSize(viewPort)
+  local okPosX = winPosX + (winSizeX / 2.) - (winWid / 2.)
+  local okPosY = winPosY + (winSizeY / 2.) - (winHgt / 2.) + (yOff and yOff or 0)
+  if okPosY + winHgt > windowInfo.top + windowInfo.height then
+    okPosY = okPosY - ((windowInfo.top + windowInfo.height) - (okPosY + winHgt))
+  end
+  r.ImGui_SetNextWindowPos(ctx, okPosX, okPosY)
+  --r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+end
+
 local function Spacing()
   local posy = r.ImGui_GetCursorPosY(ctx)
   r.ImGui_SetCursorPosY(ctx, posy + ((r.ImGui_GetFrameHeight(ctx) / 4) * canvasScale))
@@ -182,9 +201,7 @@ local function HandleOKDialog(title, text)
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if inOKDialog then
-    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
-    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.6)
-    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+    PositionModalWindow(0.6, r.ImGui_GetFrameHeight(ctx) / 2)
     r.ImGui_OpenPopup(ctx, title)
   elseif (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
     or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())) then
@@ -261,9 +278,31 @@ local function MakeLoadPopup()
           r.ImGui_CloseCurrentPopup(ctx)
           popupLabel = fn
         end
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsItemClicked(ctx, r.ImGui_MouseButton_Right()) then
+          deletePresetPath = r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap'
+          r.ImGui_OpenPopup(ctx, 'preset ctx menu')
+        end
         cherry = false
       end
-    else
+      if r.ImGui_BeginPopup(ctx, 'preset ctx menu') then
+        if r.ImGui_Selectable(ctx, 'Delete Preset') then
+          inOKDialog = true
+        end
+
+        r.ImGui_EndPopup(ctx)
+      end
+      if deletePresetPath then
+        local dpName = deletePresetPath:match('.*/(.*)%.ReaperMouseMap$')
+        local okrv, okval = HandleOKDialog('Delete Action?', 'Delete '..dpName..' permanently?')
+        if okrv then
+          if okval == 1 then
+            os.remove(deletePresetPath)
+            deletePresetPath = nil
+            --r.ImGui_CloseCurrentPopup(ctx)
+          end
+        end
+      end
+  else
       r.ImGui_BeginDisabled(ctx)
       r.ImGui_Selectable(ctx, 'No presets')
       r.ImGui_EndDisabled(ctx)
@@ -313,12 +352,14 @@ local function ManageSaveAndOverwrite(pathFn, saveFn, statusCtx, suppressOverwri
     end
   end
 
-  local okrv, okval = HandleOKDialog('Overwrite File?', 'Overwrite file '..lastInputTextBuffer..'?')
-  if okrv then
-    if okval == 1 then
-      local path, fname = pathFn()
-      saveFn(path, fname)
-      r.ImGui_CloseCurrentPopup(ctx)
+  if lastInputTextBuffer and lastInputTextBuffer ~= '' then
+    local okrv, okval = HandleOKDialog('Overwrite File?', 'Overwrite file '..lastInputTextBuffer..'?')
+    if okrv then
+      if okval == 1 then
+        local path, fname = pathFn()
+        saveFn(path, fname)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
     end
   end
 end
@@ -353,9 +394,7 @@ local function MakeSavePopup()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if r.ImGui_Button(ctx, 'Write a Preset...') then
-    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
-    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.75)
-    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+    PositionModalWindow(0.75)
     r.ImGui_OpenPopup(ctx, 'Write Preset')
     lastInputTextBuffer = ''
   end
@@ -461,10 +500,8 @@ local function MakeToggleActionPopup()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if r.ImGui_Button(ctx, 'Build a Toggle Action...') then
-    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+    PositionModalWindow(YAGNI and 1.1 or 0.75)
     lastInputTextBuffer = lastInputTextBuffer or activeFname and activeFname or ''
-    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * (YAGNI and 1.1 or 0.75))
-    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
     r.ImGui_OpenPopup(ctx, 'Build a Toggle Action')
   end
 
@@ -521,10 +558,8 @@ local function MakeOneShotActionPopup()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if r.ImGui_Button(ctx, 'Build a One-shot Action...') then
-    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+    PositionModalWindow(0.75)
     lastInputTextBuffer = lastInputTextBuffer or activeFname and activeFname or ''
-    r.ImGui_SetNextWindowSize(ctx, winWid, winWid * (windowInfo.height / windowInfo.width) * 0.75)
-    r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
     r.ImGui_OpenPopup(ctx, 'Build a One-shot Action')
   end
 
@@ -537,52 +572,62 @@ end
 -----------------------------------------------------------------------------
 ----------------------------------- GEAR MENU -------------------------------
 
+local function RebuildActionsMenu()
+  actionNames = {}
+  local startupStr
+  local f = io.open(r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua', 'r')
+  if f then
+    startupStr = f:read("*all")
+    f:close()
+  end
+
+  local _, activePath = mm.GetActiveToggleAction()
+
+  local idx = 0
+  local actionPath = r.GetResourcePath()..'/Scripts/MouseMapActions/'
+  r.EnumerateFiles(actionPath, -1)
+  local fname = r.EnumerateFiles(actionPath, idx)
+  while fname do
+    if fname ~= '__startup_MouseMap.lua' and fname:match('_MouseMap%.lua$') then
+      local actionStr
+      local actionType = 0 -- simple action
+      local actionStartup = false
+      local actionActive = false
+      local actionScriptPath = actionPath..fname
+      f = io.open(actionScriptPath, 'r')
+      if f then
+        actionStr = f:read("*all")
+        f:close()
+      end
+      if actionStr and actionStr:match('HandleToggleAction') then
+        actionType = 1 -- toggle action
+        actionStartup = startupStr:match(actionScriptPath) and true or false
+        actionActive = activePath == actionScriptPath
+      end
+      local actionName = fname:gsub('_MouseMap%.lua$', '')
+      table.insert(actionNames, { name = actionName, path = actionScriptPath, type = actionType, startup = actionStartup, active = actionActive })
+    end
+    idx = idx + 1
+    fname = r.EnumerateFiles(actionPath, idx)
+  end
+end
+
 local function MakeGearPopup()
   local x = r.ImGui_GetWindowSize(ctx)
   local textWidth = r.ImGui_CalcTextSize(ctx, 'Gear')
   r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
+  local wantsPop = false
   if r.ImGui_Button(ctx, 'Gear') then
-    -----------------------------------------------------------------------------
-    ------------------------------ SETUP ACTIONS MENU ---------------------------
-    actionNames = {}
-    local startupStr
-    local f = io.open(r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua', 'r')
-    if f then
-      startupStr = f:read("*all")
-      f:close()
-    end
+    rebuildActionsMenu = true
+    wantsPop = true
+  end
 
-    local _, activePath = mm.GetActiveToggleAction()
-
-    local idx = 0
-    local actionPath = r.GetResourcePath()..'/Scripts/MouseMapActions/'
-    r.EnumerateFiles(actionPath, -1)
-    local fname = r.EnumerateFiles(actionPath, idx)
-    while fname do
-      if fname ~= '__startup_MouseMap.lua' and fname:match('_MouseMap%.lua$') then
-        local actionStr
-        local actionType = 0 -- simple action
-        local actionStartup = false
-        local actionActive = false
-        local actionScriptPath = actionPath..fname
-        f = io.open(actionScriptPath, 'r')
-        if f then
-          actionStr = f:read("*all")
-          f:close()
-        end
-        if actionStr and actionStr:match('HandleToggleAction') then
-          actionType = 1 -- toggle action
-          actionStartup = startupStr:match(actionScriptPath) and true or false
-          actionActive = activePath == actionScriptPath
-        end
-        local actionName = fname:gsub('_MouseMap%.lua$', '')
-        table.insert(actionNames, { name = actionName, path = actionScriptPath, type = actionType, startup = actionStartup, active = actionActive })
-      end
-      idx = idx + 1
-      fname = r.EnumerateFiles(actionPath, idx)
-    end
+  if rebuildActionsMenu then
+    RebuildActionsMenu()
+  end
+  if wantsPop then
     r.ImGui_OpenPopup(ctx, 'gear menu')
   end
 
@@ -664,6 +709,7 @@ local function MakeGearPopup()
 
     r.ImGui_Spacing(ctx)
 
+    local enableActionsMenu = actionsMenu == false
     if r.ImGui_BeginMenu(ctx, 'Actions') then
       r.ImGui_PushFont(ctx, fontInfo.small)
       if #actionNames > 0 then
@@ -706,7 +752,8 @@ local function MakeGearPopup()
                 r.AddRemoveReaScript(false, 0, action.path, true)
                 os.remove(action.path)
                 mm.AddRemoveStartupAction() -- prune
-                r.ImGui_CloseCurrentPopup(ctx)
+                rebuildActionsMenu = true
+                -- r.ImGui_CloseCurrentPopup(ctx)
               end
             end
             r.ImGui_EndMenu(ctx)
@@ -920,6 +967,10 @@ local function openWindow()
   r.ImGui_PopFont(ctx)
   if useFilter then
     r.ImGui_PopStyleColor(ctx)
+  end
+
+  if r.ImGui_IsWindowAppearing(ctx) then
+    viewPort = r.ImGui_GetWindowViewport(ctx)
   end
 
   return visible, open

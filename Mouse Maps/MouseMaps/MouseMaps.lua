@@ -373,13 +373,17 @@ local function RestoreStateInternal(state, filtered, disableToggles)
   end
 
   -- set everything to -1
-  if UseFasterAPI then
+  if not filtered and UseFasterAPI then
     r.SetMouseModifier(-1, -1, -1)
   else
     if ctx then
       for k in pairs(ctx) do
-        for i = 0, 15 do
-          r.SetMouseModifier(k, i, '-1')
+        if UseFasterAPI then
+          r.SetMouseModifier(k, -1, -1)
+        else
+          for i = 0, 15 do
+            r.SetMouseModifier(k, i, '-1')
+          end
         end
       end
     end

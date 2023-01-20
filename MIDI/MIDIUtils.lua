@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.9
+-- @version 0.1.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -289,8 +289,8 @@ end
 local Event = class(nil, { ppqpos = 0, offset = 0, flags = 0, msg1 = 0, msg2 = 0, msg3 = 0,
                            chanmsg = 0, chan = 0, msg = '', MIDI = '', recalcMIDI = false, MIDIidx = 0, delete = false })
 function Event:init(ppqpos, offset, flags, msg, MIDI)
-  self.ppqpos = ppqpos
-  self.offset = offset
+  self.ppqpos = math.floor(ppqpos + 0.5)
+  self.offset = math.floor(offset + 0.5)
   self.flags = flags
 
   self.msg1 = (msg and msg:byte(1)) or 0
@@ -693,7 +693,16 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
   if testEvent.chan == selectedEvent.chan
     and testEvent.msg2 == selectedEvent.msg2
   then
-    if testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
+    -- quick test for equality, in which case we should prioritize a selected event over an unselected one
+    -- regardless of the overlap selection setting
+    if testEvent.ppqpos == selectedEvent.ppqpos and testEvent.endppqpos == selectedEvent.endppqpos then
+      local testSel = testEvent:IsSelected()
+      local selSel = selectedEvent:IsSelected()
+      if testSel ~= selSel and testSel then selectedEvent.delete = true
+      else testEvent.delete = true
+      end
+      return true
+    elseif testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
       MIDIUtils.MIDI_SetNote(take, testEvent.idx, nil, nil, nil, selectedEvent.ppqpos, nil, nil, nil)
       modified = true
     elseif testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
@@ -862,10 +871,12 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
       AdjustNoteOff(noteoff, 'flags', event.flags)
     end
     if ppqpos then
+      ppqpos = math.floor(ppqpos + 0.5)
       local diff = ppqpos - event.ppqpos
       event.ppqpos = ppqpos
     end
     if endppqpos then
+      endppqpos = math.floor(endppqpos + 0.5)
       AdjustNoteOff(noteoff, 'ppqpos', endppqpos)
       event.endppqpos = noteoff.ppqpos
     end
@@ -901,7 +912,6 @@ local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, p
                                   string.char(pitch & 0x7F),
                                   string.char(vel & 0x7F)
                                 }))
-  newNoteOn.endppqpos = endppqpos
   newNoteOn.noteOffIdx = -1
   InsertMIDIEvent(newNoteOn)
 
@@ -913,6 +923,7 @@ local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, p
                                     string.char(newNoteOn.msg2),
                                     string.char(relvel and (relvel & 0x7F) or 0)
                                   }))
+  newNoteOn.endppqpos = newNoteOff.ppqpos
   newNoteOff.noteOnIdx = #MIDIEvents
   _, newNoteOn.noteOffIdx = InsertMIDIEvent(newNoteOff)
   return true, newNoteOn.idx
@@ -1078,6 +1089,7 @@ local function MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg
       else event.flags = event.flags & ~2 end
     end
     if ppqpos then
+      ppqpos = math.floor(ppqpos + 0.5)
       event.ppqpos = ppqpos -- bounds checking?
     end
     if chanmsg then
@@ -1265,6 +1277,7 @@ local function MIDI_SetTextSysexEvt(take, idx, selected, muted, ppqpos, type, ms
       else event.flags = event.flags & ~2 end
     end
     if ppqpos then
+      ppqpos = math.floor(ppqpos + 0.5)
       event.ppqpos = ppqpos
     end
     if type and msg then
@@ -1375,6 +1388,7 @@ local function MIDI_SetEvt(take, idx, selected, muted, ppqpos, msg)
           else event.flags = event.flags & ~2 end
         end
         if ppqpos then
+          ppqpos = math.floor(ppqpos + 0.5)
           event.ppqpos = ppqpos
           end
         if msg then -- the problem here is that we could mess up the numbering

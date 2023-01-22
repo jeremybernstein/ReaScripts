@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="8251bc87e9ba4351688fcceecb54205ad309f9bd">
+<index version="1" name="sockmonkey72 Scripts" commit="a049164a6b22c06a506f6a925445ce0d4d51ef03">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -591,6 +591,11 @@ some refactoring]]></changelog>
         <changelog><![CDATA[- initial]]></changelog>
         <source file="MouseMaps/MouseMaps.lua">https://github.com/jeremybernstein/ReaScripts/raw/464db53216c010cc9ef317c2f69470c2bfde58f9/Mouse%20Maps/MouseMaps/MouseMaps.lua</source>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/464db53216c010cc9ef317c2f69470c2bfde58f9/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
+      </version>
+      <version name="0.0.1-beta.16" author="sockmonkey72" time="2023-01-22T17:11:25Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source file="MouseMaps/MouseMaps.lua">https://github.com/jeremybernstein/ReaScripts/raw/a049164a6b22c06a506f6a925445ce0d4d51ef03/Mouse%20Maps/MouseMaps/MouseMaps.lua</source>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/a049164a6b22c06a506f6a925445ce0d4d51ef03/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
       </version>
     </reapack>
   </category>

@@ -342,7 +342,7 @@ local function ReadStateFromFile(path, filtered)
       --   if not state[ctxname] then state[ctxname] = {} end
       -- end
     else
-      local modflag, action = line:match('mm_(%d+)%s*=%s*(%g*)$')
+      local modflag, action = line:match('mm_(%d+)%s*=%s*(%g*).*$')
       if modflag and action then
         modflag = tonumber(modflag)
         if modflag then current[modflag] = action end

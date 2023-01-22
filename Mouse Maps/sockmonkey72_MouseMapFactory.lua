@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.15
+-- @version 0.0.1-beta.16
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -9,8 +9,6 @@
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
-
--- TODO startup manager for toggle actions
 
 local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
@@ -709,7 +707,6 @@ local function MakeGearPopup()
 
     r.ImGui_Spacing(ctx)
 
-    local enableActionsMenu = actionsMenu == false
     if r.ImGui_BeginMenu(ctx, 'Actions') then
       r.ImGui_PushFont(ctx, fontInfo.small)
       if #actionNames > 0 then

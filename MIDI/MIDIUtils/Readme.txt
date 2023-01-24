@@ -729,7 +729,18 @@ MIDIUtils.MIDI_NoteNumberToNoteName(notenum, names = { 'C', 'C#', 'D', 'D#', 'E'
 MIDIUtils.post(...)
 MIDIUtils.p(...)
 --[[
-    Convenience method to post a message (or comma-delimited messages) to the REAPER console.
+    post: Convenience method to post a message (or comma-delimited messages) to the REAPER console.
+--]]
+
+number ppq =
+MIDIUtils.MIDI_GetPPQ(take)
+--[[
+    MIDI_GetPPQ: Returns the PPQ of the provided take.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+
+    Return value: PPQ value (parts (ticks) per quarter note) of the provided take
 --]]
 
 -----------------------------------------------------------------------------

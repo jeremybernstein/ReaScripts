@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.16
+-- @version 0.0.1-beta.17
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -65,6 +65,8 @@ local actionNames = {}
 local inOKDialog = false
 local deletePresetPath
 local rebuildActionsMenu = false
+local defaultPresetName = ''
+local presetPopupName
 
 local viewPort
 
@@ -84,6 +86,7 @@ local function handleExtState()
     r.SetExtState(scriptID, 'backupSet', mm.GetCurrentState_Serialized(true), true)
   end
   local filterStr = r.GetExtState(scriptID, 'filteredCats')
+
   if filterStr and filterStr ~= '' then
     local filterNames = mm.Deserialize(filterStr)
     if filterNames then
@@ -92,14 +95,18 @@ local function handleExtState()
       end
     end
   end
+
   local useFilterStr = r.GetExtState(scriptID, 'useFilter')
   if useFilterStr and useFilter ~= '' then
     useFilter = tonumber(useFilterStr) == 1 and true or false
   end
+
   local runToggles = r.GetExtState(scriptID, 'runTogglesAtStartup')
   if runToggles and runToggles ~= '' then
     runTogglesAtStartup = tonumber(runToggles) == 1 and true or false
   end
+
+  defaultPresetName = r.GetExtState(scriptID, 'defaultPresetName')
 end
 
 local function prepRandomShit()
@@ -237,6 +244,24 @@ end
 local function MakeLoadPopup()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'LOAD:')
+
+  if defaultPresetName ~= '' then
+    r.ImGui_SameLine(ctx)
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_AlignTextToFramePadding(ctx)
+    local x = r.ImGui_GetWindowSize(ctx)
+    local textWidth = r.ImGui_CalcTextSize(ctx, 'Restore Default')
+    r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+    if r.ImGui_Button(ctx, 'Restore Default') then
+      local restored = mm.RestoreStateFromFile(r.GetResourcePath()..'/MouseMaps/'..defaultPresetName..'.ReaperMouseMap', useFilter and getFilterNames() or nil)
+      statusMsg = (restored and 'Loaded' or 'Failed to load')..' '..defaultPresetName..'.ReaperMouseMap'
+      statusTime = r.time_precise()
+      statusContext = 1
+      popupLabel = defaultPresetName
+    end
+    r.ImGui_PopFont(ctx)
+  end
+
   r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
@@ -278,15 +303,23 @@ local function MakeLoadPopup()
         end
         if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsItemClicked(ctx, r.ImGui_MouseButton_Right()) then
           deletePresetPath = r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap'
+          presetPopupName = fn
           r.ImGui_OpenPopup(ctx, 'preset ctx menu')
         end
         cherry = false
       end
       if r.ImGui_BeginPopup(ctx, 'preset ctx menu') then
+        local retval, v = r.ImGui_Checkbox(ctx, 'Set Default Preset', presetPopupName == defaultPresetName)
+        if retval then
+          defaultPresetName = v and presetPopupName or ''
+          r.SetExtState(scriptID, 'defaultPresetName', defaultPresetName, true)
+        end
+        r.ImGui_Spacing(ctx)
+        r.ImGui_Separator(ctx)
+        r.ImGui_Spacing(ctx)
         if r.ImGui_Selectable(ctx, 'Delete Preset') then
           inOKDialog = true
         end
-
         r.ImGui_EndPopup(ctx)
       end
       if deletePresetPath then
@@ -300,7 +333,7 @@ local function MakeLoadPopup()
           end
         end
       end
-  else
+    else
       r.ImGui_BeginDisabled(ctx)
       r.ImGui_Selectable(ctx, 'No presets')
       r.ImGui_EndDisabled(ctx)
@@ -386,6 +419,20 @@ end
 local function MakeSavePopup()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'SAVE: ')
+
+  local DEBUG = false
+  if DEBUG then
+    r.ImGui_SameLine(ctx)
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_AlignTextToFramePadding(ctx)
+    local x = r.ImGui_GetWindowSize(ctx)
+    local textWidth = r.ImGui_CalcTextSize(ctx, 'Read reaper-mouse.ini')
+    r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+    if r.ImGui_Button(ctx, 'Read reaper-mouse.ini') then
+      mm.GetCurrentState()
+    end
+    r.ImGui_PopFont(ctx)
+  end
 
   r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
 

@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.10
+-- @version 0.1.12-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -1699,6 +1699,12 @@ local function MIDI_DebugInfo(take)
   return noteon, noteoff, cc, sysex, text, bezier, unknown
 end
 
+local function GetPPQ(take)
+  local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
+  local qn2 = qn1 + 1
+  return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
+end
+
 -----------------------------------------------------------------------------
 
 MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
@@ -1714,6 +1720,13 @@ MIDIUtils.MIDI_DebugInfo = function(take)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
   return select(2, xpcall(MIDI_DebugInfo, OnError, take))
+end
+
+MIDIUtils.MIDI_GetPPQ = function(take)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
+  )
+  return select(2, xpcall(GetPPQ, OnError, take))
 end
 
 -----------------------------------------------------------------------------

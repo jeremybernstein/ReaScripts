@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.17
+-- @version 0.0.1-beta.18
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -238,6 +238,9 @@ local function HandleOKDialog(title, text)
   end
   r.ImGui_PopFont(ctx)
   r.ImGui_PopStyleColor(ctx)
+
+  inOKDialog = false
+
   return rv, retval
 end
 

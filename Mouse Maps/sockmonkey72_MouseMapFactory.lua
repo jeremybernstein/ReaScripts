@@ -1,5 +1,5 @@
 -- @description Mouse Map Factory
--- @version 0.0.1-beta.18
+-- @version 0.0.1-beta.19
 -- @author sockmonkey72
 -- @about
 --   # Mouse Map Factory
@@ -213,7 +213,7 @@ local function HandleOKDialog(title, text)
       doOK = true
   end
 
-  if r.ImGui_BeginPopupModal(ctx, title) then
+  if r.ImGui_BeginPopupModal(ctx, title, true) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
       r.ImGui_CloseCurrentPopup(ctx)
     end
@@ -449,7 +449,7 @@ local function MakeSavePopup()
 
   handleStatus(2)
 
-  if r.ImGui_BeginPopupModal(ctx, 'Write Preset') then
+  if r.ImGui_BeginPopupModal(ctx, 'Write Preset', true) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
       r.ImGui_CloseCurrentPopup(ctx)
     end
@@ -499,7 +499,7 @@ local function DoSaveToggleAction(path, fname)
 end
 
 local function MakeToggleActionModal(modalName, editableName, suppressOverwrite)
-  if r.ImGui_BeginPopupModal(ctx, modalName) then
+  if r.ImGui_BeginPopupModal(ctx, modalName, true) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
       r.ImGui_CloseCurrentPopup(ctx)
     end
@@ -555,6 +555,17 @@ local function MakeToggleActionPopup()
 
   handleStatus(3)
 
+r.ImGui_SameLine(ctx)
+r.ImGui_PushFont(ctx, fontInfo.small)
+local x = r.ImGui_GetWindowSize(ctx)
+local textWidth = r.ImGui_CalcTextSize(ctx, 'Customize Toolbars...')
+r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+r.ImGui_AlignTextToFramePadding(ctx)
+if r.ImGui_Button(ctx, 'Customize Toolbars...') then
+  r.Main_OnCommand(40905, 0) -- Toolbars: Customize...
+end
+r.ImGui_PopFont(ctx)
+
   MakeToggleActionModal('Build a Toggle Action', true)
   r.ImGui_PopStyleColor(ctx)
 end
@@ -573,7 +584,7 @@ local function DoSaveOneShotAction(path, fname)
 end
 
 local function MakeOneShotActionModal(modalName, editableName, suppressOverwrite)
-  if r.ImGui_BeginPopupModal(ctx, modalName) then
+  if r.ImGui_BeginPopupModal(ctx, modalName, true) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
       r.ImGui_CloseCurrentPopup(ctx)
     end
@@ -1007,7 +1018,7 @@ local function openWindow()
 
   r.ImGui_PushFont(ctx, fontInfo.small)
   local visible, open = r.ImGui_Begin(ctx, titleBarText, true,
-                                        r.ImGui_WindowFlags_TopMost()
+                                        0 -- r.ImGui_WindowFlags_TopMost()
                                       + r.ImGui_WindowFlags_NoScrollWithMouse()
                                       + r.ImGui_WindowFlags_NoScrollbar()
                                       + r.ImGui_WindowFlags_NoSavedSettings())

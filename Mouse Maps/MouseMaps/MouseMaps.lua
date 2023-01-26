@@ -403,10 +403,12 @@ local function RestoreStateInternal(state, filtered, disableToggles)
     local known = filtered and true or (ctx and ctx[k]) and true or false
     for i = 0, 15 do
       if v[i] then
-        local action, flag = v[i]:match('^(%g*)%s*(%g*)$')
-        if flag == '' then flag = nil end
-        if not tonumber(action) then action = tostring(r.NamedCommandLookup(action)) end
-        if flag then action = action .. ' ' .. flag end
+        local action = v[i]
+        -- -- was necessary in +dev 0114(?)-0120, fixed in 0124
+        -- local action, flag = v[i]:match('^(%g*)%s*(%g*)$')
+        -- if flag == '' then flag = nil end
+        -- if not tonumber(action) then action = tostring(r.NamedCommandLookup(action)) end
+        -- if flag then action = action .. ' ' .. flag end
         r.SetMouseModifier(k, i, action)
         -- post('setting in ['..k..']', i, '"'..action..'"')
       elseif not known then
@@ -545,7 +547,7 @@ local function AddRemoveStartupAction(cmdIdx, fpath, add)
       local startupStr = ''
       f = io.open(startupFilePath, 'r')
       if f then
-        startupStr = f:read("*all")
+        startupStr = f:read('*all')
         f:close()
       end
       if not startupStr:match(actionScriptName) then

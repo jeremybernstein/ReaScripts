@@ -1,19 +1,20 @@
--- @description Mouse Map Factory
--- @version 0.0.1-beta.19
+-- @description MoM Toggle: Mouse Mod Toggle Action Generator
+-- @version 0.0.1-beta.20
 -- @author sockmonkey72
 -- @about
---   # Mouse Map Factory
---   Load/Save Mouse Maps, Create Toggle and One-shot Actions to change them up
+--   # MoM Toggle: Mouse Mod Toggle Action Generator
+--   Load/Save Mouse Maps, Generate Toggle and One-shot Actions to change them up
 -- @changelog
 --   - initial
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
+--   [main] sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua
 
 local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
-local scriptName = 'Mouse Map Factory'
+local scriptName = 'MoM Toggle'
 
 local canStart = true
 
@@ -47,7 +48,7 @@ local windowInfo
 local fontInfo
 
 local canvasScale = 1.0
-local DEFAULT_TITLEBAR_TEXT = 'Mouse Map Factory'
+local DEFAULT_TITLEBAR_TEXT = scriptName .. ': Mouse Mod Toggle Action Generator'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 
 local wantsUngrouped = false
@@ -63,12 +64,17 @@ local runTogglesAtStartup = true
 local activeFname
 local actionNames = {}
 local inOKDialog = false
-local deletePresetPath
+local selectedPresetPath
 local rebuildActionsMenu = false
 local defaultPresetName = ''
 local presetPopupName
 
 local viewPort
+
+local canReveal = true
+if not r.APIExists('CF_LocateInExplorer') then
+  canReveal = false
+end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
@@ -305,7 +311,7 @@ local function MakeLoadPopup()
           popupLabel = fn
         end
         if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsItemClicked(ctx, r.ImGui_MouseButton_Right()) then
-          deletePresetPath = r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap'
+          selectedPresetPath = r.GetResourcePath()..'/MouseMaps/'..fn..'.ReaperMouseMap'
           presetPopupName = fn
           r.ImGui_OpenPopup(ctx, 'preset ctx menu')
         end
@@ -319,19 +325,28 @@ local function MakeLoadPopup()
         end
         r.ImGui_Spacing(ctx)
         r.ImGui_Separator(ctx)
+
+        if canReveal then
+          r.ImGui_Spacing(ctx)
+          if r.ImGui_Selectable(ctx, 'Reveal in Finder/Explorer') then
+            r.CF_LocateInExplorer(selectedPresetPath)
+            r.ImGui_CloseCurrentPopup(ctx)
+          end
+        end
+
         r.ImGui_Spacing(ctx)
         if r.ImGui_Selectable(ctx, 'Delete Preset') then
           inOKDialog = true
         end
         r.ImGui_EndPopup(ctx)
       end
-      if deletePresetPath then
-        local dpName = deletePresetPath:match('.*/(.*)%.ReaperMouseMap$')
-        local okrv, okval = HandleOKDialog('Delete Action?', 'Delete '..dpName..' permanently?')
+      if selectedPresetPath then
+        local spName = selectedPresetPath:match('.*/(.*)%.ReaperMouseMap$')
+        local okrv, okval = HandleOKDialog('Delete Preset?', 'Delete '..spName..' permanently?')
         if okrv then
           if okval == 1 then
-            os.remove(deletePresetPath)
-            deletePresetPath = nil
+            os.remove(selectedPresetPath)
+            selectedPresetPath = nil
             --r.ImGui_CloseCurrentPopup(ctx)
           end
         end
@@ -636,7 +651,7 @@ local function RebuildActionsMenu()
   local startupStr
   local f = io.open(r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua', 'r')
   if f then
-    startupStr = f:read("*all")
+    startupStr = f:read('*all')
     f:close()
   end
 
@@ -655,7 +670,7 @@ local function RebuildActionsMenu()
       local actionScriptPath = actionPath..fname
       f = io.open(actionScriptPath, 'r')
       if f then
-        actionStr = f:read("*all")
+        actionStr = f:read('*all')
         f:close()
       end
       if actionStr and actionStr:match('HandleToggleAction') then
@@ -731,7 +746,7 @@ local function MakeGearPopup()
 
     if r.ImGui_BeginMenu(ctx, 'Filter') then
       r.ImGui_PushFont(ctx, fontInfo.small)
-      local f_retval, f_v = r.ImGui_Checkbox(ctx, "Enable Filter", useFilter and true or false)
+      local f_retval, f_v = r.ImGui_Checkbox(ctx, 'Enable Filter', useFilter and true or false)
       if f_retval then
         useFilter = f_v
         r.SetExtState(scriptID, 'useFilter', useFilter and '1' or '0', true)
@@ -797,6 +812,15 @@ local function MakeGearPopup()
             end
             r.ImGui_Spacing(ctx)
             r.ImGui_Separator(ctx)
+
+            if canReveal then
+              r.ImGui_Spacing(ctx)
+              if r.ImGui_Selectable(ctx, 'Reveal in Finder/Explorer') then
+                r.CF_LocateInExplorer(action.path)
+                r.ImGui_CloseCurrentPopup(ctx)
+              end
+            end
+
             r.ImGui_Spacing(ctx)
             if r.ImGui_Selectable(ctx, 'Delete Action', false, r.ImGui_SelectableFlags_DontClosePopups()) then
               inOKDialog = true
@@ -899,7 +923,7 @@ local function mainFn()
 
   Spacing()
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Text(ctx, 'FACTORIES')
+  r.ImGui_Text(ctx, 'GENERATORS')
 
   r.ImGui_Separator(ctx)
 

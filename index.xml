@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="592593c3113777ee9d6a43c92f9859d9a82c0c5e">
+<index version="1" name="sockmonkey72 Scripts" commit="d62aeeea80961587727f458793dd2ea5f1ea769c">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -772,6 +772,22 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       <version name="1.03" author="sockmonkey72" time="2022-08-09T12:07:12Z">
         <changelog><![CDATA[1.03 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/ab27a4d1a416b22c41997334802099d03c64875e/Various/sockmonkey72_Smarter_Zoom.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_StartupManager.lua" type="script" desc="Startup Manager">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Startup Manager\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Manage startup actions in the __startup.lua file\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.0.1-beta.1" author="sockmonkey72" time="2023-01-26T12:09:25Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/d62aeeea80961587727f458793dd2ea5f1ea769c/Various/sockmonkey72_StartupManager.lua</source>
       </version>
     </reapack>
   </category>

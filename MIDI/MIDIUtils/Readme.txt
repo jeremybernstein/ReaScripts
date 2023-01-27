@@ -713,6 +713,36 @@ MIDIUtils.MIDI_EnumEvts(take, idx)
 
 -----------------------------------------------------------------------------
 
+boolean rv, number val, number ppqpos, integer chanmsg, integer chan, integer msg2out, integer msg3out =
+MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
+--[[
+    MIDI_GetCCValueAtTime: Get the effective CC value at a given time position, applying any curve.
+
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      number chanmsg: message type:
+        0xA0 - poly pressure / aftertouch
+        0xB0 - continuous controller
+        0xC0 - program change [* only requres 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xE0 - pitch bend
+      number chan: MIDI channel (0 - 15)
+      number msg2: 2nd message byte (0 - 127) [unused for program change and channel pressure types]
+      number time: project time in seconds (as returned by reaper.GetCursorPosition() or similar)
+
+    Return values:
+      boolean rv: true on success, false otherwise
+      number val: the effective CC value at the given time position (floating-point, interpolated)
+      number ppqpos: PPQ position in the take of the requested time
+      integer chanmsg: the message type (generally the same as was passed in)
+      integer chan: MIDI channel (0 - 15) (the same as was passed in)
+      integer msg2out: the 2nd MIDI byte for the controller message
+      integer msg3out: the 3rd MIDI byte for the controller message
+--]]
+
+-----------------------------------------------------------------------------
+
 string notename =
 MIDIUtils.MIDI_NoteNumberToNoteName(notenum, names = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' })
 --[[
@@ -726,12 +756,6 @@ MIDIUtils.MIDI_NoteNumberToNoteName(notenum, names = { 'C', 'C#', 'D', 'D#', 'E'
     Return value: note name + octave string for the input value
 --]]
 
-MIDIUtils.post(...)
-MIDIUtils.p(...)
---[[
-    post: Convenience method to post a message (or comma-delimited messages) to the REAPER console.
---]]
-
 number ppq =
 MIDIUtils.MIDI_GetPPQ(take)
 --[[
@@ -741,6 +765,12 @@ MIDIUtils.MIDI_GetPPQ(take)
       MediaItem_Take take: the MediaItem_Take provided by REAPER
 
     Return value: PPQ value (parts (ticks) per quarter note) of the provided take
+--]]
+
+MIDIUtils.post(...)
+MIDIUtils.p(...)
+--[[
+    post: Convenience method to post a message (or comma-delimited messages) to the REAPER console.
 --]]
 
 -----------------------------------------------------------------------------

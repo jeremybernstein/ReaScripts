@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.12-beta.1
+-- @version 0.1.12-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -77,8 +77,9 @@ end
 local function post(...)
   local args = {...}
   local str = ''
-  for i, v in ipairs(args) do
-    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
+  for i = 1, #args do
+    local v = args[i]
+    str = str .. (i ~= 1 and ', ' or '') .. (v ~= nil and tostring(v) or '<nil>')
   end
   str = str .. '\n'
   r.ShowConsoleMsg(str)
@@ -317,6 +318,7 @@ end
 function Event:IsChannelEvt() return false end
 function Event:IsAllEvt() return false end
 function Event:IsSelected() return self.flags & 1 ~= 0 end
+function Event:IsMuted() return self.flags & 2 ~= 0 end
 
 function Event:SetMIDIString(msg)
   self.msg = self:PurifyMsg(msg)
@@ -1655,6 +1657,256 @@ MIDIUtils.MIDI_EnumSelEvts = function(take, idx)
 end
 
 -----------------------------------------------------------------------------
+--------------------------------- CURVEINTERP -------------------------------
+
+--[[ ported from lice_bezier.h ]]
+
+--[[
+  -- https://forum.cockos.com/showpost.php?p=1690470&postcount=7
+  Given end points at (0,1) (1,-1), tension maps to control points as:
+
+  tension 0 => (0.25,0.5) (0.75,-0.5)
+
+  This is somewhat arbitrary and everything else is based off it.
+
+  tension -1 => (0,-1) (0,-1)
+  tension 1 => (1,1) (1,1)
+
+  All other tension values just interpolate the control points between those 3 states.
+
+  tension -0.5 => (0.125,-0.25) (0.375,-0.75)
+  tension 0.5 => (0.625,0.75) (0.875,0.25)
+  etc.
+--]]
+
+--[[
+  -- https://github.com/reaper-oss/sws/blob/98b91a9495bf90c1ae4d31a7bec483e69fbb897b/Breeder/BR_EnvelopeUtil.cpp#L754-L807
+  int id0 = (m_sorted) ? (id-1)     : (this->FindPrevious(t1, 0));
+  int id3 = (m_sorted) ? (nextId+1) : (this->FindNext(t2, 0));
+  double t0 = (!this->ValidateId(id0)) ? (t1) : (m_points[id0].position);
+  double v0 = (!this->ValidateId(id0)) ? (v1) : (m_points[id0].value);
+  double t3 = (!this->ValidateId(id3)) ? (t2) : (m_points[id3].position);
+  double v3 = (!this->ValidateId(id3)) ? (v2) : (m_points[id3].value);
+
+  double x1, x2, y1, y2, empty;
+  LICE_Bezier_FindCardinalCtlPts(0.25, t0, t1, t2, v0, v1, v2, &empty, &x1, &empty, &y1);
+  LICE_Bezier_FindCardinalCtlPts(0.25, t1, t2, t3, v1, v2, v3, &x2, &empty, &y2, &empty);
+
+  double tension = m_points[id].bezier;
+  x1 += tension * ((tension > 0) ? (t2-x1) : (x1-t1));
+  x2 += tension * ((tension > 0) ? (t2-x2) : (x2-t1));
+  y1 -= tension * ((tension > 0) ? (y1-v1) : (v2-y1));
+  y2 -= tension * ((tension > 0) ? (y2-v1) : (v2-y2));
+
+  x1 = SetToBounds(x1, t1, t2);
+  x2 = SetToBounds(x2, t1, t2);
+  y1 = SetToBounds(y1, this->MinValue(), this->MaxValue());
+  y2 = SetToBounds(y2, this->MinValue(), this->MaxValue());
+  return LICE_CBezier_GetY(t1, x1, x2, t2, v1, y1, y2, v2, position);
+--]]
+
+local CBEZ_ITERS = 8
+
+local function EVAL_CBEZ(a,b,c,d,t)
+  local _t2=t*t
+  local tx=(a*t*_t2+b*_t2+c*t+d)
+  return tx
+end
+
+local function LICE_CBezier_GetCoeffs(ctrl_x1, ctrl_x2, ctrl_x3, ctrl_x4, ctrl_y1, ctrl_y2, ctrl_y3, ctrl_y4)
+  local pAX, pBX, pCX
+  local pAY, pBY, pCY
+
+  pCX = 3.0 * (ctrl_x2 - ctrl_x1)
+  local cx = pCX
+  pBX = 3.0 * (ctrl_x3 - ctrl_x2) - cx
+  local bx = pBX
+  pAX = (ctrl_x4 - ctrl_x1) - cx - bx
+  pCY =  3.0 * (ctrl_y2 - ctrl_y1)
+  local cy = pCY
+  pBY = 3.0 * (ctrl_y3 - ctrl_y2) - cy
+  local by = pBY
+  pAY = (ctrl_y4 - ctrl_y1) - cy - by
+  return pAX, pBX, pCX, pAY, pBY, pCY
+end
+
+local function LICE_CBezier_GetY(ctrl_x1, ctrl_x2, ctrl_x3, ctrl_x4, ctrl_y1, ctrl_y2, ctrl_y3, ctrl_y4, x)
+  local pNextX = 0
+  local pdYdX = 0
+  local ptLo = 0
+  local ptHi = 0
+
+  if x < ctrl_x1 then
+    pNextX = ctrl_x1
+    pdYdX = 0
+    return ctrl_y1, pNextX, pdYdX, ptLo, ptHi
+  end
+
+  if x >= ctrl_x4 then
+    pNextX = ctrl_x4
+    pdYdX = 0
+    return ctrl_y4, pNextX, pdYdX, ptLo, ptHi
+  end
+
+  local ax, bx, cx, ay, by, cy =
+    LICE_CBezier_GetCoeffs(ctrl_x1, ctrl_x2, ctrl_x3, ctrl_x4, ctrl_y1, ctrl_y2, ctrl_y3, ctrl_y4)
+
+  local tx, t
+  local tLo = 0.0
+  local tHi = 1.0
+  local xLo=0.0
+  local xHi=0.0
+  local yLo, yHi
+
+  for i = 1, CBEZ_ITERS do
+    t = 0.5 * (tLo + tHi)
+    tx = EVAL_CBEZ(ax, bx, cx, ctrl_x1, t)
+    if tx < x then
+      tLo = t
+      xLo = tx
+    elseif tx > x then
+      tHi = t
+      xHi = tx
+    else
+      tLo = t
+      xLo = tx
+      tHi = t + 1.0 / (2.0 ^ CBEZ_ITERS)
+      if tHi > 1.0 then tHi = 1.0 end -- floating point error
+      xHi = EVAL_CBEZ(ax, bx, cx, ctrl_x1, tHi)
+      break
+    end
+  end
+
+  if tLo == 0. then xLo = EVAL_CBEZ(ax, bx, cx, ctrl_x1, 0.) end
+  if tHi == 1. then xHi = EVAL_CBEZ(ax, bx, cx, ctrl_x1, 1.) end
+
+  yLo = EVAL_CBEZ(ay, by, cy, ctrl_y1, tLo)
+  yHi = EVAL_CBEZ(ay, by, cy, ctrl_y1, tHi)
+
+  local dYdX = (xLo == xHi and 0.0 or (yHi - yLo) / (xHi - xLo))
+  local y = yLo + (x - xLo) * dYdX
+
+  pNextX = xHi
+  pdYdX = dYdX
+
+  ptLo = tLo
+  ptHi = tHi
+
+  return y, pNextX, pdYdX, ptLo, ptHi
+end
+
+local function CalculateCCValueAtTime(val1, val2, pos, shape, beztension)
+  if shape == 0 then -- square
+    return val1
+  elseif shape == 1 then -- linear
+    return val1 + ((val2 - val1) * pos)
+  elseif shape == 2 then -- slow start/end
+    return val1 + ((val2 - val1) * (pos ^ 2) * (3 - 2 * pos))
+  elseif shape == 3 then -- fast start
+    return val1 + ((val2 - val1) * (1. - ((1. - pos) ^ 3)))
+  elseif shape == 4 then -- fast end
+    return val1 + ((val2 - val1) * (pos ^ 3))
+  elseif shape == 5 then -- bezier TODO
+    local x0, x1, x2, x3, y0, y1, y2, y3
+    x0, y0 = 0., val1
+    x3, y3 = 1., val2
+    x1, y1 = 0.25, val1 + ((val2 - val1) * 0.25)
+    x2, y2 = 0.75, val1 + ((val2 - val1) * 0.75)
+
+    x1 = x1 + beztension * (beztension > 0 and 1 - x1 or x1 - 0)
+    y1 = y1 - beztension * (beztension > 0 and y1 - val1 or val2 - y1)
+    x2 = x2 + beztension * (beztension > 0 and 1 - x2 or x2 - 0)
+    y2 = y2 - beztension * (beztension > 0 and y2 - val1 or val2 - y2)
+
+    local bezy = LICE_CBezier_GetY(x0, x1, x2, x3, y0, y1, y2, y3, pos)
+    return bezy
+  end
+  return val1
+end
+
+local function MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
+  EnsureTake(take)
+  local rv = false
+  local val = 0
+  local ppqpos = 0
+  chanmsg = chanmsg & 0xF0
+  chan = chan & 0xF
+  local b3 = chanmsg == 0xA0 or chanmsg == 0xB0
+  local b2 = chanmsg == 0xC0 or chanmsg == 0xD0
+  local pb = chanmsg == 0xE0
+  local msg2out = 0
+  local msg3out = 0
+
+  if chanmsg >= 0xA0 and chanmsg < 0xF0 then
+    ppqpos = r.MIDI_GetPPQPosFromProjTime(take, time)
+    local event_start
+    local event_end
+    if b3 and not msg2 then return false, 0 end
+    for _, event in ipairs(MIDIEvents) do
+      if event:is_a(CCEvent)
+        and event.chanmsg == chanmsg
+        and event.chan == chan
+        and not event:IsMuted()
+      then
+        if not b3 or event.msg2 == msg2 then
+          if event.ppqpos <= ppqpos and (not event_start or event.ppqpos > event_start.ppqpos) then
+            event_start = event
+          elseif event.ppqpos >= ppqpos and (not event_end or event.ppqpos < event_end.ppqpos) then
+            event_end = event
+          end
+        end
+      end
+    end
+    if event_start and event_end then
+      local ret, shape, beztension = MIDI_GetCCShape(take, event_start.idx)
+      local val_start, val_end
+      if b3 then
+        val_start = event_start.msg3
+        val_end = event_end.msg3
+      elseif chanmsg == 0xC0 or chanmsg == 0xD0 then
+        val_start = event_start.msg2
+        val_end = event_end.msg2
+      else
+        val_start = (event_start.msg3 << 7 | event_start.msg2) - (1 << 13)
+        val_end = (event_end.msg3 << 7 | event_end.msg2) - (1 << 13)
+      end
+      if val_start and val_end then
+        local range = event_end.ppqpos - event_start.ppqpos
+        local pos = range ~= 0 and (ppqpos - event_start.ppqpos) / range or 0
+        val = CalculateCCValueAtTime(val_start, val_end, pos, shape, beztension)
+        rv = true
+      end
+    elseif event_start then
+      val = b3 and event_start.msg3 or b2 and event_start.msg2 or pb and (event_start.msg3 << 7 | event_start.msg2) - (1 << 13) or 0
+      rv = true
+    end
+    if rv then
+      if pb then
+        val = (math.floor(val + 0.5) + (1 << 13)) & 0x3FFF
+        msg2out = val & 0x7F
+        msg3out = (val >> 7) & 0x7F
+      else
+        msg2out = b3 and event_start.msg2 or b2 and math.floor(val + 0.5) or 0
+        msg3out = b3 and math.floor(val + 0.5) or 0
+      end
+    end
+  end
+  return rv, val, ppqpos, chanmsg, chan, msg2out, msg3out
+end
+
+-----------------------------------------------------------------------------
+
+MIDIUtils.MIDI_GetCCValueAtTime = function(take, chanmsg, chan, msg2, time)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(chanmsg, 'number'),
+    MakeTypedArg(chan, 'number'),
+    MakeTypedArg(time, 'number')
+  )
+  return select(2, xpcall(MIDI_GetCCValueAtTime, OnError, take, chanmsg, chan, msg2, time))
+end
+
+-----------------------------------------------------------------------------
 ------------------------------------ MISC -----------------------------------
 
 local noteNames = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' }
@@ -1699,13 +1951,13 @@ local function MIDI_DebugInfo(take)
   return noteon, noteoff, cc, sysex, text, bezier, unknown
 end
 
-local function GetPPQ(take)
+local function MIDI_GetPPQ(take)
+  EnsureTake(take)
   local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
   local qn2 = qn1 + 1
   return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
 end
 
------------------------------------------------------------------------------
 
 MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
   EnforceArgs(
@@ -1726,7 +1978,7 @@ MIDIUtils.MIDI_GetPPQ = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
-  return select(2, xpcall(GetPPQ, OnError, take))
+  return select(2, xpcall(MIDI_GetPPQ, OnError, take))
 end
 
 -----------------------------------------------------------------------------

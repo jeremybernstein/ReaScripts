@@ -728,7 +728,9 @@ MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
         0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
         0xE0 - pitch bend
       number chan: MIDI channel (0 - 15)
-      number msg2: 2nd message byte (0 - 127) [unused for program change and channel pressure types]
+      number msg2: 2nd message byte (0 - 127)
+                   e.g. the CC# or poly aftertouch note#
+                   [unused for program change, channel pressure and pitch bend types]
       number time: project time in seconds (as returned by reaper.GetCursorPosition() or similar)
 
     Return values:

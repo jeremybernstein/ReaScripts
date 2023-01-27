@@ -1,5 +1,5 @@
 -- @description Startup Manager
--- @version 0.0.1-beta.1
+-- @version 0.0.1-beta.2
 -- @author sockmonkey72
 -- @about
 --   # Startup Manager
@@ -39,8 +39,9 @@ end
 local function post(...)
   local args = {...}
   local str = ''
-  for i, v in ipairs(args) do
-    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
+  for i = 1, #args do
+    local v = args[i]
+    str = str .. (i ~= 1 and ', ' or '') .. (v ~= nil and tostring(v) or '<nil>')
   end
   str = str .. '\n'
   r.ShowConsoleMsg(str)
@@ -85,7 +86,13 @@ local fontInfo
 local DEFAULT_TITLEBAR_TEXT = scriptName
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 
-local fileLines = {}
+local startStash
+local endStash
+local startIdx
+local endIdx
+
+local stashString = ''
+local entries = {}
 local inActionList = false
 local actionListRow = -1
 
@@ -112,13 +119,32 @@ local function MakeBackup(path)
   end
 end
 
-local function WriteFile(path, lines)
+local stashStartStr = '___Startup_Manager_Stash_Start___'
+local stashEndStr = '___Startup_Manager_Stash_End___'
+local entryStartStr = '___Startup_Manager_Start___'
+local entryEndStr = '___Startup_Manager_End___'
+
+local function WriteFile(path, entries)
   MakeBackup(path)
   local f = io.open(path, 'wb')
   if f then
-    for _, line in ipairs(lines) do
-      f:write(line..'\n')
+    stashString = string.gsub(stashString, '^%s*(.-)%s*$', '%1')
+    if stashString ~= '' then
+      f:write('--[[ -- ' .. stashStartStr .. '\n\n')
+      f:write(stashString .. '\n\n')
+      f:write('--]] -- ' .. stashEndStr .. '\n\n')
     end
+    f:write('--[[ ' .. entryStartStr .. ' ]]\n\n')
+    for _, entry in ipairs(entries) do
+      local cmdStr = entry.enabled and '' or '-- '
+      cmdStr = cmdStr .. 'reaper.Main_OnCommand('
+      if tonumber(entry.cmdID) then cmdStr = cmdStr .. entry.cmdID
+      else cmdStr = cmdStr .. 'reaper.NamedCommandLookup("' .. entry.cmdID .. '")'
+      end
+      cmdStr = cmdStr .. ', 0) -- ' .. entry.name
+      f:write(cmdStr .. '\n')
+    end
+    f:write('\n--[[ ' .. entryEndStr .. ' ]]\n')
     f:close()
   end
   gooseLines = true
@@ -179,13 +205,20 @@ local function prepWindowAndFont()
   processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
 end
 
-local function MoveDraggedLine(payload, target, lines)
-  local oldline = tonumber(payload:match('^(%d+),'))
-  if oldline then
-    local oldlineText = lines[oldline]
-    table.remove(lines, oldline)
-    table.insert(lines, oldline < target and target or target + 1, oldlineText)
-    WriteFile(startupFilePath, lines)
+local function MoveDraggedLine(payload, target, entries)
+  local oldIdx = tonumber(payload:match('^(%d+),'))
+  if oldIdx then
+    local oldEntry = entries[oldIdx]
+    table.remove(entries, oldIdx)
+    target = oldIdx < target and target or target + 1
+    if target > #entries then target = nil end
+
+    if target then
+      table.insert(entries, target, oldEntry)
+    else
+      table.insert(entries, oldEntry)
+    end
+    WriteFile(startupFilePath, entries)
   end
 end
 
@@ -257,9 +290,6 @@ local function mainFn()
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    local enabled, order, name, id
-    order = 0
-
     -- only refresh file list every 1s, unless there's been a change
     if gooseTimer and r.time_precise() - gooseTimer > 1 then
       gooseTimer = nil
@@ -267,14 +297,79 @@ local function mainFn()
     end
 
     if gooseLines then
-      fileLines = {}
+      local enabled, name
+
+      entries = {}
+      stashString = ''
+      startStash = nil
+      endStash = nil
+      startIdx = nil
+      endIdx = nil
+
+      local fileLines = {}
       if FileExists(startupFilePath) then
         for line in io.lines(startupFilePath) do
           table.insert(fileLines, line)
+
+          if line:match('%-%-%[%[ %-%- ' .. stashStartStr) then
+            startStash = #fileLines
+          elseif line:match('%-%-%]%] %-%- ' .. stashEndStr) then
+            endStash = #fileLines
+          elseif line:match('%-%-%[%[ ' .. entryStartStr) then
+            startIdx = #fileLines
+          elseif line:match('%-%-%[%[ ' .. entryEndStr) then
+            endIdx = #fileLines
+          end
         end
       end
       gooseLines = false
       gooseTimer = r.time_precise()
+
+      if startStash and endStash then
+        stashString = table.concat(fileLines, '\n', startStash + 1, endStash - 1)
+      end
+
+      for idx, line in ipairs(fileLines) do
+        local termed = false
+        local term
+        if (not (startStash and endStash) or (idx < startStash or idx > endStash)) then
+          term = line:match('Main_OnCommand%s*%(([^%s,]*),[%s%d]+%)')
+          termed = true
+        end
+        if not term then
+          if termed and idx ~= startStash and idx ~= endStash and idx ~= startIdx and idx ~= endIdx then
+            stashString = stashString .. line .. '\n'
+          end
+        else
+          name = ''
+          enabled = true
+          if line:match('^[%s-]+-') then enabled = false end
+          local cmdID = term:match('NamedCommandLookup%([\"\']([^\"\']*)[\"\']')
+          if not cmdID then
+            cmdID = line:match('OnCommand%s*%(%s*(%d+)')
+          end
+          if not cmdID then
+            local varname = line:match('NamedCommandLookup%(%s*(%g*)%s*%)')
+            if varname then
+              for i = idx - 1, 1, -1 do
+                cmdID = fileLines[i]:match(varname .. '%s*=%s*[\"\']([^\"\']*)[\"\']')
+                if cmdID and cmdID ~= '' then
+                  break
+                end
+              end
+              if cmdID == '' then cmdID = nil end
+            end
+          end
+          if cmdID then
+            name = r.kbd_getTextFromCmd(r.NamedCommandLookup(cmdID), nil)
+            if name == '' then name = '(unknown script)' end
+            table.insert(entries, { cmdID = cmdID, name = name, enabled = enabled })
+          end
+          if (not (startIdx and endIdx)) or (idx < startIdx or idx > endIdx) then
+            stashString = stashString .. line .. '\n'
+          end
+        end
+      end
     end
 
     r.ImGui_TableNextRow(ctx, nil, (fontInfo.largeDefaultSize * 1.75) * canvasScale)
@@ -284,92 +379,68 @@ local function mainFn()
     if r.ImGui_BeginDragDropTarget(ctx) then
       local rv, payload = r.ImGui_AcceptDragDropPayload(ctx, 'row')
       if rv then
-        MoveDraggedLine(payload, 1, fileLines)
+        MoveDraggedLine(payload, 1, entries)
       end
       r.ImGui_EndDragDropTarget(ctx)
     end
-    for idx, line in ipairs(fileLines) do
-      local term = line:match('Main_OnCommand%(([^%s,]*),[%s%d]+%)') -- ensure that this is a complete single-line command
-      if term then
-        r.ImGui_TableNextRow(ctx, nil, (fontInfo.largeDefaultSize * 1.75) * canvasScale)
-        order = order + 1
-        enabled = true
-        if line:match('^[%s-]+-') then enabled = false end
-        local cmdID = term:match('NamedCommandLookup%([\"\'](.*)[\"\']')
-        if not cmdID then
-          cmdID = line:match('OnCommand%s*%(%s*(%d+)')
-        end
-        if cmdID then
-          name = r.kbd_getTextFromCmd(r.NamedCommandLookup(cmdID), nil)
-          if name == '' then name = '(unknown script)' end
-          id = cmdID
-        end
 
-        r.ImGui_TableNextColumn(ctx)
-        if r.ImGui_Checkbox(ctx, '##'..order..'_enabled', enabled) then
-          enabled = not enabled
-          local newline = line
-          if enabled then newline = line:gsub('^[%s-]+', '')
-          else newline = '-- ' .. line
-          end
-          fileLines[idx] = newline
-          WriteFile(startupFilePath, fileLines)
+    for idx, entry in ipairs(entries) do
+      r.ImGui_TableNextRow(ctx, nil, (fontInfo.largeDefaultSize * 1.75) * canvasScale)
+      r.ImGui_TableNextColumn(ctx)
+      if r.ImGui_Checkbox(ctx, '##'..idx..'_enabled', entry.enabled) then
+        entry.enabled = not entry.enabled
+        WriteFile(startupFilePath, entries)
+      end
+      r.ImGui_TableNextColumn(ctx)
+      r.ImGui_Selectable(ctx, ''..idx, false)
+      if r.ImGui_BeginDragDropTarget(ctx) then
+        local rv, payload = r.ImGui_AcceptDragDropPayload(ctx, 'row')
+        if rv then
+          MoveDraggedLine(payload, idx, entries)
         end
-        r.ImGui_TableNextColumn(ctx)
-        r.ImGui_Selectable(ctx, ''..order, false)
-        if r.ImGui_BeginDragDropTarget(ctx) then
-          local rv, payload = r.ImGui_AcceptDragDropPayload(ctx, 'row')
-          if rv then
-            MoveDraggedLine(payload, idx, fileLines)
-          end
-          r.ImGui_EndDragDropTarget(ctx)
-        end
-        -- if r.ImGui_BeginDragDropSource(ctx, r.ImGui_DragDropFlags_SourceAllowNullID()) then
-        --   r.ImGui_SetDragDropPayload(ctx, 'row', idx..','..(enabled and 1 or 0)..','..order..','..name..','..id)
-        --   r.ImGui_Text(ctx, 'Row '..order..': '..name)
-        --   r.ImGui_EndDragDropSource(ctx)
-        -- end
+        r.ImGui_EndDragDropTarget(ctx)
+      end
 
-        r.ImGui_TableNextColumn(ctx)
-        r.ImGui_Text(ctx, name)
-        r.ImGui_TableNextColumn(ctx)
-        r.ImGui_Text(ctx, id)
-        r.ImGui_TableNextColumn(ctx)
-        if r.ImGui_Button(ctx, 'Choose...##'..order) then
-          r.PromptForAction(1, 0, 0)
-          inActionList = true
-          actionListRow = order
+      r.ImGui_TableNextColumn(ctx)
+      r.ImGui_Text(ctx, entry.name)
+      r.ImGui_TableNextColumn(ctx)
+      r.ImGui_Text(ctx, entry.cmdID)
+      r.ImGui_TableNextColumn(ctx)
+      if r.ImGui_Button(ctx, 'Choose...##'..idx) then
+        r.PromptForAction(1, 0, 0)
+        inActionList = true
+        actionListRow = idx
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x0077FF33)
+      r.ImGui_Selectable(ctx, '##group'..idx, false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap())
+      if r.ImGui_BeginPopupContextItem(ctx, '##rowctx'..idx) then
+        r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), defaultHoverColor)
+        r.ImGui_Spacing(ctx)
+        if r.ImGui_Selectable(ctx, 'Copy Script Description To Clipboard') then
+          r.ImGui_SetClipboardText(ctx, entry.name)
         end
-        r.ImGui_SameLine(ctx)
-        r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x0077FF33)
-        r.ImGui_Selectable(ctx, '##group'..order, false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap())
-        if r.ImGui_BeginPopupContextItem(ctx, '##rowctx'..order) then
-          r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), defaultHoverColor)
-          r.ImGui_Spacing(ctx)
-          if r.ImGui_Selectable(ctx, 'Copy Script Description To Clipboard') then
-            r.ImGui_SetClipboardText(ctx, name)
-          end
-          r.ImGui_Spacing(ctx)
-          if r.ImGui_Selectable(ctx, 'Copy Script ID To Clipboard') then
-            r.ImGui_SetClipboardText(ctx, id)
-          end
-          r.ImGui_Spacing(ctx)
-          if r.ImGui_Selectable(ctx, 'Delete Entry') then
-            table.remove(fileLines, idx)
-            WriteFile(startupFilePath, fileLines)
-          end
-          r.ImGui_Spacing(ctx)
-          r.ImGui_PopStyleColor(ctx)
-          r.ImGui_EndPopup(ctx)
+        r.ImGui_Spacing(ctx)
+        if r.ImGui_Selectable(ctx, 'Copy Script ID To Clipboard') then
+          r.ImGui_SetClipboardText(ctx, entry.cmdID)
         end
+        r.ImGui_Spacing(ctx)
+        if r.ImGui_Selectable(ctx, 'Delete Entry') then
+          table.remove(entries, idx)
+          WriteFile(startupFilePath, entries)
+        end
+        r.ImGui_Spacing(ctx)
         r.ImGui_PopStyleColor(ctx)
-        if r.ImGui_BeginDragDropSource(ctx, r.ImGui_DragDropFlags_SourceAllowNullID()) then
-          r.ImGui_SetDragDropPayload(ctx, 'row', idx..','..(enabled and 1 or 0)..','..order..','..name..','..id)
-          r.ImGui_Text(ctx, 'Row '..order..': '..name)
-          r.ImGui_EndDragDropSource(ctx)
-        end
+        r.ImGui_EndPopup(ctx)
+      end
+      r.ImGui_PopStyleColor(ctx)
+      if r.ImGui_BeginDragDropSource(ctx, r.ImGui_DragDropFlags_SourceAllowNullID()) then
+        r.ImGui_SetDragDropPayload(ctx, 'row', idx..','..(entry.enabled and 1 or 0)..','..entry.name..','..entry.cmdID)
+        r.ImGui_Text(ctx, 'Row '..idx..': '..entry.name)
+        r.ImGui_EndDragDropSource(ctx)
       end
     end
+
     r.ImGui_TableNextRow(ctx, nil, (fontInfo.largeDefaultSize * 1.75) * canvasScale)
     r.ImGui_TableNextColumn(ctx)
     r.ImGui_TableNextColumn(ctx)
@@ -389,18 +460,13 @@ local function mainFn()
         local cmdID = r.ReverseNamedCommandLookup(action)
         -- r.ShowConsoleMsg('chose new action: '..action..' ('..cmdID..')'..' -- row '..actionListRow..'\n')
         r.PromptForAction(-1, 0, 0)
-
-        local cmdStr = 'reaper.Main_OnCommand('
-        if not cmdID then cmdStr = cmdStr .. action
-        else cmdStr = cmdStr .. 'reaper.NamedCommandLookup("_' .. cmdID .. '")'
-        end
-        cmdStr = cmdStr .. ', 0) --' .. r.kbd_getTextFromCmd(action, nil)
+        local entry = { cmdID = cmdID and '_' .. cmdID or tostring(action), name = r.kbd_getTextFromCmd(action, nil), enabled = true }
         if actionListRow > 0 then
-          fileLines[actionListRow] = cmdStr
+          table.insert(entries, actionListRow, entry)
         else
-          table.insert(fileLines, cmdStr)
+          table.insert(entries, entry)
         end
-        WriteFile(startupFilePath, fileLines)
+        WriteFile(startupFilePath, entries)
         inActionList = false
       elseif action < 0 then
         -- r.ShowConsoleMsg('canceled or sth went wrong\n')

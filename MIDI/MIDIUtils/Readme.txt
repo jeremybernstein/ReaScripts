@@ -316,8 +316,8 @@ MIDIUtils.MIDI_GetCC(take, idx)
       number chanmsg: message type:
         0xA0 - poly pressure / aftertouch
         0xB0 - continuous controller
-        0xC0 - program change [* only requres 2 bytes]
-        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xC0 - program change [* only requires 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requires 2 bytes]
         0xE0 - pitch bend
       number chan: MIDI channel (0 - 15)
       number msg2: 2nd message byte (0 - 127)
@@ -338,8 +338,8 @@ MIDIUtils.MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, ms
       number chanmsg: message type [optional]:
         0xA0 - poly pressure / aftertouch
         0xB0 - continuous controller
-        0xC0 - program change [* only requres 2 bytes]
-        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xC0 - program change [* only requires 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requires 2 bytes]
         0xE0 - pitch bend
       number chan: MIDI channel (0 - 15) [optional]
       number msg2: 2nd message byte (0 - 127) [optional]
@@ -361,8 +361,8 @@ MIDIUtils.MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3
       number chanmsg: message type:
         0xA0 - poly pressure / aftertouch
         0xB0 - continuous controller
-        0xC0 - program change [* only requres 2 bytes]
-        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xC0 - program change [* only requires 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requires 2 bytes]
         0xE0 - pitch bend
       number chan: MIDI channel (0 - 15)
       number msg2: 2nd message byte (0 - 127)
@@ -724,8 +724,8 @@ MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
       number chanmsg: message type:
         0xA0 - poly pressure / aftertouch
         0xB0 - continuous controller
-        0xC0 - program change [* only requres 2 bytes]
-        0xD0 - channel pressure / aftertouch [* only requres 2 bytes]
+        0xC0 - program change [* only requires 2 bytes]
+        0xD0 - channel pressure / aftertouch [* only requires 2 bytes]
         0xE0 - pitch bend
       number chan: MIDI channel (0 - 15)
       number msg2: 2nd message byte (0 - 127)

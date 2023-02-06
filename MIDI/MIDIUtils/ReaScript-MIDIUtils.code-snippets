@@ -1,0 +1,192 @@
+{
+	"SetOnError lua": {
+		"prefix": "mu.SetOnError",
+		"body": "mu.SetOnError(${1:fn})$0",
+		"description": "set an optional error callback for xpcall(), otherwise a traceback will be posted to the REAPER console window by default.  Return value: none\n\n"
+	},
+	"CheckDependencies lua": {
+		"prefix": "mu.CheckDependencies",
+		"body": "mu.CheckDependencies(${1:callerScriptName})$0",
+		"description": "check whether all MIDIUtils dependencies are met, pass the name of your script as an argument, will be used as an identifier in any error message generated.  Return value: boolean rv: true if dependencies are met, false otherwise\n\n"
+	},
+	"MIDI_InitializeTake lua": {
+		"prefix": "mu.MIDI_InitializeTake",
+		"body": "mu.MIDI_InitializeTake(${1:take}, ${2:enforceargs})$0",
+		"description": "gather the events in a MediaItem_Take for use with MIDIUtils. In simple usage, this call is optional -- API calls will automatically call MIDI_InitializeTake() internally if the provided take is not already prepared.  NOTE: if using MIDIUtils in a defer() script, you will want to call this once per defer cycle to ensure that the MIDIUtils internal state is synced with the take state.  The optional 'enforceargs' argument can be used to disable API argument type enforcement for efficiency in production code.\n\n"
+	},
+	"MIDI_CountEvts lua": {
+		"prefix": "mu.MIDI_CountEvts",
+		"body": "mu.MIDI_CountEvts(${1:take})$0",
+		"description": "provide a count of take events by type.\n\n"
+	},
+	"MIDI_OpenWriteTransaction lua": {
+		"prefix": "mu.MIDI_OpenWriteTransaction",
+		"body": "mu.MIDI_OpenWriteTransaction(${1:take})$0",
+		"description": "start a 'write' transaction. MIDIUtils performs all of its MIDI data manipulation in memory. Unlike Cockos' high-level MIDI API, there are no 'immediately sorted' API calls. To make changes to the data, you are required to open a transaction, make all changes, and then commit the transaction, which will write all changes in a single bulk set action.\n\n"
+	},
+	"MIDI_CommitWriteTransaction lua": {
+		"prefix": "mu.MIDI_CommitWriteTransaction",
+		"body": "mu.MIDI_CommitWriteTransaction(${1:take}, ${2:refresh}, ${3:dirty})$0",
+		"description": "end a 'write' transaction and commit the data to the take.\n\n"
+	},
+	"MIDI_CorrectOverlaps lua": {
+		"prefix": "mu.MIDI_CorrectOverlaps",
+		"body": "mu.MIDI_CorrectOverlaps(${1:take}, ${2:favorSelection})$0",
+		"description": "manually apply overlap correction to the current take. See also MIDIUtils.CORRECT_OVERLAPS and MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION for automatic overlap correction options.\n\n"
+	},
+	"MIDI_GetNote lua": {
+		"prefix": "mu.MIDI_GetNote",
+		"body": "mu.MIDI_GetNote(${1:take}, ${2:idx})$0",
+		"description": "Get MIDI note properties.\n\n"
+	},
+	"MIDI_SetNote lua": {
+		"prefix": "mu.MIDI_SetNote",
+		"body": "mu.MIDI_SetNote(${1:take}, ${2:idx}, ${3:selected}, ${4:muted}, ${5:ppqpos}, ${6:endppqpos}, ${7:chan}, ${8:pitch}, ${9:vel}, ${10:relvel})$0",
+		"description": "Set MIDI note properties for an existing event.\n\n"
+	},
+	"MIDI_InsertNote lua": {
+		"prefix": "mu.MIDI_InsertNote",
+		"body": "mu.MIDI_InsertNote(${1:take}, ${2:selected}, ${3:muted}, ${4:ppqpos}, ${5:endppqpos}, ${6:chan}, ${7:pitch}, ${8:vel}, ${9:relvel})$0",
+		"description": "Create a new MIDI note event.\n\n"
+	},
+	"MIDI_DeleteNote lua": {
+		"prefix": "mu.MIDI_DeleteNote",
+		"body": "mu.MIDI_DeleteNote(${1:take}, ${2:idx})$0",
+		"description": "Delete a note event.\n\n"
+	},
+	"MIDI_GetCC lua": {
+		"prefix": "mu.MIDI_GetCC",
+		"body": "mu.MIDI_GetCC(${1:take}, ${2:idx})$0",
+		"description": "Get CC/channel message properties.\n\n"
+	},
+	"MIDI_SetCC lua": {
+		"prefix": "mu.MIDI_SetCC",
+		"body": "mu.MIDI_SetCC(${1:take}, ${2:idx}, ${3:selected}, ${4:muted}, ${5:ppqpos}, ${6:chanmsg}, ${7:chan}, ${8:msg2}, ${9:msg3})$0",
+		"description": "Set CC/channel message properties for an existing event.\n\n"
+	},
+	"MIDI_InsertCC lua": {
+		"prefix": "mu.MIDI_InsertCC",
+		"body": "mu.MIDI_InsertCC(${1:take}, ${2:selected}, ${3:muted}, ${4:ppqpos}, ${5:chanmsg}, ${6:chan}, ${7:msg2}, ${8:msg3})$0",
+		"description": "Create a new CC/channel message event.\n\n"
+	},
+	"MIDI_DeleteCC lua": {
+		"prefix": "mu.MIDI_DeleteCC",
+		"body": "mu.MIDI_DeleteCC(${1:take}, ${2:idx})$0",
+		"description": "Delete a CC/channel message event.\n\n"
+	},
+	"MIDI_GetCCShape lua": {
+		"prefix": "mu.MIDI_GetCCShape",
+		"body": "mu.MIDI_GetCCShape(${1:take}, ${2:idx})$0",
+		"description": "Get CC shape and bezier tension.\n\n"
+	},
+	"MIDI_SetCCShape lua": {
+		"prefix": "mu.MIDI_SetCCShape",
+		"body": "mu.MIDI_SetCCShape(${1:take}, ${2:idx}, ${3:shape}, ${4:beztension})$0",
+		"description": "Set CC shape and bezier tension.\n\n"
+	},
+	"MIDI_GetTextSysexEvt lua": {
+		"prefix": "mu.MIDI_GetTextSysexEvt",
+		"body": "mu.MIDI_GetTextSysexEvt(${1:take}, ${2:idx})$0",
+		"description": "Get meta / system exclusive message properties.\n\n"
+	},
+	"MIDI_SetTextSysexEvt lua": {
+		"prefix": "mu.MIDI_SetTextSysexEvt",
+		"body": "mu.MIDI_SetTextSysexEvt(${1:take}, ${2:idx}, ${3:selected}, ${4:muted}, ${5:ppqpos}, ${6:type}, ${7:msg})$0",
+		"description": "Set meta / system exclusive message properties for an existing event.\n\n"
+	},
+	"MIDI_InsertTextSysexEvt lua": {
+		"prefix": "mu.MIDI_InsertTextSysexEvt",
+		"body": "mu.MIDI_InsertTextSysexEvt(${1:take}, ${2:selected}, ${3:muted}, ${4:ppqpos}, ${5:type}, ${6:bytestr})$0",
+		"description": "Create a new meta / system exclusive message event.\n\n"
+	},
+	"MIDI_DeleteTextSysexEvt lua": {
+		"prefix": "mu.MIDI_DeleteTextSysexEvt",
+		"body": "mu.MIDI_DeleteTextSysexEvt(${1:take}, ${2:idx})$0",
+		"description": "Delete a meta / system exclusive message event.\n\n"
+	},
+	"MIDI_GetEvt lua": {
+		"prefix": "mu.MIDI_GetEvt",
+		"body": "mu.MIDI_GetEvt(${1:take}, ${2:idx})$0",
+		"description": "Get event properties.\n\n"
+	},
+	"MIDI_SetEvt lua": {
+		"prefix": "mu.MIDI_SetEvt",
+		"body": "mu.MIDI_SetEvt(${1:take}, ${2:idx}, ${3:selected}, ${4:muted}, ${5:ppqpos}, ${6:msg})$0",
+		"description": "Set event properties for an existing event.\n\n"
+	},
+	"MIDI_DeleteEvt lua": {
+		"prefix": "mu.MIDI_DeleteEvt",
+		"body": "mu.MIDI_DeleteEvt(${1:take}, ${2:idx})$0",
+		"description": "Delete an event.\n\n"
+	},
+	"MIDI_EnumSelNotes lua": {
+		"prefix": "mu.MIDI_EnumSelNotes",
+		"body": "mu.MIDI_EnumSelNotes(${1:take}, ${2:idx})$0",
+		"description": "Returns the index of the next selected MIDI note event after idx (-1 if there are no more selected events).\n\n"
+	},
+	"MIDI_EnumSelCC lua": {
+		"prefix": "mu.MIDI_EnumSelCC",
+		"body": "mu.MIDI_EnumSelCC(${1:take}, ${2:idx})$0",
+		"description": "Returns the index of the next selected MIDI CC event after idx (-1 if there are no more selected events).\n\n"
+	},
+	"MIDI_EnumNotes lua": {
+		"prefix": "mu.MIDI_EnumNotes",
+		"body": "mu.MIDI_EnumNotes(${1:take}, ${2:idx})$0",
+		"description": "Returns the index of the next MIDI note event after idx (-1 if there are no more events).\n\n"
+	},
+	"MIDI_EnumCC lua": {
+		"prefix": "mu.MIDI_EnumCC",
+		"body": "mu.MIDI_EnumCC(${1:take}, ${2:idx})$0",
+		"description": "Returns the index of the next MIDI CC event after idx (-1 if there are no more events).\n\n"
+	},
+	"MIDI_EnumTextSysexEvts lua": {
+		"prefix": "mu.MIDI_EnumTextSysexEvts",
+		"body": "mu.MIDI_EnumTextSysexEvts(${1:take}, ${2:idx})$0",
+		"description": "Returns the index of the next MIDI meta / system exclusive event after idx (-1 if there are no more events).\n\n"
+	},
+	"MIDI_EnumEvts lua": {
+		"prefix": "mu.MIDI_EnumEvts",
+		"body": "mu.MIDI_EnumEvts(${1:take}, ${2:idx})$0",
+		"description": "Returns the index of the next event after idx (-1 if there are no more events).\n\n"
+	},
+	"MIDI_NoteNumberToNoteName lua": {
+		"prefix": "mu.MIDI_NoteNumberToNoteName",
+		"body": "mu.MIDI_NoteNumberToNoteName(${1:notenum}, ${2:names})$0",
+		"description": "Returns the note name + octave (i.e. A3, D#-1) of the provided MIDI note number. Takes REAPER's MIDI octave name display offset preference into account.\n\n"
+	},
+	"MIDI_GetPPQ lua": {
+		"prefix": "mu.MIDI_GetPPQ",
+		"body": "mu.MIDI_GetPPQ(${1:take})$0",
+		"description": "Returns the PPQ of the provided take.\n\n"
+	},
+	"post lua": {
+		"prefix": "mu.post",
+		"body": "mu.post(${1:...})$0",
+		"description": "Convenience method to post a message (or comma-delimited messages) to the REAPER console.\n\n"
+	},
+	"p lua": {
+		"prefix": "mu.p",
+		"body": "mu.p(${1:...})$0",
+		"description": "Convenience method to post a message (or comma-delimited messages) to the REAPER console.\n\n"
+	},
+	"ENFORCE_ARGS lua": {
+		"prefix": "mu.ENFORCE_ARGS",
+		"body": "mu.ENFORCE_ARGS$0",
+		"description": "Flag to enable/disable argument type-checking. When enabled, submitting the wrong argument type(s) to MIDIUtils functions will cause an error, useful for debugging code. Disable in production code, since the type checking adds some minimal overhead. On by default, see also MIDIUtils.InitializeTake(), where this can be set.\n\n"
+	},
+	"CORRECT_OVERLAPS lua": {
+		"prefix": "mu.CORRECT_OVERLAPS",
+		"body": "mu.CORRECT_OVERLAPS$0",
+		"description": "Flag to enable/disable overlap correction on commit. Off by default, but may be desirable if the option 'Correct overlapping notes while editing' is enabled, or for the Inline MIDI Editor (where that option is always active).\n\n"
+	},
+	"CORRECT_OVERLAPS_FAVOR_SELECTION lua": {
+		"prefix": "mu.CORRECT_OVERLAPS_FAVOR_SELECTION",
+		"body": "mu.CORRECT_OVERLAPS_FAVOR_SELECTION$0",
+		"description": "If CORRECT_OVERLAPS is enabled, CORRECT_OVERLAPS_FAVOR_SELECTION determines whether the selection's note-off takes precedence over an unselected note-on when performing the overlap correction. Off by default.\n\n"
+	},
+	"ALLNOTESOFF_SNAPS_TO_ITEM_END lua": {
+		"prefix": "mu.ALLNOTESOFF_SNAPS_TO_ITEM_END",
+		"body": "mu.ALLNOTESOFF_SNAPS_TO_ITEM_END$0",
+		"description": "If ALLNOTESOFF_SNAPS_TO_ITEM_END is enabled, the 'All Notes Off' event (CC#123, at the end of every item) will be snapped to the end of the item, rather than floating around near the end of the item, or being stuck at the end of the last note, or whatever REAPER decides to do with it. On by default.\n\n"
+	}
+}

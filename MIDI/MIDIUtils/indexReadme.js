@@ -83,6 +83,6 @@ allContents.split(/\r?\n/).forEach((line) => {
 
 contents += '\n}\n';
 contents = contents.replaceAll(/\s*?(\\n\\n)/g, '$1');
-fs.writeFile('/Users/jeremydb/Desktop/ReaScript-MIDIUtils.code-snippets', contents, err => {
+fs.writeFile('ReaScript-MIDIUtils.code-snippets', contents, err => {
 
 });

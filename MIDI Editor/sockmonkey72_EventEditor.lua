@@ -34,9 +34,9 @@ local r = reaper
 
 -- package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'EventEditor/?.lua'
-local s = require 'MIDIUtils'
-s.ENFORCE_ARGS = false -- turn off type checking
-s.CORRECT_OVERLAPS = false -- manual correction
+local mu = require 'MIDIUtils'
+mu.ENFORCE_ARGS = false -- turn off type checking
+mu.CORRECT_OVERLAPS = false -- manual correction
 
 local function fileExists(name)
   local f = io.open(name,'r')
@@ -47,16 +47,16 @@ local canStart = true
 
 local imGuiPath = r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua'
 if not fileExists(imGuiPath) then
-  s.post('MIDI Event Editor requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
+  mu.post('MIDI Event Editor requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
   canStart = false
 end
 
 if not r.APIExists('JS_Mouse_GetState') then
-  s.post('MIDI Event Editor requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
+  mu.post('MIDI Event Editor requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
   canStart = false
 end
 
-if not s.CheckDependencies('MIDI Event Editor') then
+if not mu.CheckDependencies('MIDI Event Editor') then
   canStart = false
 end
 
@@ -495,7 +495,7 @@ local function windowFn()
     if lo ~= hi then
       text = '['..lo..'-'..hi..']'
     elseif name == 'pitch' then
-      text = '<'..s.MIDI_NoteNumberToNoteName(lo)..'>'
+      text = '<'..mu.MIDI_NoteNumberToNoteName(lo)..'>'
     end
     if text then
       local ix, iy = currentRect.left, currentRect.bottom
@@ -934,14 +934,14 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------ ITERATE EVENTS -----------------------------
 
-  s.MIDI_InitializeTake(take) -- reset this each cycle
-  local _, notecnt, cccnt = s.MIDI_CountEvts(take)
+  mu.MIDI_InitializeTake(take) -- reset this each cycle
+  local _, notecnt, cccnt = mu.MIDI_CountEvts(take)
   local selnotecnt = 0
   local selcccnt = 0
-  local noteidx = s.MIDI_EnumNotes(take, -1)
+  local noteidx = mu.MIDI_EnumNotes(take, -1)
   while noteidx ~= -1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
-    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = s.MIDI_GetNote(take, noteidx)
+    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = mu.MIDI_GetNote(take, noteidx)
     e.notedur = e.endppqpos - e.ppqpos
     e.chanmsg = 0x90
     if e.selected then
@@ -951,13 +951,13 @@ local function windowFn()
       table.insert(newNotes, e.idx)
     end
     table.insert(allEvents, e)
-    noteidx = s.MIDI_EnumNotes(take, noteidx)
+    noteidx = mu.MIDI_EnumNotes(take, noteidx)
   end
 
-  local ccidx = s.MIDI_EnumCC(take, -1)
+  local ccidx = mu.MIDI_EnumCC(take, -1)
   while ccidx ~= -1 do
     local e = { type = CC_TYPE, idx = ccidx }
-    _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = s.MIDI_GetCC(take, ccidx)
+    _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = mu.MIDI_GetCC(take, ccidx)
 
     if e.chanmsg == 0xE0 then
       e.ccnum = INVALID
@@ -975,7 +975,7 @@ local function windowFn()
       table.insert(selectedEvents, e)
     end
     table.insert(allEvents, e)
-    ccidx = s.MIDI_EnumCC(take, ccidx)
+    ccidx = mu.MIDI_EnumCC(take, ccidx)
   end
 
   -- this determines if we need to switch the view back
@@ -1362,7 +1362,7 @@ local function windowFn()
     local item = r.GetMediaItemTake_Item(take)
     local item_extents = getItemExtents(item)
 
-    s.MIDI_OpenWriteTransaction(take)
+    mu.MIDI_OpenWriteTransaction(take)
 
     for _, v in ipairs(selectedEvents) do
       if popupFilter == v.chanmsg then
@@ -1387,25 +1387,25 @@ local function windowFn()
           local pitch = changedParameter == 'pitch' and v.pitch or nil
           local vel = changedParameter == 'vel' and v.vel or nil
           if v.delete then
-            s.MIDI_DeleteNote(take, v.idx)
+            mu.MIDI_DeleteNote(take, v.idx)
           elseif v.touched then
-            s.MIDI_SetNote(take, v.idx, nil, nil, v.ppqpos, v.endppqpos, nil, nil, nil)
+            mu.MIDI_SetNote(take, v.idx, nil, nil, v.ppqpos, v.endppqpos, nil, nil, nil)
           else
-            s.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
+            mu.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
           end
         elseif popupFilter ~= 0 then
           local ppqpos = recalced and v.ppqpos or nil
           local chan = changedParameter == 'chan' and v.chan or nil
           local msg2 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg2 or nil
           local msg3 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg3 or nil
-          s.MIDI_SetCC(take, v.idx, nil, nil, ppqpos, nil, chan, msg2, msg3)
+          mu.MIDI_SetCC(take, v.idx, nil, nil, ppqpos, nil, chan, msg2, msg3)
         end
       end
     end
 
-    if correctOverlapsNow then s.MIDI_CorrectOverlaps(take, overlapFavorsSelected) end
+    if correctOverlapsNow then mu.MIDI_CorrectOverlaps(take, overlapFavorsSelected) end
 
-    s.MIDI_CommitWriteTransaction(take) -- sorts
+    mu.MIDI_CommitWriteTransaction(take) -- sorts
     if canProcess and popupFilter == NOTE_FILTER then
       processTimeout = r.time_precise() * 1000
     else
@@ -1574,7 +1574,7 @@ local function loop()
   -- if not r.ImGui_IsWindowFocused(ctx) then
   --   local hwnd = r.MIDIEditor_GetActive()
   --   if not hwnd or r.JS_Window_GetFocus() ~= hwnd then
-  --     s.post(hwnd and 'no match' or 'no hwnd')
+  --     mu.post(hwnd and 'no match' or 'no hwnd')
   --     r.ImGui_IsWindowAppearing(ctx) -- keep the ctx alive
   --     r.defer(function() xpcall(loop, onCrash) end)
   --     return

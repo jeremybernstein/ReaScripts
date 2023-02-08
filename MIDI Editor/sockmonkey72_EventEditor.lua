@@ -260,6 +260,7 @@ local function windowFn()
   end
 
   local function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
+    local nilmeas = measures == nil
     if not measures then measures = 0 end
     if not beats then beats = 0 end
     if not ticks then ticks = 0 end
@@ -269,7 +270,13 @@ local function windowFn()
       beats = beats + relBeats
       ticks = ticks + relTicks
     end
-    local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, r.TimeMap2_beatsToTime(0, beats, measures)) + ticks
+    local bbttime
+    if nilmeas then
+      bbttime = r.TimeMap2_beatsToTime(0, beats) -- have to do it this way, passing nil as 3rd arg is equivalent to 0 and breaks things
+    else
+      bbttime = r.TimeMap2_beatsToTime(0, beats, measures)
+    end
+    local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, bbttime) + ticks
     if relativeppq and not nosubtract then ppqpos = ppqpos - relativeppq end
     return math.floor(ppqpos)
   end
@@ -290,7 +297,7 @@ local function windowFn()
     -- REAPER, why is this so difficult?
     -- get the PPQ position of the nearest measure start (to ensure that we're dealing with round values)
     local _, startMeasures, _, startBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
-    local startPPQ = BBTToPPQ(nil,  math.floor(startBeats))
+    local startPPQ = BBTToPPQ(nil, math.floor(startBeats))
 
     -- now we need the nearest measure start to the end position
     local _, endMeasuresSOM, _, endBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, startPPQ + ppqlen)))

@@ -1,6 +1,6 @@
 @description onprojectload (run action at project load)
 @author sockmonkey72
-@version 1.0.0
+@version 1.0.1
 @provides
   [darwin] onprojectload/reaper_onprojectload.dylib > reaper_onprojectload.dylib
   [linux64] onprojectload/reaper_onprojectload.so > reaper_onprojectload.so

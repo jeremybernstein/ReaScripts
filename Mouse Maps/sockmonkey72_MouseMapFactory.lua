@@ -11,6 +11,8 @@
 --   [main] sockmonkey72_MouseMapFactory.lua
 --   [main] sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua
 
+-- TODO: toggle actions across sections -- interaction
+
 local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
@@ -38,11 +40,16 @@ local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnabl
 
 local YAGNI = false
 
+local IMAGEBUTTON_SIZE = 13
+local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'MouseMaps/' .. 'gear_40031.png')
+-- if GearImage then r.ImGui_Attach(ctx, GearImage) end
+
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
 local DEFAULT_WIDTH = 36 * FONTSIZE_LARGE
-local DEFAULT_HEIGHT = 19.5 * FONTSIZE_LARGE
+local DEFAULT_HEIGHT = 17 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 60
+local DEFAULT_MENUBUTTON_WIDTH = 100
 
 local windowInfo
 local fontInfo
@@ -70,6 +77,10 @@ local defaultPresetName = ''
 local presetPopupName
 
 local viewPort
+
+local SectionMain = true
+local SectionMIDI = false
+local PresetLoadSelected
 
 local canReveal = true
 if not r.APIExists('CF_LocateInExplorer') then
@@ -212,7 +223,7 @@ local function HandleOKDialog(title, text)
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   if inOKDialog then
-    PositionModalWindow(0.6, r.ImGui_GetFrameHeight(ctx) / 2)
+    PositionModalWindow(0.7, r.ImGui_GetFrameHeight(ctx) / 2)
     r.ImGui_OpenPopup(ctx, title)
   elseif (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
     or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())) then
@@ -250,9 +261,30 @@ local function HandleOKDialog(title, text)
   return rv, retval
 end
 
+local function EnumerateMouseMapFiles()
+  local idx = 0
+  local fnames = {}
+  r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', -1)
+  local fname = r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', idx)
+  while fname do
+    if fname:match('%.ReaperMouseMap$') then
+      fname = fname:gsub('%.ReaperMouseMap$', '')
+      table.insert(fnames, fname)
+    end
+    idx = idx + 1
+    fname = r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', idx)
+  end
+  return fnames
+end
+
 local function MakeLoadPopup()
+  r.ImGui_PushFont(ctx, fontInfo.small)
+  r.ImGui_SetCursorPosX(ctx, 15 * canvasScale)
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'LOAD:')
+  r.ImGui_PopFont(ctx)
+  r.ImGui_SameLine(ctx)
+  r.ImGui_SetCursorPosX(ctx, (DEFAULT_ITEM_WIDTH - 5) * canvasScale)
 
   if defaultPresetName ~= '' then
     r.ImGui_SameLine(ctx)
@@ -271,11 +303,9 @@ local function MakeLoadPopup()
     r.ImGui_PopFont(ctx)
   end
 
-  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
-
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
-  if r.ImGui_Button(ctx, popupLabel) then
+  if r.ImGui_Button(ctx, popupLabel, DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
     r.ImGui_OpenPopup(ctx, 'preset menu')
   end
 
@@ -286,18 +316,7 @@ local function MakeLoadPopup()
       r.ImGui_CloseCurrentPopup(ctx)
     end
 
-    local idx = 0
-    local fnames = {}
-    r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', -1)
-    local fname = r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', idx)
-    while fname do
-      if fname:match('%.ReaperMouseMap$') then
-        fname = fname:gsub('%.ReaperMouseMap$', '')
-        table.insert(fnames, fname)
-      end
-      idx = idx + 1
-      fname = r.EnumerateFiles(r.GetResourcePath()..'/MouseMaps/', idx)
-    end
+    local fnames = EnumerateMouseMapFiles()
     if #fnames > 0 then
       local cherry = true
       for _, fn in mm.spairs(fnames, function (t, a, b) return t[a] < t[b] end ) do
@@ -434,9 +453,26 @@ local function DoSavePreset(path, fname)
   r.ImGui_CloseCurrentPopup(ctx)
 end
 
+local function ConfirmButton()
+  if not lastInputTextBuffer or lastInputTextBuffer == '' then
+    r.ImGui_BeginDisabled(ctx)
+  end
+  if r.ImGui_Button(ctx, 'Confirm') then
+    inOKDialog = true
+  end
+  if not lastInputTextBuffer or lastInputTextBuffer == '' then
+    r.ImGui_EndDisabled(ctx)
+  end
+end
+
 local function MakeSavePopup()
+  r.ImGui_PushFont(ctx, fontInfo.small)
+  r.ImGui_SetCursorPosX(ctx, 15 * canvasScale)
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'SAVE: ')
+  r.ImGui_PopFont(ctx)
+  r.ImGui_SameLine(ctx)
+  r.ImGui_SetCursorPosX(ctx, (DEFAULT_ITEM_WIDTH - 5) * canvasScale)
 
   local DEBUG = false
   if DEBUG then
@@ -452,11 +488,9 @@ local function MakeSavePopup()
     r.ImGui_PopFont(ctx)
   end
 
-  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
-
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
-  if r.ImGui_Button(ctx, 'Write a Preset...') then
+  if r.ImGui_Button(ctx, 'Write a Preset...', DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
     PositionModalWindow(0.75)
     r.ImGui_OpenPopup(ctx, 'Write Preset')
     lastInputTextBuffer = ''
@@ -480,9 +514,8 @@ local function MakeSavePopup()
 
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Spacing(ctx)
-    if r.ImGui_Button(ctx, 'Confirm') then
-      inOKDialog = true
-    end
+
+    ConfirmButton()
 
     ManageSaveAndOverwrite(PresetPathAndFilenameFromLastInput, DoSavePreset, 2)
 
@@ -492,19 +525,40 @@ local function MakeSavePopup()
   r.ImGui_PopStyleColor(ctx)
 end
 
+local function DoRegisterScript(path, section, isToggle)
+  local newCmdIdx = r.AddRemoveReaScript(true, section, path, true) -- Main
+  if isToggle then
+    if section == 0 then
+      r.Main_OnCommand(newCmdIdx, section) -- jigger
+    else
+      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), newCmdIdx) -- jigger
+    end
+    if section == 0 then
+      if runTogglesAtStartup then
+        -- TODO: check this for MIDI Editor toggles
+        mm.AddRemoveStartupAction(newCmdIdx, path, true)
+      end
+    end
+  end
+end
+
+local function RegisterScript(path, isToggle)
+  if SectionMain then
+    DoRegisterScript(path, 0, isToggle)
+  end
+  if SectionMIDI then
+    DoRegisterScript(path, 32060, isToggle) -- MIDI Editor
+    DoRegisterScript(path, 32061, false) -- Event List
+    DoRegisterScript(path, 32062, false) -- Inline Editor
+  end
+end
+
 local function DoSaveToggleAction(path, fname)
   local rv = mm.SaveToggleActionToFile(path, wantsUngrouped, useFilter and getFilterNames() or nil)
   wantsUngrouped = false
   r.ImGui_CloseCurrentPopup(ctx)
   if rv then
-    local newCmdIdx = r.AddRemoveReaScript(true, 0, path, true)
-    if newCmdIdx ~= 0 then
-      if runTogglesAtStartup then
-        mm.AddRemoveStartupAction(newCmdIdx, path, true)
-      end
-      -- run it once to jigger the toggle state
-      r.Main_OnCommand(newCmdIdx, 0)
-    end
+    RegisterScript(path, true)
     statusMsg = 'Wrote and registered '..fname
   else
     statusMsg = 'Error writing '..fname
@@ -513,12 +567,84 @@ local function DoSaveToggleAction(path, fname)
   statusContext = 3
 end
 
+local function DoSavePresetLoadAction(path, fname)
+  local rv = mm.SavePresetLoadActionToFile(path, PresetLoadSelected)
+  r.ImGui_CloseCurrentPopup(ctx)
+  if rv then
+    RegisterScript(path)
+    statusMsg = 'Wrote and registered '..fname
+  else
+    statusMsg = 'Error writing '..fname
+  end
+  statusTime = r.time_precise()
+  statusContext = 5
+end
+
+local function MakeSectionPopup()
+  r.ImGui_SameLine(ctx)
+
+  local ibSize = IMAGEBUTTON_SIZE * 0.75 * canvasScale
+  local x = r.ImGui_GetWindowSize(ctx)
+  r.ImGui_SetCursorPosX(ctx, x - ibSize - (15 * canvasScale))
+
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+
+  local wantsPop = false
+  if r.ImGui_ImageButton(ctx, 'sectgear', GearImage, ibSize, ibSize) then
+    wantsPop = true
+  end
+
+  if wantsPop then
+    r.ImGui_OpenPopup(ctx, 'sectgear menu')
+  end
+
+  if r.ImGui_BeginPopup(ctx, 'sectgear menu') then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_AlignTextToFramePadding(ctx)
+    r.ImGui_Text(ctx, 'Section(s):')
+    r.ImGui_SameLine(ctx)
+
+    if not SectionMain and not SectionMIDI then SectionMain = true end
+    local sectText = (SectionMain and SectionMIDI) and 'Main + MIDI' or (SectionMain) and 'Main' or (SectionMIDI) and 'MIDI' or 'Choose Section(s)...'
+    if r.ImGui_Button(ctx, sectText, DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
+      r.ImGui_OpenPopup(ctx, 'section menu')
+    end
+
+    if r.ImGui_BeginPopup(ctx, 'section menu') then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+
+      local retval, v = r.ImGui_Checkbox(ctx, 'Main', SectionMain and true or false)
+      if retval then
+        SectionMain = v
+      end
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+      retval, v = r.ImGui_Checkbox(ctx, 'MIDI Editors', SectionMIDI and true or false)
+      if retval then
+        SectionMIDI = v
+      end
+      r.ImGui_EndPopup(ctx)
+    end
+    r.ImGui_PopFont(ctx)
+    r.ImGui_EndPopup(ctx)
+  end
+  r.ImGui_PopStyleColor(ctx)
+end
+
 local function MakeToggleActionModal(modalName, editableName, suppressOverwrite)
   if r.ImGui_BeginPopupModal(ctx, modalName, true) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
       r.ImGui_CloseCurrentPopup(ctx)
     end
+    r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'Toggle Action Name')
+    r.ImGui_PopFont(ctx)
     r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) and editableName then r.ImGui_SetKeyboardFocusHere(ctx) end
     r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
@@ -533,9 +659,10 @@ local function MakeToggleActionModal(modalName, editableName, suppressOverwrite)
 
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Spacing(ctx)
-    if r.ImGui_Button(ctx, 'Confirm') then
-      inOKDialog = true
-    end
+
+    ConfirmButton()
+
+    MakeSectionPopup()
 
     ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, DoSaveToggleAction, 3)
 
@@ -570,16 +697,16 @@ local function MakeToggleActionPopup()
 
   handleStatus(3)
 
-r.ImGui_SameLine(ctx)
-r.ImGui_PushFont(ctx, fontInfo.small)
-local x = r.ImGui_GetWindowSize(ctx)
-local textWidth = r.ImGui_CalcTextSize(ctx, 'Customize Toolbars...')
-r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
-r.ImGui_AlignTextToFramePadding(ctx)
-if r.ImGui_Button(ctx, 'Customize Toolbars...') then
-  r.Main_OnCommand(40905, 0) -- Toolbars: Customize...
-end
-r.ImGui_PopFont(ctx)
+  r.ImGui_SameLine(ctx)
+  r.ImGui_PushFont(ctx, fontInfo.small)
+  local x = r.ImGui_GetWindowSize(ctx)
+  local textWidth = r.ImGui_CalcTextSize(ctx, 'Customize Toolbars...')
+  r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+  r.ImGui_AlignTextToFramePadding(ctx)
+  if r.ImGui_Button(ctx, 'Customize Toolbars...') then
+    r.Main_OnCommand(40905, 0) -- Toolbars: Customize...
+  end
+  r.ImGui_PopFont(ctx)
 
   MakeToggleActionModal('Build a Toggle Action', true)
   r.ImGui_PopStyleColor(ctx)
@@ -589,7 +716,7 @@ local function DoSaveOneShotAction(path, fname)
   local rv = mm.SaveOneShotActionToFile(path, useFilter and getFilterNames() or nil)
   r.ImGui_CloseCurrentPopup(ctx)
   if rv then
-    r.AddRemoveReaScript(true, 0, path, true)
+    RegisterScript(path)
     statusMsg = 'Wrote and registered '..fname
   else
     statusMsg = 'Error writing '..fname
@@ -603,7 +730,10 @@ local function MakeOneShotActionModal(modalName, editableName, suppressOverwrite
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
       r.ImGui_CloseCurrentPopup(ctx)
     end
+    -- TODO: script context (main, midi, etc.) see reapack
+    r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'One-Shot Action Name')
+    r.ImGui_PopFont(ctx)
     r.ImGui_Spacing(ctx)
     if r.ImGui_IsWindowAppearing(ctx) and editableName then r.ImGui_SetKeyboardFocusHere(ctx) end
     r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
@@ -617,9 +747,10 @@ local function MakeOneShotActionModal(modalName, editableName, suppressOverwrite
 
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Spacing(ctx)
-    if r.ImGui_Button(ctx, 'Confirm') then
-      inOKDialog = true
-    end
+
+    ConfirmButton()
+
+    MakeSectionPopup()
 
     ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, DoSaveOneShotAction, 4)
 
@@ -640,6 +771,113 @@ local function MakeOneShotActionPopup()
   handleStatus(4)
 
   MakeOneShotActionModal('Build a One-shot Action', true)
+  r.ImGui_PopStyleColor(ctx)
+end
+
+local function MakePresetSelectionPopup()
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+  r.ImGui_PushFont(ctx, fontInfo.small)
+
+  if r.ImGui_Button(ctx, PresetLoadSelected ~= nil and PresetLoadSelected or 'Choose Preset...', DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
+
+    r.ImGui_OpenPopup(ctx, 'presetload menu')
+  end
+
+  handleStatus(5)
+
+  if r.ImGui_BeginPopup(ctx, 'presetload menu') then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    local fnames = EnumerateMouseMapFiles()
+    if #fnames > 0 then
+      local cherry = true
+      -- TODO: select multiple presets for restore?
+      for _, fn in mm.spairs(fnames, function (t, a, b) return t[a] < t[b] end ) do
+        if not cherry then Spacing() end
+        if r.ImGui_Selectable(ctx, fn) then
+          PresetLoadSelected = fn
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+        cherry = false
+      end
+    else
+      r.ImGui_BeginDisabled(ctx)
+      r.ImGui_Selectable(ctx, 'No presets')
+      r.ImGui_EndDisabled(ctx)
+    end
+    r.ImGui_EndPopup(ctx)
+  end
+  r.ImGui_PopFont(ctx)
+  r.ImGui_PopStyleColor(ctx)
+end
+
+local function MakePresetLoadActionModal(modalName, editableName, suppressOverwrite)
+  if r.ImGui_BeginPopupModal(ctx, modalName, true) then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    MakePresetSelectionPopup()
+
+    -- preset to load menu
+    -- set context/all contexts to default before recall
+    -- script context (main, midi, etc.) see reapack
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Spacing(ctx)
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_Text(ctx, 'Preset Load Action Name')
+    r.ImGui_PopFont(ctx)
+    r.ImGui_Spacing(ctx)
+    if r.ImGui_IsWindowAppearing(ctx) and editableName then r.ImGui_SetKeyboardFocusHere(ctx) end
+    r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
+    if not editableName then r.ImGui_BeginDisabled(ctx) end
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetloadaction', 'Untitled Preset Load Action', lastInputTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
+    if not editableName then r.ImGui_EndDisabled(ctx) end
+    lastInputTextBuffer = buf
+    if buf and KbdEntryIsCompleted() then
+      inOKDialog = true
+    end
+
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_Spacing(ctx)
+
+    -- MakeSectionPopup()
+    -- r.ImGui_Spacing(ctx)
+
+    if PresetLoadSelected == nil then
+      r.ImGui_BeginDisabled(ctx)
+    end
+
+    ConfirmButton()
+
+    if PresetLoadSelected == nil then
+      r.ImGui_EndDisabled(ctx)
+    end
+
+    MakeSectionPopup()
+
+    ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, DoSavePresetLoadAction, 5)
+
+    r.ImGui_PopFont(ctx)
+    r.ImGui_EndPopup(ctx)
+  end
+end
+
+local function MakePresetLoadActionPopup()
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+
+  if r.ImGui_Button(ctx, 'Build a Preset Load Action...') then
+    PositionModalWindow(1)
+    lastInputTextBuffer = lastInputTextBuffer or activeFname and activeFname or ''
+    r.ImGui_OpenPopup(ctx, 'Build a Preset Load Action')
+    PresetLoadSelected = nil
+  end
+
+  handleStatus(5)
+
+  MakePresetLoadActionModal('Build a Preset Load Action', true)
   r.ImGui_PopStyleColor(ctx)
 end
 
@@ -687,13 +925,14 @@ local function RebuildActionsMenu()
 end
 
 local function MakeGearPopup()
+  local ibSize = IMAGEBUTTON_SIZE * canvasScale
   local x = r.ImGui_GetWindowSize(ctx)
-  local textWidth = r.ImGui_CalcTextSize(ctx, 'Gear')
+  local textWidth = ibSize -- r.ImGui_CalcTextSize(ctx, 'Gear')
   r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
   local wantsPop = false
-  if r.ImGui_Button(ctx, 'Gear') then
+  if r.ImGui_ImageButton(ctx, 'gear', GearImage, ibSize, ibSize) then
     rebuildActionsMenu = true
     wantsPop = true
   end
@@ -829,9 +1068,13 @@ local function MakeGearPopup()
             if okrv then
               if okval == 1 then
                 if action.active then
+                  -- TODO: manage active state if not in Main (or in both)
                   r.Main_OnCommand(r.AddRemoveReaScript(true, 0, action.path, false), 0) -- turn it off
                 end
                 r.AddRemoveReaScript(false, 0, action.path, true)
+                r.AddRemoveReaScript(false, 32060, action.path, true)
+                r.AddRemoveReaScript(false, 32061, action.path, true)
+                r.AddRemoveReaScript(false, 32062, action.path, true)
                 os.remove(action.path)
                 mm.AddRemoveStartupAction() -- prune
                 rebuildActionsMenu = true
@@ -932,6 +1175,9 @@ local function mainFn()
 
   Spacing()
   MakeOneShotActionPopup()
+
+  Spacing()
+  MakePresetLoadActionPopup()
 
   r.ImGui_PopFont(ctx)
 end

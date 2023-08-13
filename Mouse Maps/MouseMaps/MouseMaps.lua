@@ -624,6 +624,25 @@ local function SaveOneShotActionToFile(path, filtered)
   return false
 end
 
+local function PrintPresetLoadActionForState(presetName)
+  local str = 'local r = reaper\n\n'
+    ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
+    ..'local mm = require "MouseMaps"\n\n'
+    ..'mm.RestoreStateFromFile(r.GetResourcePath().."/MouseMaps/'..presetName..'.ReaperMouseMap")\n'
+  return str
+end
+
+local function SavePresetLoadActionToFile(path, presetName)
+  local actionStr = PrintPresetLoadActionForState(presetName)
+  local f = io.open(path, 'wb')
+  if f then
+    f:write(actionStr)
+    f:close()
+    return true
+  end
+  return false
+end
+
 -----------------------------------------------------------------------------
 ---------------------------------- RUNTIME ----------------------------------
 
@@ -698,6 +717,7 @@ MouseMaps.SaveCurrentStateToFile = SaveCurrentStateToFile
 
 MouseMaps.SaveToggleActionToFile = SaveToggleActionToFile
 MouseMaps.SaveOneShotActionToFile = SaveOneShotActionToFile
+MouseMaps.SavePresetLoadActionToFile = SavePresetLoadActionToFile
 
 MouseMaps.HandleToggleAction = HandleToggleAction
 

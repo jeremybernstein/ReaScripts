@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.1.8
+-- @version 1.2-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -13,7 +13,7 @@
 --   When setting negative absolute values for pitch bend, use --VALUE (instead of -VALUE, which will use the
 --   '-' Math Operator)
 -- @changelog
---   - initial
+--   - add support for text/sysex/notation events
 -- @provides
 --   EventEditor/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
@@ -22,8 +22,7 @@
 ----------------------------------- TODO ------------------------------------
 
 -- TODO
--- - [x] arrow up/down to change active item (how would I do this so that changes can be seen?)
---   [see commented code for focusKeyboardHere for current attempts on this]
+-- - CLEANUP
 -- - [ ] transform menu: invert, retrograde (can use selection for center point), quantize?
 -- - [ ] help text describing keyboard shortcuts
 
@@ -74,7 +73,7 @@ local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnabl
 
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
-local DEFAULT_WIDTH = 64 * FONTSIZE_LARGE
+local DEFAULT_WIDTH = 68 * FONTSIZE_LARGE
 local DEFAULT_HEIGHT = 7 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 60
 
@@ -112,15 +111,38 @@ local OP_MUL = string.byte('*', 1)
 local OP_DIV = string.byte('/', 1)
 local OP_SCL = string.byte('.', 1)
 
-local ccTypes = {}
-ccTypes[0x90] = { val = 0x90, label = 'Note', exists = false }
-ccTypes[0xA0] = { val = 0xA0, label = 'PolyAT', exists = false }
-ccTypes[0xB0] = { val = 0xB0, label = 'CC', exists = false }
-ccTypes[0xC0] = { val = 0xC0, label = 'PrgCh', exists = false }
-ccTypes[0xD0] = { val = 0xD0, label = 'ChanAT', exists = false }
-ccTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
+local dataTypes = {}
+dataTypes[0x90] = { val = 0x90, label = 'Note', exists = false }
+dataTypes[0xA0] = { val = 0xA0, label = 'PolyAT', exists = false }
+dataTypes[0xB0] = { val = 0xB0, label = 'CC', exists = false }
+dataTypes[0xC0] = { val = 0xC0, label = 'PrgCh', exists = false }
+dataTypes[0xD0] = { val = 0xD0, label = 'ChanAT', exists = false }
+dataTypes[0xE0] = { val = 0xE0, label = 'Pitch', exists = false }
+
+dataTypes[-1] = { val = -1, label = 'Sysex', exists = false }
+dataTypes[1] = { val = 1, label = 'Text', exists = false }
+dataTypes[15] = { val = 15, label = 'Notation', exists = false }
+
+local textTypes = {}
+textTypes[1] = { val = 1, label = 'Text', exists = false }
+textTypes[2] = { val = 2, label = 'Copyright', exists = false }
+textTypes[3] = { val = 3, label = 'TrckName', exists = false }
+textTypes[4] = { val = 4, label = 'InstName', exists = false }
+textTypes[5] = { val = 5, label = 'Lyrics', exists = false }
+textTypes[6] = { val = 6, label = 'Marker', exists = false }
+textTypes[7] = { val = 7, label = 'CuePoint', exists = false }
+textTypes[8] = { val = 8, label = 'PrgName', exists = false }
+textTypes[9] = { val = 9, label = 'DevName', exists = false }
+
+local unusedTextTypes = {}
+unusedTextTypes[10] = { val = 10, label = 'REAPER10', exists = false }
+unusedTextTypes[11] = { val = 11, label = 'REAPER11', exists = false }
+unusedTextTypes[12] = { val = 12, label = 'REAPER12', exists = false }
+unusedTextTypes[13] = { val = 13, label = 'REAPER13', exists = false }
+unusedTextTypes[14] = { val = 14, label = 'REAPER14', exists = false }
 
 local selectedNotes = {} -- interframe cache
+local isClosing = false
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
@@ -173,7 +195,7 @@ local function processBaseFontUpdate(baseFontSize)
   fontInfo.largeDefaultSize = FONTSIZE_LARGE
   fontInfo.smallDefaultSize = FONTSIZE_SMALL
 
-  windowInfo.defaultWidth = 64 * fontInfo.largeDefaultSize
+  windowInfo.defaultWidth = 68 * fontInfo.largeDefaultSize
   windowInfo.defaultHeight = 7 * fontInfo.smallDefaultSize
   DEFAULT_ITEM_WIDTH = 4.6 * FONTSIZE_LARGE
   windowInfo.width = windowInfo.defaultWidth -- * canvasScale
@@ -205,6 +227,65 @@ local function prepWindowAndFont()
   processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
 end
 
+local function sysexStringToBytes(input)
+  local result = {}
+  local currentByte = 0
+  local nibbleCount = 0
+  local count = 0
+
+  for hex in input:gmatch("%x+") do
+    for nibble in hex:gmatch("%x") do
+      currentByte = currentByte * 16 + tonumber(nibble, 16)
+      nibbleCount = nibbleCount + 1
+
+      if nibbleCount == 2 then
+        if count == 0 and currentByte == 0xF0 then
+        elseif currentByte == 0xF7 then
+          return table.concat(result)
+        else
+          table.insert(result, string.char(currentByte))
+        end
+        currentByte = 0
+        nibbleCount = 0
+      elseif nibbleCount == 1 and #hex == 1 then
+        -- Handle a single nibble in the middle of the string
+        table.insert(result, string.char(currentByte))
+        currentByte = 0
+        nibbleCount = 0
+      end
+    end
+  end
+
+  if nibbleCount == 1 then
+    -- Handle a single trailing nibble
+    currentByte = currentByte * 16
+    table.insert(result, string.char(currentByte))
+  end
+
+  return table.concat(result)
+end
+
+local function sysexBytesToString(bytes)
+  local str = ''
+  for i = 1, string.len(bytes) do
+    str = str .. string.format('%02X', tonumber(string.byte(bytes, i)))
+    if i ~= string.len(bytes) then str = str .. ' ' end
+  end
+  return str
+end
+
+local function notationStringToString(notStr)
+  local a, b = string.find(notStr, 'TRAC ')
+  if a and b then return string.sub(notStr, b + 1) end
+  return notStr
+end
+
+local function stringToNotationString(str)
+  local a, b = string.find(str, 'TRAC ')
+  if a and b then return str end
+  return 'TRAC ' .. str
+end
+
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
 
@@ -231,6 +312,7 @@ local function windowFn()
   local hasCCs = false
   local NOTE_TYPE = 0
   local CC_TYPE = 1
+  local SYXTEXT_TYPE = 2
   local NOTE_FILTER = 0x90
   local changedParameter = nil
   local allEvents = {}
@@ -315,8 +397,14 @@ local function windowFn()
     e.measures, e.beats, e.beatsmax, e.ticks = ppqToTime(e.ppqpos)
   end
 
+  local function chanmsgToType(chanmsg)
+    local type = chanmsg
+    if type and type >= 1 and type <= #textTypes then type = 1 end
+    return type
+  end
+
   local function unionEntry(name, val, entry)
-    if entry.chanmsg == popupFilter then
+    if chanmsgToType(entry.chanmsg) == popupFilter then
       if not union[name] then union[name] = val
       elseif union[name] ~= val then union[name] = INVALID end
     end
@@ -327,7 +415,7 @@ local function windowFn()
       unionEntry(v, e[v], e)
     end
 
-    if e.chanmsg == popupFilter then
+    if chanmsgToType(e.chanmsg) == popupFilter then
       if e.ppqpos < union.selposticks then union.selposticks = e.ppqpos end
       if e.type == NOTE_TYPE then
         if e.endppqpos > union.selendticks then union.selendticks = e.endppqpos end
@@ -394,6 +482,21 @@ local function windowFn()
     return false
   end
 
+  local function makeStringVal(name, str)
+    userValues[name] = { operation = OP_ABS, opval = str }
+    return true
+  end
+
+  local function makeSysexVal(name, str)
+    userValues[name] = { operation = OP_ABS, opval = sysexStringToBytes(str) }
+    return true
+  end
+
+  local function makeNotationVal(name, str)
+    userValues[name] = { operation = OP_ABS, opval = stringToNotationString(str) }
+    return true
+  end
+
   local function paramCanScale(name)
     local canscale = false
     for _, v in ipairs(scaleOpWhitelist) do
@@ -408,6 +511,16 @@ local function windowFn()
   local function processString(name, str)
     local char = str:byte(1)
     local val
+
+    if name == 'textmsg' then
+      if userValues.texttype.opval == -1 then
+        return makeSysexVal(name, str)
+      elseif userValues.texttype.opval == 15 then
+        return makeNotationVal(name, str)
+      elseif popupFilter < 0x80 then
+        return makeStringVal(name, str)
+      end
+    end
 
     -- special case for setting negative numbers for pitch bend
     if name == 'ccval' and popupFilter == 0xE0 and char == OP_SUB then
@@ -448,7 +561,8 @@ local function windowFn()
       local rangeLo = 0xFFFF
       local rangeHi = -0xFFFF
       for _, v in ipairs(selectedEvents) do
-        if v.chanmsg == popupFilter then
+        local type = chanmsgToType(v.chanmsg)
+        if type == popupFilter then
           if v[name] and v[name] ~= INVALID then
             if v[name] < rangeLo then rangeLo = v[name] end
             if v[name] > rangeHi then rangeHi = v[name] end
@@ -525,7 +639,8 @@ local function windowFn()
     local timeval = isTimeValue(name)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
-    r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale))
+    local nextwid = wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale)
+    r.ImGui_SetNextItemWidth(ctx, nextwid)
     r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
 
     r.ImGui_PushFont(ctx, fontInfo.large)
@@ -534,6 +649,51 @@ local function windowFn()
     if val ~= INVALID then
       if (name == 'chan' or name == 'beats') then val = val + 1
       elseif needsBBUConversion(name) then val = math.floor((val / PPQ) * 100)
+      elseif name == 'texttype' then
+        if textTypes[userValues[name].opval] then
+          r.ImGui_Button(ctx, textTypes[userValues[name].opval].label, nextwid)
+
+          r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+
+          if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+            r.ImGui_OpenPopup(ctx, 'texttype menu')
+            activeFieldName = name
+            focusKeyboardHere = name
+          end
+
+          if r.ImGui_BeginPopup(ctx, 'texttype menu') then
+            if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+              if r.ImGui_IsPopupOpen(ctx, 'texttype menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+                r.ImGui_CloseCurrentPopup(ctx)
+                handledEscape = true
+              end
+            end
+            for i = 1, #textTypes do
+              local rv, selected = r.ImGui_Selectable(ctx, textTypes[i].label)
+              if rv and selected then
+                val = textTypes[i].val
+                changedParameter = name
+                userValues[name] = { operation = OP_ABS, opval = val }
+                canProcess = true
+              end
+            end
+            r.ImGui_EndPopup(ctx)
+          end
+          currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
+          currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
+          generateLabel(label)
+          registerItem(name, false, false)
+          r.ImGui_PopStyleColor(ctx)
+        end
+        r.ImGui_PopFont(ctx)
+        r.ImGui_EndGroup(ctx)
+        return
+      elseif name == 'textmsg' then
+        if popupFilter == -1 then
+          val = sysexBytesToString(val)
+        elseif popupFilter == 15 then
+          val = notationStringToString(val)
+        end
       end
     end
 
@@ -543,9 +703,15 @@ local function windowFn()
       -- r.ImGui_SetKeyboardFocusHere(ctx) -- we could reactivate the input field, but it's pretty good as-is
     end
 
-    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, r.ImGui_InputTextFlags_CharsNoBlank()
-                                                                + r.ImGui_InputTextFlags_CharsDecimal()
-                                                                + r.ImGui_InputTextFlags_AutoSelectAll())
+    local flags = r.ImGui_InputTextFlags_AutoSelectAll()
+    if name == 'textmsg' then
+      if popupFilter == -1 then
+        flags = flags + 0 --r.ImGui_InputTextFlags_CharsHexadecimal()
+      end
+    else
+      flags = flags + r.ImGui_InputTextFlags_CharsNoBlank() + r.ImGui_InputTextFlags_CharsDecimal()
+    end
+    local rt, nstr = r.ImGui_InputText(ctx, genItemID(name), str, flags)
     if rt and kbdEntryIsCompleted() then
       if processString(name, nstr) then
         if timeval then recalcEventTimes = true else canProcess = true end
@@ -799,18 +965,18 @@ local function windowFn()
     return false, INVALID
   end
 
-  function performOperation(name, e)
+  function performOperation(name, e, valname)
     if name == 'ppqpos' or name == 'endppqpos' then return performTimeSelectionOperation(name, e) end
 
     local op = userValues[name]
     if op then
-      return doPerformOperation(name, e[name], op.operation, op.opval, op.opval2)
+      return doPerformOperation(name, e[valname and valname or name], op.operation, op.opval, op.opval2)
     end
     return false, INVALID
   end
 
-  local function getEventValue(name, e, vals)
-    local rv, val = performOperation(name, e)
+  local function getEventValue(name, e, valname)
+    local rv, val = performOperation(name, e, valname)
     if rv then
       if name == 'chan' then val = val < 0 and 0 or val > 15 and 15 or val
       elseif name == 'measures' or name == 'beats' or name == 'ticks' then val = val
@@ -821,6 +987,12 @@ local function windowFn()
         else val = val < 0 and 0 or val > 127 and 127 or val
         end
       elseif name == 'ppqpos' or name == 'endppqpos' then val = val
+      elseif name == 'texttype' then
+        if e.chanmsg == 1 then
+          return (val < 1 and 1 or val > #textTypes and #textTypes or val)
+        end
+        return val
+      elseif name == 'textmsg' then return val
       else val = val < 0 and 0 or val
       end
 
@@ -835,17 +1007,18 @@ local function windowFn()
   end
 
   local function updateValuesForEvent(e)
-    if e.chanmsg ~= popupFilter then return {} end
+    if chanmsgToType(e.chanmsg) ~= popupFilter then return {} end
 
     e.measures = getEventValue('measures', e)
     e.beats = getEventValue('beats', e)
     e.ticks = getEventValue('ticks', e)
-    e.chan = getEventValue('chan', e)
     if popupFilter == NOTE_FILTER then
+      e.chan = getEventValue('chan', e)
       e.pitch = getEventValue('pitch', e)
       e.vel = getEventValue('vel', e)
       e.notedur = getEventValue('notedur', e)
-    elseif popupFilter ~= 0 then
+    elseif popupFilter >= 0x80 then
+      e.chan = getEventValue('chan', e)
       e.ccnum = getEventValue('ccnum', e)
       e.ccval = getEventValue('ccval', e)
       if e.chanmsg == 0xA0 then
@@ -860,6 +1033,9 @@ local function windowFn()
         e.msg2 = e.ccnum
         e.msg3 = e.ccval
       end
+    else
+      e.chanmsg = getEventValue('texttype', e, 'chanmsg')
+      e.textmsg = getEventValue('textmsg', e)
     end
     if recalcEventTimes then
       e.ppqpos = BBTToPPQ(e.measures, e.beats, e.ticks)
@@ -935,9 +1111,10 @@ local function windowFn()
   ------------------------------ ITERATE EVENTS -----------------------------
 
   mu.MIDI_InitializeTake(take) -- reset this each cycle
-  local _, notecnt, cccnt = mu.MIDI_CountEvts(take)
+  local _, notecnt, cccnt, syxcnt = mu.MIDI_CountEvts(take)
   local selnotecnt = 0
   local selcccnt = 0
+  local selsyxcnt = 0
   local noteidx = mu.MIDI_EnumNotes(take, -1)
   while noteidx ~= -1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
@@ -978,6 +1155,19 @@ local function windowFn()
     ccidx = mu.MIDI_EnumCC(take, ccidx)
   end
 
+  local syxidx = mu.MIDI_EnumSelTextSysexEvts(take, -1)
+  while syxidx ~= -1 do
+    local e = { type = SYXTEXT_TYPE, idx = syxidx }
+    _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.textmsg = mu.MIDI_GetTextSysexEvt(take, syxidx)
+    if e.selected then
+      calcMIDITime(e)
+      selsyxcnt = selsyxcnt + 1
+      table.insert(selectedEvents, e)
+    end
+    table.insert(allEvents, e)
+    syxidx = mu.MIDI_EnumSelTextSysexEvts(take, syxidx)
+  end
+
   -- this determines if we need to switch the view back
   -- to notes (did the note selection change?)
   local resetFilter = false
@@ -1000,7 +1190,10 @@ local function windowFn()
   if resetFilter then popupFilter = 0x90 end
   selectedNotes = newNotes
 
-  if #selectedEvents == 0 or not (selnotecnt > 0 or selcccnt > 0) then return end
+  if #selectedEvents == 0 or not (selnotecnt > 0 or selcccnt > 0 or selsyxcnt > 0) then
+    titleBarText = DEFAULT_TITLEBAR_TEXT..': No selection' -- (PPQ='..PPQ..')' -- does PPQ make sense here?
+    return
+  end
 
   ---------------------------------------------------------------------------
   ------------------------------ TITLEBAR TEXT ------------------------------
@@ -1009,29 +1202,35 @@ local function windowFn()
   if selnotecnt > 0 then selectedText = selectedText..selnotecnt..' of '..notecnt..' note(s) selected' end
   if selcccnt > 0 and selnotecnt > 0 then selectedText = selectedText..' :: ' end
   if selcccnt > 0 then selectedText = selectedText..selcccnt..' of '..cccnt..' CC(s) selected' end
+  if selsyxcnt > 0 and (selnotecnt > 0 or selcccnt > 0) then selectedText = selectedText..' :: ' end
+  if selsyxcnt > 0 then selectedText = selectedText..selsyxcnt..' of '..syxcnt..' Sysex/Text event(s) selected' end
   if selectedText ~= '' then selectedText = ': '..selectedText end
   titleBarText = DEFAULT_TITLEBAR_TEXT..selectedText..' (PPQ='..PPQ..')' --..' DPI=('..r.ImGui_GetWindowDpiScale(ctx)..')'
 
   ---------------------------------------------------------------------------
   ------------------------------ SETUP FILTER -------------------------------
 
-  for _, type in pairs(ccTypes) do
+  for _, type in pairs(dataTypes) do
     type.exists = false
   end
 
   for _, v in ipairs(selectedEvents) do
-    if v.chanmsg and v.chanmsg ~= 0 then ccTypes[v.chanmsg].exists = true end
+    if v.chanmsg and v.chanmsg ~= 0 then
+      local type = chanmsgToType(v.chanmsg)
+      dataTypes[type].exists = true
+    end
   end
-  if popupFilter ~= 0 and not ccTypes[popupFilter].exists then popupFilter = 0 end
+  if popupFilter ~= 0 and not dataTypes[popupFilter].exists then popupFilter = 0 end
   if popupFilter == 0 then
     for _, v in ipairs(selectedEvents) do
       if v.chanmsg and v.chanmsg ~= 0 then
-        popupFilter = v.chanmsg
+        local type = chanmsgToType(v.chanmsg)
+        popupFilter = type
         break
       end
     end
   end
-  popupLabel = ccTypes[popupFilter].label
+  popupLabel = dataTypes[popupFilter].label
   if popupFilter == 0xD0 or popupFilter == 0xE0 then cc2byte = true end
 
   ---------------------------------------------------------------------------
@@ -1051,6 +1250,9 @@ local function windowFn()
       unionEntry('chanmsg', v.chanmsg, v)
       unionEntry('ccnum', v.ccnum, v)
       unionEntry('ccval', v.ccval, v)
+    elseif v.type == SYXTEXT_TYPE then
+      unionEntry('texttype', v.chanmsg, v)
+      unionEntry('textmsg', v.textmsg, v)
     end
   end
   if union.selposticks == -INVALID then union.selposticks = INVALID end
@@ -1062,7 +1264,7 @@ local function windowFn()
   r.ImGui_NewLine(ctx)
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
-  r.ImGui_Button(ctx, popupLabel)
+  r.ImGui_Button(ctx, popupLabel, DEFAULT_ITEM_WIDTH * canvasScale * 1.5)
 
   -- cache the positions to generate next box position
   currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
@@ -1084,7 +1286,7 @@ local function windowFn()
       end
     end
     r.ImGui_PushFont(ctx, fontInfo.small)
-    for _, type in pairs(ccTypes) do
+    for _, type in pairs(dataTypes) do
       if type.exists then
         local rv, selected = r.ImGui_Selectable(ctx, type.label)
         if rv and selected then
@@ -1197,6 +1399,14 @@ local function windowFn()
     return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and math.floor(union[name]) or INVALID }
   end
 
+  local function makeTextValueEntry(name)
+    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and union[name] or INVALID }
+  end
+
+  local function makePopupEntry(name)
+    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and union[name] or INVALID }
+  end
+
   local function commonValueEntries()
     for _, v in ipairs(commonEntries) do
       userValues[v] = makeValueEntry(v)
@@ -1210,10 +1420,13 @@ local function windowFn()
     userValues.pitch = makeValueEntry('pitch')
     userValues.vel = makeValueEntry('vel')
     userValues.notedur = makeValueEntry('notedur')
-  elseif popupFilter ~= 0 then
+  elseif popupFilter >= 0x80 then
     userValues.ccnum = makeValueEntry('ccnum')
     userValues.ccval = makeValueEntry('ccval')
     userValues.chanmsg = makeValueEntry('chanmsg')
+  else
+    userValues.texttype = makePopupEntry('texttype')
+    userValues.textmsg = makeTextValueEntry('textmsg')
   end
 
   ---------------------------------------------------------------------------
@@ -1226,15 +1439,21 @@ local function windowFn()
   makeTextInput('measures', 'Bars')
   makeTextInput('beats', 'Beats')
   makeTextInput('ticks', wantsBBU and 'Percent' or 'Ticks')
-  makeTextInput('chan', 'Chan', true)
 
   if popupFilter == NOTE_FILTER then
+    makeTextInput('chan', 'Chan', true)
     makeTextInput('pitch', 'Pitch')
     makeTextInput('vel', 'Velocity')
     makeTextInput('notedur', 'Length '..(wantsBBU and '(beat %)' or '(ticks)'), true, DEFAULT_ITEM_WIDTH * 2)
-  elseif popupFilter ~= 0 then
+  elseif popupFilter >= 0x80 then
+    makeTextInput('chan', 'Chan', true)
     if not cc2byte then makeTextInput('ccnum', 'Ctrlr') end
     makeTextInput('ccval', 'Value')
+  elseif popupFilter == -1 or popupFilter > #textTypes then
+    makeTextInput('textmsg', 'Message', true, DEFAULT_ITEM_WIDTH * 5.1)
+  else
+    makeTextInput('texttype', 'Type', true, DEFAULT_ITEM_WIDTH * 1.25)
+    makeTextInput('textmsg', 'Message', true, DEFAULT_ITEM_WIDTH * 3.75)
   end
 
   makeTimeInput('selposticks', 'Sel. Position', true, DEFAULT_ITEM_WIDTH * 2)
@@ -1258,15 +1477,22 @@ local function windowFn()
   ------------------------------- ARROW KEYS ------------------------------
 
   -- escape key kills our arrow key focus
-  if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then focusKeyboardHere = nil end
+  if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+    if focusKeyboardHere then focusKeyboardHere = nil
+    else
+      isClosing = true
+      return
+    end
+  end
 
   local arrowAdjust = r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) and 1
                    or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) and -1
                    or 0
   if arrowAdjust ~= 0 and (activeFieldName or focusKeyboardHere) then
     for _, hitTest in ipairs(itemBounds) do
-      if hitTest.name == focusKeyboardHere
-        or hitTest.name == activeFieldName
+      if (hitTest.name == focusKeyboardHere
+          or hitTest.name == activeFieldName)
+        and hitTest.name ~= 'textmsg'
       then
         if hitTest.recalcSelection and optdown then
           arrowAdjust = arrowAdjust * PPQ -- beats instead of ticks
@@ -1308,6 +1534,7 @@ local function windowFn()
       if userValues[hitTest.name].operation == OP_ABS -- and userValues[hitTest.name].opval ~= INVALID
         and posy > hitTest.hity[1] and posy < hitTest.hity[2]
         and posx > hitTest.hitx[1] and posx < hitTest.hitx[2]
+        and hitTest.name ~= 'textmsg'
       then
         if hitTest.name == activeFieldName then
           rewriteIDForAFrame = activeFieldName
@@ -1365,7 +1592,8 @@ local function windowFn()
     mu.MIDI_OpenWriteTransaction(take)
 
     for _, v in ipairs(selectedEvents) do
-      if popupFilter == v.chanmsg then
+      local type = chanmsgToType(v.chanmsg)
+      if popupFilter == type then
         updateValuesForEvent(v) -- first update the values
         correctItemExtents(item_extents, v)
       end
@@ -1379,9 +1607,10 @@ local function windowFn()
 
     local recalced = recalcEventTimes or recalcSelectionTimes
     for _, v in ipairs(selectedEvents) do
-      if popupFilter == v.chanmsg then
+      local type = chanmsgToType(v.chanmsg)
+      if popupFilter == type then
+        local ppqpos = recalced and v.ppqpos or nil
         if popupFilter == NOTE_FILTER then
-          local ppqpos = recalced and v.ppqpos or nil
           local endppqpos = recalced and v.endppqpos or nil
           local chan = changedParameter == 'chan' and v.chan or nil
           local pitch = changedParameter == 'pitch' and v.pitch or nil
@@ -1393,12 +1622,16 @@ local function windowFn()
           else
             mu.MIDI_SetNote(take, v.idx, nil, nil, ppqpos, endppqpos, chan, pitch, vel)
           end
-        elseif popupFilter ~= 0 then
-          local ppqpos = recalced and v.ppqpos or nil
+        elseif popupFilter >= 0x80 then
           local chan = changedParameter == 'chan' and v.chan or nil
           local msg2 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg2 or nil
           local msg3 = (changedParameter == 'ccnum' or changedParameter == 'ccval') and v.msg3 or nil
           mu.MIDI_SetCC(take, v.idx, nil, nil, ppqpos, nil, chan, msg2, msg3)
+        else
+          local dotypemsg = (changedParameter == 'texttype' or changedParameter == 'textmsg')
+          local texttype = dotypemsg and v.chanmsg or nil
+          local textmsg = dotypemsg and v.textmsg or nil
+          mu.MIDI_SetTextSysexEvt(take, v.idx, nil, nil, ppqpos, texttype, textmsg)
         end
       end
     end
@@ -1428,7 +1661,13 @@ local function windowFn()
     if not canProcess and correctOverlapsNow then
       undoText = 'Correct Overlapping Notes'
     else
-      undoText = popupFilter == NOTE_FILTER and 'Edit Note(s)' or 'Edit CC(s)'
+      if popupFilter == NOTE_FILTER then
+        undoText = 'Edit Note(s)'
+      elseif popupFilter >= 0x80 then
+        undoText = 'Edit CC(s)'
+      else
+        undoText = 'Edit Sysex/Text Event(s)'
+      end
     end
     r.Undo_EndBlock2(0, undoText, -1)
   end
@@ -1565,8 +1804,6 @@ end
 
 -----------------------------------------------------------------------------
 -------------------------------- MAIN LOOP ----------------------------------
-
-local isClosing = false
 
 local function loop()
 

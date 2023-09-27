@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.2-beta.1
+-- @version 1.2-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -65,8 +65,8 @@ dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 
 local scriptID = 'sockmonkey72_EventEditor'
 
-local ctx = r.ImGui_CreateContext(scriptID) --, r.ImGui_ConfigFlags_DockingEnable()) -- TODO docking
---r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1) -- TODO docking
+local ctx = r.ImGui_CreateContext(scriptID)
+r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1) -- TODO docking
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -103,6 +103,7 @@ local overlapFavorsSelected = false
 local disabledAutoOverlap = false
 local wantsBBU = false
 local reverseScroll = false
+local dockID = 0
 
 local OP_ABS = 0
 local OP_ADD = string.byte('+', 1)
@@ -151,6 +152,11 @@ local function handleExtState()
   overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
   wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
   reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
+  dockID = 0
+  if r.HasExtState(scriptID, 'dockID') then
+    local str = r.GetExtState(scriptID, 'dockID')
+    if str then dockID = tonumber(str) end
+  end
 
   if r.HasExtState(scriptID, 'wantsOverlapCorrection') then
     local wants = r.GetExtState(scriptID, 'wantsOverlapCorrection')
@@ -1105,7 +1111,7 @@ local function windowFn()
   ----------------------------------- SETUP ---------------------------------
 
   PPQ = getPPQ()
-  handleExtState()
+  --handleExtState()
 
   ---------------------------------------------------------------------------
   ------------------------------ ITERATE EVENTS -----------------------------
@@ -1700,6 +1706,14 @@ local function updateWindowPosition()
   local curWindowWidth, curWindowHeight = r.ImGui_GetWindowSize(ctx)
   local curWindowLeft, curWindowTop = r.ImGui_GetWindowPos(ctx)
 
+  if dockID ~= 0 then
+    local styleWidth, styleHeight = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_WindowMinSize())
+    if curWindowWidth == styleWidth and curWindowHeight == styleHeight then
+      curWindowWidth = windowInfo.width
+      curWindowHeight = windowInfo.height
+    end
+  end
+
   if not windowInfo.wantsResize
     and (windowInfo.wantsResizeUpdate
       or curWindowWidth ~= windowInfo.width
@@ -1707,10 +1721,20 @@ local function updateWindowPosition()
       or curWindowLeft ~= windowInfo.left
       or curWindowTop ~= windowInfo.top)
   then
-    r.SetExtState(scriptID, 'windowRect', math.floor(curWindowLeft)..','..math.floor(curWindowTop)..','..math.floor(curWindowWidth)..','..math.floor(curWindowHeight), true)
+    if dockID == 0 then
+      r.SetExtState(scriptID, 'windowRect', math.floor(curWindowLeft)..','..math.floor(curWindowTop)..','..math.floor(curWindowWidth)..','..math.floor(curWindowHeight), true)
+    end
     windowInfo.left, windowInfo.top, windowInfo.width, windowInfo.height = curWindowLeft, curWindowTop, curWindowWidth, curWindowHeight
     windowInfo.wantsResizeUpdate = false
   end
+
+
+  local curDockID = r.ImGui_GetWindowDockID(ctx)
+  if dockID ~= curDockID then
+    dockID = curDockID
+    r.SetExtState(scriptID, 'dockID', tostring(math.floor(dockID)), true)
+  end
+
 end
 
 local function initializeWindowPosition()
@@ -1756,15 +1780,16 @@ local function openWindow()
   if windowInfo.wantsResize then
     windowSizeFlag = nil
   end
-  r.ImGui_SetNextWindowSize(ctx, windowInfo.width, windowInfo.height, windowSizeFlag)
-  r.ImGui_SetNextWindowPos(ctx, windowInfo.left, windowInfo.top, windowSizeFlag)
+  if dockID == 0 then
+    r.ImGui_SetNextWindowSize(ctx, windowInfo.width, windowInfo.height, windowSizeFlag)
+    r.ImGui_SetNextWindowPos(ctx, windowInfo.left, windowInfo.top, windowSizeFlag)
+  end
   if windowInfo.wantsResize then
     windowInfo.wantsResize = false
     windowInfo.wantsResizeUpdate = true
   end
 
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
-  -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
 
   r.ImGui_PushFont(ctx, fontInfo.large)
   local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 4
@@ -1772,11 +1797,17 @@ local function openWindow()
   r.ImGui_PopFont(ctx)
 
   r.ImGui_PushFont(ctx, fontInfo.small)
-  local visible, open = r.ImGui_Begin(ctx, titleBarText, true,
+  r.ImGui_SetNextWindowDockID(ctx, ~0, r.ImGui_Cond_Appearing()) --, r.ImGui_Cond_Appearing()) -- TODO docking
+  local visible, open = r.ImGui_Begin(ctx, titleBarText .. '###' .. scriptID, true,
                                         r.ImGui_WindowFlags_TopMost()
                                       + r.ImGui_WindowFlags_NoScrollWithMouse()
                                       + r.ImGui_WindowFlags_NoScrollbar()
                                       + r.ImGui_WindowFlags_NoSavedSettings())
+
+  if r.ImGui_IsWindowDocked(ctx) then
+    r.ImGui_Text(ctx, titleBarText)
+    r.ImGui_Separator(ctx)
+  end
   r.ImGui_PopFont(ctx)
 
   return visible, open
@@ -1839,7 +1870,6 @@ local function loop()
     windowFn()
     r.ImGui_PopFont(ctx)
 
-    -- ww, wh = r.ImGui_Viewport_GetSize(r.ImGui_GetWindowViewport(ctx)) -- TODO docking
     updateWindowPosition()
 
     r.ImGui_End(ctx)

@@ -1,11 +1,11 @@
 -- @description MoM Toggle: Mouse Mod Toggle Action Generator
--- @version 0.0.1-beta.20
+-- @version 1.0.0
 -- @author sockmonkey72
 -- @about
 --   # MoM Toggle: Mouse Mod Toggle Action Generator
 --   Load/Save Mouse Maps, Generate Toggle and One-shot Actions to change them up
 -- @changelog
---   - initial
+--   - initial non-beta release (no changes from last beta)
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua

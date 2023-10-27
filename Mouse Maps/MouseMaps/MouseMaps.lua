@@ -11,6 +11,9 @@ local MouseMaps = {}
 local SectionName = 'sockmonkey72_MouseMaps'
 local CommonName = 'commonInitState'
 
+local startupFileName = '__startup_MouseMap.lua'
+local startupFileName_MIDI = '__startup_MouseMap_MIDI.lua'
+
 local CalcFasterAPI = function ()
   local appVer = r.GetAppVersion()
   local major, minor, devrev = appVer:match('(%d+)%.(%d+)([^%d][^+/]*)')
@@ -26,12 +29,16 @@ local UseFasterAPI, major, minor, devrev = CalcFasterAPI()
 -----------------------------------------------------------------------------
 ---------------------------------- CONTEXTS ---------------------------------
 
--- known contexts as of 7. Jan 2023
+-- known contexts as of 28. Sep 2023
 local contexts = {
   MM_CTX_AREASEL = 'Razor edit area (left drag)',
   MM_CTX_AREASEL_CLK = 'Razor edit area (left click)',
   MM_CTX_AREASEL_EDGE = 'Razor edit edge (left drag)',
   MM_CTX_AREASEL_ENV = 'Razor edit envelope area (left drag)',
+  MM_CTX_ARRANGE_A = 'Arrange view override A (left drag)',
+  MM_CTX_ARRANGE_B = 'Arrange view override B (left drag)',
+  MM_CTX_ARRANGE_C = 'Arrange view override C (left drag)',
+  MM_CTX_ARRANGE_D = 'Arrange view override D (left drag)',
   MM_CTX_ARRANGE_MMOUSE = 'Arrange view (middle drag)',
   MM_CTX_ARRANGE_MMOUSE_CLK = 'Arrange view (middle click)',
   MM_CTX_ARRANGE_RMOUSE = 'Arrange view (right drag)',
@@ -47,7 +54,10 @@ local contexts = {
   MM_CTX_ENVSEG = 'Envelope segment (left drag)',
   MM_CTX_ENVSEG_DBLCLK = 'Envelope segment (double click)',
   MM_CTX_FIXEDLANETAB_CLK = 'Fixed lane header button (left click)',
+  MM_CTX_FIXEDLANETAB_DBLCLK = 'Fixed lane header button (double click)',
   MM_CTX_ITEM = 'Media item (left drag)',
+  MM_CTX_ITEM_CLK = 'Media item (left click)',
+  MM_CTX_ITEM_DBLCLK = 'Media item (double click)',
   MM_CTX_ITEMEDGE = 'Media item edge (left drag)',
   MM_CTX_ITEMEDGE_DBLCLK = 'Media item edge (double click)',
   MM_CTX_ITEMFADE = 'Media item fade/autocrossfade (left drag)',
@@ -57,14 +67,13 @@ local contexts = {
   MM_CTX_ITEMLOWER_CLK = 'Media item bottom half (left click)',
   MM_CTX_ITEMLOWER_DBLCLK = 'Media item bottom half (double click)',
   MM_CTX_ITEMSTRETCHMARKER = 'Media item stretch marker (left drag)',
-  MM_CTX_ITEMSTRETCHMARKERRATE = 'Media item stretch marker rate (left drag)',
   MM_CTX_ITEMSTRETCHMARKER_DBLCLK = 'Media item stretch marker (double click)',
-  MM_CTX_ITEM_CLK = 'Media item (left click)',
-  MM_CTX_ITEM_DBLCLK = 'Media item (double click)',
+  MM_CTX_ITEMSTRETCHMARKERRATE = 'Media item stretch marker rate (left drag)',
   MM_CTX_LINKEDLANE = 'Fixed lane when comping is enabled (left drag)',
   MM_CTX_LINKEDLANE_CLK = 'Fixed lane comp area (left click)',
-  MM_CTX_MARKERLANES = 'Project marker/region lane (left drag)',
+  MM_CTX_LINKEDLANE_DBLCLK = 'Fixed lane comp area (double click)',
   MM_CTX_MARKER_REGIONEDGE = 'Project marker/region edge (left drag)',
+  MM_CTX_MARKERLANES = 'Project marker/region lane (left drag)',
   MM_CTX_MCP_DBLCLK = 'Mixer control panel (double click)',
   MM_CTX_MIDI_CCEVT = 'MIDI CC event (left click/drag)',
   MM_CTX_MIDI_CCEVT_DBLCLK = 'MIDI CC event (double click)',
@@ -75,9 +84,9 @@ local contexts = {
   MM_CTX_MIDI_ENDPTR = 'MIDI source loop end marker (left drag)',
   MM_CTX_MIDI_MARKERLANES = 'MIDI marker/region lanes (left drag)',
   MM_CTX_MIDI_NOTE = 'MIDI note (left drag)',
-  MM_CTX_MIDI_NOTEEDGE = 'MIDI note edge (left drag)',
   MM_CTX_MIDI_NOTE_CLK = 'MIDI note (left click)',
   MM_CTX_MIDI_NOTE_DBLCLK = 'MIDI note (double click)',
+  MM_CTX_MIDI_NOTEEDGE = 'MIDI note edge (left drag)',
   MM_CTX_MIDI_PIANOROLL = 'MIDI piano roll (left drag)',
   MM_CTX_MIDI_PIANOROLL_CLK = 'MIDI piano roll (left click)',
   MM_CTX_MIDI_PIANOROLL_DBLCLK = 'MIDI piano roll (double click)',
@@ -86,8 +95,8 @@ local contexts = {
   MM_CTX_MIDI_RULER_CLK = 'MIDI ruler (left click)',
   MM_CTX_MIDI_RULER_DBLCLK = 'MIDI ruler (double click)',
   MM_CTX_POOLEDENV = 'Automation item (left drag)',
-  MM_CTX_POOLEDENVEDGE = 'Automation item edge (left drag)',
   MM_CTX_POOLEDENV_DBLCLK = 'Automation item (double click)',
+  MM_CTX_POOLEDENVEDGE = 'Automation item edge (left drag)',
   MM_CTX_REGION = 'Project region (left drag)',
   MM_CTX_RULER = 'Ruler (left drag)',
   MM_CTX_RULER_CLK = 'Ruler (left click)',
@@ -96,6 +105,7 @@ local contexts = {
   MM_CTX_TEMPOMARKER = 'Project tempo/time signature marker (left drag)',
   MM_CTX_TRACK = 'Track (left drag)',
   MM_CTX_TRACK_CLK = 'Track (left click)',
+  MM_CTX_TRACK_DBLCLK = 'Track (double click)'
 }
 
 -----------------------------------------------------------------------------
@@ -128,7 +138,7 @@ local function post(...)
   local args = {...}
   local str = ''
   for i, v in ipairs(args) do
-    str = str .. (i ~= 1 and ', ' or '') .. tostring(v)
+    str = str .. (i ~= 1 and ', ' or '') .. (v ~= nil and tostring(v) or '<nil>')
   end
   str = str .. '\n'
   r.ShowConsoleMsg(str)
@@ -245,59 +255,70 @@ end
 -----------------------------------------------------------------------------
 ------------------------------ ACTIVE ACTIONS -------------------------------
 
-local function GetActiveToggleAction()
-  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
+local function ExtStateNameForSection(section)
+  return section == 1 and 'activeMIDIToggleAction' or 'activeToggleAction'
+end
+
+local function GetActiveToggleAction(section) -- exported
+  local activeAction = r.GetExtState(SectionName, ExtStateNameForSection(section))
   local activeActionTable = Deserialize(activeAction)
   if activeActionTable then return activeActionTable.cmdID, activeActionTable.path end
   return nil, nil
 end
 
-local function GetActiveAction()
-  local activeAction = r.GetExtState(SectionName, 'activeToggleAction')
-  -- from beta versions, can be removed eventually
-  local cmdIdx = tonumber(activeAction)
-  if cmdIdx then
-    local cmdID = r.ReverseNamedCommandLookup(cmdIdx)
-    if cmdID and cmdID ~= '' then return '_'..cmdID end
-  end
-  -- end beta version support
+local function GetActiveAction(section)
+  local activeAction = r.GetExtState(SectionName, ExtStateNameForSection(section))
+  -- -- from beta versions, can be removed eventually
+  -- local cmdIdx = tonumber(activeAction)
+  -- if cmdIdx then
+  --   local cmdID = r.ReverseNamedCommandLookup(cmdIdx)
+  --   if cmdID and cmdID ~= '' then return '_'..cmdID end
+  -- end
+  -- -- end beta version support
   local activeActionTable = Deserialize(activeAction)
   if activeActionTable then return activeActionTable.cmdID end
   return ''
 end
 
-local function IsActiveAction(cmdID)
-  local activeAction = GetActiveAction()
-  return cmdID == activeAction
-end
-
-local function PutActiveAction(cmdID, path)
-  if cmdID then
-    r.SetExtState(SectionName, 'activeToggleAction', Serialize({ cmdID = cmdID, path = path }, nil, 1), 1)
+local function PutActiveAction(cmdID, path, section)
+  local extStateName = ExtStateNameForSection(section)
+  if cmdID and path then
+    r.SetExtState(SectionName, extStateName, Serialize({ cmdID = cmdID, path = path }, nil, 1), true)
   else
-    r.DeleteExtState(SectionName, 'activeToggleAction', 1)
+    r.DeleteExtState(SectionName, extStateName, true)
   end
 end
 
+-----------------------------------------------------------------------------
+
+local function IsActiveAction(sectionID, cmdID)
+  local section = sectionID ~= 0 and 1 or 0
+  local activeAction = GetActiveAction(section)
+  return cmdID == activeAction
+end
+
 local function SwapActiveAction(sectionID, cmdID, path)
-  local activeAction = GetActiveAction()
+  local section = sectionID ~= 0 and 1 or 0
+  local activeAction = GetActiveAction(sectionID ~= 0 and 1 or 0)
   if activeAction ~= cmdID then
     -- NOTE: this sets the command state, but doesn't call into the command itself
     -- which simplifies the logic significantly
     if activeAction then r.SetToggleCommandState(sectionID, r.NamedCommandLookup(activeAction), 0) end
-    PutActiveAction(cmdID, path)
+    PutActiveAction(cmdID, path, section)
   end
 end
 
 local function SetActiveAction(sectionID, cmdID, path)
-  local activeAction = GetActiveAction()
+  local section = sectionID ~= 0 and 1 or 0
+  local activeAction = GetActiveAction(section)
   if activeAction ~= cmdID then
-    PutActiveAction(cmdID, path)
+    PutActiveAction(cmdID, path, section)
   end
 end
 
 local function RemoveActiveAction(sectionID, cmdID)
-  PutActiveAction()
+  local section = sectionID ~= 0 and 1 or 0
+  PutActiveAction(nil, nil, section)
 end
 
 -----------------------------------------------------------------------------
@@ -365,7 +386,7 @@ local function GetCurrentState(filtered)
   return ReadStateFromFile(r.GetResourcePath()..'/reaper-mouse.ini', filtered)
 end
 
-local function RestoreStateInternal(state, filtered, disableToggles)
+local function RestoreStateInternal(state, filtered, disableToggles, section)
   if not state then return false end
 
   if disableToggles then
@@ -376,13 +397,23 @@ local function RestoreStateInternal(state, filtered, disableToggles)
   local rawCtx = filtered
   if not rawCtx then rawCtx = getContextNames() end
 
+  local omni = section ~= 0 and section ~= 1
+  local ignoreUnknown = false
   local ctx = {}
   for _, v in ipairs(rawCtx) do
-    ctx[v] = true
+    if section == 1 and string.match(v, '^MM_CTX_MIDI_') then
+      ctx[v] = true
+      ignoreUnknown = true
+    elseif section == 0 and not string.match(v, '^MM_CTX_MIDI_') then
+      ctx[v] = true
+      ignoreUnknown = true
+    elseif omni then
+      ctx[v] = true -- section == 2, do it all
+    end
   end
 
   -- set everything to -1
-  if not filtered and UseFasterAPI then
+  if not filtered and omni and UseFasterAPI then
     r.SetMouseModifier(-1, -1, -1)
   else
     if ctx then
@@ -400,18 +431,13 @@ local function RestoreStateInternal(state, filtered, disableToggles)
 
   for k, v in pairs(state) do
     -- filtered will not restored unknown cats
-    local known = filtered and true or (ctx and ctx[k]) and true or false
+    local known = (ctx and ctx[k]) and true or false
     for i = 0, 15 do
-      if v[i] then
+      if v[i] and known then
         local action = v[i]
-        -- -- was necessary in +dev 0114(?)-0120, fixed in 0124
-        -- local action, flag = v[i]:match('^(%g*)%s*(%g*)$')
-        -- if flag == '' then flag = nil end
-        -- if not tonumber(action) then action = tostring(r.NamedCommandLookup(action)) end
-        -- if flag then action = action .. ' ' .. flag end
         r.SetMouseModifier(k, i, action)
         -- post('setting in ['..k..']', i, '"'..action..'"')
-      elseif not known then
+      elseif not known and not ignoreUnknown then
         r.SetMouseModifier(k, i, '-1')
       end
     end
@@ -419,8 +445,8 @@ local function RestoreStateInternal(state, filtered, disableToggles)
   return true
 end
 
-local function RestoreState(state, filtered)
-  return RestoreStateInternal(state, filtered, true)
+local function RestoreState(state, filtered, section)
+  return RestoreStateInternal(state, filtered, true, section)
 end
 
 local function RestoreStateFromFile(path, filtered)
@@ -488,12 +514,36 @@ local function PrintStartupActionScript(actionTable)
     ..'for _, v in ipairs(cmdIDs) do\n'
     ..'  r.Main_OnCommand(r.NamedCommandLookup(v.cmdID), 0)\n'
     ..'end\n'
-    -- ..'r.TrackList_AdjustWindows(0)\n'
   return str
 end
 
-local function AddRemoveStartupAction(cmdIdx, fpath, add)
-  local path = r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua'
+local function PrintStartupActionScript_MIDI(actionTable)
+  local str = 'local r = reaper\n\n'
+    ..'local '..Serialize(actionTable, 'cmdIDs')..'\n\n'
+    ..'local function loop()\n'
+    ..'  local me = r.MIDIEditor_GetActive()\n\n'
+    ..'  if me then\n'
+    ..'    for _, v in ipairs(cmdIDs) do\n'
+    ..'      r.MIDIEditor_OnCommand(me, r.NamedCommandLookup(v.cmdID))\n'
+    ..'    end\n'
+    ..'  else\n'
+    ..'    r.defer(loop)\n'
+    ..'  end\n'
+    ..'end\n\n'
+    ..'r.defer(loop)\n'
+  return str
+end
+
+local function AddRemoveStartupAction(cmdIdx, fpath, add, section)
+
+  local filename = startupFileName
+  local printFun = PrintStartupActionScript
+  if section ~= 0 then
+    filename = startupFileName_MIDI
+    printFun = PrintStartupActionScript_MIDI
+  end
+
+  local path = r.GetResourcePath()..'/Scripts/MouseMapActions/' .. filename
   local existing = ''
   local capturing = false
 
@@ -535,7 +585,7 @@ local function AddRemoveStartupAction(cmdIdx, fpath, add)
     end
   end
 
-  local actionStr = PrintStartupActionScript(actionTable)
+  local actionStr = printFun(actionTable)
   local f = io.open(path, 'w+b')
   if f then
     f:write(actionStr)
@@ -562,7 +612,7 @@ local function AddRemoveStartupAction(cmdIdx, fpath, add)
         -- end backup
         f = io.open(startupFilePath, 'a+b')
         if f then
-          f:write('\nreaper.Main_OnCommand(reaper.NamedCommandLookup("'..actionScriptName..'"), 0) -- __startup_MouseMaps.lua\n')
+          f:write('\nreaper.Main_OnCommand(reaper.NamedCommandLookup("'..actionScriptName..'"), 0) -- __startup_MouseMap(_MIDI).lua\n')
           f:close()
         end
       end
@@ -575,25 +625,26 @@ end
 -----------------------------------------------------------------------------
 ---------------------------------- ACTIONS ----------------------------------
 
-local function PrintToggleActionForState(state, wantsUngrouped, filtered)
+local function PrintToggleActionForState(state, wantsUngrouped, filtered, section)
   local actionName = 'nil'
   if wantsUngrouped then
     local _, filename, sectionID, cmdID = r.get_action_context()
     actionName = filename
   end
 
+  local sectionStr = (not section or section == 3) and ('') or (', '..section)
   local str = 'local r = reaper\n\n'
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
     ..'local '..Serialize(state, 'data')..'\n\n'
     ..(filtered and ('local '..Serialize(filtered, 'filter')..'\n\n') or '')
-    ..'mm.HandleToggleAction('..actionName..', '..'data'..(filtered and ', filter' or '')..')\n'
+    ..'mm.HandleToggleAction('..actionName..', '..'data'..(filtered and ', filter' or ', nil')..sectionStr..')\n'
     ..'r.TrackList_AdjustWindows(0)\n'
   return str
 end
 
-local function SaveToggleActionToFile(path, wantsUngrouped, filtered)
-  local actionStr = PrintToggleActionForState(GetCurrentState(filtered), wantsUngrouped, filtered)
+local function SaveToggleActionToFile(path, wantsUngrouped, filtered, section)
+  local actionStr = PrintToggleActionForState(GetCurrentState(filtered), wantsUngrouped, filtered, section)
   local f = io.open(path, 'wb')
   if f then
     f:write(actionStr)
@@ -603,18 +654,19 @@ local function SaveToggleActionToFile(path, wantsUngrouped, filtered)
   return false
 end
 
-local function PrintOneShotActionForState(state, filtered)
+local function PrintOneShotActionForState(state, filtered, section)
+  local sectionStr = (not section or section == 3) and ('') or (', '..section)
   local str = 'local r = reaper\n\n'
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
     ..'local '..Serialize(state, 'data')..'\n\n'
     ..(filtered and ('local '..Serialize(filtered, 'filter')..'\n\n') or '')
-    ..'mm.RestoreState(data'..(filtered and ', filter' or '')..')\n'
+    ..'mm.RestoreState(data'..(filtered and ', filter' or ', nil')..sectionStr..')\n'
   return str
 end
 
-local function SaveOneShotActionToFile(path, filtered)
-  local actionStr = PrintOneShotActionForState(GetCurrentState(filtered), filtered)
+local function SaveOneShotActionToFile(path, filtered, section)
+  local actionStr = PrintOneShotActionForState(GetCurrentState(filtered), filtered, section)
   local f = io.open(path, 'wb')
   if f then
     f:write(actionStr)
@@ -646,29 +698,38 @@ end
 -----------------------------------------------------------------------------
 ---------------------------------- RUNTIME ----------------------------------
 
-local function HandleToggleAction(cmdName, data, filtered)
-  local _, path, sectionID, cmdIdx = r.get_action_context()
-  local togState = r.GetToggleCommandStateEx(sectionID, cmdIdx)
+local function HandleToggleAction(cmdName, data, filtered, section)
+  -- ok, we have some variables here:
+  -- section nil or 0 means Main context
+  -- section 1 means MIDI context
+  -- does it matter from which context we trigger from?
+  -- I would argue no -- we really just need to know the desired section
+  section = section ~= nil and section or 0
+  local _, path, _, cmdIdx = r.get_action_context()
+  local togState = r.GetToggleCommandStateEx(section ~= 0 and 32060 or 0, cmdIdx)
   local commandName = cmdName or CommonName
   local extState = r.GetExtState(SectionName, commandName)
   local common = cmdName and false or true
+
+  -- this is the name as run from the current section and may cause trouble
+  -- if a MIDI toggle action is executed from the main context. needs testing.
   local cmdID = '_'..r.ReverseNamedCommandLookup(cmdIdx)
 
   if togState == -1 then -- first run, not set yet (fix this, Cockos!)
     togState = 0
     if extState and extState ~= '' then
-      if not common or IsActiveAction(cmdID) then
+      if not common or IsActiveAction(section, cmdID) then
         togState = 1
         if common then
-          SetActiveAction(sectionID, cmdID, path)
+          SetActiveAction(section, cmdID, path)
         end
         -- post('-1 toggle on')
       end
     else
-      if not common or IsActiveAction(cmdID) then
+      if not common or IsActiveAction(section, cmdID) then
         r.DeleteExtState(SectionName, commandName, true)
         if common then
-          RemoveActiveAction(sectionID, cmdID)
+          RemoveActiveAction(section, cmdID)
         end
         -- post('-1 toggle off')
       end
@@ -681,28 +742,44 @@ local function HandleToggleAction(cmdName, data, filtered)
           r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
           -- post('set common state')
         end
-        SwapActiveAction(sectionID, cmdID, path)
+        if section ~= 1 then
+          SwapActiveAction(0, cmdID, path) -- this really needs a sectionID
+        else
+          SwapActiveAction(32060, cmdID, path) -- (32060, 32061, 32062?)
+        end
       else
         r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
       end
       -- post('toggle on')
-      RestoreStateInternal(data, filtered, false)
+      RestoreStateInternal(data, filtered, false, section)
     else
       togState = 0
       -- post('restore common state')
       if extState and extState ~= '' then RestoreState_Serialized(extState) end
       r.DeleteExtState(SectionName, commandName, true)
       if common then
-        RemoveActiveAction(sectionID, cmdID)
+        RemoveActiveAction(section, cmdID)
       end
       -- post('toggle off')
     end
   end
-  r.SetToggleCommandState(sectionID, cmdIdx, togState)
+  if section ~= 1 then
+    r.SetToggleCommandState(0, cmdIdx, togState) -- this really needs a sectionID
+  else
+    r.SetToggleCommandState(32060, cmdIdx, togState) -- (32060, 32061, 32062?)
+  end
+end
+
+function GetStartupFilenameForSection(section)
+  if section == 1 then return startupFileName_MIDI
+  else return startupFileName
+  end
 end
 
 -----------------------------------------------------------------------------
 ----------------------------------- EXPORT ----------------------------------
+
+MouseMaps.GetStartupFilenameForSection = GetStartupFilenameForSection
 
 MouseMaps.GetActiveToggleAction = GetActiveToggleAction
 MouseMaps.AddRemoveStartupAction = AddRemoveStartupAction

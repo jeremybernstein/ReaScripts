@@ -1,22 +1,22 @@
 -- @description MoM Toggle: Mouse Mod Toggle Action Generator
--- @version 1.0.0
+-- @version 2.0.0-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MoM Toggle: Mouse Mod Toggle Action Generator
 --   Load/Save Mouse Maps, Generate Toggle and One-shot Actions to change them up
 -- @changelog
---   - initial non-beta release (no changes from last beta)
+--   - support for Main, MIDI and Main+MIDI (legacy) contexts
+--   - lots of other work, support for v7 MM contexts and more
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
 --   [main] sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua
 
--- TODO: toggle actions across sections -- interaction
-
 local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
 local scriptName = 'MoM Toggle'
+local versionStr = '2.0.0-beta.1' -- don't forget to change this above
 
 local canStart = true
 
@@ -47,7 +47,7 @@ local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
 local DEFAULT_WIDTH = 36 * FONTSIZE_LARGE
-local DEFAULT_HEIGHT = 17 * FONTSIZE_LARGE
+local DEFAULT_HEIGHT = (10 * FONTSIZE_LARGE) + (100)
 local DEFAULT_ITEM_WIDTH = 60
 local DEFAULT_MENUBUTTON_WIDTH = 100
 
@@ -80,7 +80,12 @@ local viewPort
 
 local SectionMain = true
 local SectionMIDI = false
+local SectionLegacy = false
 local PresetLoadSelected
+
+local TYPE_SIMPLE = 0
+local TYPE_TOGGLE = 1
+local TYPE_PRESET = 2
 
 local canReveal = true
 if not r.APIExists('CF_LocateInExplorer') then
@@ -134,7 +139,7 @@ local function processBaseFontUpdate(baseFontSize)
 
   if not baseFontSize then return FONTSIZE_LARGE end
 
-  baseFontSize = math.floor(baseFontSize)
+  baseFontSize = math.floor(baseFontSize + 0.5)
   if baseFontSize < 10 then baseFontSize = 10
   elseif baseFontSize > 48 then baseFontSize = 48
   end
@@ -142,12 +147,13 @@ local function processBaseFontUpdate(baseFontSize)
   if baseFontSize == FONTSIZE_LARGE then return FONTSIZE_LARGE end
 
   FONTSIZE_LARGE = baseFontSize
-  FONTSIZE_SMALL = math.floor(baseFontSize * (11/13))
+  FONTSIZE_SMALL = math.floor(baseFontSize * (11/13) + 0.5)
   fontInfo.largeDefaultSize = FONTSIZE_LARGE
   fontInfo.smallDefaultSize = FONTSIZE_SMALL
-
-  windowInfo.defaultWidth = 36 * fontInfo.largeDefaultSize
-  windowInfo.defaultHeight = 19.5 * fontInfo.largeDefaultSize
+  windowInfo.defaultWidth = 36 * FONTSIZE_LARGE
+  local scale = ((fontInfo.largeDefaultSize / 15) - 1)
+  if scale < 1 then scale = 1 end
+  windowInfo.defaultHeight = (10 * FONTSIZE_LARGE) + (100 * scale)
   DEFAULT_ITEM_WIDTH = 4.6 * FONTSIZE_LARGE
   windowInfo.width = windowInfo.defaultWidth -- * canvasScale
   windowInfo.height = windowInfo.defaultHeight -- * canvasScale
@@ -277,6 +283,15 @@ local function EnumerateMouseMapFiles()
   return fnames
 end
 
+local function BuildTooltip(height, text)
+  if r.ImGui_IsItemHovered(ctx) then
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    r.ImGui_SetNextWindowContentSize(ctx, FONTSIZE_SMALL * 24, FONTSIZE_SMALL * height)
+    r.ImGui_SetTooltip(ctx, text)
+    r.ImGui_PopFont(ctx)
+  end
+end
+
 local function MakeLoadPopup()
   r.ImGui_PushFont(ctx, fontInfo.small)
   r.ImGui_SetCursorPosX(ctx, 15 * canvasScale)
@@ -305,9 +320,12 @@ local function MakeLoadPopup()
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
-  if r.ImGui_Button(ctx, popupLabel, DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
+  local textWidth = r.ImGui_CalcTextSize(ctx, 'Load a Preset...')
+  if r.ImGui_Button(ctx, popupLabel, textWidth + 15 * canvasScale) then
     r.ImGui_OpenPopup(ctx, 'preset menu')
   end
+
+  BuildTooltip(5, 'Load a Mouse Modifier preset\nfile (as exported in the Mouse\nModifiers Preferences dialog).')
 
   handleStatus(1)
 
@@ -490,11 +508,14 @@ local function MakeSavePopup()
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
-  if r.ImGui_Button(ctx, 'Write a Preset...', DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
+  local textWidth = r.ImGui_CalcTextSize(ctx, 'Write a Preset...')
+  if r.ImGui_Button(ctx, 'Write a Preset...', textWidth + 15 * canvasScale) then
     PositionModalWindow(0.75)
     r.ImGui_OpenPopup(ctx, 'Write Preset')
     lastInputTextBuffer = ''
   end
+
+  BuildTooltip(7, 'Write a Mouse Modifier preset\nfile (for import in the Mouse\nModifiers Preferences dialog\nor via the Load Preset menu in\nthis script).')
 
   handleStatus(2)
 
@@ -533,17 +554,14 @@ local function DoRegisterScript(path, section, isToggle)
     else
       r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), newCmdIdx) -- jigger
     end
-    if section == 0 then
-      if runTogglesAtStartup then
-        -- TODO: check this for MIDI Editor toggles
-        mm.AddRemoveStartupAction(newCmdIdx, path, true)
-      end
+    if runTogglesAtStartup then
+      mm.AddRemoveStartupAction(newCmdIdx, path, true, section ~= 0 and 1 or 0)
     end
   end
 end
 
 local function RegisterScript(path, isToggle)
-  if SectionMain then
+  if SectionMain or SectionLegacy then
     DoRegisterScript(path, 0, isToggle)
   end
   if SectionMIDI then
@@ -553,8 +571,16 @@ local function RegisterScript(path, isToggle)
   end
 end
 
+local function GetSectionIDForActiveSections()
+  if SectionLegacy then return 3
+  elseif SectionMain and SectionMIDI then return 2
+  elseif SectionMIDI then return 1
+  else return 0
+  end
+end
+
 local function DoSaveToggleAction(path, fname)
-  local rv = mm.SaveToggleActionToFile(path, wantsUngrouped, useFilter and getFilterNames() or nil)
+  local rv = mm.SaveToggleActionToFile(path, wantsUngrouped, useFilter and getFilterNames() or nil, GetSectionIDForActiveSections())
   wantsUngrouped = false
   r.ImGui_CloseCurrentPopup(ctx)
   if rv then
@@ -607,29 +633,61 @@ local function MakeSectionPopup()
     r.ImGui_Text(ctx, 'Section(s):')
     r.ImGui_SameLine(ctx)
 
-    if not SectionMain and not SectionMIDI then SectionMain = true end
-    local sectText = (SectionMain and SectionMIDI) and 'Main + MIDI' or (SectionMain) and 'Main' or (SectionMIDI) and 'MIDI' or 'Choose Section(s)...'
-    if r.ImGui_Button(ctx, sectText, DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
-      r.ImGui_OpenPopup(ctx, 'section menu')
-    end
+    if useFilter then
+      r.ImGui_BeginDisabled(ctx)
+      r.ImGui_Button(ctx, 'Filtered', DEFAULT_MENUBUTTON_WIDTH * canvasScale)
+      r.ImGui_EndDisabled(ctx)
+      SectionMain = false
+      SectionMIDI = false
+      WantsLegacy = true
+    else
+      if not SectionMain and not SectionMIDI and not SectionLegacy then SectionMain = true end
 
-    if r.ImGui_BeginPopup(ctx, 'section menu') then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        r.ImGui_CloseCurrentPopup(ctx)
+      local sectText
+      if SectionMain and SectionMIDI then
+        sectText = 'Main + MIDI'
+      elseif SectionMain then
+        sectText = 'Main'
+      elseif SectionMIDI then
+        sectText = 'MIDI'
+      elseif SectionLegacy then
+        sectText = 'Legacy (unfiltered)'
       end
 
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+      if r.ImGui_Button(ctx, sectText, DEFAULT_MENUBUTTON_WIDTH * canvasScale) then
+        r.ImGui_OpenPopup(ctx, 'section menu')
+      end
 
-      local retval, v = r.ImGui_Checkbox(ctx, 'Main', SectionMain and true or false)
-      if retval then
-        SectionMain = v
+      if r.ImGui_BeginPopup(ctx, 'section menu') then
+        if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+
+        r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+        local retval, v = r.ImGui_Checkbox(ctx, 'Main', SectionMain and true or false)
+        if retval then
+          SectionMain = v
+          if v then SectionLegacy = false end
+        end
+
+        r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+        retval, v = r.ImGui_Checkbox(ctx, 'MIDI Editors', SectionMIDI and true or false)
+        if retval then
+          SectionMIDI = v
+          if v then SectionLegacy = false end
+        end
+
+        r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
+        retval, v = r.ImGui_Checkbox(ctx, 'Legacy (Global)', SectionLegacy and true or false)
+        if retval then
+          SectionLegacy = v
+          if v then
+            SectionMain = false
+            SectionMIDI = false
+          end
+        end
+        r.ImGui_EndPopup(ctx)
       end
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
-      retval, v = r.ImGui_Checkbox(ctx, 'MIDI Editors', SectionMIDI and true or false)
-      if retval then
-        SectionMIDI = v
-      end
-      r.ImGui_EndPopup(ctx)
     end
     r.ImGui_PopFont(ctx)
     r.ImGui_EndPopup(ctx)
@@ -695,25 +753,16 @@ local function MakeToggleActionPopup()
     r.ImGui_OpenPopup(ctx, 'Build a Toggle Action')
   end
 
-  handleStatus(3)
+  BuildTooltip(8, 'Toggle Actions have on/off state\nand are linked with another.\n\nOnly one Toggle Action\ncan be active at a time.')
 
-  r.ImGui_SameLine(ctx)
-  r.ImGui_PushFont(ctx, fontInfo.small)
-  local x = r.ImGui_GetWindowSize(ctx)
-  local textWidth = r.ImGui_CalcTextSize(ctx, 'Customize Toolbars...')
-  r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
-  r.ImGui_AlignTextToFramePadding(ctx)
-  if r.ImGui_Button(ctx, 'Customize Toolbars...') then
-    r.Main_OnCommand(40905, 0) -- Toolbars: Customize...
-  end
-  r.ImGui_PopFont(ctx)
+  handleStatus(3)
 
   MakeToggleActionModal('Build a Toggle Action', true)
   r.ImGui_PopStyleColor(ctx)
 end
 
 local function DoSaveOneShotAction(path, fname)
-  local rv = mm.SaveOneShotActionToFile(path, useFilter and getFilterNames() or nil)
+  local rv = mm.SaveOneShotActionToFile(path, useFilter and getFilterNames() or nil, GetSectionIDForActiveSections())
   r.ImGui_CloseCurrentPopup(ctx)
   if rv then
     RegisterScript(path)
@@ -730,7 +779,6 @@ local function MakeOneShotActionModal(modalName, editableName, suppressOverwrite
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) and not IsOKDialogOpen() then
       r.ImGui_CloseCurrentPopup(ctx)
     end
-    -- TODO: script context (main, midi, etc.) see reapack
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Text(ctx, 'One-Shot Action Name')
     r.ImGui_PopFont(ctx)
@@ -767,6 +815,8 @@ local function MakeOneShotActionPopup()
     lastInputTextBuffer = lastInputTextBuffer or activeFname and activeFname or ''
     r.ImGui_OpenPopup(ctx, 'Build a One-shot Action')
   end
+
+  BuildTooltip(3, 'One-shot actions have no state and\nare independent of one another.')
 
   handleStatus(4)
 
@@ -843,9 +893,6 @@ local function MakePresetLoadActionModal(modalName, editableName, suppressOverwr
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_Spacing(ctx)
 
-    -- MakeSectionPopup()
-    -- r.ImGui_Spacing(ctx)
-
     if PresetLoadSelected == nil then
       r.ImGui_BeginDisabled(ctx)
     end
@@ -875,6 +922,8 @@ local function MakePresetLoadActionPopup()
     PresetLoadSelected = nil
   end
 
+  BuildTooltip(5, 'Preset actions load Mouse Modifier\npreset files (as exported in the Mouse\nModifiers Preferences dialog).')
+
   handleStatus(5)
 
   MakePresetLoadActionModal('Build a Preset Load Action', true)
@@ -886,38 +935,85 @@ end
 
 local function RebuildActionsMenu()
   actionNames = {}
+  local startupFileName = mm.GetStartupFilenameForSection()
   local startupStr
-  local f = io.open(r.GetResourcePath()..'/Scripts/MouseMapActions/__startup_MouseMap.lua', 'r')
+  local f = io.open(r.GetResourcePath()..'/Scripts/MouseMapActions/' .. startupFileName, 'r')
   if f then
     startupStr = f:read('*all')
     f:close()
   end
 
+  local startupFileName_MIDI = mm.GetStartupFilenameForSection(1)
+  local startupStr_MIDI
+  f = io.open(r.GetResourcePath()..'/Scripts/MouseMapActions/' .. startupFileName_MIDI, 'r')
+  if f then
+    startupStr_MIDI = f:read('*all')
+    f:close()
+  end
+
   local _, activePath = mm.GetActiveToggleAction()
+  local _, activeMIDIPath = mm.GetActiveToggleAction(1)
 
   local idx = 0
   local actionPath = r.GetResourcePath()..'/Scripts/MouseMapActions/'
   r.EnumerateFiles(actionPath, -1)
   local fname = r.EnumerateFiles(actionPath, idx)
   while fname do
-    if fname ~= '__startup_MouseMap.lua' and fname:match('_MouseMap%.lua$') then
+    if fname ~= startupFileName
+      and fname ~= startupFileName_MIDI
+      and fname:match('_MouseMap%.lua$')
+    then
       local actionStr
-      local actionType = 0 -- simple action
+      local actionType = nil
       local actionStartup = false
       local actionActive = false
       local actionScriptPath = actionPath..fname
+      local actionSection = nil
       f = io.open(actionScriptPath, 'r')
       if f then
         actionStr = f:read('*all')
         f:close()
       end
-      if actionStr and actionStr:match('HandleToggleAction') then
-        actionType = 1 -- toggle action
-        actionStartup = startupStr:match(actionScriptPath) and true or false
-        actionActive = activePath == actionScriptPath
+      if actionStr then
+        local matched = false
+        local match
+
+        if not matched then
+          match = actionStr:match('RestoreState%s*%(.*,(.-)%s*%)')
+          if match then
+            actionType = TYPE_SIMPLE
+            actionSection = tonumber(match)
+            matched = true
+          end
+        end
+
+        if not matched then
+          match = actionStr:match('HandleToggleAction%s*%(.*,(.-)%s*%)')
+          if match then
+            actionType = TYPE_TOGGLE
+            actionActive = activePath == actionScriptPath or activeMIDIPath == actionScriptPath
+            actionSection = tonumber(match)
+            if actionSection == 1 then actionStartup = startupStr_MIDI:match(actionScriptPath) and true or false
+            else actionStartup = startupStr:match(actionScriptPath) and true or false
+            end
+            matched = true
+          end
+        end
+
+        if not matched then
+          match = actionStr:match('RestoreStateFromFile%s*%(.*,(.-)%s*%)')
+          if match then
+            actionType = TYPE_PRESET
+            matched = true
+            -- actionStartup = startupStr:match(actionScriptPath) and true or false -- this should always be false, right?
+          end
+        end
+
       end
-      local actionName = fname:gsub('_MouseMap%.lua$', '')
-      table.insert(actionNames, { name = actionName, path = actionScriptPath, type = actionType, startup = actionStartup, active = actionActive })
+      if actionType then
+        local actionName = fname:gsub('_MouseMap%.lua$', '')
+        table.insert(actionNames, { name = actionName, path = actionScriptPath, type = actionType, startup = actionStartup, active = actionActive, section = actionSection })
+      end
     end
     idx = idx + 1
     fname = r.EnumerateFiles(actionPath, idx)
@@ -925,7 +1021,7 @@ local function RebuildActionsMenu()
 end
 
 local function MakeGearPopup()
-  local ibSize = IMAGEBUTTON_SIZE * canvasScale
+  local ibSize = FONTSIZE_LARGE * canvasScale
   local x = r.ImGui_GetWindowSize(ctx)
   local textWidth = ibSize -- r.ImGui_CalcTextSize(ctx, 'Gear')
   r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
@@ -950,11 +1046,28 @@ local function MakeGearPopup()
     end
     local rv, selected, v
 
+    r.ImGui_BeginDisabled(ctx)
+    r.ImGui_Text(ctx, 'Version ' .. versionStr)
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_EndDisabled(ctx)
+
     -----------------------------------------------------------------------------
     ---------------------------------- OPEN PREFS -------------------------------
 
-    if r.ImGui_Selectable(ctx, 'Open Mouse Modifiers Preference') then
+    if r.ImGui_Selectable(ctx, 'Open Mouse Modifiers Preference Pane...') then
       r.ViewPrefs(466, '')
+      r.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+
+    -----------------------------------------------------------------------------
+    --------------------------------- TOOLBAR CUST ------------------------------
+
+    if r.ImGui_Selectable(ctx, 'Open Customize Toolbars Window...') then
+      r.Main_OnCommand(40905, 0) -- Toolbars: Customize...
       r.ImGui_CloseCurrentPopup(ctx)
     end
 
@@ -1020,71 +1133,129 @@ local function MakeGearPopup()
     -----------------------------------------------------------------------------
     ----------------------------------- ACTIONS ---------------------------------
 
+    local function GenerateSubmenu(tab, label, spacing)
+      if #tab ~= 0 then
+        if spacing then r.ImGui_Spacing(ctx) end
+        if r.ImGui_BeginMenu(ctx, label) then
+          local cherry = true
+          for _, action in mm.spairs(tab, function (t, a, b) return t[a].name < t[b].name end ) do
+            local MIDIEnable = action.section ~= 1 or r.MIDIEditor_GetActive()
+            local actionName = action.name
+            if action.active and MIDIEnable then actionName = actionName .. ' [Active]' end
+            if not cherry then Spacing() end
+            cherry = false
+            if r.ImGui_BeginMenu(ctx, actionName) then
+              local didSth = false
+              if action.type ~= TYPE_PRESET then
+                if r.ImGui_Selectable(ctx, 'Update Action From Current State', false, r.ImGui_SelectableFlags_DontClosePopups()) then
+                  lastInputTextBuffer = action.name
+                  inOKDialog = true
+                end
+                ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, action.type == TYPE_SIMPLE and DoSaveOneShotAction or DoSaveToggleAction, true)
+                didSth = true
+              end
+
+              if action.type == TYPE_TOGGLE then
+                r.ImGui_Spacing(ctx)
+                if r.ImGui_Selectable(ctx, action.startup and 'Remove From Startup' or 'Add To Startup') then
+                  local cmdIdx = r.AddRemoveReaScript(true, action.section == 1 and 32060 or 0, action.path, true)
+                  mm.AddRemoveStartupAction(cmdIdx, action.path, not action.startup, action.section == 1 and 1 or 0)
+                end
+
+                if not MIDIEnable then
+                  r.ImGui_BeginDisabled(ctx)
+                end
+                r.ImGui_Spacing(ctx)
+                if r.ImGui_Selectable(ctx, action.active and 'Deactivate Action' or 'Activate Action') then
+                  local cmdIdx = r.AddRemoveReaScript(true, action.section == 1 and 32060 or 0, action.path, true)
+                  if action.section ~= 1 then
+                    r.Main_OnCommand(cmdIdx, 0)
+                  else
+                    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), cmdIdx)
+                  end
+                end
+                if not MIDIEnable then
+                  r.ImGui_EndDisabled(ctx)
+                end
+                didSth = true
+              end
+
+              if didSth then
+                r.ImGui_Spacing(ctx)
+                r.ImGui_Separator(ctx)
+              end
+
+              if canReveal then
+                r.ImGui_Spacing(ctx)
+                if r.ImGui_Selectable(ctx, 'Reveal in Finder/Explorer') then
+                  r.CF_LocateInExplorer(action.path)
+                  r.ImGui_CloseCurrentPopup(ctx)
+                end
+              end
+
+              r.ImGui_Spacing(ctx)
+              if r.ImGui_Selectable(ctx, 'Delete Action', false, r.ImGui_SelectableFlags_DontClosePopups()) then
+                inOKDialog = true
+              end
+              local okrv, okval = HandleOKDialog('Delete Action?', 'Delete '..action.name..' permanently?')
+              if okrv then
+                if okval == 1 then
+                  if action.active then
+                    local cmdIdx = r.AddRemoveReaScript(true, action.section == 1 and 32060 or 0, action.path, false)
+                    if action.section ~= 1 then
+                      r.Main_OnCommand(cmdIdx, 0) -- turn it off
+                    else
+                      -- this might need to be done for all contexts, could be a little error-prone
+                      r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), cmdIdx)
+                    end
+                  end
+                  r.AddRemoveReaScript(false, 0, action.path, false)
+                  r.AddRemoveReaScript(false, 32060, action.path, false)
+                  r.AddRemoveReaScript(false, 32061, action.path, false)
+                  r.AddRemoveReaScript(false, 32062, action.path, true)
+                  os.remove(action.path)
+                  mm.AddRemoveStartupAction() -- prune
+                  rebuildActionsMenu = true
+                  -- r.ImGui_CloseCurrentPopup(ctx)
+                end
+              end
+              r.ImGui_EndMenu(ctx)
+            end
+          end
+          r.ImGui_EndMenu(ctx)
+        end
+        return true
+      end
+      return false
+    end
+
     r.ImGui_Spacing(ctx)
 
     if r.ImGui_BeginMenu(ctx, 'Actions') then
       r.ImGui_PushFont(ctx, fontInfo.small)
       if #actionNames > 0 then
-        -- local modalLabelT0 = 'Update One-Shot Action'
-        -- local modalLabelT1 = 'Update Toggle Action'
-
-        local cherry = true
+        local actionsMain = {}
+        local actionsMIDI = {}
+        local actionsMM = {}
+        local actionsLegacy = {}
         for _, action in mm.spairs(actionNames, function (t, a, b) return t[a].name < t[b].name end ) do
-          if not cherry then Spacing() end
-          if r.ImGui_BeginMenu(ctx, action.name..(action.active and ' [Active]' or '')) then
-            if r.ImGui_Selectable(ctx, 'Update Action From Current State', false, r.ImGui_SelectableFlags_DontClosePopups()) then
-              lastInputTextBuffer = action.name
-              inOKDialog = true
+          if action.section ~= nil then
+            if action.section == 1 then
+              table.insert(actionsMIDI, action)
+            elseif action.section == 2 then
+              table.insert(actionsMM, action)
+            else
+              table.insert(actionsMain, action)
             end
-
-            ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, action.type == 0 and DoSaveOneShotAction or DoSaveToggleAction, true)
-
-            if action.type == 1 then
-              r.ImGui_Spacing(ctx)
-              if r.ImGui_Selectable(ctx, action.startup and 'Remove From Startup' or 'Add To Startup') then
-                mm.AddRemoveStartupAction(r.AddRemoveReaScript(true, 0, action.path, true), action.path, not action.startup)
-              end
-              r.ImGui_Spacing(ctx)
-              if r.ImGui_Selectable(ctx, action.active and 'Deactivate Action' or 'Activate Action') then
-                r.Main_OnCommand(r.AddRemoveReaScript(true, 0, action.path, true), 0)
-              end
-            end
-            r.ImGui_Spacing(ctx)
-            r.ImGui_Separator(ctx)
-
-            if canReveal then
-              r.ImGui_Spacing(ctx)
-              if r.ImGui_Selectable(ctx, 'Reveal in Finder/Explorer') then
-                r.CF_LocateInExplorer(action.path)
-                r.ImGui_CloseCurrentPopup(ctx)
-              end
-            end
-
-            r.ImGui_Spacing(ctx)
-            if r.ImGui_Selectable(ctx, 'Delete Action', false, r.ImGui_SelectableFlags_DontClosePopups()) then
-              inOKDialog = true
-            end
-            local okrv, okval = HandleOKDialog('Delete Action?', 'Delete '..action.name..' permanently?')
-            if okrv then
-              if okval == 1 then
-                if action.active then
-                  -- TODO: manage active state if not in Main (or in both)
-                  r.Main_OnCommand(r.AddRemoveReaScript(true, 0, action.path, false), 0) -- turn it off
-                end
-                r.AddRemoveReaScript(false, 0, action.path, true)
-                r.AddRemoveReaScript(false, 32060, action.path, true)
-                r.AddRemoveReaScript(false, 32061, action.path, true)
-                r.AddRemoveReaScript(false, 32062, action.path, true)
-                os.remove(action.path)
-                mm.AddRemoveStartupAction() -- prune
-                rebuildActionsMenu = true
-                -- r.ImGui_CloseCurrentPopup(ctx)
-              end
-            end
-            r.ImGui_EndMenu(ctx)
+          else
+            table.insert(actionsLegacy, action)
           end
-          cherry = false
         end
+
+        local spacing = GenerateSubmenu(actionsMain, 'Main', false)
+        if GenerateSubmenu(actionsMIDI, 'MIDI', spacing) and not spacing then spacing = true end
+        if GenerateSubmenu(actionsMM, 'Main + MIDI', spacing) and not spacing then spacing = true end
+        GenerateSubmenu(actionsLegacy, 'Global', spacing)
       else
         r.ImGui_BeginDisabled(ctx)
         r.ImGui_Selectable(ctx, 'No Actions')
@@ -1148,7 +1319,8 @@ local function mainFn()
   inOKDialog = false
   r.ImGui_PushFont(ctx, fontInfo.large)
 
-  Spacing()
+  -- r.ImGui_Spacing(ctx)
+
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, 'PRESETS')
 
@@ -1238,7 +1410,7 @@ end
 local function updateOneFont(name)
   if not fontInfo[name] then return end
 
-  local newFontSize = math.floor(fontInfo[name..'DefaultSize'] * canvasScale)
+  local newFontSize = math.floor((fontInfo[name..'DefaultSize'] * canvasScale) + 0.5)
   local fontSize = fontInfo[name..'Size']
 
   if newFontSize ~= fontSize then
@@ -1259,6 +1431,7 @@ local function openWindow()
   if windowInfo.wantsResize then
     windowSizeFlag = nil
   end
+
   r.ImGui_SetNextWindowSize(ctx, windowInfo.width, windowInfo.height, windowSizeFlag)
   r.ImGui_SetNextWindowPos(ctx, windowInfo.left, windowInfo.top, windowSizeFlag)
   if windowInfo.wantsResize then
@@ -1266,10 +1439,12 @@ local function openWindow()
     windowInfo.wantsResizeUpdate = true
   end
 
+  -- TODO: active MIDI toggle action in titlebar?
   local activeCmdID, activePath = mm.GetActiveToggleAction()
   if activeCmdID and activePath then
+    activePath = tostring(activePath)
     local name = activePath:match('.*/(.*)_MouseMap.lua')
-    if name ~= activeFname then
+    if name ~= nil and name ~= activeFname then
       titleBarText = DEFAULT_TITLEBAR_TEXT .. ' :: [Active: ' .. name .. ']'
       activeFname = name
       lastInputTextBuffer = activeFname
@@ -1284,7 +1459,7 @@ local function openWindow()
   end
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
   -- r.ImGui_SetNextWindowDockID(ctx, -1)--, r.ImGui_Cond_FirstUseEver()) -- TODO docking
-  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight * 2)
+  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight, windowInfo.defaultWidth * canvasScale, windowInfo.defaultHeight * 2) -- ((windowInfo.defaultHeight - 120) * 2) + 120)
 
   r.ImGui_PushFont(ctx, fontInfo.small)
   local visible, open = r.ImGui_Begin(ctx, titleBarText, true,
@@ -1339,6 +1514,9 @@ local function loop()
   if canvasScale > 2 then canvasScale = 2 end
 
   updateFonts()
+
+  canvasScale = fontInfo.largeSize / fontInfo.largeDefaultSize --  windowInfo.height / windowInfo.defaultHeight
+  if canvasScale > 2 then canvasScale = 2 end
 
   local visible, open = openWindow()
   if visible then

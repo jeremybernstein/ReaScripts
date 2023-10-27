@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="8815a5d8a64a65df2a3baffdc366a1ba21092745">
+<index version="1" name="sockmonkey72 Scripts" commit="6b683832da22011ab0394108643d3033d81cf2f2">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -672,6 +672,15 @@ some refactoring]]></changelog>
         <source file="MouseMaps/gear_40031.txt">https://github.com/jeremybernstein/ReaScripts/raw/8815a5d8a64a65df2a3baffdc366a1ba21092745/Mouse%20Maps/MouseMaps/gear_40031.txt</source>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/8815a5d8a64a65df2a3baffdc366a1ba21092745/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
         <source main="main" file="sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua">https://github.com/jeremybernstein/ReaScripts/raw/8815a5d8a64a65df2a3baffdc366a1ba21092745/Mouse%20Maps/sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua</source>
+      </version>
+      <version name="2.0.0-beta.1" author="sockmonkey72" time="2023-10-27T19:52:03Z">
+        <changelog><![CDATA[- support for Main, MIDI and Main+MIDI (legacy) contexts
+- lots of other work, support for v7 MM contexts and more]]></changelog>
+        <source file="MouseMaps/MouseMaps.lua">https://github.com/jeremybernstein/ReaScripts/raw/6b683832da22011ab0394108643d3033d81cf2f2/Mouse%20Maps/MouseMaps/MouseMaps.lua</source>
+        <source file="MouseMaps/gear_40031.png">https://github.com/jeremybernstein/ReaScripts/raw/6b683832da22011ab0394108643d3033d81cf2f2/Mouse%20Maps/MouseMaps/gear_40031.png</source>
+        <source file="MouseMaps/gear_40031.txt">https://github.com/jeremybernstein/ReaScripts/raw/6b683832da22011ab0394108643d3033d81cf2f2/Mouse%20Maps/MouseMaps/gear_40031.txt</source>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/6b683832da22011ab0394108643d3033d81cf2f2/Mouse%20Maps/sockmonkey72_MouseMapFactory.lua</source>
+        <source main="main" file="sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua">https://github.com/jeremybernstein/ReaScripts/raw/6b683832da22011ab0394108643d3033d81cf2f2/Mouse%20Maps/sockmonkey72_MoM_Toggle_Mouse_Mod_Toggle_Generator.lua</source>
       </version>
     </reapack>
   </category>

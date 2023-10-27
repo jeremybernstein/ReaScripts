@@ -1,5 +1,5 @@
 -- @description MoM Toggle: Mouse Mod Toggle Action Generator
--- @version 2.0.0-beta.1
+-- @version 2.0.0-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MoM Toggle: Mouse Mod Toggle Action Generator
@@ -7,6 +7,7 @@
 -- @changelog
 --   - support for Main, MIDI and Main+MIDI (legacy) contexts
 --   - lots of other work, support for v7 MM contexts and more
+--   - beta.2: fix crash when minimizing/expanding window (unattached Image)
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
@@ -16,7 +17,7 @@ local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
 local scriptName = 'MoM Toggle'
-local versionStr = '2.0.0-beta.1' -- don't forget to change this above
+local versionStr = '2.0.0-beta.2' -- don't forget to change this above
 
 local canStart = true
 
@@ -42,7 +43,7 @@ local YAGNI = false
 
 local IMAGEBUTTON_SIZE = 13
 local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'MouseMaps/' .. 'gear_40031.png')
--- if GearImage then r.ImGui_Attach(ctx, GearImage) end
+if GearImage then r.ImGui_Attach(ctx, GearImage) end
 
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
@@ -1360,6 +1361,7 @@ end
 local function doClose()
   r.ImGui_Detach(ctx, fontInfo.large)
   r.ImGui_Detach(ctx, fontInfo.small)
+  r.ImGui_Detach(ctx, GearImage)
   r.ImGui_DestroyContext(ctx)
   ctx = nil
 end

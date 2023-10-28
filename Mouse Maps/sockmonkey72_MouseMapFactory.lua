@@ -1,5 +1,5 @@
 -- @description MoM Toggle: Mouse Mod Toggle Action Generator
--- @version 2.0.0-beta.2
+-- @version 2.0.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MoM Toggle: Mouse Mod Toggle Action Generator
@@ -8,6 +8,8 @@
 --   - support for Main, MIDI and Main+MIDI (legacy) contexts
 --   - lots of other work, support for v7 MM contexts and more
 --   - beta.2: fix crash when minimizing/expanding window (unattached Image)
+--   - beta.3: - add some tooltip explanations of what 'section' means for various actions
+--             - some cleanup of action generation code and Actions submenu of Gear
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
@@ -17,7 +19,7 @@ local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
 local scriptName = 'MoM Toggle'
-local versionStr = '2.0.0-beta.2' -- don't forget to change this above
+local versionStr = '2.0.0-beta.3' -- don't forget to change this above
 
 local canStart = true
 
@@ -326,7 +328,9 @@ local function MakeLoadPopup()
     r.ImGui_OpenPopup(ctx, 'preset menu')
   end
 
-  BuildTooltip(5, 'Load a Mouse Modifier preset\nfile (as exported in the Mouse\nModifiers Preferences dialog).')
+  BuildTooltip(5, 'Load a Mouse Modifier preset\n'..
+    'file (as exported in the Mouse\n'..
+    'Modifiers Preferences dialog).')
 
   handleStatus(1)
 
@@ -516,7 +520,11 @@ local function MakeSavePopup()
     lastInputTextBuffer = ''
   end
 
-  BuildTooltip(7, 'Write a Mouse Modifier preset\nfile (for import in the Mouse\nModifiers Preferences dialog\nor via the Load Preset menu in\nthis script).')
+  BuildTooltip(7, 'Write a Mouse Modifier preset\n'..
+    'file (for import in the Mouse\n'..
+    'Modifiers Preferences dialog\n'..
+    'or via the Load Preset menu in\n'..
+    'this script).')
 
   handleStatus(2)
 
@@ -607,7 +615,8 @@ local function DoSavePresetLoadAction(path, fname)
   statusContext = 5
 end
 
-local function MakeSectionPopup()
+-- we could consider decoupling install location and toggle group, but not sure if it's really necessary
+local function MakeSectionPopup(actionType)
   r.ImGui_SameLine(ctx)
 
   local ibSize = IMAGEBUTTON_SIZE * 0.75 * canvasScale
@@ -620,6 +629,39 @@ local function MakeSectionPopup()
   if r.ImGui_ImageButton(ctx, 'sectgear', GearImage, ibSize, ibSize) then
     wantsPop = true
   end
+
+  local toolTipStr = 'Choose a Section for the script.\n\n'..
+                     'Section determines:\n\n'
+  local toolTipHeight
+
+  if not actionType or actionType == TYPE_SIMPLE or actionType == TYPE_TOGGLE then
+    toolTipHeight = 12
+    toolTipStr = toolTipStr..
+      '\t* Where the new Action will be\n'..
+      '\t  installed in the Actions Window\n'..
+      '\t  and which contexts are affected.\n'..
+      '\t  (Main vs MIDI Editors context)'
+  end
+
+  if actionType == TYPE_TOGGLE then
+    toolTipHeight = 21
+    toolTipStr = toolTipStr..'\n\n'..
+      '\t* For Toggle Actions, which group\n'..
+      '\t  the Action belongs to (Main/MIDI).\n\n'..
+      'Toggle actions installed to\n'..
+      '"Main + MIDI" or "Legacy" belong\n'..
+      'to the"Main" toggle group.'
+  end
+
+  if actionType == TYPE_PRESET then
+    toolTipHeight = 10
+    toolTipStr = toolTipStr..
+      '\t* Where the new Action will be\n'..
+      '\t  installed in the Actions Window.\n'..
+      '\t  Presets are not filtered by context.'
+  end
+
+  BuildTooltip(toolTipHeight, toolTipStr)
 
   if wantsPop then
     r.ImGui_OpenPopup(ctx, 'sectgear menu')
@@ -721,7 +763,7 @@ local function MakeToggleActionModal(modalName, editableName, suppressOverwrite)
 
     ConfirmButton()
 
-    MakeSectionPopup()
+    MakeSectionPopup(TYPE_TOGGLE)
 
     ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, DoSaveToggleAction, 3)
 
@@ -754,7 +796,10 @@ local function MakeToggleActionPopup()
     r.ImGui_OpenPopup(ctx, 'Build a Toggle Action')
   end
 
-  BuildTooltip(8, 'Toggle Actions have on/off state\nand are linked with another.\n\nOnly one Toggle Action\ncan be active at a time.')
+  BuildTooltip(8, 'Toggle Actions have on/off state\n'..
+    'and are linked with another.\n\n'..
+    'Only one Toggle Action\n'..
+    'can be active at a time.')
 
   handleStatus(3)
 
@@ -799,7 +844,7 @@ local function MakeOneShotActionModal(modalName, editableName, suppressOverwrite
 
     ConfirmButton()
 
-    MakeSectionPopup()
+    MakeSectionPopup(TYPE_SIMPLE)
 
     ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, DoSaveOneShotAction, 4)
 
@@ -817,7 +862,8 @@ local function MakeOneShotActionPopup()
     r.ImGui_OpenPopup(ctx, 'Build a One-shot Action')
   end
 
-  BuildTooltip(3, 'One-shot actions have no state and\nare independent of one another.')
+  BuildTooltip(3, 'One-shot actions have no state and\n'..
+    'are independent of one another.')
 
   handleStatus(4)
 
@@ -904,7 +950,7 @@ local function MakePresetLoadActionModal(modalName, editableName, suppressOverwr
       r.ImGui_EndDisabled(ctx)
     end
 
-    MakeSectionPopup()
+    MakeSectionPopup(TYPE_PRESET)
 
     ManageSaveAndOverwrite(ActionPathAndFilenameFromLastInput, DoSavePresetLoadAction, 5)
 
@@ -923,7 +969,9 @@ local function MakePresetLoadActionPopup()
     PresetLoadSelected = nil
   end
 
-  BuildTooltip(5, 'Preset actions load Mouse Modifier\npreset files (as exported in the Mouse\nModifiers Preferences dialog).')
+  BuildTooltip(5, 'Preset actions load Mouse Modifier\n'..
+    'preset files (as exported in the Mouse\n'..
+    'Modifiers Preferences dialog).')
 
   handleStatus(5)
 
@@ -1237,26 +1285,24 @@ local function MakeGearPopup()
       if #actionNames > 0 then
         local actionsMain = {}
         local actionsMIDI = {}
-        local actionsMM = {}
-        local actionsLegacy = {}
+        local actionsGlobal = {}
         for _, action in mm.spairs(actionNames, function (t, a, b) return t[a].name < t[b].name end ) do
           if action.section ~= nil then
             if action.section == 1 then
               table.insert(actionsMIDI, action)
             elseif action.section == 2 then
-              table.insert(actionsMM, action)
+              table.insert(actionsGlobal, action) -- remove main + midi section, this menu only shows execution context
             else
               table.insert(actionsMain, action)
             end
           else
-            table.insert(actionsLegacy, action)
+            table.insert(actionsGlobal, action)
           end
         end
 
         local spacing = GenerateSubmenu(actionsMain, 'Main', false)
         if GenerateSubmenu(actionsMIDI, 'MIDI', spacing) and not spacing then spacing = true end
-        if GenerateSubmenu(actionsMM, 'Main + MIDI', spacing) and not spacing then spacing = true end
-        GenerateSubmenu(actionsLegacy, 'Global', spacing)
+        GenerateSubmenu(actionsGlobal, 'Global', spacing)
       else
         r.ImGui_BeginDisabled(ctx)
         r.ImGui_Selectable(ctx, 'No Actions')

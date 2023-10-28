@@ -408,7 +408,7 @@ local function RestoreStateInternal(state, filtered, disableToggles, section)
       ctx[v] = true
       ignoreUnknown = true
     elseif omni then
-      ctx[v] = true -- section == 2, do it all
+      ctx[v] = true -- section == 2 or 3, do it all
     end
   end
 
@@ -632,7 +632,7 @@ local function PrintToggleActionForState(state, wantsUngrouped, filtered, sectio
     actionName = filename
   end
 
-  local sectionStr = (not section or section == 3) and ('') or (', '..section)
+  local sectionStr = (not section or section >= 2) and ('') or (', '..section)
   local str = 'local r = reaper\n\n'
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'
@@ -655,7 +655,7 @@ local function SaveToggleActionToFile(path, wantsUngrouped, filtered, section)
 end
 
 local function PrintOneShotActionForState(state, filtered, section)
-  local sectionStr = (not section or section == 3) and ('') or (', '..section)
+  local sectionStr = (not section or section >= 2) and ('') or (', '..section)
   local str = 'local r = reaper\n\n'
     ..'package.path = r.GetResourcePath().."/Scripts/sockmonkey72 Scripts/Mouse Maps/MouseMaps/?.lua"\n'
     ..'local mm = require "MouseMaps"\n\n'

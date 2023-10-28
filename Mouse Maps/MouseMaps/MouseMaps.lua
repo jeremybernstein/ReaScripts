@@ -8,8 +8,9 @@
 local r = reaper
 
 local MouseMaps = {}
-local SectionName = 'sockmonkey72_MouseMaps'
+local ExtSectName = 'sockmonkey72_MouseMaps'
 local CommonName = 'commonInitState'
+local CommonName_MIDI = 'commonInitState_MIDI'
 
 local startupFileName = '__startup_MouseMap.lua'
 local startupFileName_MIDI = '__startup_MouseMap_MIDI.lua'
@@ -260,14 +261,14 @@ local function ExtStateNameForSection(section)
 end
 
 local function GetActiveToggleAction(section) -- exported
-  local activeAction = r.GetExtState(SectionName, ExtStateNameForSection(section))
+  local activeAction = r.GetExtState(ExtSectName, ExtStateNameForSection(section))
   local activeActionTable = Deserialize(activeAction)
   if activeActionTable then return activeActionTable.cmdID, activeActionTable.path end
   return nil, nil
 end
 
 local function GetActiveAction(section)
-  local activeAction = r.GetExtState(SectionName, ExtStateNameForSection(section))
+  local activeAction = r.GetExtState(ExtSectName, ExtStateNameForSection(section))
   -- -- from beta versions, can be removed eventually
   -- local cmdIdx = tonumber(activeAction)
   -- if cmdIdx then
@@ -283,9 +284,9 @@ end
 local function PutActiveAction(cmdID, path, section)
   local extStateName = ExtStateNameForSection(section)
   if cmdID and path then
-    r.SetExtState(SectionName, extStateName, Serialize({ cmdID = cmdID, path = path }, nil, 1), true)
+    r.SetExtState(ExtSectName, extStateName, Serialize({ cmdID = cmdID, path = path }, nil, 1), true)
   else
-    r.DeleteExtState(SectionName, extStateName, true)
+    r.DeleteExtState(ExtSectName, extStateName, true)
   end
 end
 
@@ -390,7 +391,7 @@ local function RestoreStateInternal(state, filtered, disableToggles, section)
   if not state then return false end
 
   if disableToggles then
-    r.DeleteExtState(SectionName, CommonName, true)
+    r.DeleteExtState(ExtSectName, CommonName, true)
     SwapActiveAction(0)
   end
 
@@ -698,17 +699,19 @@ end
 -----------------------------------------------------------------------------
 ---------------------------------- RUNTIME ----------------------------------
 
+-- TODO extState for Main vs MIDI
 local function HandleToggleAction(cmdName, data, filtered, section)
   -- ok, we have some variables here:
   -- section nil or 0 means Main context
   -- section 1 means MIDI context
   -- does it matter from which context we trigger from?
   -- I would argue no -- we really just need to know the desired section
-  section = section ~= nil and section or 0
+  local omni = not section or section >= 2
+  section = section == 1 and 1 or 0
   local _, path, _, cmdIdx = r.get_action_context()
-  local togState = r.GetToggleCommandStateEx(section ~= 0 and 32060 or 0, cmdIdx)
-  local commandName = cmdName or CommonName
-  local extState = r.GetExtState(SectionName, commandName)
+  local togState = r.GetToggleCommandStateEx(section == 1 and 32060 or 0, cmdIdx)
+  local extCmdName = cmdName or (section == 1 and CommonName_MIDI or CommonName)
+  local extState = r.GetExtState(ExtSectName, extCmdName)
   local common = cmdName and false or true
 
   -- this is the name as run from the current section and may cause trouble
@@ -727,7 +730,7 @@ local function HandleToggleAction(cmdName, data, filtered, section)
       end
     else
       if not common or IsActiveAction(section, cmdID) then
-        r.DeleteExtState(SectionName, commandName, true)
+        r.DeleteExtState(ExtSectName, extCmdName, true)
         if common then
           RemoveActiveAction(section, cmdID)
         end
@@ -739,7 +742,7 @@ local function HandleToggleAction(cmdName, data, filtered, section)
       togState = 1
       if common then
         if not extState or extState == '' then
-          r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
+          r.SetExtState(ExtSectName, extCmdName, GetCurrentState_Serialized(), true)
           -- post('set common state')
         end
         if section ~= 1 then
@@ -748,15 +751,15 @@ local function HandleToggleAction(cmdName, data, filtered, section)
           SwapActiveAction(32060, cmdID, path) -- (32060, 32061, 32062?)
         end
       else
-        r.SetExtState(SectionName, commandName, GetCurrentState_Serialized(), true)
+        r.SetExtState(ExtSectName, extCmdName, GetCurrentState_Serialized(), true)
       end
       -- post('toggle on')
-      RestoreStateInternal(data, filtered, false, section)
+      RestoreStateInternal(data, filtered, false, omni and 2 or section)
     else
       togState = 0
       -- post('restore common state')
       if extState and extState ~= '' then RestoreState_Serialized(extState) end
-      r.DeleteExtState(SectionName, commandName, true)
+      r.DeleteExtState(ExtSectName, extCmdName, true)
       if common then
         RemoveActiveAction(section, cmdID)
       end

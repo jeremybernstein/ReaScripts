@@ -1,5 +1,5 @@
 -- @description MoM Toggle: Mouse Mod Toggle Action Generator
--- @version 2.0.0-beta.3
+-- @version 2.0.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MoM Toggle: Mouse Mod Toggle Action Generator
@@ -10,6 +10,7 @@
 --   - beta.2: fix crash when minimizing/expanding window (unattached Image)
 --   - beta.3: - add some tooltip explanations of what 'section' means for various actions
 --             - some cleanup of action generation code and Actions submenu of Gear
+--   - beta.4: fix toggle action restore state for different section contexts
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
@@ -19,7 +20,7 @@ local r = reaper
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'MouseMaps/?.lua'
 local mm = require 'MouseMaps'
 local scriptName = 'MoM Toggle'
-local versionStr = '2.0.0-beta.3' -- don't forget to change this above
+local versionStr = '2.0.0-beta.4' -- don't forget to change this above
 
 local canStart = true
 

@@ -1,10 +1,13 @@
 @description Peace_MOD
 @author sockmonkey72
-@version 1.7.4-beta.6
-@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.4-beta.6/Peace_MOD.ReaperThemeZip
+@version 1.7.4-beta.7
+@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.4-beta.7/Peace_MOD.ReaperThemeZip
 @about
   # Peace_MOD
 
   Fork of Peace by Ice Cold Milk
 @changelog
-  * add theme adjuster option to align TCP controls
+  * improve MIDI editor colors (wrt marker visibility)
+  * update TCP fixed lane graphics for v7
+  * fix transport artifact on Windows
+  * fix some warnings

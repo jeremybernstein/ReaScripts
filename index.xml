@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="3b5cac2c395b7b4f607c63fc1e85c874c2ef756c">
+<index version="1" name="sockmonkey72 Scripts" commit="82b5577f0968a8b44fdb547d4046d076e1a18bb3">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -850,6 +850,25 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
 * fix transport artifact on Windows
 * fix some warnings]]></changelog>
         <source file="Peace_MOD.ReaperThemeZip">https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.4-beta.7/Peace_MOD.ReaperThemeZip</source>
+      </version>
+      <version name="1.7.4" author="sockmonkey72" time="2023-12-17T16:38:45Z">
+        <changelog><![CDATA[Changes since 1.7.3:
+
+* add and improve graphics for 'norec' (audio monitor only) on MCP/TCP
+* fix media item unselected color and upper/lower borders
+* fix dual pan positioning in MCP label bottom layouts
+* fix MCP layout problems (volume/meter/trackid)
+* swap position of rec monitor mode and rec input mode in MCP
+* add v7 fixed lane graphics
+* minor color tweaks
+* add theme adjuster option to align TCP controls
+* improve MIDI editor colors (wrt marker visibility)
+* update TCP fixed lane graphics for v7
+* fix transport artifact on Windows
+* fix some warnings
+* lighten selected track backgrounds for better envelope visibility
+* (versus previous beta: fix folder-aligned TCP control positioning in some cases)]]></changelog>
+        <source file="Peace_MOD.ReaperThemeZip">https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.4/Peace_MOD.ReaperThemeZip</source>
       </version>
     </reapack>
   </category>

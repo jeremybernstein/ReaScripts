@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="82b5577f0968a8b44fdb547d4046d076e1a18bb3">
+<index version="1" name="sockmonkey72 Scripts" commit="b8d9d9d4e9a5a4e9d07d85b98098d471ff1f72d7">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -972,6 +972,21 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       <version name="0.0.1-beta.3" author="sockmonkey72" time="2023-01-27T20:09:44Z">
         <changelog><![CDATA[- initial]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/4d6350bb3417f004284b668bd0412201397849c1/Various/sockmonkey72_StartupManager.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_ToggleTimeSelection.lua" type="script" desc="Toggle Time Selection">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Cache your time selection and disable it, or restore that cached time selection\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2023-12-19T15:06:27Z">
+        <changelog><![CDATA[1.0 initial upload]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/b8d9d9d4e9a5a4e9d07d85b98098d471ff1f72d7/Various/sockmonkey72_ToggleTimeSelection.lua</source>
       </version>
     </reapack>
   </category>

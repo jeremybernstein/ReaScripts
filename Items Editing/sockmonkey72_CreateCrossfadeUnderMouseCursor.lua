@@ -1,6 +1,6 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.0
+-- @version 1.1
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides

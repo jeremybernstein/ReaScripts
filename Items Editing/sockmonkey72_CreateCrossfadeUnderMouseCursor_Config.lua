@@ -21,7 +21,7 @@ else
     end
 end
 
-local retval, out_csv = r.GetUserInputs('Configure "Create crossfade"', 2, 'Grid Scale: 0=ignore,Time (ms): 0=ignore', in_csv)
+local retval, out_csv = r.GetUserInputs('Configure "Create crossfade"', 2, 'Grid Scale: 0=ignore,Time (sec): 0=ignore', in_csv)
 if retval then
     grid, time = out_csv:match('([^,]+),([^,]+)')
 

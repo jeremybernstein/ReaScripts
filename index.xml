@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="3ced5f0b1c217e928dd083fab4d3dc4cb5c76db0">
+<index version="1" name="sockmonkey72 Scripts" commit="fd12723ed280b8c2ac8c5105a95bfc943e92ae68">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -95,6 +95,11 @@
       <version name="1.1" author="sockmonkey72" time="2023-12-22T21:20:09Z">
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/3ced5f0b1c217e928dd083fab4d3dc4cb5c76db0/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor.lua</source>
         <source main="main" file="sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua">https://github.com/jeremybernstein/ReaScripts/raw/3ced5f0b1c217e928dd083fab4d3dc4cb5c76db0/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua</source>
+      </version>
+      <version name="1.2" author="sockmonkey72" time="2023-12-22T23:48:47Z">
+        <changelog><![CDATA[added justification preference (-1 (default) = left; 1 = right, 0 = centered)]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/fd12723ed280b8c2ac8c5105a95bfc943e92ae68/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor.lua</source>
+        <source main="main" file="sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua">https://github.com/jeremybernstein/ReaScripts/raw/fd12723ed280b8c2ac8c5105a95bfc943e92ae68/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_Paste at play position.lua" type="script" desc="Paste at play position">

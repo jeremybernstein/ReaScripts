@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="b8d9d9d4e9a5a4e9d07d85b98098d471ff1f72d7">
+<index version="1" name="sockmonkey72 Scripts" commit="8b368e46b7b3e54e4ccf72b5712de697b4bf8196">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -78,6 +78,21 @@
     </reapack>
   </category>
   <category name="Items Editing">
+    <reapack name="sockmonkey72_CreateCrossfadeUnderMouseCursor.lua" type="script" desc="sockmonkey72_Create crossfade under mouse cursor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Creates a crossfade under the mouse cursor (if possible)\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2023-12-22T21:15:06Z">
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/8b368e46b7b3e54e4ccf72b5712de697b4bf8196/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor.lua</source>
+        <source main="main" file="sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua">https://github.com/jeremybernstein/ReaScripts/raw/8b368e46b7b3e54e4ccf72b5712de697b4bf8196/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua</source>
+      </version>
+    </reapack>
     <reapack name="sockmonkey72_Paste at play position.lua" type="script" desc="Paste at play position">
       <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
         <changelog><![CDATA[initial]]></changelog>

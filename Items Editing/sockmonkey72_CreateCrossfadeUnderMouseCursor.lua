@@ -1,16 +1,40 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.1
+-- @version 1.2
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor.lua
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua
+-- @changelog
+--   added justification preference (-1 (default) = left; 1 = right, 0 = centered)
+
+-- thanks to amagalma for some great examples of how it's done
 
 ------------------------------------------------------------------------------------------
 
 local r = reaper
 local ok = false
+
+------------------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------------------
+
+local debug = false
+
+local function post(...)
+  if not debug then return end
+  local args = {...}
+  local str = ''
+  for i = 1, #args do
+    local v = args[i]
+    str = str .. (i ~= 1 and ', ' or '') .. (v ~= nil and tostring(v) or '<nil>')
+  end
+  str = str .. '\n'
+  r.ShowConsoleMsg(str)
+end
+
+------------------------------------------------------------------------------------------
 
 local xfadeshape = -1
 if xfadeshape < 0 or xfadeshape > 7 then
@@ -38,6 +62,11 @@ else
   end
 end
 
+local justification = r.GetExtState('sm72_CreateCrossfade', 'Justification')
+justification = tonumber(justification)
+if not justification then justification = -1 end
+justification = justification < 0 and -1 or justification > 0 and 1 or 0
+
 if use_grid then
   local retval, division = r.GetSetProjectGrid(0, false, 0, 0, 0)
   if retval ~= 0 then
@@ -52,18 +81,6 @@ if not xfadetime then
 end
 
 local fadelen = xfadetime -- override here if you want
-------------------------------------------------------------------------------------------
-
-local function post(...)
-  local args = {...}
-  local str = ''
-  for i = 1, #args do
-    local v = args[i]
-    str = str .. (i ~= 1 and ', ' or '') .. (v ~= nil and tostring(v) or '<nil>')
-  end
-  str = str .. '\n'
-  r.ShowConsoleMsg(str)
-end
 
 local retval, segment, details = r.BR_GetMouseCursorContext()
 if retval == "arrange" and segment == "track" and details == "item" then
@@ -117,14 +134,14 @@ if retval == "arrange" and segment == "track" and details == "item" then
     item2start = prevstart
     item2end = prevend
     what = "itemStart"
-    -- post('itemstart')
+    post('itemstart')
   end
   if not item2 and nextitemvalid and pos >= nextstart and pos <= nextend then
     item2 = nextitem
     item2start = nextstart
     item2end = nextend
     what = "itemEnd"
-    -- post('itemend')
+    post('itemend')
   end
   -- can this be consolidated into above, or could we miss extreme overlap situations?
   if not item2 then
@@ -134,13 +151,13 @@ if retval == "arrange" and segment == "track" and details == "item" then
       item2start = prevstart
       item2end = prevend
       what = "itemStart"
-      -- post('itemstart (first half)')
+      post('itemstart (first half)')
     elseif nextitemvalid and pos > halftime then
       item2 = nextitem
       item2start = nextstart
       item2end = nextend
       what = "itemEnd"
-      -- post('itemend (last half)')
+      post('itemend (last half)')
     end
   end
 
@@ -156,26 +173,33 @@ if retval == "arrange" and segment == "track" and details == "item" then
   if ok then -- clear crossfade
     r.Undo_BeginBlock2(0)
 
+    local justlen = justification == -1 and fadelen or justification == 0 and fadelen * 0.5 or 0
+
     if what == "itemStart" then
-      if itemstart > item2end - fadelen then
-        r.BR_SetItemEdges(item, item2end - fadelen, itemend)
+      local newstart = itemstart
+      if itemstart > item2end - justlen then
+        newstart = item2end - justlen
+        r.BR_SetItemEdges(item, newstart, itemend)
       elseif itemstart < item2end then
         fadelen = item2end - itemstart
       end
       r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", fadelen)
-      if item2end < itemstart - fadelen then
-        r.BR_SetItemEdges(item2, item2start, itemstart - fadelen)
+      if item2end < newstart + fadelen then
+        r.BR_SetItemEdges(item2, item2start, newstart + fadelen)
       end
       r.SetMediaItemInfo_Value(item2, "D_FADEOUTLEN_AUTO", fadelen)
     elseif what == "itemEnd" then
-      if item2start > itemend - fadelen then
-        r.BR_SetItemEdges(item2, itemend - fadelen, item2end)
+      local newstart = item2start
+      if item2start > itemend - justlen then
+        newstart = itemend - justlen
+        r.BR_SetItemEdges(item2, newstart, item2end)
       elseif item2start < itemend then
         fadelen = itemend - item2start
       end
       r.SetMediaItemInfo_Value(item2, "D_FADEINLEN_AUTO", fadelen)
-      if itemend < item2start - fadelen then
-        r.BR_SetItemEdges(item, itemstart, item2start - fadelen)
+      post(itemend, newstart, fadelen)
+      if itemend < newstart + fadelen then
+        r.BR_SetItemEdges(item, itemstart, newstart + fadelen)
       end
       r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", fadelen)
     end

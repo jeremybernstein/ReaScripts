@@ -1,6 +1,6 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.4
+-- @version 1.5
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides
@@ -253,7 +253,7 @@ if retval == 'arrange' and segment == 'track' and details == 'item' then
         newstart = item_l_start + some_tiny_amount
       end
       r.BR_SetItemEdges(item_r, newstart, item_r_end)
-    elseif item_r_start < item_l_end then
+    elseif item_l_end - item_r_start > some_tiny_amount then
       fadelen = item_l_end - item_r_start
     end
 

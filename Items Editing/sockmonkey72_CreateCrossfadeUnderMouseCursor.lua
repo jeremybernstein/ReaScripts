@@ -1,13 +1,15 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.3
+-- @version 1.4
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor.lua
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua
 -- @changelog
---   fixed up some edge cases and consolidate code a bit
+--   add razor support (cursor in razor uses the razor area for the crossfade generation)
+--   add time selection support (cursor in time selection uses the time selection area for the crossfade generation)
+--   razor/timesel support can be optionally disabled in the Config script (on by default)
 
 -- thanks to amagalma for some great examples of how it's done
 
@@ -35,6 +37,8 @@ local function post(...)
 end
 
 ------------------------------------------------------------------------------------------
+
+local some_tiny_amount = 0.0001 -- needed to prev_ent edge overlap
 
 local xfadeshape = -1
 if xfadeshape < 0 or xfadeshape > 7 then
@@ -67,6 +71,11 @@ justification = tonumber(justification)
 if not justification then justification = -1 end
 justification = justification < 0 and -1 or justification > 0 and 1 or 0
 
+local ignore_extents = r.GetExtState('sm72_CreateCrossfade', 'IgnoreExtents')
+ignore_extents = tonumber(ignore_extents)
+if not ignore_extents then ignore_extents = 0 end
+ignore_extents = ignore_extents ~= 0 and 1 or 0
+
 if use_grid then
   local retval, division = r.GetSetProjectGrid(0, false, 0, 0, 0)
   if retval ~= 0 then
@@ -82,140 +91,191 @@ end
 
 local fadelen = xfadetime -- override here if you want
 
+------------------------------------------------------------------------------------------
+
 local retval, segment, details = r.BR_GetMouseCursorContext()
 if retval == 'arrange' and segment == 'track' and details == 'item' then
   local item = r.BR_GetMouseCursorContext_Item()
   local pos = r.BR_GetMouseCursorContext_Position()
   local track = r.BR_GetMouseCursorContext_Track()
   local item_cnt = r.CountTrackMediaItems( track )
-  local itemstart = r.GetMediaItemInfo_Value(item, 'D_POSITION')
-  local itemend = itemstart + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+  local item_start = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+  local item_end = item_start + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+  local what
+
   local fixedlane = r.GetMediaTrackInfo_Value(track, 'I_FREEMODE') == 2
   local itemlane
-  local item2, what
-  local prevstart, prevend, prevlane
-  local nextstart, nextend, nextlane
-  local item2start, item2end
-
-  local previtem, nextitem
 
   if fixedlane then
     itemlane = r.GetMediaItemInfo_Value(item, 'I_FIXEDLANE')
   end
 
-  for i = 0, item_cnt - 1 do -- find the previous item
+  local function wants_use_extents(pos)
+    if ignore_extents ~= 0 then return false, nil, nil end
+
+    -- cursor in time selection
+    local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+    if ts_start ~= ts_end then
+      if pos >= ts_start and pos <= ts_end then
+        return true, ts_start, ts_end
+      end
+    end
+
+    -- cursor in razor edit
+    local _, area = reaper.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS', '', false)
+    if area ~= '' then
+      for area_start, area_end, _ in area:gmatch('(%S+) (%S+) (%S+)') do
+        area_start = tonumber(area_start)
+        area_end = tonumber(area_end)
+        if area_start and area_end and pos >= area_start and pos <= area_end then
+          return true, area_start, area_end
+        end
+      end
+    end
+    return false, nil, nil
+  end
+
+  local use_extents, extents_start, extents_end = wants_use_extents(pos)
+
+  local function test_extents(s, e)
+    if not use_extents then return true end
+
+    return
+      (s >= extents_start and s <= extents_end)
+      or (e >= extents_start and e <= extents_end)
+  end
+
+  local prev_item
+  local prev_start, prev_end, prev_lane
+  local next_item
+  local next_start, next_end, next_lane
+
+  for i = 0, item_cnt - 1 do -- find the prev_ious item
     local item_chk = r.GetTrackMediaItem(track, i)
     if item_chk == item then
       if i > 0 then
-        previtem = r.GetTrackMediaItem(track, i - 1)
+        prev_item = r.GetTrackMediaItem(track, i - 1)
         if fixedlane then
-          prevlane = r.GetMediaItemInfo_Value(previtem, 'I_FIXEDLANE')
+          prev_lane = r.GetMediaItemInfo_Value(prev_item, 'I_FIXEDLANE')
         end
-        prevstart = r.GetMediaItemInfo_Value(previtem, 'D_POSITION')
-        prevend = prevstart + r.GetMediaItemInfo_Value(previtem, 'D_LENGTH')
+        prev_start = r.GetMediaItemInfo_Value(prev_item, 'D_POSITION')
+        prev_end = prev_start + r.GetMediaItemInfo_Value(prev_item, 'D_LENGTH')
+        if not test_extents(prev_start, prev_end) then
+          prev_item = nil
+        end
       end
       if (i < item_cnt - 1) then
-        nextitem = r.GetTrackMediaItem(track, i + 1)
+        next_item = r.GetTrackMediaItem(track, i + 1)
         if fixedlane then
-          nextlane = r.GetMediaItemInfo_Value(nextitem, 'I_FIXEDLANE')
+          next_lane = r.GetMediaItemInfo_Value(next_item, 'I_FIXEDLANE')
         end
-        nextstart = r.GetMediaItemInfo_Value(nextitem, 'D_POSITION')
-        nextend = nextstart + r.GetMediaItemInfo_Value(nextitem, 'D_LENGTH')
+        next_start = r.GetMediaItemInfo_Value(next_item, 'D_POSITION')
+        next_end = next_start + r.GetMediaItemInfo_Value(next_item, 'D_LENGTH')
+        if not test_extents(next_start, next_end) then
+          next_item = nil
+        end
       end
       break
     end
   end
 
-  local previtemvalid = previtem and (not fixedlane or prevlane == itemlane)
-  local nextitemvalid = nextitem and (not fixedlane or nextlane == itemlane)
+  local prev_item_valid = prev_item and (not fixedlane or prev_lane == itemlane)
+  local next_item_valid = next_item and (not fixedlane or next_lane == itemlane)
 
-  if previtemvalid and pos >= prevstart and pos <= prevend then
-    item2 = previtem
-    item2start = prevstart
-    item2end = prevend
+  if use_extents and prev_item and next_item then return end -- bail, the extent encompasses too many items
+
+  -- check for an existing overlap of the items
+  if prev_item_valid and pos >= prev_start and pos <= prev_end then
     what = 'itemStart'
-    post('itemstart')
+    post('itemStart')
   end
-  if not item2 and nextitemvalid and pos >= nextstart and pos <= nextend then
-    item2 = nextitem
-    item2start = nextstart
-    item2end = nextend
+  if not what and next_item_valid and pos >= next_start and pos <= next_end then
     what = 'itemEnd'
-    post('itemend')
+    post('itemEnd')
   end
-  -- can this be consolidated into above, or could we miss extreme overlap situations?
-  if not item2 then
-    local halftime = itemstart + ((itemend - itemstart) / 2)
-    if previtemvalid and pos <= halftime then
-      item2 = previtem
-      item2start = prevstart
-      item2end = prevend
+
+  -- no overlap? then let's figure out which side the mouse is on
+  -- disabled the one-choice optimization, I don't think it feels right
+  if not what then
+    local halftime = item_start + ((item_end - item_start) / 2)
+    if prev_item_valid and (pos <= halftime) then -- or (not next_itemvalid and pos <= item_end)) then
       what = 'itemStart'
-      post('itemstart (first half)')
-    elseif nextitemvalid and pos > halftime then
-      item2 = nextitem
-      item2start = nextstart
-      item2end = nextend
+      post('itemStart (first half)')
+    elseif next_item_valid and (pos > halftime) then -- or (not prev_itemvalid and pos >= item_start)) then
       what = 'itemEnd'
-      post('itemend (last half)')
+      post('itemEnd (last half)')
     end
   end
 
-  if item2 then
-    -- verify that the items are close enough to crossfade (not sure if this check is necessary or correct, though)
-    if (what == 'itemStart' and itemstart - item2end <= fadelen)
-      or (what == 'itemEnd' and item2start - itemend <= fadelen)
-    then
+  local item_l, item_l_start, item_l_end
+  local item_r, item_r_start, item_r_end
+
+  if what == 'itemStart' then
+    item_l = prev_item
+    item_l_start = prev_start
+    item_l_end = prev_end
+    item_r = item
+    item_r_start = item_start
+    item_r_end = item_end
+  elseif what == 'itemEnd' then
+    item_l = item
+    item_l_start = item_start
+    item_l_end = item_end
+    item_r = next_item
+    item_r_start = next_start
+    item_r_end = next_end
+  end
+
+  if item_l and item_r then
+    if item_r_start - item_l_end <= fadelen then
       ok = true
     end
   end
 
+------------------------------------------------------------------------------------------
+
   if ok then -- create crossfade
     local justlen = justification == -1 and fadelen or justification == 0 and fadelen * 0.5 or 0
 
-    local item_a, item_a_start, item_a_end
-    local item_b, item_b_start, item_b_end
-
-    if what == 'itemStart' then
-      item_a = item
-      item_a_start = itemstart
-      item_a_end = itemend
-      item_b = item2
-      item_b_start = item2start
-      item_b_end = item2end
-    elseif what == 'itemEnd' then
-      item_a = item2
-      item_a_start = item2start
-      item_a_end = item2end
-      item_b = item
-      item_b_start = itemstart
-      item_b_end = itemend
-    end
-
     r.Undo_BeginBlock2(0)
 
-    local newstart = item_a_start
-    if item_a_start > item_b_end - justlen then
-      newstart = item_b_end - justlen
-      if newstart < item_b_start then
-        newstart = item_b_start + 0.0001 -- some tiny amount
+    local newstart = item_r_start
+
+    if use_extents then
+      local extent_adjusted_end = extents_end > item_r_end and item_r_end or extents_end
+      local extent_adjusted_start = extents_start < item_l_start and item_l_start or extents_start
+      fadelen = extent_adjusted_end - extent_adjusted_start
+      r.BR_SetItemEdges(item_r, extent_adjusted_start + some_tiny_amount, item_r_end)
+      r.BR_SetItemEdges(item_l, item_l_start, extent_adjusted_end - some_tiny_amount)
+    elseif item_r_start > item_l_end - justlen then
+      newstart = item_l_end - justlen
+      if newstart < item_l_start then
+        newstart = item_l_start + some_tiny_amount
       end
-      r.BR_SetItemEdges(item_a, newstart, item_a_end)
-    elseif item_a_start < item_b_end then
-      fadelen = item_b_end - item_a_start
+      r.BR_SetItemEdges(item_r, newstart, item_r_end)
+    elseif item_r_start < item_l_end then
+      fadelen = item_l_end - item_r_start
     end
-    r.SetMediaItemInfo_Value(item_a, 'D_FADEINLEN_AUTO', fadelen)
+
+    r.SetMediaItemInfo_Value(item_r, 'D_FADEINLEN_AUTO', fadelen)
+
     local newend = newstart + fadelen
-    if item_b_end < newend then
-      if item_a_end < newend then
-        newend = item_a_end - 0.0001 -- some tiny amount
+
+    if not use_extents
+      and item_l_end < newend
+    then
+      if item_r_end < newend then
+        newend = item_r_end - some_tiny_amount
       end
-      r.BR_SetItemEdges(item_b, item_b_start, newend)
+      r.BR_SetItemEdges(item_l, item_l_start, newend)
     end
-    r.SetMediaItemInfo_Value(item_b, 'D_FADEOUTLEN_AUTO', fadelen)
+
+    r.SetMediaItemInfo_Value(item_l, 'D_FADEOUTLEN_AUTO', fadelen)
 
     r.UpdateArrange()
+
+    r.Undo_EndBlock2(0, 'Create crossfade under mouse cursor', -1)
+
   end
 
-  r.Undo_EndBlock2(0, 'Create crossfade under mouse cursor', -1)
 end

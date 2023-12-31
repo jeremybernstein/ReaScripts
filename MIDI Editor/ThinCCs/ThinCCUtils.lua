@@ -7,10 +7,10 @@
 
 -- TODO: how do we want to go about filtering 14-bit CCs??
 
-package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
-local reduce = require "RamerDouglasPeucker"
+package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
+local reduce = require 'RamerDouglasPeucker'
 
-local lastMIDIMessage = ""
+local lastMIDIMessage = ''
 local MIDIEvents = {}
 
 function GenerateEventListFromAllEvents(take, fun)
@@ -20,9 +20,9 @@ function GenerateEventListFromAllEvents(take, fun)
 
   MIDIEvents = {}
 
-  local _, MIDIString = reaper.MIDI_GetAllEvts(take, "") -- empty string for backward compatibility with older REAPER versions
+  local _, MIDIString = reaper.MIDI_GetAllEvts(take, '') -- empty string for backward compatibility with older REAPER versions
   while stringPos < MIDIString:len() - 12 do -- -12 to exclude final All-Notes-Off message
-    local offset, flags, msg, newStringPos = string.unpack("i4Bs4", MIDIString, stringPos)
+    local offset, flags, msg, newStringPos = string.unpack('i4Bs4', MIDIString, stringPos)
 
     ppqpos = ppqpos + offset
 
@@ -134,11 +134,20 @@ end
 function DoReduction(events)
   local newevents = {}
 
-  local defaultReduction = "10"
-  if reaper.HasExtState("sockmonkey72_ThinCCs", "level") then
-    defaultReduction = reaper.GetExtState("sockmonkey72_ThinCCs", "level")
+  local defaultReduction = 10
+  local reduction
+  local defaultPbscale = 10
+  local pbscale
+
+  if reaper.HasExtState('sockmonkey72_ThinCCs', 'level') then
+    reduction = tonumber(reaper.GetExtState('sockmonkey72_ThinCCs', 'level'))
   end
-  local reduction = tonumber(defaultReduction)
+  if not reduction then reduction = defaultReduction end
+
+  if reaper.HasExtState('sockmonkey72_ThinCCs', 'pbscale') then
+    pbscale = tonumber(reaper.GetExtState('sockmonkey72_ThinCCs', 'pbscale'))
+  end
+  if not pbscale then pbscale = defaultPbscale end
 
   -- iterate, reduce points
   for _, v in pairs(events) do
@@ -147,7 +156,9 @@ function DoReduction(events)
     local is2byte = status == 0xC0 or status == 0xD0
     local isPB = status == 0xE0
 
-    local newpoints = reduce(v.points, reduction, false, "ppqpos", "value")
+    reduction = isPB and reduction * pbscale or reduction
+
+    local newpoints = reduce(v.points, reduction, false, 'ppqpos', 'value')
     for _, p in pairs(newpoints) do
       local b2 = is2byte and p.value or v.which
       local b3 = is2byte and 0 or p.value
@@ -199,7 +210,7 @@ function PerformReductionForAllEvents(eventlist, take)
   -- apply negative offset
   reaper.MIDI_DisableSort(take)
   local lastppq = MIDIEvents[#MIDIEvents].ppqpos
-  MIDIEvents[#MIDIEvents + 1] = { ppqpos = 0, offset = -lastppq, flags = 0, msg = "" }
+  MIDIEvents[#MIDIEvents + 1] = { ppqpos = 0, offset = -lastppq, flags = 0, msg = '' }
 
   -- insert new events (now in eventlist.events) -- they are sorted by ppqpos
   lastppq = 0
@@ -212,9 +223,9 @@ function PerformReductionForAllEvents(eventlist, take)
   local MIDIData = {}
   for _, v in pairs(MIDIEvents) do
     if v.wantsdelete == 1 then
-      MIDIData[#MIDIData + 1] = string.pack("i4Bs4", v.offset, 0, "")
+      MIDIData[#MIDIData + 1] = string.pack('i4Bs4', v.offset, 0, '')
     else
-      MIDIData[#MIDIData + 1] = string.pack("i4Bs4", v.offset, v.flags, v.msg)
+      MIDIData[#MIDIData + 1] = string.pack('i4Bs4', v.offset, v.flags, v.msg)
     end
   end
 
@@ -227,12 +238,12 @@ function GetVisibleCCs(take)
   local item = reaper.GetMediaItemTake_Item(take)
 
   if item then
-    local _, str = reaper.GetItemStateChunk(item, "", false)
-    -- reaper.ShowConsoleMsg("str: "..str.."\n")
+    local _, str = reaper.GetItemStateChunk(item, '', false)
+    -- reaper.ShowConsoleMsg('str: '..str..'\n')
     local lanes = {}
     local i = 0
     while true do
-      local index, _, idx = string.find(str, "VELLANE (%d+)", i + 1)
+      local index, _, idx = string.find(str, 'VELLANE (%d+)', i + 1)
       if index == nil then break end
       i = index
       table.insert(lanes, tonumber(idx))
@@ -241,7 +252,7 @@ function GetVisibleCCs(take)
     -- this is unnecessary, REAPER only provides filtered events via the MIDI_CountEvts/MIDI_GetCC API
     -- you can use MIDI_GetAllEvts to see filtered events, so adapting the main time selection
     -- script to operate on all evts.
-    -- local _, _, filterchan, filteractive = string.find(str, "EVTFILTER (%-?%d+)%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+(%-?%d+)")
+    -- local _, _, filterchan, filteractive = string.find(str, 'EVTFILTER (%-?%d+)%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+%-?%d+%s+(%-?%d+)')
     -- fchan = tonumber(filterchan)
     -- if fchan > 0 then
     --   if tonumber(filteractive) == 0 then

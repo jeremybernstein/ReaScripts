@@ -1,5 +1,5 @@
 -- @description Thin MIDI CC Events
--- @version 1.6.1
+-- @version 1.7
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events

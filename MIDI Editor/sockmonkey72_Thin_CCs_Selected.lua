@@ -1,13 +1,12 @@
 -- @description Thin MIDI CC Events
--- @version 1.7
+-- @version 1.7.1
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
 --   Reduce density of MIDI CC events
 -- @changelog
---   - add new scripts for thinning all and all visible CCs in the item
---   - add script for thinning lane under the mouse (requires SWS)
---   - (main) context selected items script will respect Razor Edit areas
+--   - support separate reduction for pitch bend events (default: 10x more)
+--   - special handling for snapped pitch lanes (reduce reduction to preserve snapping as possible)
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua

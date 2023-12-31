@@ -18,6 +18,11 @@ function GenerateEventListFromAllEvents(take, fun)
   local stringPos = 1 -- Position inside MIDIString while parsing
   local ppqpos = 0
 
+  local pbSnap = 0
+  if reaper.MIDIEditorFlagsForTrack then -- v7
+    _, pbSnap = reaper.MIDIEditorFlagsForTrack(reaper.GetMediaItemTake_Track(take), 0, 0, false)
+  end
+
   MIDIEvents = {}
 
   local _, MIDIString = reaper.MIDI_GetAllEvts(take, '') -- empty string for backward compatibility with older REAPER versions
@@ -33,7 +38,7 @@ function GenerateEventListFromAllEvents(take, fun)
       local status = b1 & 0xF0
       if status >= 0xA0 and status <= 0xF0 then
         MIDIEvents[#MIDIEvents].wantsdelete = 1 -- we will delete this point before rewriting
-        AddPointToList({ events = events }, { idx = -1, ppqpos = ppqpos, chanmsg = b1 & 0xF0, chan = b1 & 0x0F, msg2 = msg:byte(2), msg3 = msg:byte(3), selected = (flags & 1 ~= 0) and true or false, muted = (flags & 2 ~= 0) and true or false, shape = (flags & 0xF0) >> 4 })
+        AddPointToList({ events = events }, { idx = -1, ppqpos = ppqpos, chanmsg = b1 & 0xF0, chan = b1 & 0x0F, msg2 = msg:byte(2), msg3 = msg:byte(3), selected = (flags & 1 ~= 0) and true or false, muted = (flags & 2 ~= 0) and true or false, shape = (flags & 0xF0) >> 4 }, pbSnap)
       end
     end
     stringPos = newStringPos
@@ -43,8 +48,13 @@ function GenerateEventListFromAllEvents(take, fun)
 end
 
 function GenerateEventListFromFilteredEvents(take, fun)
-  local eventlist = { events = {}, todelete = { maxidx = 0} }
+  local eventlist = { events = {}, todelete = { maxidx = 0 } }
   local wants = GetVisibleCCs(take)
+
+  local pbSnap = 0
+  if reaper.MIDIEditorFlagsForTrack then -- v7
+    _, pbSnap = reaper.MIDIEditorFlagsForTrack(reaper.GetMediaItemTake_Track(take), 0, 0, false)
+  end
 
   local _, _, ccevtcnt = reaper.MIDI_CountEvts(take) -- only filtered events
   for idx = 0, ccevtcnt - 1 do
@@ -56,7 +66,7 @@ function GenerateEventListFromFilteredEvents(take, fun)
         if ((v.status & 0xF0) == event.chanmsg)
           and ((event.chanmsg == 0xB0 or event.chanmsg == 0xA0) and (v.which == event.msg2) or true)
         then
-          AddPointToList(eventlist, event)
+          AddPointToList(eventlist, event, pbSnap)
           break
         end
       end
@@ -65,7 +75,7 @@ function GenerateEventListFromFilteredEvents(take, fun)
   return eventlist
 end
 
-function AddPointToList(eventlist, event)
+function AddPointToList(eventlist, event, pbSnap)
   local curlist = nil
 
   local status = event.chanmsg & 0xF0
@@ -74,6 +84,7 @@ function AddPointToList(eventlist, event)
   local is3byte = status == 0xA0 or status == 0xB0
   local is2byte = status == 0xC0 or status == 0xD0
   local isPB = status == 0xE0
+  local isSnapped = isPB and pbSnap ~= 0
 
   status = event.chanmsg | event.chan
 
@@ -91,7 +102,7 @@ function AddPointToList(eventlist, event)
   end
 
   if curlist then
-    if #curlist > 0 and curlist[#curlist].shape == 0 then -- previous was square, add a point
+    if #curlist > 0 and (isSnapped or curlist[#curlist].shape == 0) then -- previous was square, add a point
       curlist[#curlist + 1] = { ppqpos = event.ppqpos - 1, value = curlist[#curlist].value, idx = -1, selected = curlist[#curlist].selected, muted = curlist[#curlist].muted, shape = event.shape }
     end
     curlist[#curlist + 1] = { ppqpos = event.ppqpos, value = is2byte and event.msg2 or event.msg3, idx = event.idx, selected = event.selected, muted = event.muted, shape = event.shape }
@@ -131,7 +142,7 @@ function PrepareList(eventlist)
   return hasEvents
 end
 
-function DoReduction(events)
+function DoReduction(events, take)
   local newevents = {}
 
   local defaultReduction = 10
@@ -148,6 +159,11 @@ function DoReduction(events)
     pbscale = tonumber(reaper.GetExtState('sockmonkey72_ThinCCs', 'pbscale'))
   end
   if not pbscale then pbscale = defaultPbscale end
+
+  if reaper.MIDIEditorFlagsForTrack then -- v7
+    local _, pbSnap = reaper.MIDIEditorFlagsForTrack(reaper.GetMediaItemTake_Track(take), 0, 0, false)
+    if pbSnap ~= 0 then pbscale = 1 end -- don't reduce snapped events into lines if possible
+  end
 
   -- iterate, reduce points
   for _, v in pairs(events) do
@@ -192,7 +208,7 @@ function PerformReduction(eventlist, take)
 
   reaper.MIDIEditor_OnCommand(reaper.MIDIEditor_GetActive(), 40671) -- unselect all CC events
 
-  local reduced = DoReduction(eventlist.events)
+  local reduced = DoReduction(eventlist.events, take)
   for _, p in pairs(reduced) do
     reaper.MIDI_InsertCC(take, 1, (p.flags & 2 ~= 0) and true or false, p.ppqpos, p.b1 & 0xF0, p.b1 & 0xF, p.b2, p.b3)
   end
@@ -204,7 +220,7 @@ end
 function PerformReductionForAllEvents(eventlist, take)
   if #MIDIEvents == 0 then return end
 
-  local reduced = DoReduction(eventlist.events)
+  local reduced = DoReduction(eventlist.events, take)
   table.sort(reduced, function (e1, e2) return e1.ppqpos < e2.ppqpos end) -- sort by ppqpos
 
   -- apply negative offset

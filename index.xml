@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="ab070cd14ab40f9737a8114bf13d60cd242395d6">
+<index version="1" name="sockmonkey72 Scripts" commit="10c8b5b646a06f21ec91d34345e264d7c9a99df8">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -592,6 +592,21 @@ some refactoring]]></changelog>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All_Visible.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_All_Visible.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua</source>
         <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
+      </version>
+      <version name="1.7" author="sockmonkey72" time="2023-12-31T08:26:50Z">
+        <changelog><![CDATA[- add new scripts for thinning all and all visible CCs in the item
+- add script for thinning lane under the mouse (requires SWS)
+- (main) context selected items script will respect Razor Edit areas]]></changelog>
+        <source file="ThinCCs/RamerDouglasPeucker.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/ThinCCs/RamerDouglasPeucker.lua</source>
+        <source file="ThinCCs/ThinCCUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/ThinCCs/ThinCCUtils.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_Selected.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Time_Selection.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Setup.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_Setup.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_Visible_In_Time_Selection.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_All.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_All_Visible.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_All_Visible.lua</source>
+        <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua</source>
+        <source main="main" file="sockmonkey72_Thin_CCs_In_Selected_Items.lua">https://github.com/jeremybernstein/ReaScripts/raw/10c8b5b646a06f21ec91d34345e264d7c9a99df8/MIDI%20Editor/sockmonkey72_Thin_CCs_In_Selected_Items.lua</source>
       </version>
     </reapack>
   </category>

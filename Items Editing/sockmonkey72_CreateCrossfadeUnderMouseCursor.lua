@@ -1,15 +1,13 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.5
+-- @version 1.6
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor.lua
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua
 -- @changelog
---   add razor support (cursor in razor uses the razor area for the crossfade generation)
---   add time selection support (cursor in time selection uses the time selection area for the crossfade generation)
---   razor/timesel support can be optionally disabled in the Config script (on by default)
+--   add edit group support
 
 -- thanks to amagalma for some great examples of how it's done
 
@@ -237,6 +235,56 @@ if retval == 'arrange' and segment == 'track' and details == 'item' then
   if ok then -- create crossfade
     local justlen = justification == -1 and fadelen or justification == 0 and fadelen * 0.5 or 0
 
+    -- could this support non-identical items on other tracks?
+    local function compareItems(it, test_start, test_end)
+      local i_start = r.GetMediaItemInfo_Value(it, 'D_POSITION')
+      local i_end = r.GetMediaItemInfo_Value(it, 'D_LENGTH') + i_start
+      if (i_start == test_start
+          or (i_start >= test_start - some_tiny_amount and i_start <= test_start + some_tiny_amount))
+        and (i_end == test_end
+          or (i_end >= test_end - some_tiny_amount and i_end <= test_end + some_tiny_amount))
+      then
+        return true
+      end
+      return false
+    end
+
+    local bitmask = r.GetSetTrackGroupMembership(track, 'MEDIA_EDIT_LEAD', 0, 0)
+    local hibitmask = r.GetSetTrackGroupMembershipHigh(track, 'MEDIA_EDIT_LEAD', 0, 0)
+    local processtab = { { item_l, item_r } }
+    if bitmask ~= 0 or hibitmask ~= 0 then
+      local trct = r.CountTracks(0)
+      for i = 0, trct - 1 do
+        local tr = r.GetTrack(0, i)
+        if tr and tr ~= track then
+          local trbit = r.GetSetTrackGroupMembership(tr, 'MEDIA_EDIT_FOLLOW', 0, 0)
+          local trhibit = r.GetSetTrackGroupMembershipHigh(tr, 'MEDIA_EDIT_FOLLOW', 0, 0)
+          if (bitmask & trbit) ~= 0 or (hibitmask & trhibit) ~= 0 then
+            -- post('got a matching track', i + 1)
+            local tritemct = r.GetTrackNumMediaItems(tr)
+            local tr_l, tr_r
+            for j = 0, tritemct - 1 do
+              local tritem = r.GetTrackMediaItem(tr, j)
+              if tritem then
+                if not tr_l and compareItems(tritem, item_l_start, item_l_end) then
+                  -- post('got a matching tr_l')
+                  tr_l = tritem
+                elseif not tr_r and compareItems(tritem, item_r_start, item_r_end) then
+                  -- post('got a matching tr_r')
+                  tr_r = tritem
+                end
+                if tr_l and tr_r then
+                  -- post('added follower')
+                  processtab[#processtab + 1] = { tr_l, tr_r }
+                  break
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+
     r.Undo_BeginBlock2(0)
 
     local newstart = item_r_start
@@ -245,20 +293,29 @@ if retval == 'arrange' and segment == 'track' and details == 'item' then
       local extent_adjusted_end = extents_end > item_r_end and item_r_end or extents_end
       local extent_adjusted_start = extents_start < item_l_start and item_l_start or extents_start
       fadelen = extent_adjusted_end - extent_adjusted_start
-      r.BR_SetItemEdges(item_r, extent_adjusted_start + some_tiny_amount, item_r_end)
-      r.BR_SetItemEdges(item_l, item_l_start, extent_adjusted_end - some_tiny_amount)
+      for _, v in ipairs(processtab) do
+        local f_l = v[1]
+        local f_r = v[2]
+        r.BR_SetItemEdges(f_r, extent_adjusted_start + some_tiny_amount, item_r_end)
+        r.BR_SetItemEdges(f_l, item_l_start, extent_adjusted_end - some_tiny_amount)
+      end
     elseif item_r_start > item_l_end - justlen then
       newstart = item_l_end - justlen
       if newstart < item_l_start then
         newstart = item_l_start + some_tiny_amount
       end
-      r.BR_SetItemEdges(item_r, newstart, item_r_end)
+      for _, v in ipairs(processtab) do
+        local f_r = v[2]
+        r.BR_SetItemEdges(f_r, newstart, item_r_end)
+      end
     elseif item_l_end - item_r_start > some_tiny_amount then
       fadelen = item_l_end - item_r_start
     end
 
-    r.SetMediaItemInfo_Value(item_r, 'D_FADEINLEN_AUTO', fadelen)
-
+    for _, v in ipairs(processtab) do
+      local f_r = v[2]
+      r.SetMediaItemInfo_Value(f_r, 'D_FADEINLEN_AUTO', fadelen)
+    end
     local newend = newstart + fadelen
 
     if not use_extents
@@ -267,10 +324,16 @@ if retval == 'arrange' and segment == 'track' and details == 'item' then
       if item_r_end < newend then
         newend = item_r_end - some_tiny_amount
       end
-      r.BR_SetItemEdges(item_l, item_l_start, newend)
+      for _, v in ipairs(processtab) do
+        local f_l = v[1]
+        r.BR_SetItemEdges(f_l, item_l_start, newend)
+      end
     end
 
-    r.SetMediaItemInfo_Value(item_l, 'D_FADEOUTLEN_AUTO', fadelen)
+    for _, v in ipairs(processtab) do
+      local f_l = v[1]
+      r.SetMediaItemInfo_Value(f_l, 'D_FADEOUTLEN_AUTO', fadelen)
+    end
 
     r.UpdateArrange()
 

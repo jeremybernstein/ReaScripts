@@ -1,13 +1,14 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.6
+-- @version 1.7
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor.lua
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua
 -- @changelog
---   add edit group support
+--   fix default global value (was doubled)
+--   add ImGui implementation of config script
 
 -- thanks to amagalma for some great examples of how it's done
 
@@ -84,7 +85,8 @@ elseif use_time then
 end
 
 if not xfadetime then
-  xfadetime = (tonumber(({r.get_config_var_string( 'defsplitxfadelen' )})[2]) or 0.01) * 2
+  local _, cfgval = r.get_config_var_string('defsplitxfadelen')
+  xfadetime = tonumber(cfgval) or 0.01
 end
 
 local fadelen = xfadetime -- override here if you want

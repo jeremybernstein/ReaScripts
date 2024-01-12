@@ -12,6 +12,6 @@ local saec = require 'sockmonkey72_SelectAroundEditCursorLib'
 
 r.Undo_BeginBlock2(0)
 
-saec.SelectAroundEditCursor(true, false)
+saec.SelectAroundEditCursor(false, false)
 
-r.Undo_EndBlock2(0, "Select all items after edit cursor", -1)
+r.Undo_EndBlock2(0, "Select all items before edit cursor", -1)

@@ -1,14 +1,13 @@
 -- @description sockmonkey72_Create crossfade under mouse cursor
 -- @author sockmonkey72
--- @version 1.7
+-- @version 1.8
 -- @about
 --   # Creates a crossfade under the mouse cursor (if possible)
 -- @provides
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor.lua
 --   [main] sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua
 -- @changelog
---   fix default global value (was doubled)
---   add ImGui implementation of config script
+--   prevent config script from docking (ImGui)
 
 -- thanks to amagalma for some great examples of how it's done
 

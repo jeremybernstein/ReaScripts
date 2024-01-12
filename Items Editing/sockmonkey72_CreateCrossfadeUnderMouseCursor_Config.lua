@@ -22,6 +22,10 @@ if r.ImGui_CreateContext then
   r.ImGui_Attach(ctx, sans_serif)
   r.ImGui_Attach(ctx, sans_serif_13)
 
+  -- disable docking
+  local cflags = r.ImGui_GetConfigVar(ctx, r.ImGui_ConfigVar_Flags())
+  r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_Flags(), cflags & ~(r.ImGui_ConfigFlags_DockingEnable()))
+
   local grid = tonumber(r.GetExtState('sm72_CreateCrossfade', 'GridWidth'))
   if grid and grid == 0 then grid = nil end
   local time = tonumber(r.GetExtState('sm72_CreateCrossfade', 'TimeWidth'))

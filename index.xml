@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="279e8a5ace0ad17b7c0f90168a10855bc7748138">
+<index version="1" name="sockmonkey72 Scripts" commit="356525e6ddbb57e1a8839ca6a545577640d308e1">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -131,11 +131,32 @@ add ImGui implementation of config script]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/279e8a5ace0ad17b7c0f90168a10855bc7748138/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor.lua</source>
         <source main="main" file="sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua">https://github.com/jeremybernstein/ReaScripts/raw/279e8a5ace0ad17b7c0f90168a10855bc7748138/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua</source>
       </version>
+      <version name="1.8" author="sockmonkey72" time="2024-01-12T09:06:39Z">
+        <changelog><![CDATA[prevent config script from docking (ImGui)]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/feb3da03b67cf233f7fbc738147768886c88272e/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor.lua</source>
+        <source main="main" file="sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua">https://github.com/jeremybernstein/ReaScripts/raw/feb3da03b67cf233f7fbc738147768886c88272e/Items%20Editing/sockmonkey72_CreateCrossfadeUnderMouseCursor_Config.lua</source>
+      </version>
     </reapack>
     <reapack name="sockmonkey72_Paste at play position.lua" type="script" desc="Paste at play position">
       <version name="1.0" author="sockmonkey72" time="2022-08-09T13:57:05Z">
         <changelog><![CDATA[initial]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/1f72e864647c4de01da51c368807c6e44c0cb825/Items%20Editing/sockmonkey72_Paste%20at%20play%20position.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_SelectAllBeforeEditCursor.lua" type="script" desc="sockmonkey72_Select items before/after edit cursor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 A small set of scripts to select items before/after the edit cursor\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="sockmonkey72" time="2024-01-12T09:07:09Z">
+        <changelog><![CDATA[initial]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/356525e6ddbb57e1a8839ca6a545577640d308e1/Items%20Editing/sockmonkey72_SelectAllBeforeEditCursor.lua</source>
+        <source main="main" file="sockmonkey72_SelectAllAfterEditCursor.lua">https://github.com/jeremybernstein/ReaScripts/raw/356525e6ddbb57e1a8839ca6a545577640d308e1/Items%20Editing/sockmonkey72_SelectAllAfterEditCursor.lua</source>
       </version>
     </reapack>
   </category>

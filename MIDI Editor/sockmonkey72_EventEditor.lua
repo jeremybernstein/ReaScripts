@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.2-beta.2
+-- @version 1.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -1728,13 +1728,17 @@ local function updateWindowPosition()
     windowInfo.wantsResizeUpdate = false
   end
 
-
-  local curDockID = r.ImGui_GetWindowDockID(ctx)
-  if dockID ~= curDockID then
-    dockID = curDockID
-    r.SetExtState(scriptID, 'dockID', tostring(math.floor(dockID)), true)
+  local isDocked = r.ImGui_IsWindowDocked(ctx)
+  if isDocked then
+    local curDockID = r.ImGui_GetWindowDockID(ctx)
+    if dockID ~= curDockID then
+      dockID = curDockID
+      r.SetExtState(scriptID, 'dockID', tostring(math.floor(dockID)), true)
+    end
+  elseif dockID ~= 0 then
+    dockID = 0
+    r.DeleteExtState(scriptID, 'dockID', true)
   end
-
 end
 
 local function initializeWindowPosition()
@@ -1760,6 +1764,7 @@ local function updateOneFont(name)
   if not fontInfo[name] then return end
 
   local newFontSize = math.floor(fontInfo[name..'DefaultSize'] * canvasScale)
+  if newFontSize < 1 then newFontSize = 1 end
   local fontSize = fontInfo[name..'Size']
 
   if newFontSize ~= fontSize then

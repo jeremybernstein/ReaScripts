@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="7b088e50853f6843e1f1122259486585d978b6db">
+<index version="1" name="sockmonkey72 Scripts" commit="2b0750d3932c084ff3949754f3ed7976b15d2e5d">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -1065,6 +1065,13 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
       <version name="1.03" author="sockmonkey72" time="2022-08-09T12:07:12Z">
         <changelog><![CDATA[1.03 initial upload]]></changelog>
         <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/ab27a4d1a416b22c41997334802099d03c64875e/Various/sockmonkey72_Smarter_Zoom.lua</source>
+      </version>
+      <version name="1.04" author="sockmonkey72" time="2024-02-21T11:37:03Z">
+        <changelog><![CDATA[* when zooming tracks, use the SWS zoom + minimize others action
+* fix undo strings
+* increase margin buffer a little bit
+* fix some Lua warnings & improve comments]]></changelog>
+        <source main="main">https://github.com/jeremybernstein/ReaScripts/raw/2b0750d3932c084ff3949754f3ed7976b15d2e5d/Various/sockmonkey72_Smarter_Zoom.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_StartupManager.lua" type="script" desc="Startup Manager">

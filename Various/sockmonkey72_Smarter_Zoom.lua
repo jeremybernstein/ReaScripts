@@ -1,11 +1,8 @@
 -- @description Smarter Zoom
 -- @author sockmonkey72
--- @version 1.04
+-- @version 1.05
 -- @changelog
---  * when zooming tracks, use the SWS zoom + minimize others action
---  * fix undo strings
---  * increase margin buffer a little bit
---  * fix some Lua warnings & improve comments
+--  * ensure that the option "SWS/NF: Toggle obey track height lock in vertical zoom and track height actions" is enabled when running this script.
 -- @about Zoom and scroll to razor edit region, item selection or time selection. Requires JS and SWS extensions
 
 local r = reaper
@@ -69,7 +66,13 @@ if doRE == false then
 end
 
 if doRE == true or doItems == true  or doTimeSel == true then
+  local swsTrackHeightLockEnabled = r.GetToggleCommandStateEx(0, r.NamedCommandLookup("_NF_TOGGLE_OBEY_TRACK_HEIGHT_LOCK"))
+
   r.Undo_BeginBlock2(0)
+
+  if swsTrackHeightLockEnabled == 0 then
+    r.Main_OnCommandEx(r.NamedCommandLookup("_NF_TOGGLE_OBEY_TRACK_HEIGHT_LOCK"), 0, 0) -- turn it on temporarily
+  end
 
   if doRE == true then
     r.PreventUIRefresh(1)
@@ -106,6 +109,10 @@ if doRE == true or doItems == true  or doTimeSel == true then
   elseif doTimeSel == true then
     local buffer = (maxTime - minTime) * bufferscale
     r.GetSet_ArrangeView2(0, true, 0, 0, minTime - buffer, maxTime + buffer)
+  end
+
+  if swsTrackHeightLockEnabled == 0 then
+    r.Main_OnCommandEx(r.NamedCommandLookup("_NF_TOGGLE_OBEY_TRACK_HEIGHT_LOCK"), 0, 0) -- turn it back off
   end
 
   r.Undo_EndBlock2(0, "Smarter Zoom: " .. (doRE and "Razor Edit" or doItems and "Items" or doTimeSel and "Time Selection" or "(no-op)"), -1)

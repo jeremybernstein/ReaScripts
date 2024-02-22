@@ -39,7 +39,7 @@ for i = 0, trackCount-1 do
 end
 
 reaper.Undo_BeginBlock2(0)
-if #REs then
+if #REs ~= 0 then
   for _, v in pairs(REs) do
     local track = v.track
     local itemcount = reaper.CountTrackMediaItems(track)

@@ -1,11 +1,11 @@
 -- @description Thin MIDI CC Events
--- @version 1.7.2
+-- @version 1.7.3
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
 --   Reduce density of MIDI CC events
 -- @changelog
---   - fix 'Thin CCs in Selected Items' (Main context; did nothing unless a Razor Edit was active)
+--   - added Thin CCs in Last-Clicked Lane (contributed by smandrap, thank you!)
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua
@@ -15,6 +15,7 @@
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_All.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_All_Visible.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Lane_Under_Mouse.lua
+--   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_In_Last_Clicked_Lane.lua
 --   [main=main] sockmonkey72_Thin_CCs_In_Selected_Items.lua
 
 local reaper = reaper

@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.15
+-- @version 0.1.16
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - commit comparator fix redux (thanks Talagan)
+--   - commit comparator fix redux redux (thanks Talagan)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -772,7 +772,7 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
 
   -- iterate sorted to avoid (REAPER Inline MIDI Editor) problems with offset calculation
   local comparator = function(t, a, b) -- thanks Talagan (Ben Babut) for this improvement
-    return ( (t[a].ppqpos == t[b].ppqpos) and (t[a]:type() == NOTEOFF_TYPE) ) or (t[a].ppqpos < t[b].ppqpos)
+    return ( (t[a].ppqpos == t[b].ppqpos) and (t[a].type == NOTEOFF_TYPE) ) or (t[a].ppqpos < t[b].ppqpos)
   end
 
   for _, event in spairs(MIDIEvents, comparator) do

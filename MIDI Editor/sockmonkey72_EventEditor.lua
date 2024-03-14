@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.4
+-- @version 1.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -13,7 +13,7 @@
 --   When setting negative absolute values for pitch bend, use --VALUE (instead of -VALUE, which will use the
 --   '-' Math Operator)
 -- @changelog
---   - MIDIUtils update (redux)
+--   - MIDIUtils update (redux redux)
 -- @provides
 --   EventEditor/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua

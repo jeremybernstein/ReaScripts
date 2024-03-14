@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.13
+-- @version 0.1.14
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - initial
+--   - commit comparator fix (thanks Talagan)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -769,8 +769,13 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   end
   local newMIDIString = ''
   local lastPPQPos = 0
+
   -- iterate sorted to avoid (REAPER Inline MIDI Editor) problems with offset calculation
-  for _, event in spairs(MIDIEvents, function(t, a, b) return t[a].ppqpos < t[b].ppqpos end) do
+  local comparator = function(t, a, b) -- thanks Talagan (Ben Babut) for this improvement
+    return ( (t[a].ppqpos == t[b].ppqpos) and (t[a]:type() == NOTEOFF_TYPE) ) or (t[a].ppqpos < t[b].ppqpos)
+  end
+
+  for _, event in spairs(MIDIEvents, comparator) do
     event.offset = math.floor(event.ppqpos - lastPPQPos)
     lastPPQPos = event.ppqpos
     local MIDIStr = event:GetMIDIString()

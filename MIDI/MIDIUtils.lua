@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.14
+-- @version 0.1.15
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - commit comparator fix (thanks Talagan)
+--   - commit comparator fix redux (thanks Talagan)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*

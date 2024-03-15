@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.18
+-- @version 0.1.19
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - commit comparator final fix (thanks Talagan)
+--   - fix for looped MIDI items
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -573,6 +573,29 @@ local function GetItemEndPPQPos(take)
   local item = r.GetMediaItemTake_Item(take)
   local itempos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
   local itemlen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+  local isloopsrc = r.GetMediaItemInfo_Value(item, 'B_LOOPSRC')
+  if isloopsrc ~= 0 then
+    -- this calculation is one of the most annoying in all of REAPER
+    -- there really should be an API for it
+    local mediaSrc = r.GetMediaItemTake_Source(take)
+    if mediaSrc then
+      local takeStartOffset = r.GetMediaItemTakeInfo_Value(take, 'D_STARTOFFS')
+      local takePlayRate = r.GetMediaItemTakeInfo_Value(take, 'D_PLAYRATE')
+      local scaledStartOffsetS = takeStartOffset / takePlayRate
+      local mediaSourceLen, isQN = r.GetMediaSourceLength(mediaSrc)
+      local loopMediaStartPointS = itempos - scaledStartOffsetS
+
+      local nextLoopStartS = 0;
+      if isQN then
+        local loopMediaStartPointQN = r.TimeMap2_timeToQN(0, loopMediaStartPointS)
+        local nextLoopStartQN = loopMediaStartPointQN + (mediaSourceLen / takePlayRate)
+        nextLoopStartS = r.TimeMap2_QNToTime(0, nextLoopStartQN)
+      else
+        nextLoopStartS = loopMediaStartPointS + (mediaSourceLen / takePlayRate);
+      end
+      return r.MIDI_GetPPQPosFromProjTime(take, nextLoopStartS)
+    end
+  end
   return r.MIDI_GetPPQPosFromProjTime(take, itempos + itemlen)
 end
 

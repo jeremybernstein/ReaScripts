@@ -58,7 +58,7 @@ local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
 local DEFAULT_WIDTH = 68 * FONTSIZE_LARGE
 local DEFAULT_HEIGHT = 40 * FONTSIZE_LARGE
-local DEFAULT_ITEM_WIDTH = 60
+local DEFAULT_ITEM_WIDTH = 70
 
 local windowInfo
 local fontInfo
@@ -70,6 +70,11 @@ local INVALID = -0xFFFFFFFF
 
 local popupFilter = 0x90 -- note default
 local canvasScale = 1.0
+
+local function scaled(num)
+  return num * canvasScale
+end
+
 local DEFAULT_TITLEBAR_TEXT = 'Transformer'
 local titleBarText = DEFAULT_TITLEBAR_TEXT
 local rewriteIDForAFrame
@@ -95,18 +100,143 @@ local OP_MUL = string.byte('*', 1)
 local OP_DIV = string.byte('/', 1)
 local OP_SCL = string.byte('.', 1)
 
-local currentFindTargetEntry = 1
-local currentFindConditionEntry = 1
-local currentFindParam1Entry = 1
-local currentFindParam1Val = ''
-local currentFindParam2Entry = 1
-local currentFindParam2Val = ''
-local currentFindTimeFormatEntry = 1
+local NOTE_TYPE = 0
+local CC_TYPE = 1
+local SYXTEXT_TYPE = 2
 
-local findParam1TextEditorStr = '0'
-local findParam1TimeFormatStr = '1.1.00'
-local findParam2TextEditorStr = '0'
-local findParam2TimeFormatStr = '1.1.00'
+local findConsoleText = ''
+local actionConsoleText = ''
+
+-----------------------------------------------------------------------------
+----------------------------------- OOP -------------------------------------
+
+local DEBUG_CLASS = false -- enable to check whether we're using known object properties
+
+local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaClasses
+  local c = {}    -- a new class instance
+  if not init and type(base) == 'function' then
+    init = base
+    base = nil
+  elseif type(base) == 'table' then
+   -- our new class is a shallow copy of the base class!
+    for i, v in pairs(base) do
+      c[i] = v
+    end
+    c._base = base
+  end
+  if DEBUG_CLASS then
+    c._names = {}
+    if setup then
+      for i, v in pairs(setup) do
+        c._names[i] = true
+      end
+    end
+
+    c.__newindex = function(table, key, value)
+      local found = false
+      if table._names and table._names[key] then found = true
+      else
+        local m = getmetatable(table)
+        while (m) do
+          if m._names[key] then found = true break end
+          m = m._base
+        end
+      end
+      if not found then
+        error("unknown property: "..key, 3)
+      else rawset(table, key, value)
+      end
+    end
+  end
+
+  -- the class will be the metatable for all its objects,
+  -- and they will look up their methods in it.
+  c.__index = c
+
+  -- expose a constructor which can be called by <classname>(<args>)
+  local mt = {}
+  mt.__call = function(class_tbl, ...)
+    local obj = {}
+    setmetatable(obj, c)
+    if class_tbl.init then
+      class_tbl.init(obj,...)
+    else
+      -- make sure that any stuff from the base class is initialized!
+      if base and base.init then
+        base.init(obj, ...)
+      end
+    end
+    return obj
+  end
+  c.init = init
+  c.is_a = function(self, klass)
+    local m = getmetatable(self)
+    while m do
+      if m == klass then return true end
+      m = m._base
+    end
+    return false
+  end
+  setmetatable(c, mt)
+  return c
+end
+
+local currentFindScope = 3
+
+local findScopeTable = {
+  { label = 'Everywhere' },
+  { label = 'Selected Items' },
+  { label = 'Frontmost MIDI Editor' }
+}
+
+local currentActionScope = 7
+
+local actionScopeTable = {
+  { label = 'Delete' },
+  { label = 'Transform' },
+  { label = 'Insert' },
+  { label = 'Insert Exclusive' },
+  { label = 'Copy' }, -- creates new track/item?
+  { label = 'Extract to Track' }, -- how is this different?
+  { label = 'Select' },
+  { label = 'Extract to Lanes' },
+  { label = 'Deselect' }
+}
+
+local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
+
+local FindRow = class(nil, {})
+
+function FindRow:init()
+  self.targetEntry = 1
+  self.conditionEntry = 1
+  self.param1Entry = 1
+  self.param1Val = ''
+  self.param2Entry = 1
+  self.param2Val = ''
+  self.timeFormatEntry = 1
+  self.booleanEntry = 1
+  self.param1TextEditorStr = '0'
+  self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  self.param2TextEditorStr = '0'
+  self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+end
+
+local selectedFindRow = 0
+local findRowTable = {}
+
+local function addFindRow(idx, row)
+  idx = (idx and idx ~= 0) and idx or #findRowTable+1
+  table.insert(findRowTable, idx, row and row or FindRow())
+  selectedFindRow = idx
+end
+
+local function removeFindRow()
+  if selectedFindRow ~= 0 then
+    table.remove(findRowTable, selectedFindRow) -- shifts
+    selectedFindRow = selectedFindRow <= #findRowTable and selectedFindRow or #findRowTable
+  end
+end
 
 local findColumns = {
   '(',
@@ -120,28 +250,28 @@ local findColumns = {
 }
 
 local findTargetEntries = {
-  { label = 'Position', text = 'entry.ppqpos', time = true },
-  { label = 'Length', text = 'entry.ppqdur', time = true },
-  { label = 'Channel', text = 'entry.chan', menu = true },
-  { label = 'Type', text = 'entry.chanmsg', menu = true },
-  { label = 'Main Value', text = 'entry.msg3', texteditor = true }, -- different for AT and PB
-  { label = 'Property', text = 'entry.flags', menu = true },
-  { label = 'SubType', text = 'entry.msg2', texteditor = true }, -- CC# or Note# or ...
-  { label = 'Velocity', text = 'entry.chanmsg == 0x90 and entry.msg2', texteditor = true },
-  -- { label = 'Release Velocity', text = 'entry.chanmsg == 0x80 and entry.msg2' } -- need to add release velocity to midiutils
+  { notation = '$position', label = 'Position', text = 'entry.ppqpos', time = true },
+  { notation = '$length', label = 'Length', text = 'entry.ppqdur', time = true },
+  { notation = '$channel', label = 'Channel', text = 'entry.chan', menu = true },
+  { notation = '$type', label = 'Type', text = 'entry.chanmsg', menu = true },
+  { notation = '$property', label = 'Property', text = 'entry.flags', menu = true },
+  { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(entry)', texteditor = true }, -- different for AT and PB
+  { notation = '$value2', label = 'Value 2', text = 'GetMainValue(entry)', texteditor = true }, -- CC# or Note# or ...
+  { notation = '$velocity', label = 'Velocity', text = 'entry.chanmsg == 0x90 and entry.msg2', texteditor = true },
+  { notation = '$relvel', label = 'Release Velocity', text = 'entry.relvel', texteditor = true }
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
 
 local findGenericConditionEntries = {
-  { label = 'Equal', text = '==', terms = 1 },
-  { label = 'Unequal', text = '~=', terms = 1 },
-  { label = 'Greater Than', text = '>', terms = 1 },
-  { label = 'Greater Than or Equal', text = '>=', terms = 1 },
-  { label = 'Less Than', text = '<', terms = 1 },
-  { label = 'Less Than or Equal', text = '<=', terms = 1 },
-  { label = 'Inside Range', text = { '>=', '<=' }, bool = 'and', terms = 2 },
-  { label = 'Outside Range', text = { '<', '>' }, bool = 'or', terms = 2 }
+  { notation = '==', label = 'Equal', text = '==', terms = 1 },
+  { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
+  { notation = '>', label = 'Greater Than', text = '>', terms = 1 },
+  { notation = '>=', label = 'Greater Than or Equal', text = '>=', terms = 1 },
+  { notation = '<', label = 'Less Than', text = '<', terms = 1 },
+  { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 },
+  { notation = '$inrange', label = 'Inside Range', text = '{tgt} >= {param1} and {tgt} <= {param2}', terms = 2, sub = true },
+  { notation = '!$inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true }
 }
 
 local function GetTimeSelectionStart()
@@ -154,72 +284,120 @@ local function GetTimeSelectionEnd()
   return ts_end
 end
 
+local function GetSubtypeValue(entry)
+  if entry.type == SYXTEXT_TYPE then return 0
+  else return entry.msg2
+  end
+end
+
+local function GetSubtypeValueName(entry)
+  if entry.type == SYXTEXT_TYPE then return 'devnull'
+  else return 'msg2'
+  end
+end
+
+local function GetSubtypeValueLabel(typeIndex)
+  if typeIndex == 1 then return 'Note #'
+  elseif typeIndex == 2 then return 'Note #'
+  elseif typeIndex == 3 then return 'CC #'
+  elseif typeIndex == 4 then return 'Pgm #'
+  elseif typeIndex == 5 then return 'Pressure Amount'
+  elseif typeIndex == 6 then return 'PBnd LSB'
+  else return ''
+  end
+end
+
+local function GetMainValue(entry)
+  if entry.chanmsg == 0xC0 or entry.chanmsg == 0xD0 then return entry.msg2
+  elseif entry.type == SYXTEXT_TYPE then return 0
+  else return entry.msg3
+  end
+end
+
+local function GetMainValueName(entry)
+  if entry.chanmsg == 0xC0 or entry.chanmsg == 0xD0 then return 'msg2'
+  elseif entry.type == SYXTEXT_TYPE then return 'devnull'
+  else return 'msg3'
+  end
+end
+
+local function GetMainValueLabel(typeIndex)
+  if typeIndex == 1 then return 'Velocity'
+  elseif typeIndex == 2 then return 'Pressure Amount'
+  elseif typeIndex == 3 then return 'CC Value'
+  elseif typeIndex == 4 then return 'unused'
+  elseif typeIndex == 5 then return 'unused'
+  elseif typeIndex == 6 then return 'PBnd MSB'
+  else return ''
+  end
+end
+
 local findPositionConditionEntries = {
-  { label = 'Equal', text = '==', terms = 1 },
-  { label = 'Unequal', text = '~=', terms = 1 },
-  { label = 'Greater Than', text = '>', terms = 1 },
-  { label = 'Greater Than or Equal', text = '>=', terms = 1 },
-  { label = 'Less Than', text = '<', terms = 1 },
-  { label = 'Less Than or Equal', text = '<=', terms = 1 },
-  { label = 'Inside Bar Range', text = '>=', text2 = '<=', terms = 2 },
-  { label = 'Inside Range', text = '>=', text2 = '<=', terms = 2 },
-  { label = 'Outside Bar Range', text = '<', text2 = '>', terms = 2 },
-  { label = 'Outside Range', text = '<', text2 = '>', terms = 2 },
-  { label = 'Before Cursor', text = '< r.GetCursorPositionEx(0)', terms = 0 },
-  { label = 'After Cursor', text = '> r.GetCursorPositionEx(0)', terms = 0 },
-  { label = 'Inside Time Selection', text = { '>= GetTimeSelectionStart()', '<= GetTimeSelectionEnd()' }, bool = 'and', terms = 0 },
-  { label = 'Outside Time Selection', text = { '< GetTimeSelectionStart()', '> GetTimeSelectionEnd()' }, bool = 'or', terms = 0 },
+  { notation = '==', label = 'Equal', text = '==', terms = 1 },
+  { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
+  { notation = '>', label = 'Greater Than', text = '>', terms = 1 },
+  { notation = '>=', label = 'Greater Than or Equal', text = '>=', terms = 1 },
+  { notation = '<', label = 'Less Than', text = '<', terms = 1 },
+  { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 },
+  { notation = '$inbarrange', label = 'Inside Bar Range', text = '{tgt} >= {param1} and {tgt} <= {param1}', terms = 2, sub = true }, -- what is the 'bar range'?
+  { notation = '$inrange', label = 'Inside Range', text = '{tgt} >= {param1} and {tgt} <= {param2}', terms = 2, sub = true },
+  { notation = '!$inbarrange', label = 'Outside Bar Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true}, -- what is the 'bar range'?
+  { notation = '!$inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true },
+  { notation = '$beforecursor', label = 'Before Cursor', text = '< r.GetCursorPositionEx(0)', terms = 0 },
+  { notation = '$aftercursor', label = 'After Cursor', text = '> r.GetCursorPositionEx(0)', terms = 0 },
+  { notation = '$intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
+  { notation = '!$intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0, sub = true },
   -- { label = 'Inside Track Loop', text = '', terms = 1 },
   -- { label = 'Exactly Matching Cycle', text = '', terms = 1 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
 local findTypeConditionEntries = {
-  { label = 'Equal', text = '==', terms = 1 },
-  { label = 'Unequal', text = '~=', terms = 1 },
-  { label = 'All', text = '~= nil', terms = 0 }
+  { notation = '==', label = 'Equal', text = '==', terms = 1 },
+  { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
+  { notation = '$all', label = 'All', text = '~= nil', terms = 0 }
 }
 
 local findPropertyConditionEntries = {
-  { label = 'Is Set', text = '&', terms = 1, suffix = '~= 0' },
-  { label = 'Is Not Set', text = '&', terms = 1, suffix = '== 0' }
+  { notation = '$iset', label = 'Is Set', text = '({tgt} & {param1}) ~= 0', terms = 1, sub = true },
+  { notation = '!$isset', label = 'Is Not Set', text = '({tgt} & {param1}) == 0', terms = 1, sub = true }
 }
 
 local findTypeParam1Entries = {
-  { label = 'Note', text = '0x90' },
-  { label = 'Poly Pressure', text = '0xA0' },
-  { label = 'Controller', text = '0xB0' },
-  { label = 'Program Change', text = '0xC0' },
-  { label = 'Aftertouch', text = '0xD0' },
-  { label = 'Pitch Bend', text = '0xE0' },
-  { label = 'System Exclusive', text = '0xF0' }
+  { notation = '$note', label = 'Note', text = '0x90' },
+  { notation = '$polyat', label = 'Poly Pressure', text = '0xA0' },
+  { notation = '$cc', label = 'Controller', text = '0xB0' },
+  { notation = '$pc', label = 'Program Change', text = '0xC0' },
+  { notation = '$at', label = 'Aftertouch', text = '0xD0' },
+  { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
+  { notation = '$syx', label = 'System Exclusive', text = '0xF0' }
   -- { label = 'SMF Event', text = '0x90' },
   -- { label = 'Notation Event', text = '0x90' },
   -- { label = '...', text = '0x90' }
 }
 
 local findPropertyParam1Entries = {
-  { label = 'Muted', text = '0x02' },
-  { label = 'Selected', text = '0x01' }
+  { notation = '$muted', label = 'Muted', text = '0x02' },
+  { notation = '$selected', label = 'Selected', text = '0x01' }
 }
 
 local findChannelParam1Entries = {
-  { label = '1', text = '0' },
-  { label = '2', text = '1' },
-  { label = '3', text = '2' },
-  { label = '4', text = '3' },
-  { label = '5', text = '4' },
-  { label = '6', text = '5' },
-  { label = '7', text = '6' },
-  { label = '8', text = '7' },
-  { label = '9', text = '8' },
-  { label = '10', text = '9' },
-  { label = '11', text = '10' },
-  { label = '12', text = '11' },
-  { label = '13', text = '12' },
-  { label = '14', text = '13' },
-  { label = '15', text = '14' },
-  { label = '16', text = '15' },
+  { notation = '1', label = '1', text = '0' },
+  { notation = '2', label = '2', text = '1' },
+  { notation = '3', label = '3', text = '2' },
+  { notation = '4', label = '4', text = '3' },
+  { notation = '5', label = '5', text = '4' },
+  { notation = '6', label = '6', text = '5' },
+  { notation = '7', label = '7', text = '6' },
+  { notation = '8', label = '8', text = '7' },
+  { notation = '9', label = '9', text = '8' },
+  { notation = '10', label = '10', text = '9' },
+  { notation = '11', label = '11', text = '10' },
+  { notation = '12', label = '12', text = '11' },
+  { notation = '13', label = '13', text = '12' },
+  { notation = '14', label = '14', text = '13' },
+  { notation = '15', label = '15', text = '14' },
+  { notation = '16', label = '16', text = '15' },
 }
 
 local findTimeFormatEntries = {
@@ -229,11 +407,138 @@ local findTimeFormatEntries = {
   { label = 'Frames' }
 }
 
-local replaceColumns = {
+local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
+  { notation = '&&', label = 'And', text = 'and'},
+  { notation = '||', label = 'Or', text = 'or'}
+}
+
+local ActionRow = class(nil, {})
+
+function ActionRow:init()
+  self.targetEntry = 1
+  self.operationEntry = 1
+  self.param1Entry = 1
+  self.param1Val = ''
+  self.param2Entry = 1
+  self.param2Val = ''
+  self.param1TextEditorStr = '0'
+  self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  self.param2TextEditorStr = '0'
+  self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+end
+
+local selectedActionRow = 0
+local actionRowTable = {}
+
+local function addActionRow(idx, row)
+  idx = (idx and idx ~= 0) and idx or #actionRowTable+1
+  table.insert(actionRowTable, idx, row and row or ActionRow())
+  selectedActionRow = idx
+end
+
+local function removeActionRow()
+  if selectedActionRow ~= 0 then
+    table.remove(actionRowTable, selectedActionRow) -- shifts
+    selectedActionRow = selectedActionRow <= #actionRowTable and selectedActionRow or #actionRowTable
+  end
+end
+
+local actionColumns = {
   'Target',
   'Operation',
   'Parameter 1',
   'Parameter 2'
+}
+
+local actionTargetEntries = {
+  { notation = '$position', label = 'Position', text = 'entry.ppqpos', time = true },
+  { notation = '$length', label = 'Length', text = 'entry.ppqdur', time = true },
+  { notation = '$channel', label = 'Channel', text = 'entry.chan', menu = true },
+  { notation = '$type', label = 'Type', text = 'entry.chanmsg', menu = true },
+  { notation = '$property', label = 'Property', text = 'entry.flags', menu = true },
+  { notation = '$value1', label = 'Value 1', text = 'entry[_value1]', texteditor = true },
+  { notation = '$value2', label = 'Value 2', text = 'entry[_value2]', texteditor = true },
+  { notation = '$velocity', label = 'Velocity', text = 'entry.msg2', texteditor = true, cond = 'entry.chanmsg == 0x90' },
+  { notation = '$relvel', label = 'Release Velocity', text = 'entry.relvel', texteditor = true, cond = 'entry.chanmsg == 0x90' },
+  -- { label = 'Last Event' },
+  -- { label = 'Context Variable' }
+}
+
+local actionPositionOperationEntries = {
+  { notation = '+', label = 'Add', text = '+', terms = 1 },
+  { notation = '-', label = 'Subtract', text = '-', terms = 1 },
+  { notation = '*', label = 'Multiply', text = '*', terms = 1 },
+  { notation = '/', label = 'Divide By', text = '/', terms = 1 },
+  { notation = '$round', label = 'Round By', text = '= {param1} * math.floor(({tgt} / {param1}) + 0.5)', terms = 1, sub = true },
+  { notation = '$relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue(({param1}, {param2})', terms = 2, sub = true },
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+  { notation = '$tocursor', label = 'Move to Cursor', text = '= reaper.GetCursorPositionEx()', terms = 0 },
+  { notation = '$addlength', label = 'Add Length', text = '+', terms = 1, timeval = true },
+}
+
+local actionLengthOperationEntries = {
+  { notation = '+', label = 'Add', text = '+', terms = 1 },
+  { notation = '-', label = 'Subtract', text = '-', terms = 1 },
+  { notation = '*', label = 'Multiply', text = '*', terms = 1 },
+  { notation = '/', label = 'Divide By', text = '/', terms = 1 },
+  { notation = '$round', label = 'Round By', text = '= {param1} * math.floor(({tgt} / {param1}) + 0.5)', terms = 1, sub = true },
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+  { notation = '$random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue(({param1}, {param2})', terms = 2, sub = true },
+}
+
+local actionChannelOperationEntries = {
+  { notation = '+', label = 'Add', text = '+', terms = 1 },
+  { notation = '-', label = 'Subtract', text = '-', terms = 1 },
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+  { notation = '$random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true },
+}
+
+local actionTypeOperationEntries = {
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+}
+
+local actionSubtypeOperationEntries = {
+  { notation = '+', label = 'Add', text = '+', terms = 1 },
+  { notation = '-', label = 'Subtract', text = '-', terms = 1 },
+  { notation = '*', label = 'Multiply', text = '*', terms = 1 },
+  { notation = '/', label = 'Divide By', text = '/', terms = 1 },
+  { notation = '$round', label = 'Round By', text = '= {param1} * math.floor(({tgt} / {param1}) + 0.5)', terms = 1, sub = true },
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+  { notation = '$random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue(({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$getvalue2', label = 'Use Value 2', text = '= GetMainValue(entry)', terms = 0 }, -- note that this is different for AT and PB
+  { notation = '$line', label = 'Linear Change in Time Selection Range', text = '= LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$relline', label = 'Relative Change in Time Selection Range', text = '= {tgt} + LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true },
+}
+
+local actionVelocityOperationEntries = {
+  { notation = '+', label = 'Add', text = '+', terms = 1 },
+  { notation = '-', label = 'Subtract', text = '-', terms = 1 },
+  { notation = '*', label = 'Multiply', text = '*', terms = 1 },
+  { notation = '/', label = 'Divide By', text = '/', terms = 1 },
+  { notation = '$round', label = 'Round By', text = '= {param1} * math.floor(({tgt} / {param1}) + 0.5)', terms = 1, sub = true },
+  { notation = '$random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true },
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+  { notation = '$relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue(({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(entry)', terms = 0 }, -- ?? note that this is different for AT and PB
+  { notation = '$mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
+  { notation = '$line', label = 'Linear Change in Time Selection Range', text = '= LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$relline', label = 'Relative Change in Time Selection Range', text = '= {tgt} + LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true },
+}
+
+local actionGenericOperationEntries = {
+  { notation = '+', label = 'Add', text = '+', terms = 1 },
+  { notation = '-', label = 'Subtract', text = '-', terms = 1 },
+  { notation = '*', label = 'Multiply', text = '*', terms = 1 },
+  { notation = '/', label = 'Divide By', text = '/', terms = 1 },
+  { notation = '$round', label = 'Round By', text = '= {param1} * math.floor(({tgt} / {param1}) + 0.5)', terms = 1, sub = true },
+  { notation = '$random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true },
+  { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true },
+  { notation = '$relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue(({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
+  { notation = '$line', label = 'Linear Change in Time Selection Range', text = '= LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true },
+  { notation = '$relline', label = 'Relative Change in Time Selection Range', text = '= {tgt} + LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true },
 }
 
 local selectedNotes = {} -- interframe cache
@@ -410,9 +715,6 @@ local function windowFn()
   local cc2byte = false
   local hasNotes = false
   local hasCCs = false
-  local NOTE_TYPE = 0
-  local CC_TYPE = 1
-  local SYXTEXT_TYPE = 2
   local NOTE_FILTER = 0x90
   local changedParameter = nil
   local allEvents = {}
@@ -531,6 +833,13 @@ local function windowFn()
   local itemBounds = {}
   local ranges = {}
   local currentRect = {}
+
+  local function updateCurrentRect()
+    -- cache the positions to generate next box position
+    currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
+    currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
+    currentRect.right = currentRect.right + scaled(20) -- add some spacing after the button
+  end
 
   local recalcEventTimes = false
   local recalcSelectionTimes = false
@@ -684,6 +993,7 @@ local function windowFn()
   end
 
   local function generateLabel(label)
+    -- local oldX, oldY = r.ImGui_GetCursorPos(ctx)
     local ix, iy = currentRect.left, currentRect.top
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFEF)
@@ -698,6 +1008,7 @@ local function windowFn()
     r.ImGui_Text(ctx, label)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopFont(ctx)
+    --r.ImGui_SetCursorPos(ctx, oldX, oldY)
   end
 
   local function generateRangeLabel(name)
@@ -732,16 +1043,18 @@ local function windowFn()
   local function kbdEntryIsCompleted()
     return (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
             or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
-            or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()))
+            or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
+            or (not r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) -- clicked out
+          )
   end
 
   local function makeTextInput(name, label, more, wid)
     local timeval = isTimeValue(name)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
-    local nextwid = wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale)
+    local nextwid = wid and scaled(wid) or scaled(DEFAULT_ITEM_WIDTH)
     r.ImGui_SetNextItemWidth(ctx, nextwid)
-    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
+    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + scaled(2) + (more and scaled(4) or 0))
 
     r.ImGui_PushFont(ctx, fontInfo.large)
 
@@ -942,8 +1255,8 @@ local function windowFn()
   local function makeTimeInput(name, label, more, wid)
     r.ImGui_SameLine(ctx)
     r.ImGui_BeginGroup(ctx)
-    r.ImGui_SetNextItemWidth(ctx, wid and (wid * canvasScale) or (DEFAULT_ITEM_WIDTH * canvasScale))
-    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + (2 * canvasScale) + (more and (4 * canvasScale) or 0))
+    r.ImGui_SetNextItemWidth(ctx, wid and scaled(wid) or scaled(DEFAULT_ITEM_WIDTH))
+    r.ImGui_SetCursorPosX(ctx, (currentRect.right - vx) + scaled(2) + (more and scaled(4) or 0))
 
     r.ImGui_PushFont(ctx, fontInfo.large)
 
@@ -1218,7 +1531,9 @@ local function windowFn()
   local noteidx = mu.MIDI_EnumNotes(take, -1)
   while noteidx ~= -1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
-    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel = mu.MIDI_GetNote(take, noteidx)
+    _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel, e.relvel = mu.MIDI_GetNote(take, noteidx)
+    e.msg2 = e.pitch
+    e.msg3 = e.vel
     e.notedur = e.endppqpos - e.ppqpos
     e.chanmsg = 0x90
     if e.selected then
@@ -1290,10 +1605,10 @@ local function windowFn()
   if resetFilter then popupFilter = 0x90 end
   selectedNotes = newNotes
 
-  if #selectedEvents == 0 or not (selnotecnt > 0 or selcccnt > 0 or selsyxcnt > 0) then
-    titleBarText = DEFAULT_TITLEBAR_TEXT..': No selection' -- (PPQ='..PPQ..')' -- does PPQ make sense here?
-    return
-  end
+  -- if #selectedEvents == 0 or not (selnotecnt > 0 or selcccnt > 0 or selsyxcnt > 0) then
+  --   titleBarText = DEFAULT_TITLEBAR_TEXT..': No selection' -- (PPQ='..PPQ..')' -- does PPQ make sense here?
+  --   return
+  -- end
 
   ---------------------------------------------------------------------------
   ------------------------------ TITLEBAR TEXT ------------------------------
@@ -1359,320 +1674,7 @@ local function windowFn()
   union.seldurticks = union.selposticks == INVALID and INVALID or union.selendticks - union.selposticks
 
   ---------------------------------------------------------------------------
-  -------------------------------- POPUP MENU -------------------------------
-
-  r.ImGui_NewLine(ctx)
-  r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * canvasScale)
-  r.ImGui_Button(ctx, popupLabel, DEFAULT_ITEM_WIDTH * canvasScale * 1.5)
-
-  -- cache the positions to generate next box position
-  currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
-  currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
-  currentRect.right = currentRect.right + 20 * canvasScale -- add some spacing after the button
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
-
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'main menu')
-  end
-
-  local bail = false
-  if r.ImGui_BeginPopup(ctx, 'main menu') then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      if r.ImGui_IsPopupOpen(ctx, 'main menu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-        r.ImGui_CloseCurrentPopup(ctx)
-        handledEscape = true
-      end
-    end
-    r.ImGui_PushFont(ctx, fontInfo.small)
-    for _, type in pairs(dataTypes) do
-      if type.exists then
-        local rv, selected = r.ImGui_Selectable(ctx, type.label)
-        if rv and selected then
-          popupFilter = type.val
-          bail = true
-        end
-        r.ImGui_Spacing(ctx)
-      end
-    end
-    r.ImGui_Separator(ctx)
-
-    if r.ImGui_BeginMenu(ctx, "Overlap Protection") then
-      local rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Always On', wantsOverlapCorrection == OVERLAP_AUTO and 1 or 0, 1)
-      if rv and v == 1 then
-        r.SetExtState(scriptID, 'wantsOverlapCorrection', '1', true)
-        wantsOverlapCorrection = OVERLAP_AUTO
-        -- r.ImGui_CloseCurrentPopup(ctx)
-      end
-
-      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection After Timeout', wantsOverlapCorrection == OVERLAP_TIMEOUT and 2 or 0, 2)
-      if rv and v == 2 then
-        r.SetExtState(scriptID, 'wantsOverlapCorrection', '2', true)
-        wantsOverlapCorrection = OVERLAP_TIMEOUT
-        -- r.ImGui_CloseCurrentPopup(ctx)
-      end
-
-      if wantsOverlapCorrection ~= OVERLAP_TIMEOUT then
-        r.ImGui_BeginDisabled(ctx)
-      end
-      r.ImGui_Indent(ctx)
-      r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 1.75) * canvasScale)
-      rv, v = r.ImGui_InputText(ctx, 'ms Timeout', overlapCorrectionTimeout, r.ImGui_InputTextFlags_EnterReturnsTrue()
-                                                                           + r.ImGui_InputTextFlags_CharsDecimal())
-      if rv then
-        v = tonumber(v)
-        if v then
-          r.SetExtState(scriptID, 'overlapCorrectionTimeout', tostring(math.floor(v)), true)
-        end
-        -- r.ImGui_CloseCurrentPopup(ctx)
-      end
-      r.ImGui_Unindent(ctx)
-      if wantsOverlapCorrection ~= OVERLAP_TIMEOUT then
-        r.ImGui_EndDisabled(ctx)
-      end
-
-      rv, v = r.ImGui_RadioButtonEx(ctx, 'Overlap Protection Off (Manual)', wantsOverlapCorrection == OVERLAP_MANUAL and 3 or 0, 3)
-      if rv and v == 3 then
-        r.SetExtState(scriptID, 'wantsOverlapCorrection', '0', true)
-        wantsOverlapCorrection = OVERLAP_MANUAL
-        -- r.ImGui_CloseCurrentPopup(ctx)
-      end
-      if wantsOverlapCorrection ~= OVERLAP_MANUAL then
-        r.ImGui_BeginDisabled(ctx)
-      end
-      r.ImGui_Indent(ctx)
-      -- rv = r.ImGui_Button(ctx, 'Now')
-
-      rv = r.ImGui_SmallButton(ctx, 'Now')
-      if rv then
-        correctOverlapsNow = true
-      end
-      r.ImGui_Unindent(ctx)
-      if wantsOverlapCorrection ~= OVERLAP_MANUAL then
-        r.ImGui_EndDisabled(ctx)
-      end
-
-      r.ImGui_Separator(ctx)
-      rv, v = r.ImGui_Checkbox(ctx, 'Overlap Correction Favors Selection', overlapFavorsSelected)
-      if rv then
-        r.SetExtState(scriptID, 'overlapFavorsSelected', v and '1' or '0', true)
-        overlapFavorsSelected = v
-        -- r.ImGui_CloseCurrentPopup(ctx)
-      end
-      r.ImGui_EndMenu(ctx)
-    end
-
-    local rv, v = r.ImGui_Checkbox(ctx, 'Use Bars.Beats.Percent Format ', wantsBBU)
-    if rv then
-      r.SetExtState(scriptID, 'bbu', v and '1' or '0', true)
-      wantsBBU = v
-      r.ImGui_CloseCurrentPopup(ctx)
-    end
-    rv, v = r.ImGui_Checkbox(ctx, 'Reverse Scroll Direction', reverseScroll)
-    if rv then
-      r.SetExtState(scriptID, 'reverseScroll', v and '1' or '0', true)
-      reverseScroll = v
-      r.ImGui_CloseCurrentPopup(ctx)
-    end
-    r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
-    rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue()
-                                                                   + r.ImGui_InputTextFlags_CharsDecimal())
-    if rv then
-      v = processBaseFontUpdate(tonumber(v))
-      r.SetExtState(scriptID, 'baseFont', tostring(v), true)
-      r.ImGui_CloseCurrentPopup(ctx)
-    end
-
-    r.ImGui_PopFont(ctx)
-    r.ImGui_EndPopup(ctx)
-  end
-
-  r.ImGui_PopStyleColor(ctx)
-
-  if bail then return end
-
-  ---------------------------------------------------------------------------
-  -------------------------------- USER VALUES ------------------------------
-
-  local function makeValueEntry(name)
-    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and math.floor(union[name]) or INVALID }
-  end
-
-  local function makeTextValueEntry(name)
-    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and union[name] or INVALID }
-  end
-
-  local function makePopupEntry(name)
-    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and union[name] or INVALID }
-  end
-
-  local function commonValueEntries()
-    for _, v in ipairs(commonEntries) do
-      userValues[v] = makeValueEntry(v)
-    end
-    userValues.selposticks = { operation = OP_ABS, opval = union.selposticks }
-    userValues.seldurticks = { operation = OP_ABS, opval = union.seldurticks }
-  end
-
-  commonValueEntries()
-  if popupFilter == NOTE_FILTER then
-    userValues.pitch = makeValueEntry('pitch')
-    userValues.vel = makeValueEntry('vel')
-    userValues.notedur = makeValueEntry('notedur')
-  elseif popupFilter >= 0x80 then
-    userValues.ccnum = makeValueEntry('ccnum')
-    userValues.ccval = makeValueEntry('ccval')
-    userValues.chanmsg = makeValueEntry('chanmsg')
-  else
-    userValues.texttype = makePopupEntry('texttype')
-    userValues.textmsg = makeTextValueEntry('textmsg')
-  end
-
-  ---------------------------------------------------------------------------
-  ------------------------------ INTERFACE GEN ------------------------------
-
-  -- requires userValues, above
-
-  canProcess = false
-
-  local currentFindTarget = {}
-  local currentFindCondition = {}
-  local conditionEntries = {}
-  local param1Entries = {}
-  local param2Entries = {}
-
-  local function timeFormatToSeconds(buf)
-    -- b.b.f vs h:m.s vs ...?
-    local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)') -- obviously...
-    local bars = tonumber(tbars)
-    local beats = tonumber(tbeats)
-    local fraction = tonumber(tfraction)
-    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-    return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars)
-  end
-
-  local function prepEntries()
-    conditionEntries = {}
-    param1Entries = {}
-    param2Entries = {}
-
-    if currentFindTargetEntry > 0 then
-      if currentFindTargetEntry == 1 then
-        conditionEntries = findPositionConditionEntries
-      elseif currentFindTargetEntry == 3 then
-        conditionEntries = findGenericConditionEntries
-        param1Entries = findChannelParam1Entries
-        param2Entries = findChannelParam1Entries
-      elseif currentFindTargetEntry == 4 then
-        conditionEntries = findTypeConditionEntries
-        param1Entries = findTypeParam1Entries
-      elseif currentFindTargetEntry == 6 then
-        conditionEntries = findPropertyConditionEntries
-        param1Entries = findPropertyParam1Entries
-      else
-        conditionEntries = findGenericConditionEntries
-      end
-
-      currentFindTarget = findTargetEntries[currentFindTargetEntry]
-      currentFindCondition = conditionEntries[currentFindConditionEntry]
-    end
-  end
-
-  local function processFind()
-    prepEntries()
-
-    if (#conditionEntries == 0) then return end
-
-    local targetTerm = currentFindTarget.text
-    local condition = currentFindCondition --conditionEntries[currentFindConditionEntry]
-    local conditionVal = condition.text
-    local conditionTerm = ''
-
-    currentFindParam1Val = (currentFindTarget.texteditor) and findParam1TextEditorStr
-      or currentFindTarget.time and tostring(timeFormatToSeconds(findParam1TimeFormatStr))
-      or #param1Entries ~= 0 and param1Entries[currentFindParam1Entry].text
-      or ''
-    currentFindParam2Val = condition.terms <= 1 and ''
-      or currentFindTarget.texteditor and findParam2TextEditorStr
-      or currentFindTarget.time and tostring(timeFormatToSeconds(findParam2TimeFormatStr))
-      or #param2Entries ~= 0 and param2Entries[currentFindParam2Entry].text
-      or ''
-
-    local param1Term = currentFindParam1Val -- param1Entries[currentFindParam1Entry].text
-    local param2Term = currentFindParam2Val -- (condition.terms > 1 and #param2Entries ~= 0) and param2Entries[currentFindParam2Entry].text or ''
-
-    if param1Term == '' then return end
-
-    local param1Num = tonumber(param1Term)
-    local param2Num = tonumber(param2Term)
-    if param1Num and param2Num and param2Num < param1Num then
-      local tmp = param2Term
-      param2Term = param1Term
-      param1Term = tmp
-      mu.post('swap')
-    end
-
-    if type(conditionVal) == 'table' then
-      for k, v in ipairs(conditionVal) do
-        conditionTerm = conditionTerm .. targetTerm .. ' ' .. v .. ' '
-        if condition.terms ~= 0 then
-          if condition.terms > 1 then
-            conditionTerm = conditionTerm .. (k == 1 and param1Term or param2Term) .. ' '
-          else
-            conditionTerm = conditionTerm .. param1Term .. ' '
-          end
-        end
-        if k ~= #conditionVal then
-          conditionTerm = conditionTerm .. condition.bool .. ' '
-        end
-      end
-    else
-      -- suffix only applies to single terms
-      conditionTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term) .. (condition.suffix and ' ' .. condition.suffix or '')
-    end
-
-    -- what about multiple param1?
-
-    local fnString = 'return ' .. conditionTerm
-    mu.post(fnString)
-
-    local entry = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25 }
-    local context = {}
-    context.entry = entry
-    context.r = reaper
-    context.GetTimeSelectionStart = GetTimeSelectionStart
-    context.GetTimeSelectionEnd = GetTimeSelectionEnd
-
-    mu.post(load(fnString, nil, nil, context)())
-  end
-
-  prepEntries()
--- each row needs an id and a state table
-
-  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns)
-  for _, label in ipairs(findColumns) do
-    local narrow = (label == '(' or label == ')' or label == 'Boolean')
-    local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_None()
-    local colwid = narrow and (label == 'Boolean' and 70 or 20) or nil
-    r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
-  end
-  r.ImGui_TableHeadersRow(ctx)
-  r.ImGui_TableNextRow(ctx)
-
-  r.ImGui_TableSetColumnIndex(ctx, 0) -- '('
-
-  r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Target'
-  r.ImGui_Button(ctx, currentFindTargetEntry > 0 and currentFindTarget.label or '---' )
-  if (currentFindTargetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'targetMenu')
-  end
-
-  r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Condition'
-  r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---' )
-  if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    r.ImGui_OpenPopup(ctx, 'conditionMenu')
-  end
+  --------------------------------- UTILITIES -------------------------------
 
   local function timeFormatClampPad(str, min, max, fmt)
     local num = tonumber(str)
@@ -1720,62 +1722,257 @@ local function windowFn()
     -- ... etc.
   end
 
-  local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
-    EventChar < '0' || EventChar > '9' ? EventChar = 0;
-  ]])
+  ---------------------------------------------------------------------------
+  ------------------------------- PRESET RECALL -----------------------------
 
-  r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 1'
-  if currentFindTarget.menu then
-      r.ImGui_Button(ctx, #param1Entries ~= 0 and param1Entries[currentFindParam1Entry].label or '---' )
-    if (#param1Entries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      r.ImGui_OpenPopup(ctx, 'param1Menu')
+  -- TODO
+
+  ---------------------------------------------------------------------------
+  --------------------------------- FIND ROWS -------------------------------
+
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x006655FF)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x008877FF)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x007766FF)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x006655FF)
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_AlignTextToFramePadding(ctx)
+  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
+  r.ImGui_Button(ctx, 'Insert Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    addFindRow()
+  end
+
+  r.ImGui_SameLine(ctx)
+  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
+  if selectedFindRow == 0 then
+    r.ImGui_BeginDisabled(ctx)
+  end
+  r.ImGui_Button(ctx, 'Remove Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  if selectedFindRow == 0 then
+    r.ImGui_EndDisabled(ctx)
+  end
+
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    removeFindRow()
+  end
+
+  local function findTargetToTabs(targetEntry)
+    local condTab = {}
+    local param1Tab = {}
+    local param2Tab = {}
+
+    if targetEntry > 0 then
+      if targetEntry == 1 then -- position
+        condTab = findPositionConditionEntries
+      -- elseif targetEntry == 2 then -- length
+      elseif targetEntry == 3 then -- channel
+        condTab = findGenericConditionEntries
+        param1Tab = findChannelParam1Entries
+        param2Tab = findChannelParam1Entries
+      elseif targetEntry == 4 then -- type
+        condTab = findTypeConditionEntries
+        param1Tab = findTypeParam1Entries
+      elseif targetEntry == 5 then -- property
+        condTab = findPropertyConditionEntries
+        param1Tab = findPropertyParam1Entries
+      -- elseif targetEntry == 6 then -- value1
+      -- elseif targetEntry == 7 then -- value2
+      -- elseif targetEntry == 8 then -- velocity
+      -- elseif targetEntry == 9 then -- relvel
+    else
+        condTab = findGenericConditionEntries
+      end
     end
-  elseif currentFindTarget.texteditor then
-    local retval, buf = r.ImGui_InputText(ctx, '##param1edit', findParam1TextEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-    if retval and kbdEntryIsCompleted() then
-      findParam1TextEditorStr = buf
-      processFind()
+    return condTab, param1Tab, param2Tab
+  end
+
+  local function processFindConsoleRow(buf, boolstr)
+    local row = FindRow()
+    local bufstart = 0
+    local findstart, findend = string.find(buf, '^%s*%(%s*')
+
+    row.targetEntry = 0
+    row.conditionEntry = 0
+
+    if findstart and findend then
+      -- process paren
+      bufstart = findend + 1
     end
-  elseif currentFindTarget.time then
-      -- time format depends on PPQ column value
-    local retval, buf = r.ImGui_InputText(ctx, '##param1edit', findParam1TimeFormatStr, r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
-    if retval and kbdEntryIsCompleted() then
-      findParam1TimeFormatStr = timeFormatRebuf(buf)
-      processFind()
+    for k, v in ipairs(findTargetEntries) do
+      findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
+      if findstart and findend then
+        row.targetEntry = k
+        bufstart = findend + 1
+        -- mu.post('found target: ' .. v.label)
+        break
+      end
+    end
+
+    if row.targetEntry < 1 then return end
+
+    local condTab, param1Tab, param2Tab = findTargetToTabs(row.targetEntry)
+
+    -- do we need some way to filter out extraneous (/) chars?
+    for k, v in ipairs(condTab) do
+      -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
+      findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
+      if findstart and findend then
+        row.conditionEntry = k
+        bufstart = findend + 1
+
+        local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
+        if param1 and param1 ~= '' then
+          param1 = string.gsub(param1, '^%s*(.-)%s*$', '%1') -- trim whitespace
+          if #param1Tab ~= 0 then
+            for kk, vv in ipairs(param1Tab) do
+              local p1a, p1b = string.find(param1, vv.notation)
+              if p1a and p1b then
+                row.param1Entry = kk
+                break
+              end
+            end
+          elseif findTargetEntries[row.targetEntry].texteditor then
+            row.param1TextEditorStr = param1
+          elseif findTargetEntries[row.targetEntry].time then
+            row.param1TimeFormatStr = timeFormatRebuf(param1)
+          end
+        end
+        break
+      else
+        local param1, param2
+        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]*),*([^,]*)%)', bufstart)
+        if findstart and findend then
+          row.conditionEntry = k
+          if param1 and param1 ~= '' then
+            param1 = string.gsub(param1, '^%s*(.-)%s*$', '%1') -- trim whitespace
+            if #param1Tab ~= 0 then
+              for kk, vv in ipairs(param1Tab) do
+                local p1a, p1b = string.find(param1, vv.notation)
+                if p1a and p1b then
+                  row.param1Entry = kk
+                  break
+                end
+              end
+            elseif findTargetEntries[row.targetEntry].texteditor then
+              row.param1TextEditorStr = param1
+            elseif findTargetEntries[row.targetEntry].time then
+              row.param1TimeFormatStr = timeFormatRebuf(param1)
+            end
+          end
+          if param2 and param2 ~= '' then
+            param2 = string.gsub(param2, '^%s*(.-)%s*$', '%1') -- trim whitespace
+            if #param2Tab ~= 0 then
+              for kk, vv in ipairs(param2Tab) do
+                local p2a, p2b = string.find(param2, vv.notation)
+                if p2a and p2b then
+                  row.param2Entry = kk
+                  break
+                end
+              end
+            elseif findTargetEntries[row.targetEntry].texteditor then
+              row.param2TextEditorStr = param2
+            elseif findTargetEntries[row.targetEntry].time then
+              row.param2TimeFormatStr = timeFormatRebuf(param2)
+            end
+          end
+
+          row.param1Val = param1
+          row.param2Val = param2
+          mu.post(v.label .. ': ' .. (param1 and param1 or '') .. ' / ' .. (param2 and param2 or ''))
+          break
+        end
+      end
+    end
+
+    if row.targetEntry ~= 0 and row.conditionEntry ~= 0 then
+      if boolstr == '||' then row.booleanEntry = 2 end
+      addFindRow(nil, row)
+    else
+      mu.post('Error parsing row: ' .. buf)
     end
   end
 
-  r.ImGui_TableSetColumnIndex(ctx, 4) -- 'Parameter 2'
-  if currentFindCondition.terms > 1 then
-    if currentFindTarget.menu then
-      r.ImGui_Button(ctx, #param2Entries ~= 0 and param2Entries[currentFindParam2Entry].label or '---' )
-      if ((currentFindCondition.terms > 1 and #param2Entries ~= 0) and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-        r.ImGui_OpenPopup(ctx, 'param2Menu')
-      end
-    elseif currentFindTarget.texteditor then
-      local retval, buf = r.ImGui_InputText(ctx, '##param2edit', findParam2TextEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-      if retval then
-        findParam2TextEditorStr = timeFormatRebuf(buf)
-        processFind()
-      end
-    elseif currentFindTarget.time then
-      -- time format depends on PPQ column value
-      -- change format according to currentFindTimeFormatEntry
-      local retval, buf = r.ImGui_InputText(ctx, '##param2edit', findParam2TimeFormatStr, r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
-      if retval then
-        findParam2TimeFormatStr = buf
-        processFind()
+  local function processFindConsole()
+    local buf = findConsoleText
+    local bufstart = 0
+    local rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+')
+    if not (rowstart and rowend) then
+      rowstart, rowend, boolstr = string.find(buf, '%s+(||)%s+')
+    end
+    while rowstart and rowend do
+      local rowbuf = string.sub(buf, bufstart, rowend)
+      mu.post('got row: ' .. rowbuf) -- process
+      processFindConsoleRow(rowbuf, boolstr)
+      bufstart = rowend + 1
+      rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+', bufstart)
+      if not (rowstart and rowend) then
+        rowstart, rowend, boolstr = string.find(buf, '%s+(||)%s+', bufstart)
       end
     end
+    -- last iteration
+    mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
+    processFindConsoleRow(string.sub(buf, bufstart))
   end
 
-  r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
-  if currentFindTarget.time then
-    r.ImGui_Button(ctx, findTimeFormatEntries[currentFindTimeFormatEntry].label or '---' )
-    if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
-    end
+  r.ImGui_SameLine(ctx)
+  local fcrv, fcbuf = r.ImGui_InputText(ctx, '##findConsole', findConsoleText)
+  if fcrv and kbdEntryIsCompleted() then
+    findConsoleText = fcbuf
+    processFindConsole()
   end
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Separator(ctx)
+  r.ImGui_Spacing(ctx)
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+
+  ---------------------------------------------------------------------------
+  -------------------------------- USER VALUES ------------------------------
+
+  local function makeValueEntry(name)
+    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and math.floor(union[name]) or INVALID }
+  end
+
+  local function makeTextValueEntry(name)
+    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and union[name] or INVALID }
+  end
+
+  local function makePopupEntry(name)
+    return { operation = OP_ABS, opval = (union[name] and union[name] ~= INVALID) and union[name] or INVALID }
+  end
+
+  local function commonValueEntries()
+    for _, v in ipairs(commonEntries) do
+      userValues[v] = makeValueEntry(v)
+    end
+    userValues.selposticks = { operation = OP_ABS, opval = union.selposticks }
+    userValues.seldurticks = { operation = OP_ABS, opval = union.seldurticks }
+  end
+
+  commonValueEntries()
+  if popupFilter == NOTE_FILTER then
+    userValues.pitch = makeValueEntry('pitch')
+    userValues.vel = makeValueEntry('vel')
+    userValues.notedur = makeValueEntry('notedur')
+  elseif popupFilter >= 0x80 then
+    userValues.ccnum = makeValueEntry('ccnum')
+    userValues.ccval = makeValueEntry('ccval')
+    userValues.chanmsg = makeValueEntry('chanmsg')
+  else
+    userValues.texttype = makePopupEntry('texttype')
+    userValues.textmsg = makeTextValueEntry('textmsg')
+  end
+
+  ---------------------------------------------------------------------------
+  ------------------------------ INTERFACE GEN ------------------------------
+
+  -- requires userValues, above
+
+  canProcess = false
 
   local function createPopup(name, source, fun)
     if r.ImGui_BeginPopup(ctx, name) then
@@ -1795,41 +1992,1014 @@ local function windowFn()
     end
   end
 
-  createPopup('targetMenu', findTargetEntries, function(i)
-      currentFindTargetEntry = i
-      currentFindConditionEntry = 1
-      currentFindParam1Entry = 1
-      currentFindParam2Entry = 1
-      findParam1TextEditorStr = '0'
-      findParam1TimeFormatStr = '1.1.00'
-      findParam2TextEditorStr = '0'
-      findParam2TimeFormatStr = '1.1.00'
-      processFind()
-    end)
+  local function timeFormatToSeconds(buf)
+    -- b.b.f vs h:m.s vs ...?
+    local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)') -- obviously...
+    local bars = tonumber(tbars)
+    local beats = tonumber(tbeats)
+    local fraction = tonumber(tfraction)
+    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
+    return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars)
+  end
 
-  createPopup('conditionMenu', conditionEntries, function(i)
-      currentFindConditionEntry = i
-      processFind()
-    end)
+  local mainValueLabel
+  local subtypeValueLabel
 
-  createPopup('param1Menu', param1Entries, function(i)
-      currentFindParam1Entry = i
-      currentFindParam1Val = param1Entries[i]
-      processFind()
-    end)
+  local function doPrepFindEntries(row)
+    if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
 
-  createPopup('param2Menu', param2Entries, function(i)
-      currentFindParam2Entry = i
-      currentFindParam2Val = param2Entries[i]
-      processFind()
-    end)
+    local condTab, param1Tab, param2Tab = findTargetToTabs(row.targetEntry)
+    local curTarget = findTargetEntries[row.targetEntry]
+    local curCondition = condTab[row.conditionEntry]
 
-  createPopup('timeFormatMenu', findTimeFormatEntries, function(i)
-      currentFindTimeFormatEntry = i
-      processFind()
-    end)
+    return condTab, param1Tab, param2Tab, curTarget, curCondition
+  end
+
+  local function processFindParams(row, target, condition, param1Tab, param2Tab)
+    local param1Val = condition.terms <= 0 and ''
+      or (target.texteditor) and row.param1TextEditorStr
+      or target.time and tostring(timeFormatToSeconds(row.param1TimeFormatStr))
+      or #param1Tab ~= 0 and param1Tab[row.param1Entry].text
+      or ''
+    local param2Val = condition.terms <= 1 and ''
+      or target.texteditor and row.param2TextEditorStr
+      or target.time and tostring(timeFormatToSeconds(row.param2TimeFormatStr))
+      or #param2Tab ~= 0 and param2Tab[row.param2Entry].text
+      or ''
+    return param1Val, param2Val
+  end
+
+  local function findRowsToNotation()
+    local notationString = ''
+    for k, v in ipairs(findRowTable) do
+      local rowText = ''
+
+      local condTab, param1Tab, param2Tab, curTarget, curCondition = doPrepFindEntries(v)
+      rowText = curTarget.notation .. ' ' .. curCondition.notation
+      local param1Val, param2Val
+      if curTarget.menu then
+        param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[v.param1Entry].notation or nil
+        param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[v.param2Entry].notation or nil
+      else
+        param1Val, param2Val = processFindParams(v, curTarget, curCondition, param1Tab, param2Tab)
+      end
+      if string.match(curCondition.notation, '[!]*%$') then
+        rowText = rowText .. '('
+        if param1Val and param1Val ~= '' then
+          rowText = rowText .. param1Val
+          if param2Val and param2Val ~= '' then
+            rowText = rowText .. ', ' .. param2Val
+          end
+        end
+        rowText = rowText .. ')'
+      else
+        if param1Val and param1Val ~= '' then
+          rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
+        end
+      end
+      if k ~= #findRowTable then
+        rowText = rowText .. (v.booleanEntry == 2 and ' || ' or ' && ')
+      end
+      mu.post('row notation: ' .. rowText)
+      notationString = notationString .. rowText
+    end
+    return notationString
+  end
+
+  local function processFind(select)
+
+    local fnString = ''
+
+    for k, v in ipairs(findRowTable) do
+      local condTab, param1Tab, param2Tab, curTarget, curCondition = doPrepFindEntries(v)
+
+      if (#condTab == 0) then return end -- continue?
+
+      local targetTerm = curTarget.text
+      local condition = curCondition
+      local conditionVal = condition.text
+      local findTerm = ''
+
+      v.param1Val, v.param2Val = processFindParams(v, curTarget, condition, param1Tab, param2Tab)
+
+      local param1Term = v.param1Val -- param1Entries[currentFindParam1Entry].text
+      local param2Term = v.param2Val -- (condition.terms > 1 and #param2Entries ~= 0) and param2Entries[currentFindParam2Entry].text or ''
+
+      if curCondition.terms > 0 and param1Term == '' then return end
+
+      local param1Num = tonumber(param1Term)
+      local param2Num = tonumber(param2Term)
+      if param1Num and param2Num and param2Num < param1Num then
+        local tmp = param2Term
+        param2Term = param1Term
+        param1Term = tmp
+      end
+
+      findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
+
+      if condition.sub then
+        findTerm = conditionVal
+        findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
+        findTerm = string.gsub(findTerm, '{param1}', param1Term)
+        findTerm = string.gsub(findTerm, '{param2}', param2Term)
+      else
+        findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
+      end
+
+      findTerm = string.gsub(findTerm, '^%s*(.-)%s*$', '%1')
+
+      local rowStr = '( ' .. findTerm .. ' )'
+      if k ~= #findRowTable then
+        rowStr = rowStr .. ' ' .. findBooleanEntries[v.booleanEntry].text
+      end
+      mu.post(k .. ': ' .. rowStr)
+
+      fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr -- TODO Boolean
+
+    end
+    -- what about multiple param1?
+
+    fnString = 'local entry = ... \nreturn ' .. fnString
+    mu.post(fnString)
+
+    local context = {}
+    context.r = reaper
+    context.math = math
+    context.GetTimeSelectionStart = GetTimeSelectionStart
+    context.GetTimeSelectionEnd = GetTimeSelectionEnd
+    context.GetSubtypeValue = GetSubtypeValue
+    context.GetMainValue = GetMainValue
+
+    local findFn = load(fnString, nil, nil, context)
+    if not findFn then
+      mu.post('Fatal error: could not load selection criteria')
+    else
+      -- if not select then -- DEBUG
+      --   local entry = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 32, msg3 = 96 }
+      --   mu.post(findFn(entry))
+      -- else
+      --   mu.MIDI_OpenWriteTransaction(take)
+
+      --   for _, entry in ipairs(allEvents) do
+      --     entry.selected = findFn(entry)
+      --     if entry.type == NOTE_TYPE then
+      --       mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
+      --     elseif entry.type == CC_TYPE then
+      --       mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
+      --     elseif entry.type == SYXTEXT_TYPE then
+      --       mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+      --     end
+      --   end
+      --   mu.MIDI_CommitWriteTransaction(take, true, true)
+      -- end
+    end
+    return findFn
+  end
+
+  ----------------------------------------------
+  ---------- SELECTION CRITERIA TABLE ----------
+  ----------------------------------------------
+
+  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns)
+
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+  for _, label in ipairs(findColumns) do
+    local narrow = (label == '(' or label == ')' or label == 'Boolean')
+    local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_None()
+    local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(20)) or nil
+    r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
+  end
+  r.ImGui_TableHeadersRow(ctx)
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+
+  for k, v in ipairs(findRowTable) do
+    if findTargetEntries[v.targetEntry].notation == '$type' then
+      local label = GetSubtypeValueLabel(v.param1Entry)
+      if not subtypeValueLabel or subtypeValueLabel == label then subtypeValueLabel = label
+      else subtypeValueLabel = 'Multiple'
+      end
+      label = GetMainValueLabel(v.param1Entry)
+      if not mainValueLabel or mainValueLabel == label then mainValueLabel = label
+      else mainValueLabel = 'Multiple'
+      end
+    end
+  end
+
+  if not subtypeValueLabel then subtypeValueLabel = GetSubtypeValueLabel(1) end
+  if not mainValueLabel then mainValueLabel = GetMainValueLabel(1) end
+
+  for k, v in ipairs(findRowTable) do
+    r.ImGui_PushID(ctx, tostring(k))
+    local currentRow = v
+    local currentFindTarget = {}
+    local currentFindCondition = {}
+    local conditionEntries = {}
+    local param1Entries = {}
+    local param2Entries = {}
+
+    local function prepFindEntries()
+      conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = doPrepFindEntries(currentRow)
+    end
+
+    prepFindEntries()
+
+    r.ImGui_TableNextRow(ctx)
+
+    if k == selectedFindRow then
+      r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0x77FFFF1F)
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 0) -- '('
+    r.ImGui_InvisibleButton(ctx, '##invisible', 5, 5) -- or we can't test hover/click properly
+    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      -- r.ImGui_OpenPopup(ctx, 'startParenMenu')
+      selectedFindRow = k
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Target'
+    local targetText = currentRow.targetEntry > 0 and currentFindTarget.label or '---'
+    if targetText == 'Value 1' then
+      targetText = targetText .. ((subtypeValueLabel and subtypeValueLabel ~= '') and ' (' .. subtypeValueLabel .. ')' or '')
+    elseif targetText == 'Value 2' then
+      targetText = targetText .. ((mainValueLabel and mainValueLabel ~= '') and ' (' .. mainValueLabel .. ')' or '')
+    end
+    r.ImGui_Button(ctx, targetText)
+    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      selectedFindRow = k
+      r.ImGui_OpenPopup(ctx, 'targetMenu')
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Condition'
+    r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---' )
+    if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      selectedFindRow = k
+      r.ImGui_OpenPopup(ctx, 'conditionMenu')
+    end
+
+    local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+      EventChar < '0' || EventChar > '9' ? EventChar = 0;
+    ]])
+
+    r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 1'
+    if currentFindCondition.terms > 0 then
+      if currentFindTarget.menu then
+        r.ImGui_Button(ctx, #param1Entries ~= 0 and param1Entries[currentRow.param1Entry].label or '---' )
+        if (#param1Entries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          selectedFindRow = k
+          r.ImGui_OpenPopup(ctx, 'param1Menu')
+        end
+      elseif currentFindTarget.texteditor then
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param1edit', currentRow.param1TextEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+        if retval and kbdEntryIsCompleted() then
+          currentRow.param1TextEditorStr = buf
+          processFind()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedFindRow = k
+        end
+      elseif currentFindTarget.time then
+        -- time format depends on PPQ column value
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param1edit', currentRow.param1TimeFormatStr, r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+        if retval and kbdEntryIsCompleted() then
+          currentRow.param1TimeFormatStr = timeFormatRebuf(buf)
+          processFind()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedFindRow = k
+        end
+      end
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 4) -- 'Parameter 2'
+    if currentFindCondition.terms > 1 then
+      if currentFindTarget.menu then
+        r.ImGui_Button(ctx, #param2Entries ~= 0 and param2Entries[currentRow.param2Entry].label or '---' )
+        if ((currentFindCondition.terms > 1 and #param2Entries ~= 0) and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          r.ImGui_OpenPopup(ctx, 'param2Menu')
+          selectedFindRow = k
+        end
+      elseif currentFindTarget.texteditor then
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param2edit', currentRow.param2TextEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+        if retval and kbdEntryIsCompleted() then
+          currentRow.param2TextEditorStr = buf
+          processFind()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedFindRow = k
+        end
+      elseif currentFindTarget.time then
+        -- time format depends on PPQ column value
+        -- change format according to currentFindTimeFormatEntry
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param2edit', currentRow.param2TimeFormatStr, r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+        if retval and kbdEntryIsCompleted() then
+          currentRow.param2TimeFormatStr = timeFormatRebuf(buf)
+          processFind()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedFindRow = k
+        end
+      end
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
+    if currentFindTarget.time and currentFindCondition.terms ~= 0 then
+      r.ImGui_Button(ctx, findTimeFormatEntries[currentRow.timeFormatEntry].label or '---' )
+      if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        selectedFindRow = k
+        r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
+      end
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 6) -- End Paren
+    if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      selectedFindRow = k
+      -- r.ImGui_OpenPopup(ctx, 'endParenMenu')
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 7) -- Boolean
+    if k ~= #findRowTable then
+      r.ImGui_Button(ctx, findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
+      if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
+        selectedFindRow = k
+        processFind()
+      end
+    end
+
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+    if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
+      selectedFindRow = k
+    end
+    r.ImGui_PopStyleColor(ctx)
+    r.ImGui_PopStyleColor(ctx)
+
+    createPopup('targetMenu', findTargetEntries, function(i)
+        currentRow:init()
+        currentRow.targetEntry = i
+        processFind()
+      end)
+
+    createPopup('conditionMenu', conditionEntries, function(i)
+        currentRow.conditionEntry = i
+        processFind()
+      end)
+
+    createPopup('param1Menu', param1Entries, function(i)
+        currentRow.param1Entry = i
+        currentRow.param1Val = param1Entries[i]
+        processFind()
+      end)
+
+    createPopup('param2Menu', param2Entries, function(i)
+        currentRow.param2Entry = i
+        currentRow.param2Val = param2Entries[i]
+        processFind()
+      end)
+
+    createPopup('timeFormatMenu', findTimeFormatEntries, function(i)
+        currentRow.timeFormatEntry = i
+        processFind()
+      end)
+
+    r.ImGui_PopID(ctx)
+  end
 
   r.ImGui_EndTable(ctx)
+
+  updateCurrentRect()
+
+  local oldY = r.ImGui_GetCursorPosY(ctx)
+
+  generateLabel('Selection Criteria')
+
+  r.ImGui_SetCursorPosY(ctx, oldY + scaled(20))
+
+  ---------------------------------------------------------------------------
+  ------------------------------- FIND BUTTONS ------------------------------
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Separator(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Spacing(ctx)
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+
+  r.ImGui_AlignTextToFramePadding(ctx)
+
+  -- r.ImGui_Button(ctx, 'Select')
+  -- if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  --   processFind(true)
+  --   mu.post('notation: ' .. findRowsToNotation())
+  -- end
+
+  -- r.ImGui_SameLine(ctx)
+
+  -- r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(50))
+  r.ImGui_Button(ctx, findScopeTable[currentFindScope].label, scaled(150))
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    r.ImGui_OpenPopup(ctx, 'findScopeMenu')
+  end
+  updateCurrentRect()
+  generateLabel('Selection Scope')
+
+  createPopup('findScopeMenu', findScopeTable, function(i)
+      currentFindScope = i
+    end)
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Separator(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Separator(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Spacing(ctx)
+
+  ---------------------------------------------------------------------------
+  -------------------------------- ACTION ROWS ------------------------------
+
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x550077FF)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x770099FF)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x660088FF)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x440066FF)
+
+  r.ImGui_AlignTextToFramePadding(ctx)
+  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
+  r.ImGui_Button(ctx, 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    addActionRow()
+  end
+
+  r.ImGui_SameLine(ctx)
+  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
+  if selectedActionRow == 0 then
+    r.ImGui_BeginDisabled(ctx)
+  end
+  r.ImGui_Button(ctx, 'Remove Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  if selectedActionRow == 0 then
+    r.ImGui_EndDisabled(ctx)
+  end
+
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    removeActionRow()
+  end
+
+  local function actionTargetToTabs(targetEntry)
+    local opTab = {}
+    local param1Tab = {}
+    local param2Tab = {}
+
+    if targetEntry > 0 then
+      if targetEntry == 1 then -- position
+        opTab = actionPositionOperationEntries
+      elseif targetEntry == 2 then -- length
+        opTab = actionLengthOperationEntries
+      elseif targetEntry == 3 then -- channel
+        opTab = actionChannelOperationEntries
+        -- param1Tab = actionChannelParam1Entries
+        -- param2Tab = actionChannelParam1Entries
+      elseif targetEntry == 4 then -- type
+        opTab = actionTypeOperationEntries
+        param1Tab = findTypeParam1Entries -- same entries as find
+      elseif targetEntry == 5 then -- property
+        opTab = actionGenericOperationEntries
+      elseif targetEntry == 6 then -- value1
+        opTab = actionSubtypeOperationEntries
+      elseif targetEntry == 7 then -- value2
+        opTab = actionVelocityOperationEntries
+      elseif targetEntry == 8 then -- velocity
+        opTab = actionVelocityOperationEntries
+      elseif targetEntry == 9 then -- relvel
+        opTab = actionVelocityOperationEntries
+      else
+        opTab = actionGenericOperationEntries
+      end
+    end
+    return opTab, param1Tab, param2Tab
+  end
+
+  local function processActionConsoleRow(buf)
+    local row = ActionRow()
+    local bufstart = 0
+    local findstart, findend
+
+    row.targetEntry = 0
+    row.operationEntry = 0
+
+    for k, v in ipairs(actionTargetEntries) do
+      findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s*', bufstart)
+      if findstart and findend then
+        row.targetEntry = k
+        bufstart = findend + 1
+        mu.post('found target: ' .. v.label)
+        break
+      end
+    end
+
+    if row.targetEntry < 1 then return end
+
+    local opTab, param1Tab, param2Tab = actionTargetToTabs(row.targetEntry)
+
+    -- do we need some way to filter out extraneous (/) chars?
+    for k, v in ipairs(opTab) do
+      -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
+      findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
+      if findstart and findend then
+        row.operationEntry = k
+        bufstart = findend + 1
+
+        local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
+        if param1 and param1 ~= '' then
+          param1 = string.gsub(param1, '^%s*(.-)%s*$', '%1') -- trim whitespace
+          if #param1Tab ~= 0 then
+            for kk, vv in ipairs(param1Tab) do
+              local p1a, p1b = string.find(param1, vv.notation)
+              if p1a and p1b then
+                row.param1Entry = kk
+                break
+              end
+            end
+          elseif findTargetEntries[row.targetEntry].texteditor then
+            row.param1TextEditorStr = param1
+          elseif findTargetEntries[row.targetEntry].time then
+            row.param1TimeFormatStr = timeFormatRebuf(param1)
+          end
+        end
+        break
+      else
+        local param1, param2
+        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]*),*([^,]*)%)', bufstart)
+        if findstart and findend then
+          row.operationEntry = k
+          if param1 and param1 ~= '' then
+            param1 = string.gsub(param1, '^%s*(.-)%s*$', '%1') -- trim whitespace
+            if #param1Tab ~= 0 then
+              for kk, vv in ipairs(param1Tab) do
+                local p1a, p1b = string.find(param1, vv.notation)
+                if p1a and p1b then
+                  row.param1Entry = kk
+                  break
+                end
+              end
+            elseif findTargetEntries[row.targetEntry].texteditor then
+              row.param1TextEditorStr = param1
+            elseif findTargetEntries[row.targetEntry].time then
+              row.param1TimeFormatStr = timeFormatRebuf(param1)
+            end
+          end
+          if param2 and param2 ~= '' then
+            param2 = string.gsub(param2, '^%s*(.-)%s*$', '%1') -- trim whitespace
+            if #param2Tab ~= 0 then
+              for kk, vv in ipairs(param2Tab) do
+                local p2a, p2b = string.find(param2, vv.notation)
+                if p2a and p2b then
+                  row.param2Entry = kk
+                  break
+                end
+              end
+            elseif findTargetEntries[row.targetEntry].texteditor then
+              row.param2TextEditorStr = param2
+            elseif findTargetEntries[row.targetEntry].time then
+              row.param2TimeFormatStr = timeFormatRebuf(param2)
+            end
+          end
+
+          row.param1Val = param1
+          row.param2Val = param2
+          mu.post(v.label .. ': ' .. (param1 and param1 or '') .. ' / ' .. (param2 and param2 or ''))
+          break
+        end
+      end
+    end
+
+    if row.targetEntry ~= 0 and row.operationEntry ~= 0 then
+      addActionRow(nil, row)
+    else
+      mu.post('Error parsing row: ' .. buf)
+    end
+  end
+
+  local function processActionConsole()
+    local buf = actionConsoleText
+    local bufstart = 0
+    local rowstart, rowend = string.find(buf, '%s+(&&)%s+')
+    while rowstart and rowend do
+      local rowbuf = string.sub(buf, bufstart, rowend)
+      mu.post('got row: ' .. rowbuf) -- process
+      processActionConsoleRow(rowbuf)
+      bufstart = rowend + 1
+      rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+', bufstart)
+    end
+    -- last iteration
+    mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
+    processActionConsoleRow(string.sub(buf, bufstart))
+  end
+
+  r.ImGui_SameLine(ctx)
+  local acrv, acbuf = r.ImGui_InputText(ctx, '##actionConsole', actionConsoleText)
+  if acrv and kbdEntryIsCompleted() then
+    actionConsoleText = acbuf
+    processActionConsole()
+  end
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Separator(ctx)
+  r.ImGui_Spacing(ctx)
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+
+  ----------------------------------------------
+  ---------------- ACTIONS TABLE ---------------
+  ----------------------------------------------
+
+  local function doPrepActionEntries(row)
+    if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
+
+    local opTab, param1Tab, param2Tab = actionTargetToTabs(row.targetEntry)
+    local curTarget = actionTargetEntries[row.targetEntry]
+    local curOperation = opTab[row.operationEntry]
+    return opTab, param1Tab, param2Tab, curTarget, curOperation
+  end
+
+  local function processAction(select)
+
+    local fnString = ''
+
+    for k, v in ipairs(actionRowTable) do
+      local opTab, param1Tab, param2Tab, curTarget, curOperation = doPrepActionEntries(v)
+
+      if (#opTab == 0) then return end -- continue?
+
+      local targetTerm = curTarget.text
+      local operation = curOperation
+      local operationVal = operation.text
+      local actionTerm = ''
+
+      v.param1Val = (curTarget.texteditor) and v.param1TextEditorStr
+        or curTarget.time and tostring(timeFormatToSeconds(v.param1TimeFormatStr))
+        or #param1Tab ~= 0 and param1Tab[v.param1Entry].text
+        or ''
+      v.param2Val = operation.terms <= 1 and ''
+        or curTarget.texteditor and v.param2TextEditorStr
+        or curTarget.time and tostring(timeFormatToSeconds(v.param2TimeFormatStr))
+        or #param2Tab ~= 0 and param2Tab[v.param2Entry].text
+        or ''
+
+      local param1Term = v.param1Val
+      local param2Term = v.param2Val
+
+      if param1Term == '' then return end
+
+      local param1Num = tonumber(param1Term)
+      local param2Num = tonumber(param2Term)
+      if param1Num and param2Num and param2Num < param1Num then
+        local tmp = param2Term
+        param2Term = param1Term
+        param1Term = tmp
+      end
+
+      if not operation.sub then
+        targetTerm = targetTerm .. ' = ' .. targetTerm
+        actionTerm = targetTerm .. ' ' .. operationVal .. (operation.terms == 0 and '' or ' ' .. param1Term)
+      else
+        actionTerm = targetTerm .. ' ' .. operationVal
+      end
+
+      if operation.sub then
+        actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
+        actionTerm = string.gsub(actionTerm, '{param1}', param1Term)
+        actionTerm = string.gsub(actionTerm, '{param2}', param2Term)
+      end
+
+      actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
+
+      local rowStr = actionTerm
+      if curTarget.cond then
+        rowStr = 'if ' .. curTarget.cond .. ' then ' .. rowStr .. ' end'
+      end
+      mu.post(k .. ': ' .. rowStr)
+
+      fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr ..'\n'
+
+    end
+    -- what about multiple param1?
+
+    fnString = 'return function(entry, _value1, _value2)\n' .. fnString .. '\nreturn entry' .. '\nend'
+    mu.post(fnString)
+
+    local context = {}
+    context.r = reaper
+    context.math = math
+    context.GetTimeSelectionStart = GetTimeSelectionStart
+    context.GetTimeSelectionEnd = GetTimeSelectionEnd
+
+    local findFn = processFind()
+    if findFn then
+      local actionFn = load(fnString, nil, nil, context)()
+      if not actionFn then
+        mu.post('Fatal error: could not load action description')
+      else
+        if not select then -- DEBUG
+          local entry = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
+          -- mu.tprint(entry, 2)
+          actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry)) -- always returns true
+          -- mu.tprint(entry, 2)
+        else
+          if currentActionScope == 1 then -- delete
+            mu.MIDI_OpenWriteTransaction(take)
+            for _, entry in ipairs(allEvents) do
+              if findFn(entry) then
+                if entry.type == NOTE_TYPE then
+                  mu.MIDI_DeleteNote(take, entry.idx)
+                elseif entry.type == CC_TYPE then
+                  mu.MIDI_DeleteCC(take, entry.idx)
+                elseif entry.type == SYXTEXT_TYPE then
+                  mu.MIDI_DeleteTextSysexEvt(take, entry.idx)
+                end
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, true, true)
+          elseif currentActionScope == 2 then -- transform
+            mu.MIDI_OpenWriteTransaction(take)
+            for _, entry in ipairs(allEvents) do
+              if findFn(entry) then
+                actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry))
+                if entry.type == NOTE_TYPE then
+                  mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
+                elseif entry.type == CC_TYPE then
+                  mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
+                elseif entry.type == SYXTEXT_TYPE then
+                  mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
+                end
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, true, true)
+          elseif currentActionScope == 3 then -- insert
+          elseif currentActionScope == 4 then -- insert exclusive
+          elseif currentActionScope == 5 then -- copy
+          elseif currentActionScope == 6 then -- extract to track
+          elseif currentActionScope == 7 then -- select
+            mu.MIDI_OpenWriteTransaction(take)
+            for _, entry in ipairs(allEvents) do
+              entry.selected = findFn(entry)
+              if entry.type == NOTE_TYPE then
+                mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
+              elseif entry.type == CC_TYPE then
+                mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
+              elseif entry.type == SYXTEXT_TYPE then
+                mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, true, true)
+          elseif currentActionScope == 8 then -- extract to lanes
+          elseif currentActionScope == 9 then -- deselect
+            mu.MIDI_OpenWriteTransaction(take)
+            for _, entry in ipairs(allEvents) do
+              entry.selected = (findFn(entry) == false) and true or false
+              mu.post(entry.selected)
+              if entry.type == NOTE_TYPE then
+                mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
+              elseif entry.type == CC_TYPE then
+                mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
+              elseif entry.type == SYXTEXT_TYPE then
+                mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, true, true)
+          end
+        end
+      end
+    end
+  end
+
+  r.ImGui_BeginTable(ctx, 'Actions', #actionColumns)
+
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
+  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+  for _, label in ipairs(actionColumns) do
+    local flags = r.ImGui_TableColumnFlags_None()
+    r.ImGui_TableSetupColumn(ctx, label, flags)
+  end
+  r.ImGui_TableHeadersRow(ctx)
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+
+  for k, v in ipairs(actionRowTable) do
+    r.ImGui_PushID(ctx, tostring(k))
+    local currentRow = v
+    local currentActionTarget = {}
+    local currentActionOperation = {}
+    local operationEntries = {}
+    local param1Entries = {}
+    local param2Entries = {}
+
+    local function prepActionEntries()
+      operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = doPrepActionEntries(currentRow)
+    end
+
+    prepActionEntries()
+
+    r.ImGui_TableNextRow(ctx)
+
+    if k == selectedActionRow then
+      r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0xFF77FF1F)
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 0) -- 'Target'
+    r.ImGui_Button(ctx, currentRow.targetEntry > 0 and currentActionTarget.label or '---' )
+    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      selectedActionRow = k
+      r.ImGui_OpenPopup(ctx, 'targetMenu')
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Operation'
+    r.ImGui_Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---' )
+    if (#operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      selectedActionRow = k
+      r.ImGui_OpenPopup(ctx, 'operationMenu')
+    end
+
+    local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+      EventChar < '0' || EventChar > '9' ? EventChar = 0;
+    ]])
+
+    r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
+    if currentActionOperation.terms > 0 then
+      if currentActionTarget.menu then
+        r.ImGui_Button(ctx, #param1Entries ~= 0 and param1Entries[currentRow.param1Entry].label or '---' )
+        if (#param1Entries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          selectedActionRow = k
+          r.ImGui_OpenPopup(ctx, 'param1Menu')
+        end
+      elseif currentActionTarget.texteditor then
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param1edit', currentRow.param1TextEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+
+        if retval and kbdEntryIsCompleted() then
+          currentRow.param1TextEditorStr = buf
+          processAction()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedActionRow = k
+        end
+      elseif currentActionTarget.time then
+        -- time format depends on PPQ column value
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param1edit', currentRow.param1TimeFormatStr, r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+        if retval and kbdEntryIsCompleted() then
+          currentRow.param1TimeFormatStr = timeFormatRebuf(buf)
+          processAction()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedActionRow = k
+        end
+      end
+    end
+
+    r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
+    if currentActionOperation.terms > 1 then
+      if currentActionTarget.menu then
+        r.ImGui_Button(ctx, #param2Entries ~= 0 and param2Entries[currentRow.param2Entry].label or '---' )
+        if ((currentActionOperation.terms > 1 and #param2Entries ~= 0) and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          r.ImGui_OpenPopup(ctx, 'param2Menu')
+          selectedActionRow = k
+        end
+      elseif currentActionTarget.texteditor then
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param2edit', currentRow.param2TextEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+        if retval then
+          currentRow.param2TextEditorStr = timeFormatRebuf(buf)
+          processAction()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedActionRow = k
+        end
+      elseif currentActionTarget.time then
+        -- time format depends on PPQ column value
+        -- change format according to currentFindTimeFormatEntry
+        r.ImGui_BeginGroup(ctx)
+        local retval, buf = r.ImGui_InputText(ctx, '##param2edit', currentRow.param2TimeFormatStr, r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+        if retval then
+          currentRow.param2TimeFormatStr = buf
+          processAction()
+        end
+        r.ImGui_EndGroup(ctx)
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          selectedActionRow = k
+        end
+      end
+    end
+
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+    if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
+      selectedActionRow = k
+    end
+    r.ImGui_PopStyleColor(ctx)
+    r.ImGui_PopStyleColor(ctx)
+
+    createPopup('targetMenu', actionTargetEntries, function(i)
+        currentRow:init()
+        currentRow.targetEntry = i
+        processAction()
+      end)
+
+    createPopup('operationMenu', operationEntries, function(i)
+        currentRow.operationEntry = i
+        processAction()
+      end)
+
+    createPopup('param1Menu', param1Entries, function(i)
+        currentRow.param1Entry = i
+        currentRow.param1Val = param1Entries[i]
+        processAction()
+      end)
+
+    createPopup('param2Menu', param2Entries, function(i)
+        currentRow.param2Entry = i
+        currentRow.param2Val = param2Entries[i]
+        processAction()
+      end)
+
+    r.ImGui_PopID(ctx)
+  end
+
+  r.ImGui_EndTable(ctx)
+
+  updateCurrentRect();
+
+  local oldY = r.ImGui_GetCursorPosY(ctx)
+
+  generateLabel('Actions')
+
+  r.ImGui_SetCursorPosY(ctx, oldY + scaled(20))
+
+  ---------------------------------------------------------------------------
+  ------------------------------ ACTION BUTTONS -----------------------------
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Separator(ctx)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Spacing(ctx)
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+
+  r.ImGui_AlignTextToFramePadding(ctx)
+
+  r.ImGui_Button(ctx, 'Apply')
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    processAction(true)
+  end
+
+  r.ImGui_SameLine(ctx)
+
+  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(50))
+  r.ImGui_Button(ctx, actionScopeTable[currentActionScope].label, scaled(120))
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    r.ImGui_OpenPopup(ctx, 'actionScopeMenu')
+  end
+  updateCurrentRect()
+  generateLabel('Action Scope')
+
+  createPopup('actionScopeMenu', actionScopeTable, function(i)
+      currentActionScope = i
+    end)
+
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx)
+
+  ---------------------------------------------------------------------------
+  -------------------------------- PRESET SAVE ------------------------------
+
+  -- TODO
 
   ---------------------------------------------------------------------------
   ------------------------------- MOD KEYS ------------------------------
@@ -2129,7 +3299,7 @@ end
 local function updateOneFont(name)
   if not fontInfo[name] then return end
 
-  local newFontSize = math.floor(fontInfo[name..'DefaultSize'] * canvasScale)
+  local newFontSize = math.floor(scaled(fontInfo[name..'DefaultSize']))
   if newFontSize < 1 then newFontSize = 1 end
   local fontSize = fontInfo[name..'Size']
 

@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.19
+-- @version 0.1.20
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix for looped MIDI items
+--   - fix for overlapped note events inserted via the SetEvt API (thanks smandrap)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -559,6 +559,19 @@ end
 local function ReplaceMIDIEvent(event, newEvent)
   newEvent.idx = event.idx
   newEvent.MIDIidx = event.MIDIidx
+
+  -- fix note-off connection to note-on
+  newEvent.noteOnIdx = event.noteOnIdx
+  if newEvent.noteOnIdx then
+    MIDIEvents[newEvent.noteOnIdx].endppqpos = newEvent.ppqpos
+  end
+
+  -- fix note-on connection to note-off
+  newEvent.noteOffIdx = event.noteOffIdx
+  if newEvent.noteOffIdx then
+    newEvent.endppqpos = MIDIEvents[newEvent.noteOffIdx].ppqpos
+  end
+
   MIDIEvents[event.MIDIidx] = newEvent
   if newEvent.idx then
     if newEvent:is_a(NoteOnEvent) then noteEvents[newEvent.idx + 1] = newEvent

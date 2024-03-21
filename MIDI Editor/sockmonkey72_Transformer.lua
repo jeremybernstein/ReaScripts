@@ -22,7 +22,7 @@ package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
 -- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
 local mu = require 'MIDIUtils'
 mu.ENFORCE_ARGS = false -- turn off type checking
-mu.CORRECT_OVERLAPS = false -- manual correction
+mu.CORRECT_OVERLAPS = true
 mu.CLAMP_MIDI_BYTES = true
 
 -- TODO: library to execute a preset without UI
@@ -113,14 +113,8 @@ local findParserError = ''
 
 local refocusInput = false
 
--- TODO: save these as ExtState
-local metricWantsBarRestart = false
-local metricWantsDotted = false
-local metricWantsTriplet = false
-local metricSlopPercent = 0
-
--- NOT ExtState, just for program duration
 local metricLastUnit = 3 -- 1/16 in findMetricGridParam1Entries
+local metricLastBarRestart = false
 
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
@@ -399,35 +393,51 @@ local function QuantizeTo(val, quant)
   return newval
 end
 
-local function OnMetricGrid(take, PPQ, ppqpos, subdiv, gridStr)
+local function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   if not take then return false end
+
+  local subdiv = mgParams.param1
+  local gridStr = mgParams.param2
+
   local gridLen = #gridStr
   local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
+  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
+  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+
   local cycleLength = gridUnit * gridLen
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
+  local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
+  local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
+  if postSlop == 0 then postSlop = 1 end
 
   -- handle cycle lengths > measure
-  if metricWantsBarRestart then
+  if mgParams.wantsBarRestart then
     if not SOM then SOM = som end
     if som - SOM > cycleLength then
       SOM = som
       CACHED_METRIC = nil
+      CACHED_WRAPPED = nil
     end
     ppqpos = ppqpos - SOM
   end
 
-  -- mu.post(CACHED_METRIC and CACHED_METRIC or 'nil')
+  local wrapped = math.floor(ppqpos / cycleLength)
 
+  -- mu.post('metric: ' .. (CACHED_METRIC and CACHED_METRIC or 'nil'), 'wrapped: ' .. (CACHED_WRAPPED and CACHED_WRAPPED or 'nil'), 'curwrap; '.. wrapped)
+
+  if wrapped ~= CACHED_WRAPPED then
+    CACHED_WRAPPED = wrapped
+    CACHED_METRIC = nil
+  end
   local modPos = math.fmod(ppqpos, cycleLength)
-  if modPos ~= ppqpos and CACHED_METRIC == gridLen then CACHED_METRIC = nil end
 
   -- CACHED_METRIC is used to avoid iterating from the beginning each time
   for i = CACHED_METRIC and CACHED_METRIC or 1, gridLen do
     local c = gridStr:sub(i, i)
-    local startRange = gridUnit * (i - 1)
-    local endRange = startRange + gridUnit
-    -- mu.post(startRange, endRange, modPos)
-    if modPos >= startRange and modPos < endRange then
+    local trueStartRange = (gridUnit * (i - 1))
+    local startRange = trueStartRange - preSlop
+    local endRange = trueStartRange + postSlop
+    if modPos >= startRange and modPos <= endRange then
       CACHED_METRIC = i
       return c ~= '0' and true or false
     end
@@ -455,8 +465,8 @@ local findPositionConditionEntries = {
   { notation = '!:inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true },
   { notation = ':inbarrange', label = 'Inside Bar Range', text = '{tgt} >= {param1} and {tgt} <= {param1}', terms = 2, sub = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:inbarrange', label = 'Outside Bar Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true},
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, entry.ppqpos, {param1}, \'{param2}\')', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, entry.ppqpos, {param1}, \'{param2}\')', terms = 2, sub = true, metricgrid = true },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
   { notation = ':beforecursor', label = 'Before Cursor', text = '< r.GetCursorPositionEx(0)', terms = 0 },
   { notation = ':aftercursor', label = 'After Cursor', text = '> r.GetCursorPositionEx(0)', terms = 0 },
   { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
@@ -522,15 +532,15 @@ local findTimeFormatEntries = { -- time format not yet respected, these are also
 }
 
 local findMetricGridParam1Entries = {
-  { notation = '$1/64', label = '1/64', text = '(1/64)' },
-  { notation = '$1/32', label = '1/32', text = '(1/32)' },
-  { notation = '$1/16', label = '1/16', text = '(1/16)' },
-  { notation = '$1/8', label = '1/8', text = '(1/8)' },
-  { notation = '$1/4', label = '1/4', text = '(1/4)' },
-  { notation = '$1/2', label = '1/2', text = '(1/2)' },
-  { notation = '$1/1', label = '1/1', text = '(1)' },
-  { notation = '$2/1', label = '2/1', text = '(2)' },
-  { notation = '$4/1', label = '4/1', text = '(4)' },
+  { notation = '$1/64', label = '1/64', text = '0,015625' },
+  { notation = '$1/32', label = '1/32', text = '0.03125' },
+  { notation = '$1/16', label = '1/16', text = '0.0625' },
+  { notation = '$1/8', label = '1/8', text = '0.125' },
+  { notation = '$1/4', label = '1/4', text = '0.25' },
+  { notation = '$1/2', label = '1/2', text = '0.5' },
+  { notation = '$1/1', label = '1/1', text = '1' },
+  { notation = '$2/1', label = '2/1', text = '2' },
+  { notation = '$4/1', label = '4/1', text = '4' },
   -- we need some way to enable triplets and dotted notes, I guess as selections at the bottom of the menu?
 }
 
@@ -665,33 +675,9 @@ local isClosing = false
 ----------------------------- GLOBAL FUNS -----------------------------------
 
 local function handleExtState()
-  -- overlapFavorsSelected = r.GetExtState(scriptID, 'overlapFavorsSelected') == '1'
-  -- wantsBBU = r.GetExtState(scriptID, 'bbu') == '1'
-  -- reverseScroll = r.GetExtState(scriptID, 'reverseScroll') == '1'
-  -- dockID = 0
-  -- if r.HasExtState(scriptID, 'dockID') then
-  --   local str = r.GetExtState(scriptID, 'dockID')
-  --   if str then dockID = tonumber(str) end
-  -- end
-
-  -- if r.HasExtState(scriptID, 'wantsOverlapCorrection') then
-  --   local wants = r.GetExtState(scriptID, 'wantsOverlapCorrection')
-  --   wantsOverlapCorrection = wants == '1' and OVERLAP_AUTO or wants == '2' and OVERLAP_TIMEOUT or wants == '0' and OVERLAP_MANUAL or OVERLAP_AUTO
-  -- end
-  -- if r.HasExtState(scriptID, 'overlapCorrectionTimeout') then
-  --   local timeout = tonumber(r.GetExtState(scriptID, 'overlapCorrectionTimeout'))
-  --   if timeout then
-  --     timeout = timeout < 100 and 100 or timeout > 5000 and 5000 or timeout
-  --     overlapCorrectionTimeout = math.floor(timeout)
-  --   end
-  -- end
 end
 
 local function prepRandomShit()
-  -- -- remove deprecated ExtState entries
-  -- if r.HasExtState(scriptID, 'correctOverlaps') then
-  --   r.DeleteExtState(scriptID, 'correctOverlaps', true)
-  -- end
   handleExtState()
 end
 
@@ -1766,25 +1752,6 @@ local function windowFn()
   local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets/'
   local presetExt = '.tfmrPreset'
 
-  local function enumerateTransformerPresets()
-    if not dirExists(presetPath) then return {} end
-
-    local idx = 0
-    local fnames = {}
-
-    r.EnumerateFiles(presetPath, -1)
-    local fname = r.EnumerateFiles(presetPath, idx)
-    while fname do
-      if fname:match('%' .. presetExt .. '$') then
-        fname = { label = fname:gsub('%' .. presetExt .. '$', '') }
-        table.insert(fnames, fname)
-      end
-      idx = idx + 1
-      fname = r.EnumerateFiles(presetPath, idx)
-    end
-    return fnames
-  end
-
   local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
     -- collect the keys
     local keys = {}
@@ -1804,6 +1771,39 @@ local function windowFn()
         return keys[i], t[keys[i]]
       end
     end
+  end
+
+  local function enumerateTransformerPresets()
+    if not dirExists(presetPath) then return {} end
+
+    local idx = 0
+    local fnames = {}
+
+    r.EnumerateFiles(presetPath, -1)
+    local fname = r.EnumerateFiles(presetPath, idx)
+    while fname do
+      if fname:match('%' .. presetExt .. '$') then
+        fname = { label = fname:gsub('%' .. presetExt .. '$', '') }
+        table.insert(fnames, fname)
+      end
+      idx = idx + 1
+      fname = r.EnumerateFiles(presetPath, idx)
+    end
+    local sorted = {}
+    for _, v in spairs(fnames, function (t, a, b) return string.lower(t[a].label) < string.lower(t[b].label) end) do
+      table.insert(sorted, v)
+    end
+    return sorted
+  end
+
+  local function tableCopy(obj, seen)
+    if type(obj) ~= 'table' then return obj end
+    if seen and seen[obj] then return seen[obj] end
+    local s = seen or {}
+    local res = setmetatable({}, getmetatable(obj))
+    s[obj] = res
+    for k, v in pairs(obj) do res[tableCopy(k, s)] = tableCopy(v, s) end
+    return res
   end
 
   local function deserialize(str)
@@ -1974,6 +1974,27 @@ local function windowFn()
     return rv
   end
 
+  local function generateMetricGridNotation(row)
+    if not row.mg then return '' end
+    local mgStr = '|'
+    mgStr = mgStr .. (((row.mg.modifiers & 2) ~= 0) and 't' or ((row.mg.modifiers & 1) ~= 0) and 'd' or '-')
+    mgStr = mgStr .. (row.mg.wantsBarRestart and 'b' or '-')
+    mgStr = mgStr .. string.format('|%0.2f|%0.2f', row.mg.preSlopPercent, row.mg.postSlopPercent)
+    return mgStr
+  end
+
+  local function parseMetricGridNotation(str)
+    local fs, fe, mod, rst, pre, post = string.find(str, '|([td%-])([b-])|(.-)|(.-)$')
+    if fs and fe then
+      local modval = mod == 't' and 2 or mod == 'd' and 1 or 0
+      local rstval = rst == 'b' and true or false
+      local preval = tonumber(pre)
+      local postval = tonumber(post)
+      return modval, rstval, preval, postval
+    end
+    return 0, false, 0, 0
+  end
+
   local function getEditorTypeForRow(target, condOp)
     local paramType = condOp.menu and PARAM_TYPE_MENU
       or condOp.texteditor and PARAM_TYPE_TEXTEDITOR
@@ -2000,6 +2021,10 @@ local function windowFn()
         local pa, pb = string.find(paramStr, vv.notation)
         if pa and pb then
           row[paramName .. 'Entry'] = kk
+          if paramType == PARAM_TYPE_METRICGRID then
+            row.mg = {}
+            row.mg.modifiers, row.mg.wantsBarRestart, row.mg.preSlopPercent, row.mg.postSlopPercent = parseMetricGridNotation(paramStr:sub(pb + 1))
+          end
           break
         end
       end
@@ -2075,6 +2100,7 @@ local function windowFn()
           bufstart = findend + 1
 
           condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
+          if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
           if param1 and param1 ~= '' then
             param1 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1)
           end
@@ -2179,39 +2205,6 @@ local function windowFn()
     return label
   end
 
-  local function metricParam1Special(fun)
-    r.ImGui_Separator(ctx)
-
-    local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', metricWantsDotted)
-    if rv then
-      metricWantsDotted = sel
-      if sel then metricWantsTriplet = not metricWantsDotted end
-      fun(1, true)
-    end
-    rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', metricWantsTriplet)
-    if rv then
-      metricWantsTriplet = sel
-      if sel then metricWantsDotted = not metricWantsTriplet end
-      fun(2, true)
-    end
-
-    r.ImGui_Separator(ctx)
-
-    rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', metricWantsBarRestart)
-    if rv then
-      metricWantsBarRestart = sel
-      fun(3, true)
-    end
-    r.ImGui_Text(ctx, 'Slop (% of unit)')
-    r.ImGui_SameLine(ctx)
-    local tbuf
-    rv, tbuf = r.ImGui_InputDouble(ctx, '##slopInput', metricSlopPercent) -- TODO: regular text input (allow float)
-    if kbdEntryIsCompleted(rv) then
-      metricSlopPercent = tbuf
-      fun(4, true)
-    end
-  end
-
   local function createPopup(name, source, selEntry, fun, special)
     if r.ImGui_BeginPopup(ctx, name) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -2267,13 +2260,22 @@ local function windowFn()
   end
 
   local function doProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation)
-    if paramType == PARAM_TYPE_METRICGRID and terms == 1 then paramType = PARAM_TYPE_MENU end
+    local addMetricGridNotation = false
+    if paramType == PARAM_TYPE_METRICGRID then
+      if terms == 1 then
+        if notation then addMetricGridNotation = true end
+        paramType = PARAM_TYPE_MENU
+      end
+    end
     local paramVal = condOp.terms < terms and ''
       or paramType == PARAM_TYPE_TEXTEDITOR and row[paramName .. 'TextEditorStr']
       or paramType == PARAM_TYPE_TIME and (notation and row[paramName .. 'TimeFormatStr'] or tostring(timeFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
       or paramType == PARAM_TYPE_TIMEDUR and (notation and row[paramName .. 'TimeFormatStr'] or tostring(lengthFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
-      or paramType == PARAM_TYPE_METRICGRID and row[paramName .. 'TextEditorStr'] -- for now
+      or paramType == PARAM_TYPE_METRICGRID and row[paramName .. 'TextEditorStr']
       or #paramTab ~= 0 and (notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text)
+    if addMetricGridNotation then
+      paramVal = paramVal .. generateMetricGridNotation(row)
+    end
     return paramVal
   end
 
@@ -2383,11 +2385,19 @@ local function windowFn()
 
       findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
 
+      local paramType = getEditorTypeForRow(curTarget, condition)
+
       if condition.sub then
         findTerm = conditionVal
         findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
         findTerm = string.gsub(findTerm, '{param1}', param1Term)
         findTerm = string.gsub(findTerm, '{param2}', param2Term)
+        if paramType == PARAM_TYPE_METRICGRID then
+          local mgParams = tableCopy(v.mg)
+          mgParams.param1 = param1Num
+          mgParams.param2 = param2Term
+          findTerm = string.gsub(findTerm, '{metricgridparams}', serialize(mgParams))
+        end
       else
         findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
       end
@@ -2587,9 +2597,55 @@ local function windowFn()
         currentRow.conditionEntry = i
         if string.match(conditionEntries[i].notation, 'metricgrid') then
           currentRow.param1Entry = metricLastUnit
+          currentRow.mg = {
+            wantsBarRestart = metricLastBarRestart,
+            preSlopPercent = 0,
+            postSlopPercent = 0,
+            modifiers = 0
+          }
         end
         processFind()
       end)
+
+    local function metricParam1Special(fun)
+      r.ImGui_Separator(ctx)
+
+      local mg = currentRow.mg
+
+      local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', mg.modifiers & 1 ~= 0)
+      if rv then
+        mg.modifiers = sel and 1 or 0
+        fun(1, true)
+      end
+
+      rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', mg.modifiers & 2 ~= 0)
+      if rv then
+        mg.modifiers = sel and 2 or 0
+        fun(2, true)
+      end
+
+      r.ImGui_Separator(ctx)
+
+      rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
+      if rv then
+        mg.wantsBarRestart = sel
+        fun(3, true)
+      end
+      r.ImGui_Text(ctx, 'Slop (% of unit)')
+      r.ImGui_SameLine(ctx)
+      local tbuf
+      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPreInput', mg.preSlopPercent) -- TODO: regular text input (allow float)
+      if kbdEntryIsCompleted(rv) then
+        mg.preSlopPercent = tbuf
+        fun(4, true)
+      end
+      r.ImGui_SameLine(ctx)
+      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPostInput', mg.postSlopPercent) -- TODO: regular text input (allow float)
+      if kbdEntryIsCompleted(rv) then
+        mg.postSlopPercent = tbuf
+        fun(5, true)
+      end
+    end
 
     createPopup('param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
         if not isSpecial then
@@ -2778,9 +2834,10 @@ local function windowFn()
         break
       else
         local param1, param2
-        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]*)[,%s]*([^,]*)%)', bufstart)
+        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
         if findstart and findend then
           row.operationEntry = k
+          if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
           if param1 and param1 ~= '' then
             param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1)
           end
@@ -2986,6 +3043,7 @@ local function windowFn()
     if not take then return end
 
     CACHED_METRIC = nil
+    CACHED_WRAPPED = nil
     SOM = nil
 
     local fnString = ''
@@ -3436,6 +3494,7 @@ local function windowFn()
         statusMsg = 'Name must contain at least 1 character'
         statusTime = r.time_precise()
         statusContext = statusCtx
+        inOKDialog = false
         return
       end
       local path, fname = pathFn()

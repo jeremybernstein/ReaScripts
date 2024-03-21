@@ -23,6 +23,7 @@ package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
 local mu = require 'MIDIUtils'
 mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = false -- manual correction
+mu.CLAMP_MIDI_BYTES = true
 
 -- TODO: library to execute a preset without UI
 -- package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
@@ -601,11 +602,12 @@ local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', te
 local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
 local actionOperationRandom = { notation = ':random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
+-- this might need a different range for length vs MIDI data
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 } }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true }
 -- this has issues with handling range (should support negative numbers, and clamp output to supplied range). challenging, since the clamping is target-dependent and probably needs to be written to the actionFn
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
 
 local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
@@ -1948,7 +1950,7 @@ local function windowFn()
         r.ImGui_BeginGroup(ctx)
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
-          row[paramName .. 'TextEditorStr'] = paramType == PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, target.range)
+          row[paramName .. 'TextEditorStr'] = paramType == PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, condOp.range and condOp.range or target.range)
           procFn()
         end
         r.ImGui_EndGroup(ctx)
@@ -2002,7 +2004,7 @@ local function windowFn()
         end
       end
     elseif paramType == PARAM_TYPE_TEXTEDITOR then
-      row[paramName .. 'TextEditorStr'] = ensureNumString(paramStr, target.range)
+      row[paramName .. 'TextEditorStr'] = ensureNumString(paramStr, condOp.range and condOp.range or target.range)
     elseif paramType == PARAM_TYPE_TIME then
       row[paramName .. 'TimeFormatStr'] = timeFormatRebuf(paramStr)
     elseif paramType == PARAM_TYPE_TIMEDUR then

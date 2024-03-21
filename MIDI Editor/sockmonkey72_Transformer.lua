@@ -501,8 +501,8 @@ local findTypeParam1Entries = {
 }
 
 local findPropertyParam1Entries = {
-  { notation = '$muted', label = 'Muted', text = '0x02' },
-  { notation = '$selected', label = 'Selected', text = '0x01' }
+  { notation = '$selected', label = 'Selected', text = '0x01' },
+  { notation = '$muted', label = 'Muted', text = '0x02' }
 }
 
 local findChannelParam1Entries = {
@@ -3100,6 +3100,8 @@ local function windowFn()
     fnString = 'return function(entry, _value1, _value2, _firstSel, _lastSel)\n' .. fnString .. '\nreturn entry' .. '\nend'
     -- mu.post(fnString)
 
+    r.Undo_BeginBlock2(0)
+
     while take do
       initializeTake(take)
 
@@ -3136,7 +3138,7 @@ local function windowFn()
                 end
               end
             end
-            mu.MIDI_CommitWriteTransaction(take, true, true)
+            mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$transform' then
             local found = {}
             local firstTime = 0xFFFFFFFF
@@ -3162,7 +3164,7 @@ local function windowFn()
                   mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
                 end
               end
-              mu.MIDI_CommitWriteTransaction(take, true, true)
+              mu.MIDI_CommitWriteTransaction(take, false, true)
             end
           elseif notation == '$insert' then
           elseif notation == '$insertexclusive' then
@@ -3179,7 +3181,7 @@ local function windowFn()
                 mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
               end
             end
-            mu.MIDI_CommitWriteTransaction(take, true, true)
+            mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$selectadd' then
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
@@ -3195,7 +3197,7 @@ local function windowFn()
                 end
               end
             end
-            mu.MIDI_CommitWriteTransaction(take, true, true)
+            mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$invertselect' then
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
@@ -3208,7 +3210,7 @@ local function windowFn()
                 mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
               end
             end
-            mu.MIDI_CommitWriteTransaction(take, true, true)
+            mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$deselect' then
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
@@ -3224,7 +3226,7 @@ local function windowFn()
                 end
               end
             end
-            mu.MIDI_CommitWriteTransaction(take, true, true)
+            mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$extracttrack' then
           elseif notation == '$extractlane' then
           end
@@ -3232,6 +3234,8 @@ local function windowFn()
         take = getNextTake()
       end
     end
+
+    r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
   end
 
   r.ImGui_BeginTable(ctx, 'Actions', #actionColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, r.ImGui_GetFrameHeightWithSpacing(ctx) * 6.2)

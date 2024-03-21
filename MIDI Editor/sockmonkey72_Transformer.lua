@@ -24,6 +24,11 @@ local mu = require 'MIDIUtils'
 mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = false -- manual correction
 
+-- TODO: library to execute a preset without UI
+-- package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
+-- require "Transformer/TransformeUtils"
+-- local tx = require 'TransformerLib'
+
 local function fileExists(name)
   local f = io.open(name,'r')
   if f ~= nil then io.close(f) return true else return false end
@@ -193,7 +198,7 @@ end
 local findScopeTable = {
   { notation = '$everywhere', label = 'Everywhere' },
   { notation = '$selected', label = 'Selected Items' },
-  { notation = '$midieditor', label = 'Frontmost MIDI Editor' }
+  { notation = '$midieditor', label = 'Active MIDI Editor' }
 }
 
 local function findScopeFromNotation(notation)
@@ -429,12 +434,9 @@ local function OnMetricGrid(take, PPQ, ppqpos, subdiv, gridStr)
   return false
 end
 
-local function LinearChangeOverTimeSelection(projTime, p1, p2)
-  local tsStart = GetTimeSelectionStart()
-  local tsEnd = GetTimeSelectionEnd()
-
-  if tsStart ~= tsEnd and projTime >= tsStart and projTime <= tsEnd then
-    local linearPos = (projTime - tsStart) / (tsEnd - tsStart)
+local function LinearChangeOverSelection(projTime, p1, p2, firstTime, lastTime)
+  if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
+    local linearPos = (projTime - firstTime) / (lastTime - firstTime)
     local val = ((p2 - p1) * linearPos) + p1
     return math.floor(val + 0.5)
   end
@@ -601,8 +603,9 @@ local actionOperationRound = { notation = ':round', label = 'Round By', text = '
 local actionOperationRandom = { notation = ':random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
-local actionOperationLine = { notation = ':line', label = 'Linear Change in Time Selection Range', text = '= LinearChangeOverTimeSelection(entry.projtime, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Time Selection Range', text = '= {tgt} + LinearChangeOverTimeSelection(entry.projtime, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
+local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true }
+-- this has issues with handling range (should support negative numbers, and clamp output to supplied range). challenging, since the clamping is target-dependent and probably needs to be written to the actionFn
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true }
 
 local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
@@ -827,7 +830,7 @@ local function windowFn()
   context.GetMainValue = GetMainValue
   context.QuantizeTo = QuantizeTo
   context.OnMetricGrid = OnMetricGrid
-  context.LinearChangeOverTimeSelection = LinearChangeOverTimeSelection
+  context.LinearChangeOverSelection = LinearChangeOverSelection
 
   local hoverCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderHovered())
   local hoverAlphaCol = (hoverCol &~ 0xFF) | 0x3F
@@ -2898,6 +2901,7 @@ local function windowFn()
       e.msg3 = e.vel
       e.notedur = e.endppqpos - e.ppqpos
       e.chanmsg = 0x90
+      e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
       calcMIDITime(take, e)
       table.insert(allEvents, e)
       noteidx = mu.MIDI_EnumNotes(take, noteidx)
@@ -2918,6 +2922,7 @@ local function windowFn()
         e.ccnum = e.msg2
         e.ccval = e.msg3
       end
+      e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
       calcMIDITime(take, e)
       table.insert(allEvents, e)
       ccidx = mu.MIDI_EnumCC(take, ccidx)
@@ -2927,6 +2932,7 @@ local function windowFn()
     while syxidx ~= -1 do
       local e = { type = SYXTEXT_TYPE, idx = syxidx }
       _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.textmsg = mu.MIDI_GetTextSysexEvt(take, syxidx)
+      e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
       calcMIDITime(take, e)
       table.insert(allEvents, e)
       syxidx = mu.MIDI_EnumSelTextSysexEvts(take, syxidx)
@@ -3030,7 +3036,7 @@ local function windowFn()
       fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr ..'\n'
 
     end
-    fnString = 'return function(entry, _value1, _value2)\n' .. fnString .. '\nreturn entry' .. '\nend'
+    fnString = 'return function(entry, _value1, _value2, _firstSel, _lastSel)\n' .. fnString .. '\nreturn entry' .. '\nend'
     -- mu.post(fnString)
 
     local actionFn
@@ -3070,10 +3076,20 @@ local function windowFn()
             end
             mu.MIDI_CommitWriteTransaction(take, true, true)
           elseif notation == '$transform' then
-            mu.MIDI_OpenWriteTransaction(take)
+            local found = {}
+            local firstTime = 0xFFFFFFFF
+            local lastTime = -0xFFFFFFFF
             for _, entry in ipairs(allEvents) do
               if findFn(entry) then
-                actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry))
+                if entry.projtime < firstTime then firstTime = entry.projtime end
+                if entry.projtime > lastTime then lastTime = entry.projtime end
+                table.insert(found, entry)
+              end
+            end
+            if #found ~=0 then
+              mu.MIDI_OpenWriteTransaction(take)
+              for _, entry in ipairs(found) do
+                actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
                 entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
                 if entry.type == NOTE_TYPE then
                   entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
@@ -3084,8 +3100,8 @@ local function windowFn()
                   mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
                 end
               end
+              mu.MIDI_CommitWriteTransaction(take, true, true)
             end
-            mu.MIDI_CommitWriteTransaction(take, true, true)
           elseif notation == '$insert' then
           elseif notation == '$insertexclusive' then
           elseif notation == '$copy' then

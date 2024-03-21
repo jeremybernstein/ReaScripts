@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.20
+-- @version 0.1.21
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix for overlapped note events inserted via the SetEvt API (thanks smandrap)
+--   - add CLAMP_MIDI_BYTES global property to clamp rather than cycle MIDI values on under/overflow
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -24,6 +24,7 @@ MIDIUtils.ENFORCE_ARGS = true -- turn off for efficiency
 MIDIUtils.CORRECT_OVERLAPS = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
 MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END = true
+MIDIUtils.CLAMP_MIDI_BYTES = false
 
 local NOTE_TYPE = 0
 local NOTEOFF_TYPE = 1
@@ -117,6 +118,14 @@ local function ReadREAPERConfigVar_Int(name)
     end
   end
   return nil
+end
+
+local function ensureValueRange(val)
+  if MIDIUtils.CLAMP_MIDI_BYTES then
+    return val < 0 and 0 or val > 127 and 127 or val
+  else
+    return val & 0x7F
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -935,15 +944,15 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
       AdjustNoteOff(noteoff, 'chan', event.chan)
     end
     if pitch then
-      event.msg2 = pitch & 0x7F
+      event.msg2 = ensureValueRange(pitch)
       AdjustNoteOff(noteoff, 'msg2', event.msg2)
     end
     if vel then
-      event.msg3 = vel & 0x7F
+      event.msg3 = ensureValueRange(vel)
       if event.msg3 < 1 then event.msg3 = 1 end
     end
     if relvel then
-      AdjustNoteOff(noteoff, 'msg3', relvel & 0x7F)
+      AdjustNoteOff(noteoff, 'msg3', ensureValueRange(relvel))
     end
     event.recalcMIDI = true
     rv = true
@@ -959,8 +968,8 @@ local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, p
                                 FlagsFromSelMute(selected, muted),
                                 table.concat({
                                   string.char(0x90 | (chan & 0xF)),
-                                  string.char(pitch & 0x7F),
-                                  string.char(vel & 0x7F)
+                                  string.char(ensureValueRange(pitch)),
+                                  string.char(ensureValueRange(vel))
                                 }))
   newNoteOn.noteOffIdx = -1
   InsertMIDIEvent(newNoteOn)
@@ -971,7 +980,7 @@ local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, p
                                   table.concat({
                                     string.char(0x80 | newNoteOn.chan),
                                     string.char(newNoteOn.msg2),
-                                    string.char(relvel and (relvel & 0x7F) or 0)
+                                    string.char(relvel and ensureValueRange(relvel) or 0)
                                   }))
   newNoteOn.endppqpos = newNoteOff.ppqpos
   newNoteOff.noteOnIdx = #MIDIEvents
@@ -1149,10 +1158,10 @@ local function MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg
       event.chan = chan & 0x0F
     end
     if msg2 then
-      event.msg2 = msg2 & 0x7F
+      event.msg2 = ensureValueRange(msg2)
     end
     if msg3 then
-      event.msg3 = msg3 & 0x7F
+      event.msg3 = ensureValueRange(msg3)
       if chanmsg == 0xC0 or chanmsg == 0xD0 then event.msg3 = 0 end
     end
     event.recalcMIDI = true
@@ -1207,8 +1216,8 @@ local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2,
                         newFlags,
                         table.concat({
                           string.char((chanmsg & 0xF0) | (chan & 0xF)),
-                          string.char(msg2 & 0x7F),
-                          string.char(msg3 & 0x7F)
+                          string.char(ensureValueRange(msg2)),
+                          string.char(ensureValueRange(msg3))
                         }))
   InsertMIDIEvent(newCC)
   return true, newCC.idx
@@ -2028,6 +2037,8 @@ MIDIUtils.MIDI_GetPPQ = function(take)
   )
   return select(2, xpcall(MIDI_GetPPQ, OnError, take))
 end
+
+MIDIUtils.tprint = tprint
 
 -----------------------------------------------------------------------------
 ----------------------------------- EXPORT ----------------------------------

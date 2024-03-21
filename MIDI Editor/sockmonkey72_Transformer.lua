@@ -313,7 +313,7 @@ local findTargetEntries = {
   { notation = '$property', label = 'Property', text = 'entry.flags', menu = true },
   { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(entry)', texteditor = true, range = {0, 127} }, -- different for AT and PB
   { notation = '$value2', label = 'Value 2', text = 'GetMainValue(entry)', texteditor = true, range = {0, 127} }, -- CC# or Note# or ...
-  { notation = '$velocity', label = 'Velocity', text = 'entry.chanmsg == 0x90 and entry.msg2', texteditor = true, range = {1, 127} },
+  { notation = '$velocity', label = 'Velocity', text = 'entry.chanmsg == 0x90 and entry.msg3', texteditor = true, range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity', text = 'entry.relvel', texteditor = true, range = {0, 127} }
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }

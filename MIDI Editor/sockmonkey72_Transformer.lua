@@ -12,6 +12,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
+-- metric grid: dotted/triplet, slop, length of range, reset at next bar after pattern concludes (added to end of menu?)
 -- TODO: time input
 -- TODO: functions
 
@@ -106,6 +107,15 @@ local findParserError = ''
 
 local refocusInput = false
 
+-- TODO: save these as ExtState
+local metricWantsBarRestart = false
+local metricWantsDotted = false
+local metricWantsTriplet = false
+local metricSlopPercent = 0
+
+-- NOT ExtState, just for program duration
+local metricLastUnit = 3 -- 1/16 in findMetricGridParam1Entries
+
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
 
@@ -180,15 +190,24 @@ local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaCl
   return c
 end
 
-local currentFindScope = 3
-
 local findScopeTable = {
   { notation = '$everywhere', label = 'Everywhere' },
   { notation = '$selected', label = 'Selected Items' },
   { notation = '$midieditor', label = 'Frontmost MIDI Editor' }
 }
 
-local currentActionScope = 7
+local function findScopeFromNotation(notation)
+  if notation then
+    for k, v in ipairs(findScopeTable) do
+      if v.notation == notation then
+        return k
+      end
+    end
+  end
+  return findScopeFromNotation('$midieditor') -- default
+end
+
+local currentFindScope = findScopeFromNotation()
 
 local actionScopeTable = {
   { notation = '$delete', label = 'Delete' },
@@ -196,11 +215,26 @@ local actionScopeTable = {
   { notation = '$insert', label = 'Insert' },
   { notation = '$insertexclusive', label = 'Insert Exclusive' },
   { notation = '$copy', label = 'Copy' }, -- creates new track/item?
+  { notation = '$select', label = 'Select Matching' },
+  { notation = '$selectadd', label = 'Add Matching To Selection' },
+  { notation = '$invertselect', label = 'Select Non-Matching' },
+  { notation = '$deselect', label = 'Deselect Matching' },
   { notation = '$extracttrack', label = 'Extract to Track' }, -- how is this different?
-  { notation = '$select', label = 'Select' },
   { notation = '$extractlane', label = 'Extract to Lanes' },
-  { notation = '$deselect', label = 'Deselect' }
 }
+
+local function actionScopeFromNotation(notation)
+  if notation then
+    for k, v in ipairs(actionScopeTable) do
+      if v.notation == notation then
+        return k
+      end
+    end
+  end
+  return actionScopeFromNotation('$select') -- default
+end
+
+local currentActionScope = actionScopeFromNotation()
 
 local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
 local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
@@ -359,6 +393,54 @@ local function QuantizeTo(val, quant)
   return newval
 end
 
+local function OnMetricGrid(take, PPQ, ppqpos, subdiv, gridStr)
+  if not take then return false end
+  local gridLen = #gridStr
+  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
+  local cycleLength = gridUnit * gridLen
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
+
+  -- handle cycle lengths > measure
+  if metricWantsBarRestart then
+    if not SOM then SOM = som end
+    if som - SOM > cycleLength then
+      SOM = som
+      CACHED_METRIC = nil
+    end
+    ppqpos = ppqpos - SOM
+  end
+
+  -- mu.post(CACHED_METRIC and CACHED_METRIC or 'nil')
+
+  local modPos = math.fmod(ppqpos, cycleLength)
+  if modPos ~= ppqpos and CACHED_METRIC == gridLen then CACHED_METRIC = nil end
+
+  -- CACHED_METRIC is used to avoid iterating from the beginning each time
+  for i = CACHED_METRIC and CACHED_METRIC or 1, gridLen do
+    local c = gridStr:sub(i, i)
+    local startRange = gridUnit * (i - 1)
+    local endRange = startRange + gridUnit
+    -- mu.post(startRange, endRange, modPos)
+    if modPos >= startRange and modPos < endRange then
+      CACHED_METRIC = i
+      return c ~= '0' and true or false
+    end
+  end
+  return false
+end
+
+local function LinearChangeOverTimeSelection(projTime, p1, p2)
+  local tsStart = GetTimeSelectionStart()
+  local tsEnd = GetTimeSelectionEnd()
+
+  if tsStart ~= tsEnd and projTime >= tsStart and projTime <= tsEnd then
+    local linearPos = (projTime - tsStart) / (tsEnd - tsStart)
+    local val = ((p2 - p1) * linearPos) + p1
+    return math.floor(val + 0.5)
+  end
+  return 0
+end
+
 local findPositionConditionEntries = {
   { notation = '==', label = 'Equal', text = '==', terms = 1 },
   { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
@@ -370,8 +452,8 @@ local findPositionConditionEntries = {
   { notation = '!:inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true },
   { notation = ':inbarrange', label = 'Inside Bar Range', text = '{tgt} >= {param1} and {tgt} <= {param1}', terms = 2, sub = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:inbarrange', label = 'Outside Bar Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true},
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid({tgt}, {param1})', terms = 1, sub = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid({tgt}, {param1})', terms = 2, sub = true},
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, entry.ppqpos, {param1}, \'{param2}\')', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, entry.ppqpos, {param1}, \'{param2}\')', terms = 2, sub = true, metricgrid = true },
   { notation = ':beforecursor', label = 'Before Cursor', text = '< r.GetCursorPositionEx(0)', terms = 0 },
   { notation = ':aftercursor', label = 'After Cursor', text = '> r.GetCursorPositionEx(0)', terms = 0 },
   { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
@@ -429,11 +511,24 @@ local findChannelParam1Entries = {
   { notation = '16', label = '16', text = '15' },
 }
 
-local findTimeFormatEntries = {
+local findTimeFormatEntries = { -- time format not yet respected, these are also not 100% relevant to REAPER
   { label = 'PPQ' },
   { label = 'Seconds' },
   { label = 'Samples' },
   { label = 'Frames' }
+}
+
+local findMetricGridParam1Entries = {
+  { notation = '$1/64', label = '1/64', text = '(1/64)' },
+  { notation = '$1/32', label = '1/32', text = '(1/32)' },
+  { notation = '$1/16', label = '1/16', text = '(1/16)' },
+  { notation = '$1/8', label = '1/8', text = '(1/8)' },
+  { notation = '$1/4', label = '1/4', text = '(1/4)' },
+  { notation = '$1/2', label = '1/2', text = '(1/2)' },
+  { notation = '$1/1', label = '1/1', text = '(1)' },
+  { notation = '$2/1', label = '2/1', text = '(2)' },
+  { notation = '$4/1', label = '4/1', text = '(4)' },
+  -- we need some way to enable triplets and dotted notes, I guess as selections at the bottom of the menu?
 }
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
@@ -487,7 +582,7 @@ local actionTargetEntries = {
   { notation = '$property', label = 'Property', text = 'entry.flags', menu = true },
   { notation = '$value1', label = 'Value 1', text = 'entry[_value1]', texteditor = true, range = {0, 127} },
   { notation = '$value2', label = 'Value 2', text = 'entry[_value2]', texteditor = true, range = {0, 127} },
-  { notation = '$velocity', label = 'Velocity', text = 'entry.msg2', texteditor = true, cond = 'entry.chanmsg == 0x90', range = {1, 127} },
+  { notation = '$velocity', label = 'Velocity', text = 'entry.msg3', texteditor = true, cond = 'entry.chanmsg == 0x90', range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity', text = 'entry.relvel', texteditor = true, cond = 'entry.chanmsg == 0x90', range = {0, 127} },
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
@@ -506,8 +601,8 @@ local actionOperationRound = { notation = ':round', label = 'Round By', text = '
 local actionOperationRandom = { notation = ':random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
-local actionOperationLine = { notation = ':line', label = 'Linear Change in Time Selection Range', text = '= LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true, texteditor = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Time Selection Range', text = '= {tgt} + LinearChangeOverTimeSelection({param1}, {param2})', terms = 2, sub = true, texteditor = true }
+local actionOperationLine = { notation = ':line', label = 'Linear Change in Time Selection Range', text = '= LinearChangeOverTimeSelection(entry.projtime, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Time Selection Range', text = '= {tgt} + LinearChangeOverTimeSelection(entry.projtime, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
 
 local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
@@ -556,6 +651,7 @@ local PARAM_TYPE_MENU = 1
 local PARAM_TYPE_TEXTEDITOR = 2
 local PARAM_TYPE_TIME = 3
 local PARAM_TYPE_TIMEDUR = 4
+local PARAM_TYPE_METRICGRID = 5
 
 local selectedNotes = {} -- interframe cache
 local isClosing = false
@@ -730,6 +826,14 @@ local function windowFn()
   context.GetSubtypeValue = GetSubtypeValue
   context.GetMainValue = GetMainValue
   context.QuantizeTo = QuantizeTo
+  context.OnMetricGrid = OnMetricGrid
+  context.LinearChangeOverTimeSelection = LinearChangeOverTimeSelection
+
+  local hoverCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderHovered())
+  local hoverAlphaCol = (hoverCol &~ 0xFF) | 0x3F
+  local activeCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderActive())
+  local activeAlphaCol = (activeCol &~ 0xFF) | 0x7F
+  local _, framePaddingY = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
 
   ---------------------------------------------------------------------------
   --------------------------- BUNCH OF FUNCTIONS ----------------------------
@@ -1540,6 +1644,25 @@ local function windowFn()
   ---------------------------------------------------------------------------
   --------------------------------- UTILITIES -------------------------------
 
+  -- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
+  --- Check if a file or directory exists in this path
+  local function filePathExists(file)
+    local ok, err, code = os.rename(file, file)
+    if not ok then
+      if code == 13 then
+      -- Permission denied, but it exists
+        return true
+      end
+    end
+    return ok, err
+  end
+
+    --- Check if a directory exists in this path
+  local function dirExists(path)
+    -- "/" works on both Unix and Windows
+    return filePathExists(path:match('/$') and path or path..'/')
+  end
+
   local function ensureNumString(str, range)
     local num = tonumber(str)
     if not num then num = 0 end
@@ -1639,8 +1762,11 @@ local function windowFn()
   local presetExt = '.tfmrPreset'
 
   local function enumerateTransformerPresets()
+    if not dirExists(presetPath) then return {} end
+
     local idx = 0
     local fnames = {}
+
     r.EnumerateFiles(presetPath, -1)
     local fname = r.EnumerateFiles(presetPath, idx)
     while fname do
@@ -1764,7 +1890,7 @@ local function windowFn()
     removeFindRow()
   end
 
-  local function findTargetToTabs(targetEntry)
+  local function findTargetToTabs(row, targetEntry)
     local condTab = {}
     local param1Tab = {}
     local param2Tab = {}
@@ -1773,6 +1899,10 @@ local function windowFn()
       local notation = findTargetEntries[targetEntry].notation
       if notation == '$position' then
         condTab = findPositionConditionEntries
+        local condition = condTab[row.conditionEntry]
+        if condition and condition.metricgrid then
+          param1Tab = findMetricGridParam1Entries
+        end
       -- elseif notation == '$length' then
       elseif notation == '$channel' then
         condTab = findGenericConditionEntries
@@ -1788,7 +1918,7 @@ local function windowFn()
       -- elseif notation == '$value2' then
       -- elseif notation == '$velocity' then
       -- elseif notation == '$relvel' then
-    else
+      else
         condTab = findGenericConditionEntries
       end
     end
@@ -1801,6 +1931,7 @@ local function windowFn()
 
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, needsTerms, idx, procFn)
     local rv = 0
+    if paramType == PARAM_TYPE_METRICGRID and needsTerms == 1 then paramType = PARAM_TYPE_MENU end -- special case, sorry
     if condOp.terms >= needsTerms then
         local targetTab = row:is_a(FindRow) and findTargetEntries or actionTargetEntries
         local target = targetTab[row.targetEntry]
@@ -1810,11 +1941,11 @@ local function windowFn()
           rv = idx
           r.ImGui_OpenPopup(ctx, paramName .. 'Menu')
         end
-      elseif paramType == PARAM_TYPE_TEXTEDITOR then
+      elseif paramType == PARAM_TYPE_TEXTEDITOR or paramType == PARAM_TYPE_METRICGRID then -- for now
         r.ImGui_BeginGroup(ctx)
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
-          row[paramName .. 'TextEditorStr'] = ensureNumString(buf, target.range)
+          row[paramName .. 'TextEditorStr'] = paramType == PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, target.range)
           procFn()
         end
         r.ImGui_EndGroup(ctx)
@@ -1838,8 +1969,26 @@ local function windowFn()
     return rv
   end
 
-  local function handleParam(row, paramName, paramTab, paramStr)
-    local targetTab = row:is_a(FindRow) and findTargetEntries or actionTargetEntries
+  local function getEditorTypeForRow(target, condOp)
+    local paramType = condOp.menu and PARAM_TYPE_MENU
+      or condOp.texteditor and PARAM_TYPE_TEXTEDITOR
+      or condOp.time and PARAM_TYPE_TIME
+      or condOp.timedur and PARAM_TYPE_TIMEDUR
+      or condOp.metricgrid and PARAM_TYPE_METRICGRID
+      or 0
+    if paramType == PARAM_TYPE_UNKNOWN then
+      paramType = target.menu and PARAM_TYPE_MENU
+      or target.texteditor and PARAM_TYPE_TEXTEDITOR
+      or target.time and PARAM_TYPE_TIME
+      or target.timedur and PARAM_TYPE_TIMEDUR
+      or target.metricgrid and PARAM_TYPE_METRICGRID
+      or PARAM_TYPE_TEXTEDITOR
+    end
+    return paramType
+  end
+
+  local function handleParam(row, target, condOp, paramName, paramTab, paramStr)
+    local paramType = getEditorTypeForRow(target, condOp)
     paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
     if #paramTab ~= 0 then
       for kk, vv in ipairs(paramTab) do
@@ -1849,12 +1998,14 @@ local function windowFn()
           break
         end
       end
-    elseif targetTab[row.targetEntry].texteditor then
-      row[paramName .. 'TextEditorStr'] = ensureNumString(paramStr, targetTab[row.targetEntry].range)
-    elseif targetTab[row.targetEntry].time then
+    elseif paramType == PARAM_TYPE_TEXTEDITOR then
+      row[paramName .. 'TextEditorStr'] = ensureNumString(paramStr, target.range)
+    elseif paramType == PARAM_TYPE_TIME then
       row[paramName .. 'TimeFormatStr'] = timeFormatRebuf(paramStr)
-    elseif targetTab[row.targetEntry].timedur then
+    elseif paramType == PARAM_TYPE_TIMEDUR then
       row[paramName .. 'imeFormatStr'] = lengthFormatRebuf(paramStr)
+    elseif paramType == PARAM_TYPE_METRICGRID then
+      row[paramName .. 'TextEditorStr'] = paramStr
     end
     return paramStr
   end
@@ -1889,7 +2040,8 @@ local function windowFn()
 
     if row.targetEntry < 1 then return end
 
-    local condTab, param1Tab, param2Tab = findTargetToTabs(row.targetEntry)
+    local param1Tab, param2Tab
+    local condTab = findTargetToTabs(row, row.targetEntry)
 
     -- do we need some way to filter out extraneous (/) chars?
     for k, v in ipairs(condTab) do
@@ -1900,25 +2052,29 @@ local function windowFn()
       if findstart and findend then
         row.conditionEntry = k
         bufstart = findend + 1
-
+        condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
         findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
         if param1 and param1 ~= '' then
           bufstart = findend + 1
-          param1 = handleParam(row, 'param1', param1Tab, param1)
+          param1 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1)
         end
         row.param1Val = param1
         break
       else
-        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-),%s*([^,]-)%)', bufstart)
+        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
+        if not (findstart and findend) then
+          findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%(%s-%)', bufstart)
+        end
         if findstart and findend then
           row.conditionEntry = k
           bufstart = findend + 1
 
+          condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
           if param1 and param1 ~= '' then
-            param1 = handleParam(row, 'param1', param1Tab, param1)
+            param1 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1)
           end
           if param2 and param2 ~= '' then
-            param2 = handleParam(row, 'param2', param2Tab, param2)
+            param2 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param2', param2Tab, param2)
           end
           row.param1Val = param1
           row.param2Val = param2
@@ -2018,7 +2174,40 @@ local function windowFn()
     return label
   end
 
-  local function createPopup(name, source, fun)
+  local function metricParam1Special(fun)
+    r.ImGui_Separator(ctx)
+
+    local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', metricWantsDotted)
+    if rv then
+      metricWantsDotted = sel
+      if sel then metricWantsTriplet = not metricWantsDotted end
+      fun(1, true)
+    end
+    rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', metricWantsTriplet)
+    if rv then
+      metricWantsTriplet = sel
+      if sel then metricWantsDotted = not metricWantsTriplet end
+      fun(2, true)
+    end
+
+    r.ImGui_Separator(ctx)
+
+    rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', metricWantsBarRestart)
+    if rv then
+      metricWantsBarRestart = sel
+      fun(3, true)
+    end
+    r.ImGui_Text(ctx, 'Slop (% of unit)')
+    r.ImGui_SameLine(ctx)
+    local tbuf
+    rv, tbuf = r.ImGui_InputDouble(ctx, '##slopInput', metricSlopPercent) -- TODO: regular text input (allow float)
+    if kbdEntryIsCompleted(rv) then
+      metricSlopPercent = tbuf
+      fun(4, true)
+    end
+  end
+
+  local function createPopup(name, source, selEntry, fun, special)
     if r.ImGui_BeginPopup(ctx, name) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         if r.ImGui_IsPopupOpen(ctx, name, r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
@@ -2026,33 +2215,59 @@ local function windowFn()
           handledEscape = true
         end
       end
+
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+      local mousePos = {}
+      mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
+      local windowRect = {}
+      windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
+      windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+      windowRect.right = windowRect.right + windowRect.left
+      windowRect.bottom = windowRect.bottom + windowRect.top
+
       for i = 1, #source do
         local selectText = source[i].label
         if source.targetTable then
           selectText = decorateTargetLabel(selectText)
         end
-        local rv, selected = r.ImGui_Selectable(ctx, selectText)
-        if rv and selected then
-          fun(i)
+        local factoryFn = selEntry == -1 and r.ImGui_Selectable or r.ImGui_Checkbox
+        local oldX = r.ImGui_GetCursorPosX(ctx)
+        r.ImGui_BeginGroup(ctx)
+        local rv, selected = factoryFn(ctx, selectText, selEntry == i and true or false)
+        r.ImGui_SameLine(ctx)
+        r.ImGui_SetCursorPosX(ctx, oldX) -- ugly, but the selectable needs info from the checkbox
+        local rect = {}
+        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
+        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
+        local srv = r.ImGui_Selectable(ctx, '##popup' .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+        r.ImGui_EndGroup(ctx)
+
+        if rv or srv then
+          if selected or srv then fun(i) end
+          r.ImGui_CloseCurrentPopup(ctx)
         end
       end
+
+      r.ImGui_PopStyleColor(ctx, 5)
+
+      if special then special(fun) end
       r.ImGui_EndPopup(ctx)
     end
   end
 
-  local function getEditorTypeForRow(target, condOp)
-    local paramType = condOp.menu and PARAM_TYPE_MENU or condOp.texteditor and PARAM_TYPE_TEXTEDITOR or condOp.time and PARAM_TYPE_TIME or condOp.timedur and PARAM_TYPE_TIMEDUR or 0
-    if paramType == PARAM_TYPE_UNKNOWN then
-      paramType = target.menu and PARAM_TYPE_MENU or target.texteditor and PARAM_TYPE_TEXTEDITOR or target.time and PARAM_TYPE_TIME or target.timedur and PARAM_TYPE_TIMEDUR or PARAM_TYPE_TEXTEDITOR
-    end
-    return paramType
-  end
-
   local function doProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation)
+    if paramType == PARAM_TYPE_METRICGRID and terms == 1 then paramType = PARAM_TYPE_MENU end
     local paramVal = condOp.terms < terms and ''
       or paramType == PARAM_TYPE_TEXTEDITOR and row[paramName .. 'TextEditorStr']
       or paramType == PARAM_TYPE_TIME and (notation and row[paramName .. 'TimeFormatStr'] or tostring(timeFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
       or paramType == PARAM_TYPE_TIMEDUR and (notation and row[paramName .. 'TimeFormatStr'] or tostring(lengthFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
+      or paramType == PARAM_TYPE_METRICGRID and row[paramName .. 'TextEditorStr'] -- for now
       or #paramTab ~= 0 and (notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text)
     return paramVal
   end
@@ -2083,7 +2298,7 @@ local function windowFn()
   local function doPrepFindEntries(row)
     if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
 
-    local condTab, param1Tab, param2Tab = findTargetToTabs(row.targetEntry)
+    local condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
     local curTarget = findTargetEntries[row.targetEntry]
     local curCondition = condTab[row.conditionEntry]
 
@@ -2132,7 +2347,7 @@ local function windowFn()
     return notationString
   end
 
-  local function processFind(select)
+  local function processFind(take)
 
     local fnString = ''
 
@@ -2192,6 +2407,9 @@ local function windowFn()
     -- mu.post(fnString)
 
     local findFn
+
+    context.take = take
+    context.PPQ = take and mu.MIDI_GetPPQ(take) or 960 -- REAPER default, we could look this up from the prefs
     local success, pret, err = pcall(load, fnString, nil, nil, context)
     if success then
       findFn = pret
@@ -2340,17 +2558,17 @@ local function windowFn()
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    createPopup('startParenMenu', startParenEntries, function(i)
+    createPopup('startParenMenu', startParenEntries, currentRow.startParenEntry, function(i)
         currentRow.startParenEntry = i
         processFind()
       end)
 
-    createPopup('endParenMenu', endParenEntries, function(i)
+    createPopup('endParenMenu', endParenEntries, currentRow.endParenEntry, function(i)
         currentRow.endParenEntry = i
         processFind()
       end)
 
-    createPopup('targetMenu', findTargetEntries, function(i)
+    createPopup('targetMenu', findTargetEntries, currentRow.targetEntry, function(i)
         currentRow:init()
         currentRow.targetEntry = i
         if findTargetEntries[currentRow.targetEntry].notation == '$length' then
@@ -2360,24 +2578,33 @@ local function windowFn()
         processFind()
       end)
 
-    createPopup('conditionMenu', conditionEntries, function(i)
+    createPopup('conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
         currentRow.conditionEntry = i
+        if string.match(conditionEntries[i].notation, 'metricgrid') then
+          currentRow.param1Entry = metricLastUnit
+        end
         processFind()
       end)
 
-    createPopup('param1Menu', param1Entries, function(i)
-        currentRow.param1Entry = i
-        currentRow.param1Val = param1Entries[i]
+    createPopup('param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
+        if not isSpecial then
+          currentRow.param1Entry = i
+          currentRow.param1Val = param1Entries[i]
+          if string.match(conditionEntries[currentRow.conditionEntry].notation, 'metricgrid') then
+            metricLastUnit = i
+          end
+        end
         processFind()
-      end)
+      end,
+      paramType == PARAM_TYPE_METRICGRID and metricParam1Special or nil)
 
-    createPopup('param2Menu', param2Entries, function(i)
+    createPopup('param2Menu', param2Entries, currentRow.param2Entry, function(i)
         currentRow.param2Entry = i
         currentRow.param2Val = param2Entries[i]
         processFind()
       end)
 
-    createPopup('timeFormatMenu', findTimeFormatEntries, function(i)
+    createPopup('timeFormatMenu', findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
         currentRow.timeFormatEntry = i
         processFind()
       end)
@@ -2424,7 +2651,7 @@ local function windowFn()
 
   r.ImGui_SameLine(ctx)
 
-  createPopup('findScopeMenu', findScopeTable, function(i)
+  createPopup('findScopeMenu', findScopeTable, currentFindScope, function(i)
       currentFindScope = i
     end)
 
@@ -2528,7 +2755,7 @@ local function windowFn()
 
     if row.targetEntry < 1 then return end
 
-    local opTab, param1Tab, param2Tab = actionTargetToTabs(row.targetEntry)
+    local opTab, param1Tab, param2Tab = actionTargetToTabs(row.targetEntry) -- a little simpler than findTargets, no operation-based overrides (yet)
 
     -- do we need some way to filter out extraneous (/) chars?
     for k, v in ipairs(opTab) do
@@ -2536,24 +2763,24 @@ local function windowFn()
       findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
       if findstart and findend then
         row.operationEntry = k
-        bufstart = findend + 1
+        bufstart = findend + (buf[findend] == '(' and 0 or 1)
 
         local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
         if param1 and param1 ~= '' then
-          param1 = handleParam(row, 'param1', param1Tab, param1)
+          param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1)
         end
         row.param1Val = param1
         break
       else
         local param1, param2
-        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]*),*([^,]*)%)', bufstart)
+        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]*)[,%s]*([^,]*)%)', bufstart)
         if findstart and findend then
           row.operationEntry = k
           if param1 and param1 ~= '' then
-            param1 = handleParam(row, 'param1', param1Tab, param1)
+            param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1)
           end
           if param2 and param2 ~= '' then
-            param2 = handleParam(row, 'param2', param2Tab, param2)
+            param2 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param2', param2Tab, param2)
           end
           row.param1Val = param1
           row.param2Val = param2
@@ -2614,7 +2841,7 @@ local function windowFn()
   local mediaItemCount
   local mediaItemIndex
 
-    local function getNextTake()
+  local function getNextTake()
     local take
     local notation = findScopeTable[currentFindScope].notation
     if notation == '$midieditor' and not mediaItemCount then
@@ -2749,6 +2976,9 @@ local function windowFn()
     local take = getNextTake()
     if not take then return end
 
+    CACHED_METRIC = nil
+    SOM = nil
+
     local fnString = ''
 
     for k, v in ipairs(actionRowTable) do
@@ -2804,7 +3034,7 @@ local function windowFn()
     -- mu.post(fnString)
 
     local actionFn
-    local findFn = processFind()
+    local findFn = processFind(take)
     if findFn then
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
@@ -2859,7 +3089,6 @@ local function windowFn()
           elseif notation == '$insert' then
           elseif notation == '$insertexclusive' then
           elseif notation == '$copy' then
-          elseif notation == '$extracttrack' then
           elseif notation == '$select' then
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
@@ -2873,8 +3102,23 @@ local function windowFn()
               end
             end
             mu.MIDI_CommitWriteTransaction(take, true, true)
-          elseif notation == '$extractlane' then
-          elseif notation == '$deselect' then
+          elseif notation == '$selectadd' then
+            mu.MIDI_OpenWriteTransaction(take)
+            for _, entry in ipairs(allEvents) do
+              local matching = findFn(entry)
+              if matching then
+                entry.selected = true
+                if entry.type == NOTE_TYPE then
+                  mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
+                elseif entry.type == CC_TYPE then
+                  mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
+                elseif entry.type == SYXTEXT_TYPE then
+                  mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+                end
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, true, true)
+          elseif notation == '$invertselect' then
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
               entry.selected = (findFn(entry) == false) and true or false
@@ -2887,6 +3131,24 @@ local function windowFn()
               end
             end
             mu.MIDI_CommitWriteTransaction(take, true, true)
+          elseif notation == '$deselect' then
+            mu.MIDI_OpenWriteTransaction(take)
+            for _, entry in ipairs(allEvents) do
+              local matching = findFn(entry)
+              if matching then
+                entry.selected = false
+                if entry.type == NOTE_TYPE then
+                  mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
+                elseif entry.type == CC_TYPE then
+                  mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
+                elseif entry.type == SYXTEXT_TYPE then
+                  mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+                end
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, true, true)
+          elseif notation == '$extracttrack' then
+          elseif notation == '$extractlane' then
           end
         end
         take = getNextTake()
@@ -2963,7 +3225,7 @@ local function windowFn()
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    createPopup('targetMenu', actionTargetEntries, function(i)
+    createPopup('targetMenu', actionTargetEntries, currentRow.targetEntry, function(i)
         currentRow:init()
         currentRow.targetEntry = i
         if actionTargetEntries[currentRow.targetEntry].notation == '$length' then
@@ -2973,18 +3235,18 @@ local function windowFn()
         processAction()
       end)
 
-    createPopup('operationMenu', operationEntries, function(i)
+    createPopup('operationMenu', operationEntries, currentRow.operationEntry, function(i)
         currentRow.operationEntry = i
         processAction()
       end)
 
-    createPopup('param1Menu', param1Entries, function(i)
+    createPopup('param1Menu', param1Entries, currentRow.param1Entry, function(i)
         currentRow.param1Entry = i
         currentRow.param1Val = param1Entries[i]
         processAction()
       end)
 
-    createPopup('param2Menu', param2Entries, function(i)
+    createPopup('param2Menu', param2Entries, currentRow.param2Entry, function(i)
         currentRow.param2Entry = i
         currentRow.param2Val = param2Entries[i]
         processAction()
@@ -3030,7 +3292,7 @@ local function windowFn()
   updateCurrentRect()
   generateLabel('Action Scope')
 
-  createPopup('actionScopeMenu', actionScopeTable, function(i)
+  createPopup('actionScopeMenu', actionScopeTable, currentActionScope, function(i)
       currentActionScope = i
     end)
 
@@ -3116,23 +3378,13 @@ local function windowFn()
     return rv, retval
   end
 
-  -- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
-  --- Check if a file or directory exists in this path
-  local function filePathExists(file)
-    local ok, err, code = os.rename(file, file)
-    if not ok then
-      if code == 13 then
-      -- Permission denied, but it exists
-        return true
-      end
-    end
-    return ok, err
-  end
-
   local function presetPathAndFilenameFromLastInput()
     local path
     local buf = lastInputTextBuffer
     if not buf:match('%' .. presetExt .. '$') then buf = buf .. presetExt end
+
+    if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
+
     path = presetPath .. buf
     return path, buf
   end
@@ -3211,8 +3463,8 @@ local function windowFn()
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)
   end
 
-  local function handleStatus(context)
-    if statusMsg ~= '' and statusTime and statusContext == context then
+  local function handleStatus(ctext)
+    if statusMsg ~= '' and statusTime and statusContext == ctext then
       if r.time_precise() - statusTime > 3 then statusTime = nil statusMsg = '' statusContext = 0
       else
         r.ImGui_SameLine(ctx)
@@ -3224,7 +3476,7 @@ local function windowFn()
 
   handleStatus(2)
 
-  createPopup('openPresetMenu', presetTable, function(i)
+  createPopup('openPresetMenu', presetTable, -1, function(i)
     local filename = presetTable[i].label .. presetExt
     local f = io.open(presetPath .. filename, 'r')
     if f then
@@ -3234,20 +3486,8 @@ local function windowFn()
       if tabStr then
         local presetTab = deserialize(tabStr)
         if presetTab then
-          currentActionScope = 7 -- select
-          for k, v in ipairs(actionScopeTable) do
-            if v.notation == presetTab.actionScope then
-              currentActionScope = k
-              break
-            end
-          end
-          currentFindScope = 3 -- midieditor
-          for k, v in ipairs(findScopeTable) do
-            if v.notation == presetTab.findScope then
-              currentFindScope = k
-              break
-            end
-          end
+          currentActionScope = actionScopeFromNotation(presetTab.actionScope)
+          currentFindScope = findScopeFromNotation(presetTab.findScope)
           findRowTable = {}
           processFindMacro(presetTab.findMacro)
           actionRowTable = {}

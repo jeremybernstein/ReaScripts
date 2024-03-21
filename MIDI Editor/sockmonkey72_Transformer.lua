@@ -2894,6 +2894,7 @@ local function windowFn()
   end
 
   local function initializeTake(take)
+    allEvents = {}
     mu.MIDI_InitializeTake(take) -- reset this each cycle
     local noteidx = mu.MIDI_EnumNotes(take, -1)
     while noteidx ~= -1 do
@@ -3041,21 +3042,22 @@ local function windowFn()
     fnString = 'return function(entry, _value1, _value2, _firstSel, _lastSel)\n' .. fnString .. '\nreturn entry' .. '\nend'
     -- mu.post(fnString)
 
-    local actionFn
-    local findFn = processFind(take)
-    if findFn then
-      local success, pret, err = pcall(load, fnString, nil, nil, context)
-      if success and pret then
-        actionFn = pret()
-      else
-        mu.post(err)
-        findParserError = 'Fatal error: could not load action description'
-      end
-    end
+    while take do
+      initializeTake(take)
 
-    if findFn and actionFn then
-      while take do
-        initializeTake(take)
+      local actionFn
+      local findFn = processFind(take)
+      if findFn then
+        local success, pret, err = pcall(load, fnString, nil, nil, context)
+        if success and pret then
+          actionFn = pret()
+        else
+          mu.post(err)
+          findParserError = 'Fatal error: could not load action description'
+        end
+      end
+
+      if findFn and actionFn then
         if not select then -- not select then -- DEBUG
           -- local entry = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
           -- -- mu.tprint(entry, 2)

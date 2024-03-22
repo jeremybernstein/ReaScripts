@@ -2781,6 +2781,7 @@ local function windowFn()
         param1Tab = findTypeParam1Entries -- same entries as find
       elseif notation == '$property' then
         opTab = actionGenericOperationEntries
+        param1Tab = findPropertyParam1Entries
       elseif notation == '$value1' then
         opTab = actionSubtypeOperationEntries
       elseif notation == '$value2' then

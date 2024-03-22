@@ -210,17 +210,17 @@ end
 local currentFindScope = findScopeFromNotation()
 
 local actionScopeTable = {
-  { notation = '$delete', label = 'Delete' },
-  { notation = '$transform', label = 'Transform' },
-  { notation = '$insert', label = 'Insert' },
-  { notation = '$insertexclusive', label = 'Insert Exclusive' },
-  { notation = '$copy', label = 'Copy' }, -- creates new track/item?
   { notation = '$select', label = 'Select Matching' },
   { notation = '$selectadd', label = 'Add Matching To Selection' },
   { notation = '$invertselect', label = 'Select Non-Matching' },
   { notation = '$deselect', label = 'Deselect Matching' },
+  { notation = '$transform', label = 'Transform' },
+  { notation = '$copy', label = 'Copy' }, -- creates new track/item?
+  { notation = '$insert', label = 'Insert' },
+  { notation = '$insertexclusive', label = 'Insert Exclusive' },
   { notation = '$extracttrack', label = 'Extract to Track' }, -- how is this different?
   { notation = '$extractlane', label = 'Extract to Lanes' },
+  { notation = '$delete', label = 'Delete' },
 }
 
 local function actionScopeFromNotation(notation)
@@ -3038,6 +3038,147 @@ local function windowFn()
     return notationString
   end
 
+  local function runFind(findFn, getUnfound)
+    local found = {}
+    local unfound = {}
+
+    local firstTime = 0xFFFFFFFF
+    local lastTime = -0xFFFFFFFF
+    for _, entry in ipairs(allEvents) do
+      if findFn(entry) then
+        if entry.projtime < firstTime then firstTime = entry.projtime end
+        if entry.projtime > lastTime then lastTime = entry.projtime end
+        table.insert(found, entry)
+      elseif getUnfound then
+        table.insert(unfound, entry)
+      end
+    end
+    return found, firstTime, lastTime, getUnfound and unfound or nil
+  end
+
+  local function deleteEventsInTake(take, entryTab, doTx)
+    if doTx == true or doTx == nil then
+      mu.MIDI_OpenWriteTransaction(take)
+    end
+    for _, entry in ipairs(entryTab) do
+      if entry.type == NOTE_TYPE then
+        mu.MIDI_DeleteNote(take, entry.idx)
+      elseif entry.type == CC_TYPE then
+        mu.MIDI_DeleteCC(take, entry.idx)
+      elseif entry.type == SYXTEXT_TYPE then
+        mu.MIDI_DeleteTextSysexEvt(take, entry.idx)
+      end
+    end
+    if doTx == true or doTx == nil then
+      mu.MIDI_CommitWriteTransaction(take, false, true)
+    end
+  end
+
+  local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, doTx)
+    if doTx == true or doTx == nil then
+      mu.MIDI_OpenWriteTransaction(take)
+    end
+    for _, entry in ipairs(entryTab) do
+      actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), selStart, selEnd)
+      entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
+      if entry.type == NOTE_TYPE then
+        entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
+        mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
+      elseif entry.type == CC_TYPE then
+        mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
+      elseif entry.type == SYXTEXT_TYPE then
+        mu.MIDI_InsertTextSysexEvt(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
+      end
+    end
+    if doTx == true or doTx == nil then
+      mu.MIDI_CommitWriteTransaction(take, false, true)
+    end
+  end
+
+  local function setEntrySelectionInTake(take, entry)
+    if entry.type == NOTE_TYPE then
+      mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
+    elseif entry.type == CC_TYPE then
+      mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
+    elseif entry.type == SYXTEXT_TYPE then
+      mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+    end
+  end
+
+  local function transformEntryInTake(take, entryTab, actionFn, firstTime, lastTime)
+    mu.MIDI_OpenWriteTransaction(take)
+    for _, entry in ipairs(entryTab) do
+      actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
+      entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
+      if entry.type == NOTE_TYPE then
+        entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
+        mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
+      elseif entry.type == CC_TYPE then
+        mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
+      elseif entry.type == SYXTEXT_TYPE then
+        mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
+      end
+    end
+    mu.MIDI_CommitWriteTransaction(take, false, true)
+  end
+
+  local function newTakeInNewTrack(take)
+    local track = r.GetMediaItemTake_Track(take)
+    local item = r.GetMediaItemTake_Item(take)
+    local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
+    local newtake
+    if trackid ~= 0 then
+      r.InsertTrackAtIndex(trackid, true)
+      local newtrack = r.GetTrack(0, trackid)
+      if newtrack then
+        local itemPos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+        local itemLen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+        local newitem = r.CreateNewMIDIItemInProj(newtrack, itemPos, itemPos + itemLen)
+        if newitem then
+          newtake = r.GetActiveTake(newitem)
+        end
+      end
+    end
+    return newtake
+  end
+
+  local function newTakeInNewLane(take)
+    local newtake
+    local track = r.GetMediaItemTake_Track(take)
+    local item = r.GetMediaItemTake_Item(take)
+    if track and item then
+      local freemode = r.GetMediaTrackInfo_Value(track, 'I_FREEMODE')
+      local numLanes = r.GetMediaTrackInfo_Value(track, 'I_NUMFIXEDLANES')
+      if freemode ~= 2 then
+        r.SetMediaTrackInfo_Value(track, 'I_FREEMODE', 2)
+      end
+      r.SetMediaTrackInfo_Value(track, 'I_NUMFIXEDLANES', numLanes + 1)
+
+      local itemPos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+      local itemLen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+
+      local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
+
+      local tmi = r.CountTrackMediaItems(track)
+      local lastItem = r.GetTrackMediaItem(track, tmi - 1)
+      if lastItem then
+        local lastItemPos = r.GetMediaItemInfo_Value(lastItem, 'D_POSITION')
+        local lastItemLen = r.GetMediaItemInfo_Value(lastItem, 'D_LENGTH')
+        local safeTime = lastItemPos + lastItemLen + 5
+
+        local newitem = r.CreateNewMIDIItemInProj(track, safeTime, safeTime + itemLen) -- make new item at the very end
+        if newitem then
+          r.SetMediaItemInfo_Value(newitem, 'I_FIXEDLANE', numLanes)
+          r.SetMediaItemInfo_Value(newitem, 'D_POSITION', itemPos)
+          r.SetMediaItemInfo_Value(newitem, 'D_LENGTH', itemLen)
+          newtake = r.GetActiveTake(newitem)
+        end
+        r.UpdateTimeline()
+      end
+    end
+    return newtake
+  end
+
   local function processAction(select)
     local take = getNextTake()
     if not take then return end
@@ -3125,169 +3266,11 @@ local function windowFn()
           -- mu.tprint(entry, 2)
         else
           local notation = actionScopeTable[currentActionScope].notation
-          if notation == '$delete' then
-            mu.MIDI_OpenWriteTransaction(take)
-            for _, entry in ipairs(allEvents) do
-              if findFn(entry) then
-                if entry.type == NOTE_TYPE then
-                  mu.MIDI_DeleteNote(take, entry.idx)
-                elseif entry.type == CC_TYPE then
-                  mu.MIDI_DeleteCC(take, entry.idx)
-                elseif entry.type == SYXTEXT_TYPE then
-                  mu.MIDI_DeleteTextSysexEvt(take, entry.idx)
-                end
-              end
-            end
-            mu.MIDI_CommitWriteTransaction(take, false, true)
-          elseif notation == '$transform' then
-            local found = {}
-            local firstTime = 0xFFFFFFFF
-            local lastTime = -0xFFFFFFFF
-            for _, entry in ipairs(allEvents) do
-              if findFn(entry) then
-                if entry.projtime < firstTime then firstTime = entry.projtime end
-                if entry.projtime > lastTime then lastTime = entry.projtime end
-                table.insert(found, entry)
-              end
-            end
-            if #found ~=0 then
-              mu.MIDI_OpenWriteTransaction(take)
-              for _, entry in ipairs(found) do
-                actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
-                entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
-                if entry.type == NOTE_TYPE then
-                  entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-                  mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-                elseif entry.type == CC_TYPE then
-                  mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-                elseif entry.type == SYXTEXT_TYPE then
-                  mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
-                end
-              end
-              mu.MIDI_CommitWriteTransaction(take, false, true)
-            end
-          elseif notation == '$insert' then
-            local found = {}
-            local firstTime = 0xFFFFFFFF
-            local lastTime = -0xFFFFFFFF
-            for _, entry in ipairs(allEvents) do
-              if findFn(entry) then
-                if entry.projtime < firstTime then firstTime = entry.projtime end
-                if entry.projtime > lastTime then lastTime = entry.projtime end
-                table.insert(found, entry)
-              end
-            end
-            if #found ~=0 then
-              mu.MIDI_OpenWriteTransaction(take)
-              for _, entry in ipairs(found) do
-                actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
-                entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
-                if entry.type == NOTE_TYPE then
-                  entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-                  mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-                elseif entry.type == CC_TYPE then
-                  mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-                elseif entry.type == SYXTEXT_TYPE then
-                  mu.MIDI_InsertTextSysexEvt(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
-                end
-              end
-              mu.MIDI_CommitWriteTransaction(take, false, true)
-            end
-          elseif notation == '$insertexclusive' then
-            local found = {}
-						local unfound = {}
-            local firstTime = 0xFFFFFFFF
-            local lastTime = -0xFFFFFFFF
-            for _, entry in ipairs(allEvents) do
-              if findFn(entry) then
-                if entry.projtime < firstTime then firstTime = entry.projtime end
-                if entry.projtime > lastTime then lastTime = entry.projtime end
-                table.insert(found, entry)
-							else
-								table.insert(unfound, entry)
-              end
-            end
-						mu.MIDI_OpenWriteTransaction(take)
-            if #found ~=0 then
-              for _, entry in ipairs(found) do
-                actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
-                entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
-                if entry.type == NOTE_TYPE then
-                  entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-                  mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-                elseif entry.type == CC_TYPE then
-                  mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-                elseif entry.type == SYXTEXT_TYPE then
-                  mu.MIDI_InsertTextSysexEvt(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
-                end
-              end
-						end
-						if #unfound ~=0 then
-							for _, entry in ipairs(unfound) do
-								actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
-								entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
-								if entry.type == NOTE_TYPE then
-									mu.MIDI_DeleteNote(take, entry.idx)
-								elseif entry.type == CC_TYPE then
-									mu.MIDI_DeleteCC(take, entry.idx)
-								elseif entry.type == SYXTEXT_TYPE then
-									mu.MIDI_DeleteTextSysexEvt(take, entry.idx)
-								end
-							end
-            end
-						mu.MIDI_CommitWriteTransaction(take, false, true)
-          elseif notation == '$copy' then
-            local found = {}
-            local firstTime = 0xFFFFFFFF
-            local lastTime = -0xFFFFFFFF
-            for _, entry in ipairs(allEvents) do
-              if findFn(entry) then
-                if entry.projtime < firstTime then firstTime = entry.projtime end
-                if entry.projtime > lastTime then lastTime = entry.projtime end
-                table.insert(found, entry)
-              end
-            end
-            if #found ~=0 then
-							local track = r.GetMediaItemTake_Track(take)
-							local item = r.GetMediaItemTake_Item(take)
-							local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
-							local newtake
-							if trackid ~= 0 then -- TODO error checking
-								r.InsertTrackAtIndex(trackid, true)
-								track = r.GetTrack(0, trackid)
-								local itemPos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
-								local itemLen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
-								item = r.CreateNewMIDIItemInProj(track, itemPos, itemPos + itemLen)
-								newtake = r.GetActiveTake(item)
-							end
-							if newtake then
-								mu.MIDI_OpenWriteTransaction(newtake)
-								for _, entry in ipairs(found) do
-									actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
-									entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(newtake, entry.projtime)
-									if entry.type == NOTE_TYPE then
-										entry.endppqos = r.MIDI_GetPPQPosFromProjTime(newtake, entry.projtime + entry.projlen)
-										mu.MIDI_InsertNote(newtake, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-									elseif entry.type == CC_TYPE then
-										mu.MIDI_InsertCC(newtake, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-									elseif entry.type == SYXTEXT_TYPE then
-										mu.MIDI_InsertTextSysexEvt(newtake, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
-									end
-								end
-								mu.MIDI_CommitWriteTransaction(newtake, false, true)
-							end
-            end
-          elseif notation == '$select' then
+          if notation == '$select' then
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
               entry.selected = findFn(entry)
-              if entry.type == NOTE_TYPE then
-                mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
-              elseif entry.type == CC_TYPE then
-                mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
-              elseif entry.type == SYXTEXT_TYPE then
-                mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
-              end
+              setEntrySelectionInTake(take, entry)
             end
             mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$selectadd' then
@@ -3296,13 +3279,7 @@ local function windowFn()
               local matching = findFn(entry)
               if matching then
                 entry.selected = true
-                if entry.type == NOTE_TYPE then
-                  mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
-                elseif entry.type == CC_TYPE then
-                  mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
-                elseif entry.type == SYXTEXT_TYPE then
-                  mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
-                end
+                setEntrySelectionInTake(take, entry)
               end
             end
             mu.MIDI_CommitWriteTransaction(take, false, true)
@@ -3310,13 +3287,7 @@ local function windowFn()
             mu.MIDI_OpenWriteTransaction(take)
             for _, entry in ipairs(allEvents) do
               entry.selected = (findFn(entry) == false) and true or false
-              if entry.type == NOTE_TYPE then
-                mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
-              elseif entry.type == CC_TYPE then
-                mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
-              elseif entry.type == SYXTEXT_TYPE then
-                mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
-              end
+              setEntrySelectionInTake(take, entry)
             end
             mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$deselect' then
@@ -3325,70 +3296,63 @@ local function windowFn()
               local matching = findFn(entry)
               if matching then
                 entry.selected = false
-                if entry.type == NOTE_TYPE then
-                  mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
-                elseif entry.type == CC_TYPE then
-                  mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
-                elseif entry.type == SYXTEXT_TYPE then
-                  mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
-                end
+                setEntrySelectionInTake(take, entry)
+              end
+            end
+            mu.MIDI_CommitWriteTransaction(take, false, true)
+          elseif notation == '$transform' then
+            local found, firstTime, lastTime = runFind(findFn)
+            if #found ~=0 then
+              transformEntryInTake(take, found, actionFn, firstTime, lastTime)
+            end
+          elseif notation == '$copy' then
+            local found, firstTime, lastTime = runFind(findFn)
+            if #found ~=0 then
+              local newtake = newTakeInNewTrack(take)
+              if newtake then
+                insertEventsIntoTake(newtake, found, actionFn, firstTime, lastTime)
+              end
+            end
+          elseif notation == '$insert' then
+            local found, firstTime, lastTime = runFind(findFn)
+            if #found ~=0 then
+              insertEventsIntoTake(take, found, actionFn, firstTime, lastTime)
+            end
+          elseif notation == '$insertexclusive' then
+            local found, firstTime, lastTime, unfound = runFind(findFn, true)
+            mu.MIDI_OpenWriteTransaction(take)
+            if #found ~=0 then
+              insertEventsIntoTake(take, found, actionFn, firstTime, lastTime, false)
+            end
+            if #unfound ~=0 then
+              for _, entry in ipairs(unfound) do
+                deleteEventsInTake(take, unfound, false)
               end
             end
             mu.MIDI_CommitWriteTransaction(take, false, true)
           elseif notation == '$extracttrack' then
-            local found = {}
-            local firstTime = 0xFFFFFFFF
-            local lastTime = -0xFFFFFFFF
-            for _, entry in ipairs(allEvents) do
-              if findFn(entry) then
-                if entry.projtime < firstTime then firstTime = entry.projtime end
-                if entry.projtime > lastTime then lastTime = entry.projtime end
-                table.insert(found, entry)
+            local found, firstTime, lastTime = runFind(findFn)
+            if #found ~=0 then
+              deleteEventsInTake(take, found)
+              local newtake = newTakeInNewTrack(take)
+              if newtake then
+                insertEventsIntoTake(newtake, found, actionFn, firstTime, lastTime)
               end
             end
-            if #found ~=0 then
-							mu.MIDI_OpenWriteTransaction(take)
-							for _, entry in ipairs(found) do
-								if entry.type == NOTE_TYPE then
-									mu.MIDI_DeleteNote(take, entry.idx)
-								elseif entry.type == CC_TYPE then
-									mu.MIDI_DeleteCC(take, entry.idx)
-								elseif entry.type == SYXTEXT_TYPE then
-									mu.MIDI_DeleteTextSysexEvt(take, entry.idx)
-								end
-							end
-							mu.MIDI_CommitWriteTransaction(take, false, true)
-
-							local track = r.GetMediaItemTake_Track(take)
-							local item = r.GetMediaItemTake_Item(take)
-							local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
-							local newtake
-							if trackid ~= 0 then -- TODO error checking
-								r.InsertTrackAtIndex(trackid, true)
-								track = r.GetTrack(0, trackid)
-								local itemPos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
-								local itemLen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
-								item = r.CreateNewMIDIItemInProj(track, itemPos, itemPos + itemLen)
-								newtake = r.GetActiveTake(item)
-							end
-							if newtake then
-								mu.MIDI_OpenWriteTransaction(newtake)
-								for _, entry in ipairs(found) do
-									actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
-									entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(newtake, entry.projtime)
-									if entry.type == NOTE_TYPE then
-										entry.endppqos = r.MIDI_GetPPQPosFromProjTime(newtake, entry.projtime + entry.projlen)
-										mu.MIDI_InsertNote(newtake, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-									elseif entry.type == CC_TYPE then
-										mu.MIDI_InsertCC(newtake, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-									elseif entry.type == SYXTEXT_TYPE then
-										mu.MIDI_InsertTextSysexEvt(newtake, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
-									end
-								end
-								mu.MIDI_CommitWriteTransaction(newtake, false, true)
-							end
-            end
           elseif notation == '$extractlane' then
+            local found, firstTime, lastTime = runFind(findFn)
+            if #found ~=0 then
+              deleteEventsInTake(take, found)
+              local newtake = newTakeInNewLane(take)
+              if newtake then
+                insertEventsIntoTake(newtake, found, actionFn, firstTime, lastTime)
+              end
+            end
+          elseif notation == '$delete' then
+            local found = runFind(findFn)
+            if #found ~= 0 then
+              deleteEventsInTake(take, found)
+            end
           end
         end
         take = getNextTake()

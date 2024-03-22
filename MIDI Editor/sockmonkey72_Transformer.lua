@@ -632,7 +632,8 @@ local actionLengthOperationEntries = {
 }
 
 local actionChannelOperationEntries = {
-  actionOperationPlus, actionOperationMinus, actionOperationFixed, actionOperationRandom
+  actionOperationPlus, actionOperationMinus, actionOperationFixed, actionOperationRandom,
+  actionOperationRelRandom, actionOperationLine, actionOperationRelLine
 }
 
 local actionTypeOperationEntries = {

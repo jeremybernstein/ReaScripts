@@ -407,6 +407,7 @@ local function windowFn()
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, needsTerms, idx, procFn)
     local rv = 0
     if paramType == tx.PARAM_TYPE_METRICGRID and needsTerms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
+    local decimalFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
     if condOp.terms >= needsTerms then
         local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
         local target = targetTab[row.targetEntry]
@@ -418,7 +419,7 @@ local function windowFn()
         end
       elseif paramType == tx.PARAM_TYPE_TEXTEDITOR or paramType == tx.PARAM_TYPE_METRICGRID then -- for now
         r.ImGui_BeginGroup(ctx)
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], condOp.decimal and decimalFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), condOp.decimal and nil or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
           row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, condOp.range and condOp.range or target.range)
           procFn()
@@ -748,13 +749,13 @@ local function windowFn()
       r.ImGui_Text(ctx, 'Slop (% of unit)')
       r.ImGui_SameLine(ctx)
       local tbuf
-      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPreInput', mg.preSlopPercent) -- TODO: regular text input (allow float)
+      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPreInput', mg.preSlopPercent, nil, nil, '%0.2f') -- TODO: regular text input (allow float)
       if kbdEntryIsCompleted(rv) then
         mg.preSlopPercent = tbuf
         fun(4, true)
       end
       r.ImGui_SameLine(ctx)
-      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPostInput', mg.postSlopPercent) -- TODO: regular text input (allow float)
+      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPostInput', mg.postSlopPercent, nil, nil, '%0.2f') -- TODO: regular text input (allow float)
       if kbdEntryIsCompleted(rv) then
         mg.postSlopPercent = tbuf
         fun(5, true)

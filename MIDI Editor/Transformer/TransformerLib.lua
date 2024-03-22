@@ -502,20 +502,23 @@ local actionOperationRandom = { notation = ':random', label = 'Set Random Values
 -- this might need a different range for length vs MIDI data
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 } }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
-local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true }
+local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
 -- this has issues with handling range (should support negative numbers, and clamp output to supplied range). challenging, since the clamping is target-dependent and probably needs to be written to the actionFn
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _firstSel, _lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= math.floor(({tgt} * {param1}) + {param2})', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
 local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRelRandom,
   { notation = ':tocursor', label = 'Move to Cursor', text = '= r.GetCursorPositionEx()', terms = 0 },
   { notation = ':addlength', label = 'Add Length', text = '+', terms = 1, timeval = true },
+  actionOperationScaleOff
 }
 
 local actionLengthOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom
+  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
+  actionOperationScaleOff
 }
 
 local actionChannelOperationEntries = {
@@ -542,7 +545,7 @@ local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(entry)', terms = 0 }, -- note that this is different for AT and PB
-  actionOperationLine, actionOperationRelLine
+  actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionVelocityOperationEntries = {
@@ -550,14 +553,14 @@ local actionVelocityOperationEntries = {
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(entry)', terms = 0 }, -- ?? note that this is different for AT and PB
   { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
-  actionOperationLine, actionOperationRelLine
+  actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionGenericOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
   { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
-  actionOperationLine, actionOperationRelLine
+  actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local PARAM_TYPE_UNKNOWN = 0
@@ -1365,7 +1368,7 @@ local function findRowsToNotation()
     end
     notationString = notationString .. rowText
   end
-  mu.post('find macro: ' .. notationString)
+  -- mu.post('find macro: ' .. notationString)
   return notationString
 end
 
@@ -1405,8 +1408,8 @@ local function processFind(take)
     if condition.sub then
       findTerm = conditionVal
       findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
-      findTerm = string.gsub(findTerm, '{param1}', param1Term)
-      findTerm = string.gsub(findTerm, '{param2}', param2Term)
+      findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
+      findTerm = string.gsub(findTerm, '{param2}', tostring(param2Term))
       if paramType == PARAM_TYPE_METRICGRID then
         local mgParams = tableCopy(v.mg)
         mgParams.param1 = param1Num
@@ -1717,7 +1720,7 @@ local function actionRowsToNotation()
     end
     notationString = notationString .. rowText
   end
-  mu.post('action macro: ' .. notationString)
+  -- mu.post('action macro: ' .. notationString)
   return notationString
 end
 
@@ -1736,7 +1739,8 @@ local function runFind(findFn, getUnfound)
       table.insert(unfound, entry)
     end
   end
-  return found, firstTime, lastTime, getUnfound and unfound or nil
+  local contextTab = { firstTime = firstTime, lastTime = lastTime }
+  return found, contextTab, getUnfound and unfound or nil
 end
 
 local function deleteEventsInTake(take, entryTab, doTx)
@@ -1790,10 +1794,10 @@ local function setEntrySelectionInTake(take, entry)
   end
 end
 
-local function transformEntryInTake(take, entryTab, actionFn, firstTime, lastTime)
+local function transformEntryInTake(take, entryTab, actionFn, contextTab)
   mu.MIDI_OpenWriteTransaction(take)
   for _, entry in ipairs(entryTab) do
-    actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
+    actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), contextTab)
     entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
     entry.selected = (entry.flags & 1) ~= 0
     entry.muted = (entry.flags & 2) ~= 0
@@ -1898,7 +1902,9 @@ local function processAction(select)
 
     local param1Num = tonumber(param1Term)
     local param2Num = tonumber(param2Term)
-    if param1Num and param2Num and param2Num < param1Num then
+    if param1Num and param2Num and param2Num < param1Num
+      and curOperation.notation ~= ':scaleoffset' -- exception
+    then
       local tmp = param2Term
       param2Term = param1Term
       param1Term = tmp
@@ -1913,8 +1919,8 @@ local function processAction(select)
 
     if operation.sub then
       actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
-      actionTerm = string.gsub(actionTerm, '{param1}', param1Term)
-      actionTerm = string.gsub(actionTerm, '{param2}', param2Term)
+      actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
+      actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
     end
 
     actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
@@ -1928,7 +1934,7 @@ local function processAction(select)
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr ..'\n'
 
   end
-  fnString = 'return function(entry, _value1, _value2, _firstSel, _lastSel)\n' .. fnString .. '\nreturn entry' .. '\nend'
+  fnString = 'return function(entry, _value1, _value2, _context)\n' .. fnString .. '\nreturn entry' .. '\nend'
   -- mu.post(fnString)
 
   r.Undo_BeginBlock2(0)
@@ -1991,28 +1997,28 @@ local function processAction(select)
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$transform' then
-          local found, firstTime, lastTime = runFind(findFn)
+          local found, contextTab = runFind(findFn)
           if #found ~=0 then
-            transformEntryInTake(take, found, actionFn, firstTime, lastTime)
+            transformEntryInTake(take, found, actionFn, contextTab)
           end
         elseif notation == '$copy' then
-          local found, firstTime, lastTime = runFind(findFn)
+          local found, contextTab = runFind(findFn)
           if #found ~=0 then
             local newtake = newTakeInNewTrack(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, firstTime, lastTime)
+              insertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$insert' then
-          local found, firstTime, lastTime = runFind(findFn)
+          local found, contextTab = runFind(findFn)
           if #found ~=0 then
-            insertEventsIntoTake(take, found, actionFn, firstTime, lastTime)
+            insertEventsIntoTake(take, found, actionFn, contextTab)
           end
         elseif notation == '$insertexclusive' then
-          local found, firstTime, lastTime, unfound = runFind(findFn, true)
+          local found, contextTab, unfound = runFind(findFn, true)
           mu.MIDI_OpenWriteTransaction(take)
           if #found ~=0 then
-            insertEventsIntoTake(take, found, actionFn, firstTime, lastTime, false)
+            insertEventsIntoTake(take, found, actionFn, contextTab, false)
           end
           if #unfound ~=0 then
             for _, entry in ipairs(unfound) do
@@ -2021,21 +2027,21 @@ local function processAction(select)
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$extracttrack' then
-          local found, firstTime, lastTime = runFind(findFn)
+          local found, contextTab = runFind(findFn)
           if #found ~=0 then
             deleteEventsInTake(take, found)
             local newtake = newTakeInNewTrack(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, firstTime, lastTime)
+              insertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$extractlane' then
-          local found, firstTime, lastTime = runFind(findFn)
+          local found, contextTab = runFind(findFn)
           if #found ~=0 then
             deleteEventsInTake(take, found)
             local newtake = newTakeInNewLane(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, firstTime, lastTime)
+              insertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$delete' then

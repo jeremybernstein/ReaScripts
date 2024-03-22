@@ -639,6 +639,17 @@ local actionTypeOperationEntries = {
   actionOperationFixed
 }
 
+local actionPropertyOperationEntries = {
+  actionOperationFixed
+}
+
+local actionPropertyParam1Entries = {
+  { notation = '0', label = 'Clear', text = '0' },
+  { notation = '1', label = 'Selected', text = '1' },
+  { notation = '2', label = 'Muted', text = '2' },
+  { notation = '3', label = 'Selected + Muted', text = '3' },
+}
+
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
@@ -2780,8 +2791,8 @@ local function windowFn()
         opTab = actionTypeOperationEntries
         param1Tab = findTypeParam1Entries -- same entries as find
       elseif notation == '$property' then
-        opTab = actionGenericOperationEntries
-        param1Tab = findPropertyParam1Entries
+        opTab = actionPropertyOperationEntries
+        param1Tab = actionPropertyParam1Entries
       elseif notation == '$value1' then
         opTab = actionSubtypeOperationEntries
       elseif notation == '$value2' then
@@ -3082,6 +3093,8 @@ local function windowFn()
     for _, entry in ipairs(entryTab) do
       actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), selStart, selEnd)
       entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
+      entry.selected = (entry.flags & 1) ~= 0
+      entry.muted = (entry.flags & 2) ~= 0
       if entry.type == NOTE_TYPE then
         entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
         mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
@@ -3111,6 +3124,8 @@ local function windowFn()
     for _, entry in ipairs(entryTab) do
       actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), firstTime, lastTime)
       entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
+      entry.selected = (entry.flags & 1) ~= 0
+      entry.muted = (entry.flags & 2) ~= 0
       if entry.type == NOTE_TYPE then
         entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
         mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)

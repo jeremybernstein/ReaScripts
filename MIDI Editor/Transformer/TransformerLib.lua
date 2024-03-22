@@ -505,7 +505,7 @@ local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', tex
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
 -- this has issues with handling range (should support negative numbers, and clamp output to supplied range). challenging, since the clamping is target-dependent and probably needs to be written to the actionFn
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= math.floor(({tgt} * {param1}) + {param2})', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
 local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
@@ -1772,9 +1772,9 @@ local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, 
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-      mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
+      mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3), entry.relvel)
     elseif entry.type == CC_TYPE then
-      mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
+      mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3))
     elseif entry.type == SYXTEXT_TYPE then
       mu.MIDI_InsertTextSysexEvt(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
     end
@@ -1803,9 +1803,9 @@ local function transformEntryInTake(take, entryTab, actionFn, contextTab)
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-      mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
+      mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3), entry.relvel)
     elseif entry.type == CC_TYPE then
-      mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
+      mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3))
     elseif entry.type == SYXTEXT_TYPE then
       mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
     end

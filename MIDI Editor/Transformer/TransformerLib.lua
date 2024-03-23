@@ -2193,6 +2193,7 @@ TransformerLib.setCurrentActionScope = function(val) currentActionScope = val < 
 
 TransformerLib.FindRow = FindRow
 TransformerLib.findRowTable = function() return findRowTable end
+TransformerLib.clearFindRows = function() findRowTable = {} end
 
 TransformerLib.startParenEntries = startParenEntries
 TransformerLib.endParenEntries = endParenEntries
@@ -2201,6 +2202,7 @@ TransformerLib.findTimeFormatEntries = findTimeFormatEntries
 
 TransformerLib.ActionRow = ActionRow
 TransformerLib.actionRowTable = function() return actionRowTable end
+TransformerLib.clearActionRows = function() actionRowTable = {} end
 
 TransformerLib.findTargetEntries = findTargetEntries
 TransformerLib.actionTargetEntries = actionTargetEntries

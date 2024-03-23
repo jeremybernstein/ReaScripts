@@ -381,9 +381,19 @@ local function windowFn()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
 
-  r.ImGui_Button(ctx, 'Insert Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  local optDown = false
+  if r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() then
+    optDown = true
+  end
+
+  r.ImGui_Button(ctx, optDown and 'Clear Criteria' or 'Insert Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    addFindRow()
+    if optDown then
+      tx.clearFindRows()
+      selectedFindRow = 0
+    else
+      addFindRow()
+    end
   end
 
   r.ImGui_SameLine(ctx)
@@ -861,18 +871,23 @@ local function windowFn()
 
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
-  r.ImGui_Button(ctx, 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
 
+  r.ImGui_Button(ctx, optDown and 'Clear Actions' or 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    local numRows = #tx.actionRowTable()
-    addActionRow()
+    if optDown then
+      tx.clearActionRows()
+      selectedActionRow = 0
+    else
+      local numRows = #tx.actionRowTable()
+      addActionRow()
 
-    if numRows == 0 then
-      local scope = tx.actionScopeTable[tx.currentActionScope()].notation
-      if scope:match('select') then -- change to Transform scope if we're in a Select scope
-        for k, v in ipairs(tx.actionScopeTable) do
-          if v.notation == '$transform' then
-            tx.setCurrentActionScope(k)
+      if numRows == 0 then
+        local scope = tx.actionScopeTable[tx.currentActionScope()].notation
+        if scope:match('select') then -- change to Transform scope if we're in a Select scope
+          for k, v in ipairs(tx.actionScopeTable) do
+            if v.notation == '$transform' then
+              tx.setCurrentActionScope(k)
+            end
           end
         end
       end
@@ -1063,11 +1078,6 @@ local function windowFn()
   r.ImGui_Spacing(ctx)
   r.ImGui_Spacing(ctx)
   r.ImGui_Spacing(ctx)
-
-  local optDown = false
-  if r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() then
-    optDown = true
-  end
 
   r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', scaled(DEFAULT_ITEM_WIDTH + 30))
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) or refocusInput then

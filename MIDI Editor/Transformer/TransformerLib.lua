@@ -291,6 +291,10 @@ local function GetMainValueLabel(typeIndex)
   end
 end
 
+local function ClampValue(val, low, high)
+  return val < low and low or val > high and high or val
+end
+
 local function QuantizeTo(val, quant)
   if quant == 0 then return val end
   local newval = quant * math.floor((val / quant) + 0.5)
@@ -516,6 +520,7 @@ local actionOperationTimeMinus = { notation = '-', label = 'Subtract', text = '=
 local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, texteditor = true }
 local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
+local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationRandom = { notation = ':random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
 -- this might need a different range for length vs MIDI data
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 } }
@@ -561,7 +566,7 @@ local actionPropertyParam1Entries = {
 
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
+  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(entry)', terms = 0 }, -- note that this is different for AT and PB
   { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
   actionOperationLine, actionOperationRelLine, actionOperationScaleOff
@@ -569,7 +574,7 @@ local actionSubtypeOperationEntries = {
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
+  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(entry)', terms = 0 }, -- ?? note that this is different for AT and PB
   { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
   actionOperationLine, actionOperationRelLine, actionOperationScaleOff
@@ -1321,6 +1326,7 @@ context.InBarRange = InBarRange
 context.LinearChangeOverSelection = LinearChangeOverSelection
 context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration
+context.ClampValue = ClampValue
 
 local mainValueLabel
 local subtypeValueLabel

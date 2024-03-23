@@ -24,6 +24,8 @@ mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = true
 mu.CLAMP_MIDI_BYTES = true
 
+local DEBUG = false
+
 local TransformerLib = {}
 
 -----------------------------------------------------------------------------
@@ -400,8 +402,8 @@ local findPositionConditionEntries = {
   { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, entry.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
-  { notation = ':beforecursor', label = 'Before Cursor', text = '< r.GetCursorPositionEx(0)', terms = 0 },
-  { notation = ':aftercursor', label = 'After Cursor', text = '> r.GetCursorPositionEx(0)', terms = 0 },
+  { notation = ':beforecursor', label = 'Before Cursor', text = '< (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
+  { notation = ':aftercursor', label = 'After Cursor', text = '>= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
   { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
   { notation = '!:intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0, sub = true },
   -- { label = 'Inside Track Loop', text = '', terms = 1 },
@@ -540,7 +542,7 @@ local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Of
 local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRelRandom,
-  { notation = ':tocursor', label = 'Move to Cursor', text = '= r.GetCursorPositionEx()', terms = 0 },
+  { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
   actionOperationScaleOff
 }
@@ -1495,7 +1497,7 @@ local function processFind(take)
   end
 
   fnString = 'local entry = ... \nreturn ' .. fnString
-  -- mu.post(fnString)
+  if DEBUG then mu.post(fnString) end
 
   local findFn
 
@@ -1995,7 +1997,7 @@ local function processAction(select)
 
   end
   fnString = 'return function(entry, _value1, _value2, _context)\n' .. fnString .. '\nreturn entry' .. '\nend'
-  -- mu.post(fnString)
+  if DEBUG then mu.post(fnString) end
 
   r.Undo_BeginBlock2(0)
 
@@ -2234,6 +2236,8 @@ TransformerLib.timeFormatRebuf = timeFormatRebuf
 TransformerLib.lengthFormatRebuf = lengthFormatRebuf
 
 TransformerLib.getEditorTypeForRow = getEditorTypeForRow
+TransformerLib.findTargetToTabs = findTargetToTabs
+TransformerLib.actionTargetToTabs = actionTargetToTabs
 
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
 TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU

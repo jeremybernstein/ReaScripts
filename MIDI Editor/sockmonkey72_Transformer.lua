@@ -144,10 +144,25 @@ local function removeFindRow()
   end
 end
 
+local function setupActionRowFormat(row, opTab)
+  if tx.actionTargetEntries[row.targetEntry].notation == '$length' or opTab[row.operationEntry].timedur then
+    row.param1TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
+    row.param2TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
+  else
+    row.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+    row.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  end
+end
+
 local function addActionRow(idx, row)
   local actionRowTable = tx.actionRowTable()
   idx = (idx and idx ~= 0) and idx or #actionRowTable+1
-  table.insert(actionRowTable, idx, row and row or tx.ActionRow())
+  if not row then
+    row = tx.ActionRow()
+    local opTab = tx.actionTargetToTabs(row.targetEntry)
+    setupActionRowFormat(row, opTab)
+  end
+  table.insert(actionRowTable, idx, row)
   selectedActionRow = idx
 end
 
@@ -1009,15 +1024,13 @@ local function windowFn()
     createPopup('targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
         currentRow:init()
         currentRow.targetEntry = i
-        if tx.actionTargetEntries[currentRow.targetEntry].notation == '$length' then
-          currentRow.param1TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
-          currentRow.param2TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
-        end
+        setupActionRowFormat(currentRow, operationEntries)
         tx.processAction()
       end)
 
     createPopup('operationMenu', operationEntries, currentRow.operationEntry, function(i)
         currentRow.operationEntry = i
+        setupActionRowFormat(currentRow, operationEntries)
         tx.processAction()
       end)
 

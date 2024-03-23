@@ -531,20 +531,26 @@ local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', te
 local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true, decimal = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
-local actionOperationRandom = { notation = ':random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
+local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, decimal = true }
 -- this might need a different range for length vs MIDI data
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Set Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 }, decimal = true }
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 }, decimal = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
 -- this has issues with handling range (should support negative numbers, and clamp output to supplied range). challenging, since the clamping is target-dependent and probably needs to be written to the actionFn
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
+local actionOperationPositionRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, time = true }
+local actionOperationPositionRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, time = true }
+local actionOperationLengthRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, timedur = true }
+local actionOperationLengthRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, timedur = true }
+
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
   { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
   actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRelRandom,
+  actionOperationRound, actionOperationFixed,
+  actionOperationPositionRandom, actionOperationPositionRelRandom,
   { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
   actionOperationScaleOff
@@ -555,7 +561,7 @@ local actionLengthOperationEntries = {
   { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, -- the problem is that these are using 'time' in seconds and it's awkward
-  actionOperationRandom, actionOperationRelRandom, -- the problem is that these are using 'time' in seconds and it's awkward
+  actionOperationLengthRandom, actionOperationLengthRelRandom, -- the problem is that these are using 'time' in seconds and it's awkward
   actionOperationScaleOff
 }
 
@@ -808,7 +814,6 @@ local TIME_FORMAT_HMSF = 3
 
 local function determineTimeFormatStringType(buf)
   if string.match(buf, '%d+') then
-    local isBBU = false
     local isMSF = false
     local isHMSF = false
 
@@ -827,12 +832,14 @@ local function lengthFormatRebuf(buf)
   local format = determineTimeFormatStringType(buf)
   if format == TIME_FORMAT_UNKNOWN then return DEFAULT_LENGTHFORMAT_STRING end
 
+  local isneg = string.match(buf, '^%s*%-')
+
   if format == TIME_FORMAT_MEASURES then
     local bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
     if not bars then
       bars, beats = string.match(buf, '(%d-)%.(%d+)')
       if not bars then
-        bars = string.match(buf, '(%d-)')
+        bars = string.match(buf, '(%d+)')
       end
     end
     if not bars or bars == '' then bars = 0 end
@@ -841,7 +848,7 @@ local function lengthFormatRebuf(buf)
     beats = timeFormatClampPad(beats, 0, nil, '%d')
     if not fraction or fraction == '' then fraction = 0 end
     fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
-    return bars .. '.' .. beats .. '.' .. fraction
+    return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction
   elseif format == TIME_FORMAT_MINUTES then
     local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
     local minutesVal, secondsVal
@@ -861,7 +868,7 @@ local function lengthFormatRebuf(buf)
     end
     if not minutes or minutes == '' then minutes = 0 end
     minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
-    return minutes .. ':' .. seconds .. '.' .. fraction
+    return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
   elseif format == TIME_FORMAT_HMSF then
     local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
     local hoursVal, minutesVal, secondsVal, framesVal
@@ -887,7 +894,7 @@ local function lengthFormatRebuf(buf)
     end
     if not hours or hours == '' then hours = 0 end
     hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
-    return hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
+    return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
   return DEFAULT_LENGTHFORMAT_STRING
 end
@@ -896,12 +903,14 @@ local function timeFormatRebuf(buf)
   local format = determineTimeFormatStringType(buf)
   if format == TIME_FORMAT_UNKNOWN then return DEFAULT_TIMEFORMAT_STRING end
 
+  local isneg = string.match(buf, '^%s*%-')
+
   if format == TIME_FORMAT_MEASURES then
     local bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
     if not bars then
       bars, beats = string.match(buf, '(%d-)%.(%d+)')
       if not bars then
-        bars = string.match(buf, '(%d-)')
+        bars = string.match(buf, '(%d+)')
       end
     end
     if not bars or bars == '' then bars = 0 end
@@ -910,7 +919,7 @@ local function timeFormatRebuf(buf)
     beats = timeFormatClampPad(beats, 1, nil, '%d')
     if not fraction or fraction == '' then fraction = 0 end
     fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
-    return bars .. '.' .. beats .. '.' .. fraction
+    return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction
   elseif format == TIME_FORMAT_MINUTES then
     local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
     local minutesVal, secondsVal, fractionVal
@@ -930,7 +939,7 @@ local function timeFormatRebuf(buf)
     end
     if not minutes or minutes == '' then minutes = 0 end
     minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
-    return minutes .. ':' .. seconds .. '.' .. fraction
+    return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
   elseif format == TIME_FORMAT_HMSF then
     local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
     local hoursVal, minutesVal, secondsVal, framesVal
@@ -956,7 +965,7 @@ local function timeFormatRebuf(buf)
     end
     if not hours or hours == '' then hours = 0 end
     hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
-    return hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
+    return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
   return DEFAULT_TIMEFORMAT_STRING
 end
@@ -1275,8 +1284,10 @@ local function processFindMacro(buf)
   processFindMacroRow(string.sub(buf, bufstart))
 end
 
-local function timeFormatToSeconds(buf, baseTime)
+local function timeFormatToSeconds(buf, baseTime, isLength)
   local format = determineTimeFormatStringType(buf)
+
+  local isneg = string.match(buf, '^%s*%-')
 
   if format == TIME_FORMAT_MEASURES then
     local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
@@ -1284,13 +1295,15 @@ local function timeFormatToSeconds(buf, baseTime)
     local beats = tonumber(tbeats)
     local fraction = tonumber(tfraction)
     local adjust = baseTime and baseTime or 0
+    if not isLength then adjust = adjust - r.GetProjectTimeOffset(0, false) end
     fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
     if baseTime then
       local retval, measures = r.TimeMap2_timeToBeats(0, baseTime)
       bars = (bars and bars or 0) + measures
       beats = (beats and beats or 0) + retval
     end
-    return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars) - adjust
+    if not isLength and beats and beats > 0 then beats = beats - 1 end
+    return (r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars) - adjust) * (isneg and -1 or 1)
   elseif format == TIME_FORMAT_MINUTES then
     local tminutes, tseconds, tfraction = string.match(buf, '(%d+):(%d+)%.(%d+)')
     local minutes = tonumber(tminutes)
@@ -1298,7 +1311,7 @@ local function timeFormatToSeconds(buf, baseTime)
     local fraction = tonumber(tfraction)
     fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
     -- mu.post((minutes * 60) + seconds + (fraction / 100.))
-    return (minutes * 60) + seconds + (fraction / 1000.)
+    return ((minutes * 60) + seconds + (fraction / 1000.)) * (isneg and -1 or 1)
   elseif format == TIME_FORMAT_HMSF then
     local thours, tminutes, tseconds, tframes = string.match(buf, '(%d+):(%d+):(%d+):(%d+)')
     local hours = tonumber(thours)
@@ -1307,13 +1320,13 @@ local function timeFormatToSeconds(buf, baseTime)
     local frames = tonumber(tframes) -- is this based on r.TimeMap_curFrameRate()?
     local frate = r.TimeMap_curFrameRate(0)
     -- fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-    return (hours * 60 * 60) + (minutes * 60) + seconds + (frames / frate)
+    return ((hours * 60 * 60) + (minutes * 60) + seconds + (frames / frate)) * (isneg and -1 or 1)
   end
   return 0
 end
 
 local function lengthFormatToSeconds(buf, baseTime)
-  return timeFormatToSeconds(buf, baseTime)
+  return timeFormatToSeconds(buf, baseTime, true)
 end
 
 local function AddDuration(duration, baseTime)
@@ -1838,6 +1851,7 @@ local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, 
     entry.selected = (entry.flags & 1) ~= 0
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
+      if entry.projlen < 0 then entry.projlen = 1 / context.PPQ end
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
       mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
@@ -1870,6 +1884,7 @@ local function transformEntryInTake(take, entryTab, actionFn, contextTab)
     entry.selected = (entry.flags & 1) ~= 0
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
+      if entry.projlen < 0 then entry.projlen = 1 / context.PPQ end
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
       mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then

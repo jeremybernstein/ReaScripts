@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.21
+-- @version 0.1.19
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - add CLAMP_MIDI_BYTES global property to clamp rather than cycle MIDI values on under/overflow
+--   - commit comparator final fix (thanks Talagan)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -120,7 +120,16 @@ local function ReadREAPERConfigVar_Int(name)
   return nil
 end
 
+local function ensureChannelRange(chan)
+  chan = math.floor(chan + 0.5)
+  if MIDIUtils.CLAMP_MIDI_BYTES then
+    return chan < 0 and 0 or chan > 15 and 15 or chan
+  end
+  return chan & 0xF
+end
+
 local function ensureValueRange(val)
+  val = math.floor(val + 0.5)
   if MIDIUtils.CLAMP_MIDI_BYTES then
     return val < 0 and 0 or val > 127 and 127 or val
   else
@@ -940,7 +949,7 @@ local function MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan,
       event.endppqpos = noteoff.ppqpos
     end
     if chan then
-      event.chan = chan & 0x0F
+      event.chan = ensureChannelRange(chan)
       AdjustNoteOff(noteoff, 'chan', event.chan)
     end
     if pitch then
@@ -967,7 +976,7 @@ local function MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, p
                                 ppqpos - lastEventPPQ,
                                 FlagsFromSelMute(selected, muted),
                                 table.concat({
-                                  string.char(0x90 | (chan & 0xF)),
+                                  string.char(0x90 | ensureChannelRange(chan)),
                                   string.char(ensureValueRange(pitch)),
                                   string.char(ensureValueRange(vel))
                                 }))
@@ -1155,7 +1164,7 @@ local function MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg
       event.chanmsg = chanmsg < 0xA0 or chanmsg >= 0xF0 and 0xB0 or chanmsg & 0xF0
     end
     if chan then
-      event.chan = chan & 0x0F
+      event.chan = ensureChannelRange(chan)
     end
     if msg2 then
       event.msg2 = ensureValueRange(msg2)
@@ -1215,7 +1224,7 @@ local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2,
                         ppqpos - lastEventPPQ,
                         newFlags,
                         table.concat({
-                          string.char((chanmsg & 0xF0) | (chan & 0xF)),
+                          string.char((chanmsg & 0xF0) | ensureChannelRange(chan)),
                           string.char(ensureValueRange(msg2)),
                           string.char(ensureValueRange(msg3))
                         }))
@@ -1887,7 +1896,8 @@ local function MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
   local val = 0
   local ppqpos = 0
   chanmsg = chanmsg & 0xF0
-  chan = chan & 0xF
+  chan = ensureChannelRange(chan)
+  msg2 = ensureValueRange(msg2)
   local b3 = chanmsg == 0xA0 or chanmsg == 0xB0
   local b2 = chanmsg == 0xC0 or chanmsg == 0xD0
   local pb = chanmsg == 0xE0

@@ -353,7 +353,7 @@ local function LinearChangeOverSelection(projTime, p1, p2, firstTime, lastTime)
   if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
     local linearPos = (projTime - firstTime) / (lastTime - firstTime)
     local val = ((p2 - p1) * linearPos) + p1
-    return math.floor(val + 0.5)
+    return val
   end
   return 0
 end
@@ -1739,7 +1739,7 @@ local function runFind(findFn, getUnfound)
       table.insert(unfound, entry)
     end
   end
-  local contextTab = { firstTime = firstTime, lastTime = lastTime }
+  local contextTab = { firstSel = firstTime, lastSel = lastTime }
   return found, contextTab, getUnfound and unfound or nil
 end
 
@@ -1772,9 +1772,9 @@ local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, 
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-      mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3), entry.relvel)
+      mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
-      mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3))
+      mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
     elseif entry.type == SYXTEXT_TYPE then
       mu.MIDI_InsertTextSysexEvt(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
     end
@@ -1803,9 +1803,9 @@ local function transformEntryInTake(take, entryTab, actionFn, contextTab)
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
-      mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3), entry.relvel)
+      mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
-      mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, math.floor(entry.chan), math.floor(entry.msg2), math.floor(entry.msg3))
+      mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
     elseif entry.type == SYXTEXT_TYPE then
       mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
     end
@@ -2132,7 +2132,6 @@ local function loadPreset(presetPath)
   return false
 end
 
--- or accessors? it kind of doesn't matter, does it?
 TransformerLib.findScopeTable = findScopeTable
 TransformerLib.currentFindScope = function() return currentFindScope end
 TransformerLib.setCurrentFindScope = function(val) currentFindScope = val < 1 and 1 or val > #findScopeTable and #findScopeTable or val end

@@ -117,6 +117,22 @@ local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaCl
   return c
 end
 
+-----------------------------------------------------------------------------
+----------------------------------- COPY ------------------------------------
+
+local function tableCopy(obj, seen)
+  if type(obj) ~= 'table' then return obj end
+  if seen and seen[obj] then return seen[obj] end
+  local s = seen or {}
+  local res = setmetatable({}, getmetatable(obj))
+  s[obj] = res
+  for k, v in pairs(obj) do res[tableCopy(k, s)] = tableCopy(v, s) end
+  return res
+end
+
+-----------------------------------------------------------------------------
+------------------------------- TRANSFORMER ---------------------------------
+
 local findScopeTable = {
   { notation = '$everywhere', label = 'Everywhere' },
   { notation = '$selected', label = 'Selected Items' },
@@ -532,25 +548,36 @@ local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/',
 local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, decimal = true }
--- this might need a different range for length vs MIDI data
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 }, decimal = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
--- this has issues with handling range (should support negative numbers, and clamp output to supplied range). challenging, since the clamping is target-dependent and probably needs to be written to the actionFn
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
-local actionOperationPositionRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, time = true }
-local actionOperationPositionRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, time = true }
-local actionOperationLengthRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, timedur = true }
-local actionOperationLengthRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, timedur = true }
+local function positionMod(op)
+  local newop = tableCopy(op)
+  newop.menu = false
+  newop.texteditor = false
+  newop.timedur = false
+  newop.time = true
+  return newop
+end
+
+local function lengthMod(op)
+  local newop = tableCopy(op)
+  newop.menu = false
+  newop.texteditor = false
+  newop.time = false
+  newop.timedur = true
+  return newop
+end
 
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
   { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
   actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed,
-  actionOperationPositionRandom, actionOperationPositionRelRandom,
+  lengthMod(actionOperationRound), positionMod(actionOperationFixed),
+  positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
   actionOperationScaleOff
@@ -560,8 +587,8 @@ local actionLengthOperationEntries = {
   { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
   { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
   actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, -- the problem is that these are using 'time' in seconds and it's awkward
-  actionOperationLengthRandom, actionOperationLengthRelRandom, -- the problem is that these are using 'time' in seconds and it's awkward
+  lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
+  lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   actionOperationScaleOff
 }
 
@@ -1015,16 +1042,6 @@ local function enumerateTransformerPresets()
     table.insert(sorted, v)
   end
   return sorted
-end
-
-local function tableCopy(obj, seen)
-  if type(obj) ~= 'table' then return obj end
-  if seen and seen[obj] then return seen[obj] end
-  local s = seen or {}
-  local res = setmetatable({}, getmetatable(obj))
-  s[obj] = res
-  for k, v in pairs(obj) do res[tableCopy(k, s)] = tableCopy(v, s) end
-  return res
 end
 
 local function deserialize(str)

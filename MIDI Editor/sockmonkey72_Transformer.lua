@@ -865,6 +865,14 @@ local function windowFn()
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     addActionRow()
+    local scope = tx.actionScopeTable[tx.currentActionScope()].notation
+    if scope:match('select') then -- change to Transform scope if we're in a Select scope
+      for k, v in ipairs(tx.actionScopeTable) do
+        if v.notation == '$transform' then
+          tx.setCurrentActionScope(k)
+        end
+      end
+    end
   end
 
   r.ImGui_SameLine(ctx)

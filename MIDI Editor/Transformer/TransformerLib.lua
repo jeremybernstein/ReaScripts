@@ -232,7 +232,11 @@ local findGenericConditionEntries = {
 }
 
 local function RandomValue(min, max)
-  return math.random(min, max)
+  if math.type(min) == 'integer' and math.type(max) == 'integer' then
+    return math.random(min, max)
+  end
+  local rnd = math.random()
+  return (rnd * (max - min)) + min
 end
 
 local function GetTimeSelectionStart()
@@ -523,9 +527,6 @@ actionTargetEntries.targetTable = true
 local actionOperationPlus = { notation = '+', label = 'Add', text = '+', terms = 1, texteditor = true }
 local actionOperationMinus = { notation = '-', label = 'Subtract', text = '-', terms = 1, texteditor = true }
 
-local actionOperationTimePlus = { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true }
-local actionOperationTimeMinus = { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true }
-
 local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, texteditor = true, decimal = true }
 local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true, decimal = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
@@ -540,7 +541,9 @@ local actionOperationRelLine = { notation = ':relline', label = 'Relative Change
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
 local actionPositionOperationEntries = {
-  actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
+  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRelRandom,
   { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
@@ -548,8 +551,11 @@ local actionPositionOperationEntries = {
 }
 
 local actionLengthOperationEntries = {
-  actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
+  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  actionOperationMult, actionOperationDivide,
+  actionOperationRound, actionOperationFixed, -- the problem is that these are using 'time' in seconds and it's awkward
+  actionOperationRandom, actionOperationRelRandom, -- the problem is that these are using 'time' in seconds and it's awkward
   actionOperationScaleOff
 }
 
@@ -847,11 +853,11 @@ local function lengthFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    fraction = timeFormatClampPad(fraction, 0, 99, '%03d')
     seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
-      seconds = tostring(secondsVal % 60)
+      seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
     minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
@@ -865,7 +871,7 @@ local function lengthFormatRebuf(buf)
     frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
     if framesVal > frate then
       secondsVal = math.floor(framesVal / frate)
-      frames = string.format('%02d', framesVal % frate)
+      frames = string.format('%03d', framesVal % frate)
     end
     if not seconds or seconds == '' then seconds = 0 end
     seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
@@ -916,11 +922,11 @@ local function timeFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    fraction = timeFormatClampPad(fraction, 0, 99, '%03d')
     seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
-      seconds = tostring(secondsVal % 60)
+      seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
     minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
@@ -1292,7 +1298,7 @@ local function timeFormatToSeconds(buf, baseTime)
     local fraction = tonumber(tfraction)
     fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
     -- mu.post((minutes * 60) + seconds + (fraction / 100.))
-    return (minutes * 60) + seconds + (fraction / 100.)
+    return (minutes * 60) + seconds + (fraction / 1000.)
   elseif format == TIME_FORMAT_HMSF then
     local thours, tminutes, tseconds, tframes = string.match(buf, '(%d+):(%d+):(%d+):(%d+)')
     local hours = tonumber(thours)

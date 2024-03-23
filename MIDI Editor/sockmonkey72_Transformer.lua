@@ -123,7 +123,16 @@ local selectedActionRow = 0
 local function addFindRow(idx, row)
   local findRowTable = tx.findRowTable()
   idx = (idx and idx ~= 0) and idx or #findRowTable+1
-  table.insert(findRowTable, idx, row and row or tx.FindRow())
+  if not row then
+    row = tx.FindRow()
+    for k, v in ipairs(tx.findTargetEntries) do
+      if v.notation == '$type' then
+        row.targetEntry = k
+        break
+      end
+    end
+  end
+  table.insert(findRowTable, idx, row)
   selectedFindRow = idx
 end
 

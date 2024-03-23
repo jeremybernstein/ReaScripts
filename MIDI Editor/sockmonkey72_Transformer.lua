@@ -386,14 +386,9 @@ local function windowFn()
     optDown = true
   end
 
-  r.ImGui_Button(ctx, optDown and 'Clear Criteria' or 'Insert Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, 'Insert Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    if optDown then
-      tx.clearFindRows()
-      selectedFindRow = 0
-    else
-      addFindRow()
-    end
+    addFindRow()
   end
 
   r.ImGui_SameLine(ctx)
@@ -401,13 +396,18 @@ local function windowFn()
   if selectedFindRow == 0 then
     r.ImGui_BeginDisabled(ctx)
   end
-  r.ImGui_Button(ctx, 'Remove Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, optDown and 'Clear All Criteria' or 'Remove Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if selectedFindRow == 0 then
     r.ImGui_EndDisabled(ctx)
   end
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    removeFindRow()
+    if optDown then
+      tx.clearFindRows()
+      selectedFindRow = 0
+    else
+      removeFindRow()
+    end
   end
 
   local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
@@ -872,22 +872,17 @@ local function windowFn()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
 
-  r.ImGui_Button(ctx, optDown and 'Clear Actions' or 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    if optDown then
-      tx.clearActionRows()
-      selectedActionRow = 0
-    else
-      local numRows = #tx.actionRowTable()
-      addActionRow()
+    local numRows = #tx.actionRowTable()
+    addActionRow()
 
-      if numRows == 0 then
-        local scope = tx.actionScopeTable[tx.currentActionScope()].notation
-        if scope:match('select') then -- change to Transform scope if we're in a Select scope
-          for k, v in ipairs(tx.actionScopeTable) do
-            if v.notation == '$transform' then
-              tx.setCurrentActionScope(k)
-            end
+    if numRows == 0 then
+      local scope = tx.actionScopeTable[tx.currentActionScope()].notation
+      if scope:match('select') then -- change to Transform scope if we're in a Select scope
+        for k, v in ipairs(tx.actionScopeTable) do
+          if v.notation == '$transform' then
+            tx.setCurrentActionScope(k)
           end
         end
       end
@@ -899,13 +894,18 @@ local function windowFn()
   if selectedActionRow == 0 then
     r.ImGui_BeginDisabled(ctx)
   end
-  r.ImGui_Button(ctx, 'Remove Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, optDown and 'Clear All Actions' or 'Remove Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if selectedActionRow == 0 then
     r.ImGui_EndDisabled(ctx)
   end
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    removeActionRow()
+    if optDown then
+      tx.clearActionRows()
+      selectedActionRow = 0
+    else
+      removeActionRow()
+    end
   end
 
   r.ImGui_SameLine(ctx)

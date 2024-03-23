@@ -380,6 +380,13 @@ local function LinearChangeOverSelection(projTime, p1, p2, firstTime, lastTime)
   return 0
 end
 
+local function AddLength(projTime, projDur)
+  if projDur then
+    return projTime + projDur
+  end
+  return projTime
+end
+
 local findPositionConditionEntries = {
   { notation = '==', label = 'Equal', text = '==', terms = 1 },
   { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
@@ -517,8 +524,8 @@ local actionOperationMinus = { notation = '-', label = 'Subtract', text = '-', t
 local actionOperationTimePlus = { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true }
 local actionOperationTimeMinus = { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true }
 
-local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, texteditor = true }
-local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true }
+local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, texteditor = true, decimal = true }
+local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true, decimal = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
 local actionOperationRandom = { notation = ':random', label = 'Set Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true }
@@ -534,7 +541,7 @@ local actionPositionOperationEntries = {
   actionOperationTimePlus, actionOperationTimeMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRelRandom,
   { notation = ':tocursor', label = 'Move to Cursor', text = '= r.GetCursorPositionEx()', terms = 0 },
-  { notation = ':addlength', label = 'Add Length', text = '+', terms = 1, timeval = true },
+  { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
   actionOperationScaleOff
 }
 
@@ -1327,6 +1334,7 @@ context.LinearChangeOverSelection = LinearChangeOverSelection
 context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration
 context.ClampValue = ClampValue
+context.AddLength = AddLength
 
 local mainValueLabel
 local subtypeValueLabel
@@ -1950,7 +1958,7 @@ local function processAction(select)
     local param1Term = v.param1Val
     local param2Term = v.param2Val
 
-    if param1Term == '' then return end
+    if param1Term == '' and curOperation.terms ~= 0 then return end
 
     local param1Num = tonumber(param1Term)
     local param2Num = tonumber(param2Term)

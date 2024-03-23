@@ -297,6 +297,24 @@ local function QuantizeTo(val, quant)
   return newval
 end
 
+local function Mirror(val, mirrorVal)
+  return mirrorVal - (val - mirrorVal)
+end
+
+local function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
+  if not take then return false end
+
+  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
+  local _, _, cml, _, cdenom = r.TimeMap2_timeToBeats(0, tpos)
+  local beatPPQ = (4 / cdenom) * PPQ
+  local measurePPQ = beatPPQ * cml
+
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
+  local barpos = (ppqpos - som) / measurePPQ
+
+  return barpos >= (rangeStart / 100) and barpos <= (rangeEnd / 100)
+end
+
 local function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   if not take then return false end
 
@@ -367,8 +385,8 @@ local findPositionConditionEntries = {
   { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 },
   { notation = ':inrange', label = 'Inside Range', text = '{tgt} >= {param1} and {tgt} <= {param2}', terms = 2, sub = true }, -- absolute position
   { notation = '!:inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true },
-  { notation = ':inbarrange', label = 'Inside Bar Range', text = '{tgt} >= {param1} and {tgt} <= {param1}', terms = 2, sub = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:inbarrange', label = 'Outside Bar Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true},
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, entry.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, entry.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
   { notation = ':beforecursor', label = 'Before Cursor', text = '< r.GetCursorPositionEx(0)', terms = 0 },
@@ -429,10 +447,10 @@ local findChannelParam1Entries = {
 }
 
 local findTimeFormatEntries = { -- time format not yet respected, these are also not 100% relevant to REAPER
-  { label = 'PPQ' },
+  { label = 'REAPER time' },
   { label = 'Seconds' },
   { label = 'Samples' },
-  { label = 'Frames' }
+  -- { label = 'Frames' }
 }
 
 local findMetricGridParam1Entries = {
@@ -492,8 +510,8 @@ actionTargetEntries.targetTable = true
 local actionOperationPlus = { notation = '+', label = 'Add', text = '+', terms = 1, texteditor = true }
 local actionOperationMinus = { notation = '-', label = 'Subtract', text = '-', terms = 1, texteditor = true }
 
-local actionOperationTimePlus = { notation = '+', label = 'Add', text = '+', terms = 1, timedur = 1 }
-local actionOperationTimeMinus = { notation = '-', label = 'Subtract', text = '-', terms = 1, timedur = 1 }
+local actionOperationTimePlus = { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true }
+local actionOperationTimeMinus = { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true }
 
 local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, texteditor = true }
 local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true }
@@ -545,6 +563,7 @@ local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(entry)', terms = 0 }, -- note that this is different for AT and PB
+  { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
   actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
@@ -641,69 +660,57 @@ end
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
 
-  ---------------------------------------------------------------------------
-  --------------------------- BUNCH OF VARIABLES ----------------------------
+---------------------------------------------------------------------------
+--------------------------- BUNCH OF VARIABLES ----------------------------
 
-  local allEvents = {}
+local allEvents = {}
 
-  local context = {}
-  context.r = reaper
-  context.math = math
-  context.RandomValue = RandomValue
-  context.GetTimeSelectionStart = GetTimeSelectionStart
-  context.GetTimeSelectionEnd = GetTimeSelectionEnd
-  context.GetSubtypeValue = GetSubtypeValue
-  context.GetMainValue = GetMainValue
-  context.QuantizeTo = QuantizeTo
-  context.OnMetricGrid = OnMetricGrid
-  context.LinearChangeOverSelection = LinearChangeOverSelection
+---------------------------------------------------------------------------
+--------------------------- BUNCH OF FUNCTIONS ----------------------------
 
-  ---------------------------------------------------------------------------
-  --------------------------- BUNCH OF FUNCTIONS ----------------------------
+-- local function getPPQ()
+--   local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
+--   local qn2 = qn1 + 1
+--   return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
+-- end
 
-  -- local function getPPQ()
-  --   local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
-  --   local qn2 = qn1 + 1
-  --   return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
-  -- end
+-- local function needsBBUConversion(name)
+--   return wantsBBU and (name == 'ticks' or name == 'notedur' or name == 'selposticks' or name == 'seldurticks')
+-- end
 
-  -- local function needsBBUConversion(name)
-  --   return wantsBBU and (name == 'ticks' or name == 'notedur' or name == 'selposticks' or name == 'seldurticks')
-  -- end
-
-  local function BBTToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
-    local nilmeas = measures == nil
-    if not measures then measures = 0 end
-    if not beats then beats = 0 end
-    if not ticks then ticks = 0 end
-    if relativeppq then
-      local relMeasures, relBeats, _, relTicks = PpqToTime(relativeppq)
-      measures = measures + relMeasures
-      beats = beats + relBeats
-      ticks = ticks + relTicks
-    end
-    local bbttime
-    if nilmeas then
-      bbttime = r.TimeMap2_beatsToTime(0, beats) -- have to do it this way, passing nil as 3rd arg is equivalent to 0 and breaks things
-    else
-      bbttime = r.TimeMap2_beatsToTime(0, beats, measures)
-    end
-    local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, bbttime) + ticks
-    if relativeppq and not nosubtract then ppqpos = ppqpos - relativeppq end
-    return math.floor(ppqpos)
+local function BBTToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
+  local nilmeas = measures == nil
+  if not measures then measures = 0 end
+  if not beats then beats = 0 end
+  if not ticks then ticks = 0 end
+  if relativeppq then
+    local relMeasures, relBeats, _, relTicks = PpqToTime(relativeppq)
+    measures = measures + relMeasures
+    beats = beats + relBeats
+    ticks = ticks + relTicks
   end
-
-  function PpqToTime(take, ppqpos, projtime)
-    local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, projtime)
-    local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
-
-    local measures = posMeasures
-    local beats = math.floor(posBeats - posBeatsSOM)
-    local beatsmax = math.floor(cml)
-    local posBeats_PPQ = BBTToPPQ(take, nil, math.floor(posBeats))
-    local ticks = math.floor(ppqpos - posBeats_PPQ)
-    return measures, beats, beatsmax, ticks
+  local bbttime
+  if nilmeas then
+    bbttime = r.TimeMap2_beatsToTime(0, beats) -- have to do it this way, passing nil as 3rd arg is equivalent to 0 and breaks things
+  else
+    bbttime = r.TimeMap2_beatsToTime(0, beats, measures)
   end
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, bbttime) + ticks
+  if relativeppq and not nosubtract then ppqpos = ppqpos - relativeppq end
+  return math.floor(ppqpos)
+end
+
+function PpqToTime(take, ppqpos, projtime)
+  local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, projtime)
+  local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
+
+  local measures = posMeasures
+  local beats = math.floor(posBeats - posBeatsSOM)
+  local beatsmax = math.floor(cml)
+  local posBeats_PPQ = BBTToPPQ(take, nil, math.floor(posBeats))
+  local ticks = math.floor(ppqpos - posBeats_PPQ)
+  return measures, beats, beatsmax, ticks
+end
 
   -- local function ppqToLength(ppqpos, ppqlen)
   --   -- REAPER, why is this so difficult?
@@ -723,225 +730,216 @@ end
   --   return measures, beats, ticks
   -- end
 
-  local function calcMIDITime(take, e)
-    e.projtime = r.MIDI_GetProjTimeFromPPQPos(take, e.ppqpos)
-    if e.endppqpos then
-      e.projlen = r.MIDI_GetProjTimeFromPPQPos(take, e.endppqpos) - e.projtime
-    else
-      e.projlen = 0
+local function calcMIDITime(take, e)
+  local timeAdjust = r.GetProjectTimeOffset(0, false)
+  e.projtime = r.MIDI_GetProjTimeFromPPQPos(take, e.ppqpos) + timeAdjust
+  if e.endppqpos then
+    e.projlen = (r.MIDI_GetProjTimeFromPPQPos(take, e.endppqpos) + timeAdjust) - e.projtime
+  else
+    e.projlen = 0
+  end
+  e.measures, e.beats, e.beatsmax, e.ticks = PpqToTime(take, e.ppqpos, e.projtime)
+end
+
+---------------------------------------------------------------------------
+--------------------------------- UTILITIES -------------------------------
+
+-- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
+--- Check if a file or directory exists in this path
+local function filePathExists(file)
+  local ok, err, code = os.rename(file, file)
+  if not ok then
+    if code == 13 then
+    -- Permission denied, but it exists
+      return true
     end
-    e.measures, e.beats, e.beatsmax, e.ticks = PpqToTime(take, e.ppqpos, e.projtime)
   end
+  return ok, err
+end
 
-  -- local function isTimeValue(name)
-  --   if name == 'measures' or name == 'beats' or name == 'ticks' or name == 'notedur' then
-  --     return true
-  --   end
-  --   return false
-  -- end
+  --- Check if a directory exists in this path
+local function dirExists(path)
+  -- "/" works on both Unix and Windows
+  return filePathExists(path:match('/$') and path or path..'/')
+end
 
-  -- local function timeStringToTime(timestr, ispos)
-  --   local a = 1
-  --   local dots = {}
-  --   repeat
-  --     a = timestr:find('%.', a)
-  --     if a then
-  --       table.insert(dots, a)
-  --       a = a + 1
-  --     end
-  --   until not a
-
-  --   local nums = {}
-  --   if #dots ~= 0 then
-  --       local str = timestr:sub(1, dots[1] - 1)
-  --       table.insert(nums, str)
-  --       for k, v in ipairs(dots) do
-  --           str = timestr:sub(v + 1, k ~= #dots and dots[k + 1] - 1 or nil)
-  --           table.insert(nums, str)
-  --       end
-  --   end
-
-  --   if #nums == 0 then table.insert(nums, timestr) end
-
-  --   local measures = (not nums[1] or nums[1] == '') and 0 or tonumber(nums[1])
-  --   measures = measures and math.floor(measures) or 0
-  --   local beats = (not nums[2] or nums[2] == '') and (ispos and 1 or 0) or tonumber(nums[2])
-  --   beats = beats and math.floor(beats) or 0
-
-  --   local ticks
-  --   if wantsBBU then
-  --     local units = (not nums[3] or nums[3] == '') and 0 or tonumber(nums[3])
-  --     ticks = math.floor((units * 0.01) * PPQ)
-  --   else
-  --     ticks = (not nums[3] or nums[3] == '') and 0 or tonumber(nums[3])
-  --     ticks = ticks and math.floor(ticks) or 0
-  --    end
-
-  --   if ispos then
-  --     beats = beats - 1
-  --     if beats < 0 then beats = 0 end
-  --   end
-
-  --   return measures, beats, ticks
-  -- end
-
-  -- local function parseTimeString(name, str)
-  --   local ppqpos = nil
-  --   local measures, beats, ticks = timeStringToTime(str, name == 'selposticks')
-  --   if measures and beats and ticks then
-  --     if name == 'selposticks' then
-  --       ppqpos = BBTToPPQ(measures, beats, ticks)
-  --     elseif name == 'seldurticks' then
-  --       ppqpos = BBTToPPQ(measures, beats, ticks, union.selposticks)
-  --     else return nil
-  --     end
-  --   end
-  --   return math.floor(ppqpos)
-  -- end
-
-  -- local function processTimeString(name, str)
-  --   local char = str:byte(1)
-  --   local ppqpos = nil
-
-  --   if char == OP_SCL then str = '0'..str end
-
-  --   if char == OP_ADD or char == OP_SUB or char == OP_MUL or char == OP_DIV then
-  --     if char == OP_ADD or char == OP_SUB then
-  --       local measures, beats, ticks = timeStringToTime(str:sub(2), false)
-  --       if measures and beats and ticks then
-  --         local opand = BBTToPPQ(measures, beats, ticks, union.selposticks)
-  --         _, ppqpos = doPerformOperation(nil, union[name], char, opand)
-  --       end
-  --     end
-  --     if not ppqpos then
-  --       _, ppqpos = doPerformOperation(nil, union[name], char, tonumber(str:sub(2)))
-  --     end
-  --   else
-  --     ppqpos = parseTimeString(name, str)
-  --   end
-  --   if ppqpos then
-  --     userValues[name] = { operation = OP_ABS, opval = ppqpos }
-  --     return true
-  --   end
-  --   return false
-  -- end
-
-  ---------------------------------------------------------------------------
-  --------------------------------- UTILITIES -------------------------------
-
-  -- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
-  --- Check if a file or directory exists in this path
-  local function filePathExists(file)
-    local ok, err, code = os.rename(file, file)
-    if not ok then
-      if code == 13 then
-      -- Permission denied, but it exists
-        return true
-      end
-    end
-    return ok, err
+local function ensureNumString(str, range)
+  local num = tonumber(str)
+  if not num then num = 0 end
+  if range then
+    if range[1] and num < range[1] then num = range[1] end
+    if range[2] and num > range[2] then num = range[2] end
   end
+  return tostring(num)
+end
 
-    --- Check if a directory exists in this path
-  local function dirExists(path)
-    -- "/" works on both Unix and Windows
-    return filePathExists(path:match('/$') and path or path..'/')
+local function timeFormatClampPad(str, min, max, fmt, startVal)
+  local num = tonumber(str)
+  if not num then num = 0 end
+  num = num + (startVal and startVal or 0)
+  num = (min and num < min) and min or (max and num > max) and max or num
+  return string.format(fmt, num), num
+end
+
+local TIME_FORMAT_UNKNOWN = 0
+local TIME_FORMAT_MEASURES = 1
+local TIME_FORMAT_MINUTES = 2
+local TIME_FORMAT_HMSF = 3
+
+local function determineTimeFormatStringType(buf)
+  if string.match(buf, '%d+') then
+    local isBBU = false
+    local isMSF = false
+    local isHMSF = false
+
+    isHMSF = string.match(buf, '^%s-%d+:%d+:%d+:%d+')
+    if isHMSF then return TIME_FORMAT_HMSF end
+
+    isMSF = string.match(buf, '^%s-%d-:')
+    if isMSF then return TIME_FORMAT_MINUTES end
+
+    return TIME_FORMAT_MEASURES
   end
+  return TIME_FORMAT_UNKNOWN
+end
 
-  local function ensureNumString(str, range)
-    local num = tonumber(str)
-    if not num then num = 0 end
-    if range then
-      if range[1] and num < range[1] then num = range[1] end
-      if range[2] and num > range[2] then num = range[2] end
-    end
-    return tostring(num)
-  end
+local function lengthFormatRebuf(buf)
+  local format = determineTimeFormatStringType(buf)
+  if format == TIME_FORMAT_UNKNOWN then return DEFAULT_LENGTHFORMAT_STRING end
 
-  local function timeFormatClampPad(str, min, max, fmt)
-    local num = tonumber(str)
-    if not num then num = 0 end
-    num = (min and num < min) and min or (max and num > max) and max or num
-    return string.format(fmt, num)
-  end
-
-  local function lengthFormatRebuf(buf)
-    if string.match(buf, '%d*%.') then
-      local bars, beats, fraction = string.match(buf, '(%d*)%.(%d+)%.(%d+)')
+  if format == TIME_FORMAT_MEASURES then
+    local bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
+    if not bars then
+      bars, beats = string.match(buf, '(%d-)%.(%d+)')
       if not bars then
-        bars, beats = string.match(buf, '(%d*)%.(%d+)')
-        if not bars then
-          bars = string.match(buf, '(%d*)')
-        end
+        bars = string.match(buf, '(%d-)')
       end
-      if not bars or bars == '' then bars = 0 end
-      bars = timeFormatClampPad(bars, 0, nil, '%d')
-      if not beats or beats == '' then beats = 1 end -- need to check number of beats in bar N
-      beats = timeFormatClampPad(beats, 0, nil, '%d')
-      if not fraction or fraction == '' then fraction = 0 end
-      fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
-
-      return bars .. '.' .. beats .. '.' .. fraction
     end
-    -- if (string.match(buf, '%d*:')) then
-    --   local minutes, seconds, fracsecs = string.match(buf, '(%d*):(%d+)%.(%d+)')
-    --   if not minutes then
-    --     minutes, seconds = string.match(buf, '(%d*):(%d+)')
-    --     if not minutes then
-    --       minutes = string.match(buf, '(%d*)')
-    --     end
-    --   end
-    --   if not minutes or minutes == '' then minutes = 0 end
-    --   minutes = timeFormatClampPad(minutes, 0, 59, '%02d')
-    --   if not seconds or seconds == '' then seconds = 0 end
-    --   seconds = timeFormatClampPad(seconds, 0, 59, '%02d')
-    --   if not fracsecs then fracsecs = 0 end
-    --   fracsecs = timeFormatClampPad(fracsecs, 0, 99, '%02d')
+    if not bars or bars == '' then bars = 0 end
+    bars = timeFormatClampPad(bars, 0, nil, '%d')
+    if not beats or beats == '' then beats = 0 end
+    beats = timeFormatClampPad(beats, 0, nil, '%d')
+    if not fraction or fraction == '' then fraction = 0 end
+    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    return bars .. '.' .. beats .. '.' .. fraction
+  elseif format == TIME_FORMAT_MINUTES then
+    local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
+    local minutesVal, secondsVal
+    if not minutes then
+      minutes, seconds = string.match(buf, '(%d-):(%d+)')
+      if not minutes then
+        minutes = string.match(buf, '(%d-):')
+      end
+    end
 
-    --   return minutes .. '.' .. seconds .. '.' .. fracsecs
-    -- end
-    return DEFAULT_LENGTHFORMAT_STRING
-    -- ... etc.
+    if not fraction or fraction == '' then fraction = 0 end
+    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
+    if secondsVal > 59 then
+      minutesVal = math.floor(secondsVal / 60)
+      seconds = tostring(secondsVal % 60)
+    end
+    if not minutes or minutes == '' then minutes = 0 end
+    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
+    return minutes .. ':' .. seconds .. '.' .. fraction
+  elseif format == TIME_FORMAT_HMSF then
+    local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
+    local hoursVal, minutesVal, secondsVal, framesVal
+    local frate = r.TimeMap_curFrameRate(0)
+
+    if not frames or frames == '' then frames = 0 end
+    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
+    if framesVal > frate then
+      secondsVal = math.floor(framesVal / frate)
+      frames = string.format('%02d', framesVal % frate)
+    end
+    if not seconds or seconds == '' then seconds = 0 end
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
+    if secondsVal > 59 then
+      minutesVal = math.floor(secondsVal / 60)
+      seconds = string.format('%02d', secondsVal % 60)
+    end
+    if not minutes or minutes == '' then minutes = 0 end
+    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
+    if minutesVal > 59 then
+      hoursVal = math.floor(minutesVal / 60)
+      minutes = string.format('%02d', minutesVal % 60)
+    end
+    if not hours or hours == '' then hours = 0 end
+    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
+    return hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
+  return DEFAULT_LENGTHFORMAT_STRING
+end
 
-  local function timeFormatRebuf(buf)
-    if string.match(buf, '%d*%.') then
-      local bars, beats, fraction = string.match(buf, '(%d*)%.(%d+)%.(%d+)')
+local function timeFormatRebuf(buf)
+  local format = determineTimeFormatStringType(buf)
+  if format == TIME_FORMAT_UNKNOWN then return DEFAULT_TIMEFORMAT_STRING end
+
+  if format == TIME_FORMAT_MEASURES then
+    local bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
+    if not bars then
+      bars, beats = string.match(buf, '(%d-)%.(%d+)')
       if not bars then
-        bars, beats = string.match(buf, '(%d*)%.(%d+)')
-        if not bars then
-          bars = string.match(buf, '(%d*)')
-        end
+        bars = string.match(buf, '(%d-)')
       end
-      if not bars or bars == '' then bars = 0 end
-      bars = timeFormatClampPad(bars, nil, nil, '%d')
-      if not beats or beats == '' then beats = 1 end -- need to check number of beats in bar N
-      beats = timeFormatClampPad(beats, 1, nil, '%d')
-      if not fraction or fraction == '' then fraction = 0 end
-      fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
-
-      return bars .. '.' .. beats .. '.' .. fraction
     end
-    -- if (string.match(buf, '%d*:')) then
-    --   local minutes, seconds, fracsecs = string.match(buf, '(%d*):(%d+)%.(%d+)')
-    --   if not minutes then
-    --     minutes, seconds = string.match(buf, '(%d*):(%d+)')
-    --     if not minutes then
-    --       minutes = string.match(buf, '(%d*)')
-    --     end
-    --   end
-    --   if not minutes or minutes == '' then minutes = 0 end
-    --   minutes = timeFormatClampPad(minutes, 0, 59, '%02d')
-    --   if not seconds or seconds == '' then seconds = 0 end
-    --   seconds = timeFormatClampPad(seconds, 0, 59, '%02d')
-    --   if not fracsecs then fracsecs = 0 end
-    --   fracsecs = timeFormatClampPad(fracsecs, 0, 99, '%02d')
+    if not bars or bars == '' then bars = 0 end
+    bars = timeFormatClampPad(bars, nil, nil, '%d')
+    if not beats or beats == '' then beats = 1 end
+    beats = timeFormatClampPad(beats, 1, nil, '%d')
+    if not fraction or fraction == '' then fraction = 0 end
+    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    return bars .. '.' .. beats .. '.' .. fraction
+  elseif format == TIME_FORMAT_MINUTES then
+    local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
+    local minutesVal, secondsVal, fractionVal
+    if not minutes then
+      minutes, seconds = string.match(buf, '(%d-):(%d+)')
+      if not minutes then
+        minutes = string.match(buf, '(%d-):')
+      end
+    end
 
-    --   return minutes .. '.' .. seconds .. '.' .. fracsecs
-    -- end
-    return DEFAULT_TIMEFORMAT_STRING
-    -- ... etc.
+    if not fraction or fraction == '' then fraction = 0 end
+    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
+    if secondsVal > 59 then
+      minutesVal = math.floor(secondsVal / 60)
+      seconds = tostring(secondsVal % 60)
+    end
+    if not minutes or minutes == '' then minutes = 0 end
+    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
+    return minutes .. ':' .. seconds .. '.' .. fraction
+  elseif format == TIME_FORMAT_HMSF then
+    local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
+    local hoursVal, minutesVal, secondsVal, framesVal
+    local frate = r.TimeMap_curFrameRate(0)
+
+    if not frames or frames == '' then frames = 0 end
+    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
+    if framesVal > frate then
+      secondsVal = math.floor(framesVal / frate)
+      frames = string.format('%02d', framesVal % frate)
+    end
+    if not seconds or seconds == '' then seconds = 0 end
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
+    if secondsVal > 59 then
+      minutesVal = math.floor(secondsVal / 60)
+      seconds = string.format('%02d', secondsVal % 60)
+    end
+    if not minutes or minutes == '' then minutes = 0 end
+    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
+    if minutesVal > 59 then
+      hoursVal = math.floor(minutesVal / 60)
+      minutes = string.format('%02d', minutesVal % 60)
+    end
+    if not hours or hours == '' then hours = 0 end
+    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
+    return hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
+  return DEFAULT_TIMEFORMAT_STRING
+end
 
 local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets/'
 local presetExt = '.tfmrPreset'
@@ -1135,7 +1133,7 @@ local function handleParam(row, target, condOp, paramName, paramTab, paramStr)
   elseif paramType == PARAM_TYPE_TIME then
     row[paramName .. 'TimeFormatStr'] = timeFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_TIMEDUR then
-    row[paramName .. 'imeFormatStr'] = lengthFormatRebuf(paramStr)
+    row[paramName .. 'TimeFormatStr'] = lengthFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_METRICGRID then
     row[paramName .. 'TextEditorStr'] = paramStr
   end
@@ -1257,25 +1255,72 @@ local function processFindMacro(buf)
   processFindMacroRow(string.sub(buf, bufstart))
 end
 
-local function lengthFormatToSeconds(buf)
-  -- b.b.f vs h:m.s vs ...?
-  local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
-  local bars = tonumber(tbars)
-  local beats = tonumber(tbeats)
-  local fraction = tonumber(tfraction)
-  fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-  return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars)
+local function timeFormatToSeconds(buf, baseTime)
+  local format = determineTimeFormatStringType(buf)
+
+  if format == TIME_FORMAT_MEASURES then
+    local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
+    local bars = tonumber(tbars)
+    local beats = tonumber(tbeats)
+    local fraction = tonumber(tfraction)
+    local adjust = baseTime and baseTime or 0
+    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
+    if baseTime then
+      local retval, measures = r.TimeMap2_timeToBeats(0, baseTime)
+      bars = (bars and bars or 0) + measures
+      beats = (beats and beats or 0) + retval
+    end
+    return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars) - adjust
+  elseif format == TIME_FORMAT_MINUTES then
+    local tminutes, tseconds, tfraction = string.match(buf, '(%d+):(%d+)%.(%d+)')
+    local minutes = tonumber(tminutes)
+    local seconds = tonumber(tseconds)
+    local fraction = tonumber(tfraction)
+    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
+    -- mu.post((minutes * 60) + seconds + (fraction / 100.))
+    return (minutes * 60) + seconds + (fraction / 100.)
+  elseif format == TIME_FORMAT_HMSF then
+    local thours, tminutes, tseconds, tframes = string.match(buf, '(%d+):(%d+):(%d+):(%d+)')
+    local hours = tonumber(thours)
+    local minutes = tonumber(tminutes)
+    local seconds = tonumber(tseconds)
+    local frames = tonumber(tframes) -- is this based on r.TimeMap_curFrameRate()?
+    local frate = r.TimeMap_curFrameRate(0)
+    -- fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
+    return (hours * 60 * 60) + (minutes * 60) + seconds + (frames / frate)
+  end
+  return 0
 end
 
-local function timeFormatToSeconds(buf)
-  -- b.b.f vs h:m.s vs ...?
-  local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
-  local bars = tonumber(tbars)
-  local beats = tonumber(tbeats)
-  local fraction = tonumber(tfraction)
-  fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-  return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars)
+local function lengthFormatToSeconds(buf, baseTime)
+  return timeFormatToSeconds(buf, baseTime)
 end
+
+local function AddDuration(duration, baseTime)
+  local adjustedTime = lengthFormatToSeconds(duration, baseTime)
+  return baseTime + adjustedTime
+end
+
+local function SubtractDuration(duration, baseTime)
+  local adjustedTime = lengthFormatToSeconds(duration, baseTime)
+  return baseTime - adjustedTime
+end
+
+local context = {}
+context.r = reaper
+context.math = math
+context.RandomValue = RandomValue
+context.GetTimeSelectionStart = GetTimeSelectionStart
+context.GetTimeSelectionEnd = GetTimeSelectionEnd
+context.GetSubtypeValue = GetSubtypeValue
+context.GetMainValue = GetMainValue
+context.QuantizeTo = QuantizeTo
+context.Mirror = Mirror
+context.OnMetricGrid = OnMetricGrid
+context.InBarRange = InBarRange
+context.LinearChangeOverSelection = LinearChangeOverSelection
+context.AddDuration = AddDuration
+context.SubtractDuration = SubtractDuration
 
 local mainValueLabel
 local subtypeValueLabel
@@ -1299,8 +1344,8 @@ local function doProcessParams(row, target, condOp, paramName, paramType, paramT
   end
   local paramVal = condOp.terms < terms and ''
     or paramType == PARAM_TYPE_TEXTEDITOR and row[paramName .. 'TextEditorStr']
-    or paramType == PARAM_TYPE_TIME and (notation and row[paramName .. 'TimeFormatStr'] or tostring(timeFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
-    or paramType == PARAM_TYPE_TIMEDUR and (notation and row[paramName .. 'TimeFormatStr'] or tostring(lengthFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
+    or paramType == PARAM_TYPE_TIME and ((notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(timeFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
+    or paramType == PARAM_TYPE_TIMEDUR and ((notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(lengthFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
     or paramType == PARAM_TYPE_METRICGRID and row[paramName .. 'TextEditorStr']
     or #paramTab ~= 0 and (notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text)
   if addMetricGridNotation then
@@ -1434,7 +1479,6 @@ local function processFind(take)
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr -- TODO Boolean
 
   end
-  -- what about multiple param1?
 
   fnString = 'local entry = ... \nreturn ' .. fnString
   -- mu.post(fnString)
@@ -1766,12 +1810,13 @@ local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, 
     mu.MIDI_OpenWriteTransaction(take)
   end
   for _, entry in ipairs(entryTab) do
+    local timeAdjust = r.GetProjectTimeOffset(0, false)
     actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), selStart, selEnd)
-    entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
+    entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime - timeAdjust)
     entry.selected = (entry.flags & 1) ~= 0
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
-      entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
+      entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
       mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
       mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
@@ -1797,12 +1842,13 @@ end
 local function transformEntryInTake(take, entryTab, actionFn, contextTab)
   mu.MIDI_OpenWriteTransaction(take)
   for _, entry in ipairs(entryTab) do
+    local timeAdjust = r.GetProjectTimeOffset(0, false)
     actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), contextTab)
-    entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime)
+    entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime - timeAdjust)
     entry.selected = (entry.flags & 1) ~= 0
     entry.muted = (entry.flags & 2) ~= 0
     if entry.type == NOTE_TYPE then
-      entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime + entry.projlen)
+      entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
       mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
       mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)

@@ -80,7 +80,8 @@ local function post(...)
   local str = ''
   for i = 1, #args do
     local v = args[i]
-    str = str .. (i ~= 1 and ', ' or '') .. (v ~= nil and tostring(v) or '<nil>')
+    local val = tostring(v)
+    str = str .. (i ~= 1 and ', ' or '') .. (val ~= nil and val or '<nil>')
   end
   str = str .. '\n'
   r.ShowConsoleMsg(str)

@@ -404,6 +404,10 @@ local function windowFn()
     (EventChar < '0' || EventChar > '9') && EventChar != '-' ? EventChar = 0;
   ]])
 
+  local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+    (EventChar < '0' || EventChar > '9') && EventChar != '-' && EventChar != ':' && EventChar != '.' ? EventChar = 0;
+  ]])
+
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, needsTerms, idx, procFn)
     local rv = 0
     if paramType == tx.PARAM_TYPE_METRICGRID and needsTerms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
@@ -431,7 +435,7 @@ local function windowFn()
       elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
         -- time format depends on PPQ column value
         r.ImGui_BeginGroup(ctx)
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TimeFormatStr'], r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TimeFormatStr'], r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
         if kbdEntryIsCompleted(retval) then
           row[paramName .. 'TimeFormatStr'] = paramType == tx.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
           procFn()
@@ -649,7 +653,7 @@ local function windowFn()
     if selected and selected > 0 then selectedFindRow = selected end
 
     r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
-    if (currentFindTarget.time or currentFindTarget.timedur) and currentFindCondition.terms ~= 0 then
+    if (paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
       r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
       if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
         selectedFindRow = k

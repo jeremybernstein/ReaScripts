@@ -864,12 +864,16 @@ local function windowFn()
   r.ImGui_Button(ctx, 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
 
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    local numRows = #tx.actionRowTable()
     addActionRow()
-    local scope = tx.actionScopeTable[tx.currentActionScope()].notation
-    if scope:match('select') then -- change to Transform scope if we're in a Select scope
-      for k, v in ipairs(tx.actionScopeTable) do
-        if v.notation == '$transform' then
-          tx.setCurrentActionScope(k)
+
+    if numRows == 0 then
+      local scope = tx.actionScopeTable[tx.currentActionScope()].notation
+      if scope:match('select') then -- change to Transform scope if we're in a Select scope
+        for k, v in ipairs(tx.actionScopeTable) do
+          if v.notation == '$transform' then
+            tx.setCurrentActionScope(k)
+          end
         end
       end
     end

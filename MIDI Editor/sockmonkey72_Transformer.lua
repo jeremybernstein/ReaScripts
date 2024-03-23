@@ -117,6 +117,8 @@ local isClosing = false
 local selectedFindRow = 0
 local selectedActionRow = 0
 
+local showTimeFormatColumn = false
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
@@ -591,26 +593,30 @@ local function windowFn()
   ---------- SELECTION CRITERIA TABLE ----------
   ----------------------------------------------
 
+  local timeFormatColumnName = 'Bar Range/Time Base'
+
   local findColumns = {
     '(',
     'Target',
     'Condition',
     'Parameter 1',
     'Parameter 2',
-    'Bar Range/Time Base',
+    timeFormatColumnName,
     ')',
     'Boolean'
   }
 
-  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, r.ImGui_GetFrameHeightWithSpacing(ctx) * 6.2)
+  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, r.ImGui_GetFrameHeightWithSpacing(ctx) * 6.2)
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
   for _, label in ipairs(findColumns) do
-    local narrow = (label == '(' or label == ')' or label == 'Boolean')
-    local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_None()
-    local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(PAREN_COLUMN_WIDTH)) or nil
-    r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
+    if showTimeFormatColumn or label ~= timeFormatColumnName then
+      local narrow = (label == '(' or label == ')' or label == 'Boolean')
+      local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_WidthStretch()
+      local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(PAREN_COLUMN_WIDTH)) or nil
+      r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
+    end
   end
   r.ImGui_TableHeadersRow(ctx)
   r.ImGui_PopStyleColor(ctx)
@@ -686,16 +692,18 @@ local function windowFn()
     selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramType, 2, k, tx.processFind)
     if selected and selected > 0 then selectedFindRow = selected end
 
-    r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
-    if (paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
-      r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
-      if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-        selectedFindRow = k
-        r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
+    if showTimeFormatColumn then
+      r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
+      if (paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
+        r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
+        if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          selectedFindRow = k
+          r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
+        end
       end
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 6) -- End Paren
+    r.ImGui_TableSetColumnIndex(ctx, 6 - (showTimeFormatColumn == false and 1 or 0)) -- End Paren
     if currentRow.endParenEntry < 2 then
       r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), r.ImGui_GetFrameHeight(ctx)) -- or we can't test hover/click properly
     else
@@ -706,7 +714,7 @@ local function windowFn()
       selectedFindRow = k
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 7) -- Boolean
+    r.ImGui_TableSetColumnIndex(ctx, 7 - (showTimeFormatColumn == false and 1 or 0)) -- Boolean
     if k ~= #tx.findRowTable() then
       r.ImGui_Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
       if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -818,10 +826,12 @@ local function windowFn()
         tx.processFind()
       end)
 
-    createPopup('timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
-        currentRow.timeFormatEntry = i
-        tx.processFind()
-      end)
+    if showTimeFormatColumn then
+      createPopup('timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
+          currentRow.timeFormatEntry = i
+          tx.processFind()
+        end)
+    end
 
     r.ImGui_PopID(ctx)
   end

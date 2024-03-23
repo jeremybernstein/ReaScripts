@@ -479,7 +479,7 @@ local findChannelParam1Entries = {
   { notation = '16', label = '16', text = '15' },
 }
 
-local findTimeFormatEntries = { -- time format not yet respected, these are also not 100% relevant to REAPER
+local findTimeFormatEntries = {
   { label = 'REAPER time' },
   { label = 'Seconds' },
   { label = 'Samples' },
@@ -887,7 +887,7 @@ local function lengthFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 99, '%03d')
+    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
     seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
@@ -958,7 +958,7 @@ local function timeFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 99, '%03d')
+    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
     seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
@@ -1326,8 +1326,7 @@ local function timeFormatToSeconds(buf, baseTime, isLength)
     local minutes = tonumber(tminutes)
     local seconds = tonumber(tseconds)
     local fraction = tonumber(tfraction)
-    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-    -- mu.post((minutes * 60) + seconds + (fraction / 100.))
+    fraction = not fraction and 0 or fraction > 999 and 999 or fraction < 0 and 0 or fraction
     return ((minutes * 60) + seconds + (fraction / 1000.)) * (isneg and -1 or 1)
   elseif format == TIME_FORMAT_HMSF then
     local thours, tminutes, tseconds, tframes = string.match(buf, '(%d+):(%d+):(%d+):(%d+)')

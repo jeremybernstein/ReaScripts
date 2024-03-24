@@ -618,14 +618,14 @@ local actionPropertyParam1Entries = {
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0 }, -- note that this is different for AT and PB
+  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0, sub = true }, -- note that this is different for AT and PB
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0 }, -- ?? note that this is different for AT and PB
+  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0, sub = true }, -- ?? note that this is different for AT and PB
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 

@@ -553,6 +553,7 @@ local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', tex
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
+local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true }
 
 local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', event.projtime, true)', terms = 2, sub = true, split = {{ texteditor = true }, { timedur = true }}, range = {}, decimal = true, timearg = true }
 
@@ -618,23 +619,20 @@ local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0 }, -- note that this is different for AT and PB
-  { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
-  actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
   { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0 }, -- ?? note that this is different for AT and PB
-  { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
-  actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionGenericOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
-  actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local PARAM_TYPE_UNKNOWN = 0

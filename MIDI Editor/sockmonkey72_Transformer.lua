@@ -7,6 +7,7 @@
 --   - initial
 -- @provides
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
+--   Transformer/TransformerLib.lua
 --   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Transformer.lua
 
 -----------------------------------------------------------------------------
@@ -121,6 +122,14 @@ local showTimeFormatColumn = false
 
 local defaultFindRow
 local defaultActionRow
+
+-- local focuswait
+-- local wantsRecede -- = tonumber(r.GetExtState('sm72_CreateCrossfade', 'ConfigWantsRecede'))
+-- wantsRecede = (not wantsRecede or wantsRecede ~= 0) and 1 or 0
+
+-- local function reFocus()
+--   focuswait = 5
+-- end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
@@ -286,6 +295,20 @@ end
 local ppqToTime -- forward declaration to avoid vs.code warning
 
 local function windowFn()
+
+  -- if wantsRecede ~= 0 and focuswait then
+  --   focuswait = focuswait - 1
+  --   if focuswait == 0 then
+  --     r.SetCursorContext(0, nil)
+  --     focuswait = nil
+  --   end
+  -- end
+
+  -- if r.ImGui_IsMouseHoveringRect(ctx, windowInfo.left, windowInfo.top, windowInfo.left + windowInfo.width, windowInfo.top + windowInfo.height) then
+  --   reFocus()
+  -- else
+  --   if not focuswait then focuswait = 5 end
+  -- end
 
   ---------------------------------------------------------------------------
   --------------------------- BUNCH OF VARIABLES ----------------------------
@@ -771,15 +794,14 @@ local function windowFn()
 
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-    r.ImGui_BeginGroup(ctx)
     if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
       selectedFindRow = k
     end
-    r.ImGui_EndGroup(ctx)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    if r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+      selectedFindRow = k
       r.ImGui_OpenPopup(ctx, 'defaultFindRow')
     end
 
@@ -1099,15 +1121,14 @@ local function windowFn()
 
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-    r.ImGui_BeginGroup(ctx)
     if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
       selectedActionRow = k
     end
-    r.ImGui_EndGroup(ctx)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    if r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+      selectedActionRow = k
       r.ImGui_OpenPopup(ctx, 'defaultActionRow')
     end
 

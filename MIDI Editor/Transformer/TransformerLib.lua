@@ -1893,6 +1893,7 @@ local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, 
     if entry.type == NOTE_TYPE then
       if entry.projlen < 0 then entry.projlen = 1 / context.PPQ end
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
+      entry.msg3 = entry.msg3 < 1 and 1 or entry.msg3 -- do not turn off the note
       mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
       mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
@@ -1926,6 +1927,7 @@ local function transformEntryInTake(take, entryTab, actionFn, contextTab)
     if entry.type == NOTE_TYPE then
       if entry.projlen < 0 then entry.projlen = 1 / context.PPQ end
       entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
+      entry.msg3 = entry.msg3 < 1 and 1 or entry.msg3 -- do not turn off the note
       mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
     elseif entry.type == CC_TYPE then
       mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)

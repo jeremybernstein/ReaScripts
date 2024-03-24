@@ -222,15 +222,15 @@ local endParenEntries = {
 }
 
 local findTargetEntries = {
-  { notation = '$position', label = 'Position', text = 'entry.projtime', time = true },
-  { notation = '$length', label = 'Length', text = 'entry.chanmsg == 0x90 and entry.projlen', timedur = true },
-  { notation = '$channel', label = 'Channel', text = 'entry.chan', menu = true },
-  { notation = '$type', label = 'Type', text = 'entry.chanmsg', menu = true },
-  { notation = '$property', label = 'Property', text = 'entry.flags', menu = true },
-  { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(entry)', texteditor = true, range = {0, 127} }, -- different for AT and PB
-  { notation = '$value2', label = 'Value 2', text = 'GetMainValue(entry)', texteditor = true, range = {0, 127} }, -- CC# or Note# or ...
-  { notation = '$velocity', label = 'Velocity', text = 'entry.chanmsg == 0x90 and entry.msg3', texteditor = true, range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity', text = 'entry.relvel', texteditor = true, range = {0, 127} }
+  { notation = '$position', label = 'Position', text = 'event.projtime', time = true },
+  { notation = '$length', label = 'Length', text = 'event.chanmsg == 0x90 and event.projlen', timedur = true },
+  { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
+  { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
+  { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
+  { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(event)', texteditor = true, range = {0, 127} }, -- different for AT and PB
+  { notation = '$value2', label = 'Value 2', text = 'GetMainValue(event)', texteditor = true, range = {0, 127} }, -- CC# or Note# or ...
+  { notation = '$velocity', label = 'Velocity', text = 'event.chanmsg == 0x90 and event.msg3', texteditor = true, range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', texteditor = true, range = {0, 127} }
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
@@ -265,14 +265,14 @@ local function GetTimeSelectionEnd()
   return ts_end
 end
 
-local function GetSubtypeValue(entry)
-  if entry.type == SYXTEXT_TYPE then return 0
-  else return entry.msg2
+local function GetSubtypeValue(event)
+  if event.type == SYXTEXT_TYPE then return 0
+  else return event.msg2
   end
 end
 
-local function GetSubtypeValueName(entry)
-  if entry.type == SYXTEXT_TYPE then return 'devnull'
+local function GetSubtypeValueName(event)
+  if event.type == SYXTEXT_TYPE then return 'devnull'
   else return 'msg2'
   end
 end
@@ -288,16 +288,16 @@ local function GetSubtypeValueLabel(typeIndex)
   end
 end
 
-local function GetMainValue(entry)
-  if entry.chanmsg == 0xC0 or entry.chanmsg == 0xD0 then return entry.msg2
-  elseif entry.type == SYXTEXT_TYPE then return 0
-  else return entry.msg3
+local function GetMainValue(event)
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 then return event.msg2
+  elseif event.type == SYXTEXT_TYPE then return 0
+  else return event.msg3
   end
 end
 
-local function GetMainValueName(entry)
-  if entry.chanmsg == 0xC0 or entry.chanmsg == 0xD0 then return 'msg2'
-  elseif entry.type == SYXTEXT_TYPE then return 'devnull'
+local function GetMainValueName(event)
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 then return 'msg2'
+  elseif event.type == SYXTEXT_TYPE then return 'devnull'
   else return 'msg3'
   end
 end
@@ -418,10 +418,10 @@ local findPositionConditionEntries = {
   { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 },
   { notation = ':inrange', label = 'Inside Range', text = '{tgt} >= {param1} and {tgt} <= {param2}', terms = 2, sub = true }, -- absolute position
   { notation = '!:inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true },
-  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, entry.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, entry.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } },
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, entry.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
   { notation = ':beforecursor', label = 'Before Cursor', text = '< (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
   { notation = ':aftercursor', label = 'After Cursor', text = '>= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
   { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
@@ -526,15 +526,15 @@ local function addActionRow(row)
 end
 
 local actionTargetEntries = {
-  { notation = '$position', label = 'Position', text = 'entry.projtime', time = true },
-  { notation = '$length', label = 'Length', text = 'entry.projlen', timedur = true, cond = 'entry.chanmsg == 0x90' },
-  { notation = '$channel', label = 'Channel', text = 'entry.chan', menu = true },
-  { notation = '$type', label = 'Type', text = 'entry.chanmsg', menu = true },
-  { notation = '$property', label = 'Property', text = 'entry.flags', menu = true },
-  { notation = '$value1', label = 'Value 1', text = 'entry[_value1]', texteditor = true, range = {0, 127} },
-  { notation = '$value2', label = 'Value 2', text = 'entry[_value2]', texteditor = true, range = {0, 127} },
-  { notation = '$velocity', label = 'Velocity', text = 'entry.msg3', texteditor = true, cond = 'entry.chanmsg == 0x90', range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity', text = 'entry.relvel', texteditor = true, cond = 'entry.chanmsg == 0x90', range = {0, 127} },
+  { notation = '$position', label = 'Position', text = 'event.projtime', time = true },
+  { notation = '$length', label = 'Length', text = 'event.projlen', timedur = true, cond = 'event.chanmsg == 0x90' },
+  { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
+  { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
+  { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
+  { notation = '$value1', label = 'Value 1', text = 'event[_value1]', texteditor = true, range = {0, 127} },
+  { notation = '$value2', label = 'Value 2', text = 'event[_value2]', texteditor = true, range = {0, 127} },
+  { notation = '$velocity', label = 'Velocity', text = 'event.msg3', texteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', texteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
@@ -550,11 +550,11 @@ local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', tex
 local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, decimal = true }
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 }, decimal = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
-local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
+local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
-local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', entry.projtime, true)', terms = 2, sub = true, split = {{ texteditor = true }, { timedur = true }}, range = {}, decimal = true, timearg = true }
+local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', event.projtime, true)', terms = 2, sub = true, split = {{ texteditor = true }, { timedur = true }}, range = {}, decimal = true, timearg = true }
 
 local function positionMod(op)
   local newop = tableCopy(op)
@@ -575,19 +575,19 @@ local function lengthMod(op)
 end
 
 local actionPositionOperationEntries = {
-  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
-  { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
+  { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, event.projlen)', terms = 0, sub = true },
   actionOperationTimeScaleOff
 }
 
 local actionLengthOperationEntries = {
-  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', entry.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
@@ -617,7 +617,7 @@ local actionPropertyParam1Entries = {
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(entry)', terms = 0 }, -- note that this is different for AT and PB
+  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0 }, -- note that this is different for AT and PB
   { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
   actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
@@ -625,7 +625,7 @@ local actionSubtypeOperationEntries = {
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(entry)', terms = 0 }, -- ?? note that this is different for AT and PB
+  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0 }, -- ?? note that this is different for AT and PB
   { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true },
   actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
@@ -1550,7 +1550,7 @@ local function processFind(take)
 
   end
 
-  fnString = 'local entry = ... \nreturn ' .. fnString
+  fnString = 'local event = ... \nreturn ' .. fnString
   if DEBUG then mu.post(fnString) end
 
   local findFn
@@ -1849,30 +1849,30 @@ local function runFind(findFn, getUnfound)
 
   local firstTime = 0xFFFFFFFF
   local lastTime = -0xFFFFFFFF
-  for _, entry in ipairs(allEvents) do
-    if findFn(entry) then
-      if entry.projtime < firstTime then firstTime = entry.projtime end
-      if entry.projtime > lastTime then lastTime = entry.projtime end
-      table.insert(found, entry)
+  for _, event in ipairs(allEvents) do
+    if findFn(event) then
+      if event.projtime < firstTime then firstTime = event.projtime end
+      if event.projtime > lastTime then lastTime = event.projtime end
+      table.insert(found, event)
     elseif getUnfound then
-      table.insert(unfound, entry)
+      table.insert(unfound, event)
     end
   end
   local contextTab = { firstSel = firstTime, lastSel = lastTime }
   return found, contextTab, getUnfound and unfound or nil
 end
 
-local function deleteEventsInTake(take, entryTab, doTx)
+local function deleteEventsInTake(take, eventTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
-  for _, entry in ipairs(entryTab) do
-    if entry.type == NOTE_TYPE then
-      mu.MIDI_DeleteNote(take, entry.idx)
-    elseif entry.type == CC_TYPE then
-      mu.MIDI_DeleteCC(take, entry.idx)
-    elseif entry.type == SYXTEXT_TYPE then
-      mu.MIDI_DeleteTextSysexEvt(take, entry.idx)
+  for _, event in ipairs(eventTab) do
+    if event.type == NOTE_TYPE then
+      mu.MIDI_DeleteNote(take, event.idx)
+    elseif event.type == CC_TYPE then
+      mu.MIDI_DeleteCC(take, event.idx)
+    elseif event.type == SYXTEXT_TYPE then
+      mu.MIDI_DeleteTextSysexEvt(take, event.idx)
     end
   end
   if doTx == true or doTx == nil then
@@ -1880,25 +1880,25 @@ local function deleteEventsInTake(take, entryTab, doTx)
   end
 end
 
-local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, doTx)
+local function insertEventsIntoTake(take, eventTab, actionFn, selStart, selEnd, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
-  for _, entry in ipairs(entryTab) do
+  for _, event in ipairs(eventTab) do
     local timeAdjust = r.GetProjectTimeOffset(0, false)
-    actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), selStart, selEnd)
-    entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime - timeAdjust)
-    entry.selected = (entry.flags & 1) ~= 0
-    entry.muted = (entry.flags & 2) ~= 0
-    if entry.type == NOTE_TYPE then
-      if entry.projlen < 0 then entry.projlen = 1 / context.PPQ end
-      entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
-      entry.msg3 = entry.msg3 < 1 and 1 or entry.msg3 -- do not turn off the note
-      mu.MIDI_InsertNote(take, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-    elseif entry.type == CC_TYPE then
-      mu.MIDI_InsertCC(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-    elseif entry.type == SYXTEXT_TYPE then
-      mu.MIDI_InsertTextSysexEvt(take, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
+    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), selStart, selEnd)
+    event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+    event.selected = (event.flags & 1) ~= 0
+    event.muted = (event.flags & 2) ~= 0
+    if event.type == NOTE_TYPE then
+      if event.projlen < 0 then event.projlen = 1 / context.PPQ end
+      event.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
+      event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
+      mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqos, event.chan, event.msg2, event.msg3, event.relvel)
+    elseif event.type == CC_TYPE then
+      mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+    elseif event.type == SYXTEXT_TYPE then
+      mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
     end
   end
   if doTx == true or doTx == nil then
@@ -1906,33 +1906,33 @@ local function insertEventsIntoTake(take, entryTab, actionFn, selStart, selEnd, 
   end
 end
 
-local function setEntrySelectionInTake(take, entry)
-  if entry.type == NOTE_TYPE then
-    mu.MIDI_SetNote(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil, nil)
-  elseif entry.type == CC_TYPE then
-    mu.MIDI_SetCC(take, entry.idx, entry.selected, nil, nil, nil, nil, nil, nil)
-  elseif entry.type == SYXTEXT_TYPE then
-    mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, nil, nil, nil, nil)
+local function setEntrySelectionInTake(take, event)
+  if event.type == NOTE_TYPE then
+    mu.MIDI_SetNote(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil, nil)
+  elseif event.type == CC_TYPE then
+    mu.MIDI_SetCC(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil)
+  elseif event.type == SYXTEXT_TYPE then
+    mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, nil, nil, nil, nil)
   end
 end
 
-local function transformEntryInTake(take, entryTab, actionFn, contextTab)
+local function transformEntryInTake(take, eventTab, actionFn, contextTab)
   mu.MIDI_OpenWriteTransaction(take)
-  for _, entry in ipairs(entryTab) do
+  for _, event in ipairs(eventTab) do
     local timeAdjust = r.GetProjectTimeOffset(0, false)
-    actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry), contextTab)
-    entry.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, entry.projtime - timeAdjust)
-    entry.selected = (entry.flags & 1) ~= 0
-    entry.muted = (entry.flags & 2) ~= 0
-    if entry.type == NOTE_TYPE then
-      if entry.projlen < 0 then entry.projlen = 1 / context.PPQ end
-      entry.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (entry.projtime - timeAdjust) + entry.projlen)
-      entry.msg3 = entry.msg3 < 1 and 1 or entry.msg3 -- do not turn off the note
-      mu.MIDI_SetNote(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.endppqos, entry.chan, entry.msg2, entry.msg3, entry.relvel)
-    elseif entry.type == CC_TYPE then
-      mu.MIDI_SetCC(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.chan, entry.msg2, entry.msg3)
-    elseif entry.type == SYXTEXT_TYPE then
-      mu.MIDI_SetTextSysexEvt(take, entry.idx, entry.selected, entry.muted, entry.ppqpos, entry.chanmsg, entry.textmsg)
+    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
+    event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+    event.selected = (event.flags & 1) ~= 0
+    event.muted = (event.flags & 2) ~= 0
+    if event.type == NOTE_TYPE then
+      if event.projlen < 0 then event.projlen = 1 / context.PPQ end
+      event.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
+      event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
+      mu.MIDI_SetNote(take, event.idx, event.selected, event.muted, event.ppqpos, event.endppqos, event.chan, event.msg2, event.msg3, event.relvel)
+    elseif event.type == CC_TYPE then
+      mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+    elseif event.type == SYXTEXT_TYPE then
+      mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
     end
   end
   mu.MIDI_CommitWriteTransaction(take, false, true)
@@ -2059,7 +2059,7 @@ local function processAction(select)
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr ..'\n'
 
   end
-  fnString = 'return function(entry, _value1, _value2, _context)\n' .. fnString .. '\nreturn entry' .. '\nend'
+  fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\nreturn event' .. '\nend'
   if DEBUG then mu.post(fnString) end
 
   r.Undo_BeginBlock2(0)
@@ -2081,43 +2081,43 @@ local function processAction(select)
 
     if findFn and actionFn then
       if not select then -- not select then -- DEBUG
-        -- local entry = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
-        -- -- mu.tprint(entry, 2)
-        -- actionFn(entry, GetSubtypeValueName(entry), GetMainValueName(entry)) -- always returns true
-        -- mu.tprint(entry, 2)
+        -- local event = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
+        -- -- mu.tprint(event, 2)
+        -- actionFn(event, GetSubtypeValueName(event), GetMainValueName(event)) -- always returns true
+        -- mu.tprint(event, 2)
       else
         local notation = actionScopeTable[currentActionScope].notation
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, entry in ipairs(allEvents) do
-            entry.selected = findFn(entry)
-            setEntrySelectionInTake(take, entry)
+          for _, event in ipairs(allEvents) do
+            event.selected = findFn(event)
+            setEntrySelectionInTake(take, event)
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$selectadd' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, entry in ipairs(allEvents) do
-            local matching = findFn(entry)
+          for _, event in ipairs(allEvents) do
+            local matching = findFn(event)
             if matching then
-              entry.selected = true
-              setEntrySelectionInTake(take, entry)
+              event.selected = true
+              setEntrySelectionInTake(take, event)
             end
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$invertselect' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, entry in ipairs(allEvents) do
-            entry.selected = (findFn(entry) == false) and true or false
-            setEntrySelectionInTake(take, entry)
+          for _, event in ipairs(allEvents) do
+            event.selected = (findFn(event) == false) and true or false
+            setEntrySelectionInTake(take, event)
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$deselect' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, entry in ipairs(allEvents) do
-            local matching = findFn(entry)
+          for _, event in ipairs(allEvents) do
+            local matching = findFn(event)
             if matching then
-              entry.selected = false
-              setEntrySelectionInTake(take, entry)
+              event.selected = false
+              setEntrySelectionInTake(take, event)
             end
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
@@ -2146,7 +2146,7 @@ local function processAction(select)
             insertEventsIntoTake(take, found, actionFn, contextTab, false)
           end
           if #unfound ~=0 then
-            for _, entry in ipairs(unfound) do
+            for _, event in ipairs(unfound) do
               deleteEventsInTake(take, unfound, false)
             end
           end

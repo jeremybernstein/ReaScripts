@@ -13,10 +13,6 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
--- metric grid: dotted/triplet, slop, length of range, reset at next bar after pattern concludes (added to end of menu?)
--- TODO: time input
--- TODO: functions
-
 local r = reaper
 
 package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
@@ -58,7 +54,7 @@ dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 local scriptID = 'sockmonkey72_Transformer'
 
 local ctx = r.ImGui_CreateContext(scriptID)
-r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1) -- TODO docking
+r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1)
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -96,6 +92,9 @@ local presetTable = {}
 local presetLabel = ''
 local presetInputVisible = false
 local presetInputDoesScript = false
+local scriptWritesMainContext = true
+local scriptWritesMIDIContexts = true
+local refocusField = false
 
 local lastInputTextBuffer = ''
 local inOKDialog = false
@@ -229,6 +228,16 @@ local function handleExtState()
   if state and state ~= '' then
     defaultActionRow = state
   end
+
+  state = r.GetExtState(scriptID, 'scriptWritesMainContext')
+  if state and state ~= '' then
+    scriptWritesMainContext = tonumber(state) == 1 and true or false
+  end
+
+  state = r.GetExtState(scriptID, 'scriptWritesMIDIContexts')
+  if state and state ~= '' then
+    scriptWritesMIDIContexts = tonumber(state) == 1 and true or false
+  end
 end
 
 local function prepRandomShit()
@@ -335,7 +344,6 @@ local function windowFn()
   end
 
   local function generateLabel(label)
-    -- local oldX, oldY = r.ImGui_GetCursorPos(ctx)
     local ix, iy = currentRect.left, currentRect.top
     r.ImGui_PushFont(ctx, fontInfo.small)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFEF)
@@ -350,14 +358,23 @@ local function windowFn()
     r.ImGui_Text(ctx, label)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopFont(ctx)
-    --r.ImGui_SetCursorPos(ctx, oldX, oldY)
+  end
+
+  local function generateLabelOnLine(label, advance)
+    if not advance then
+      r.ImGui_SameLine(ctx)
+    end
+    updateCurrentRect()
+    local oldX, oldY = r.ImGui_GetCursorPos(ctx)
+    generateLabel(label)
+    r.ImGui_SetCursorPosY(ctx, oldY + scaled(20))
   end
 
   local function kbdEntryIsCompleted(retval)
     return (retval and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
               or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
               or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())))
-            or r.ImGui_IsItemDeactivated(ctx)
+            or (not refocusField and r.ImGui_IsItemDeactivated(ctx))
   end
 
   ---------------------------------------------------------------------------
@@ -397,7 +414,7 @@ local function windowFn()
     return tostring(num)
   end
 
-  local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets/'
+  local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
   local presetExt = '.tfmrPreset'
 
   local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
@@ -421,22 +438,39 @@ local function windowFn()
     end
   end
 
-  local function enumerateTransformerPresets()
-    if not dirExists(presetPath) then return {} end
+  local function enumerateTransformerPresets(pPath)
+    if not dirExists(pPath) then return {} end
 
     local idx = 0
     local fnames = {}
+    local fname
 
-    r.EnumerateFiles(presetPath, -1)
-    local fname = r.EnumerateFiles(presetPath, idx)
+    r.EnumerateSubdirectories(pPath, -1)
+    fname = r.EnumerateSubdirectories(pPath, idx)
+    while fname do
+      local entry = { label = fname }
+      table.insert(fnames, entry)
+      idx = idx + 1
+      fname = r.EnumerateSubdirectories(pPath, idx)
+    end
+
+    for _, v in ipairs(fnames) do
+      local newPath = pPath .. '/' .. v.label
+      v.sub = enumerateTransformerPresets(newPath)
+    end
+
+    idx = 0
+    r.EnumerateFiles(pPath, -1)
+    fname = r.EnumerateFiles(pPath, idx)
     while fname do
       if fname:match('%' .. presetExt .. '$') then
-        fname = { label = fname:gsub('%' .. presetExt .. '$', '') }
-        table.insert(fnames, fname)
+        local entry = { label = fname:gsub('%' .. presetExt .. '$', '') }
+        table.insert(fnames, entry)
       end
       idx = idx + 1
-      fname = r.EnumerateFiles(presetPath, idx)
+      fname = r.EnumerateFiles(pPath, idx)
     end
+
     local sorted = {}
     for _, v in spairs(fnames, function (t, a, b) return string.lower(t[a].label) < string.lower(t[b].label) end) do
       table.insert(sorted, v)
@@ -451,7 +485,7 @@ local function windowFn()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Button(ctx, 'Recall Preset...', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-    presetTable = enumerateTransformerPresets()
+    presetTable = enumerateTransformerPresets(presetPath)
     if #presetTable ~= 0 then
       r.ImGui_OpenPopup(ctx, 'openPresetMenu') -- defined far below
     end
@@ -535,7 +569,6 @@ local function windowFn()
           rv = idx
         end
       elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
-        -- time format depends on PPQ column value
         r.ImGui_BeginGroup(ctx)
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TimeFormatStr'], r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
         if kbdEntryIsCompleted(retval) then
@@ -558,36 +591,16 @@ local function windowFn()
     tx.processFindMacro(findConsoleText)
   end
 
+  generateLabelOnLine('Selection Criteria Console')
+
   r.ImGui_Spacing(ctx)
   r.ImGui_Separator(ctx)
   r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(12))
 
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE GEN ------------------------------
-
-  -- requires userValues, above
-
-  local function lengthFormatToSeconds(buf)
-    -- b.b.f vs h:m.s vs ...?
-    local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
-    local bars = tonumber(tbars)
-    local beats = tonumber(tbeats)
-    local fraction = tonumber(tfraction)
-    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-    return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars)
-  end
-
-  local function timeFormatToSeconds(buf)
-    -- b.b.f vs h:m.s vs ...?
-    local tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
-    local bars = tonumber(tbars)
-    local beats = tonumber(tbeats)
-    local fraction = tonumber(tfraction)
-    fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
-    return r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars)
-  end
 
   local mainValueLabel
   local subtypeValueLabel
@@ -933,13 +946,7 @@ local function windowFn()
 
   r.ImGui_EndTable(ctx)
 
-  updateCurrentRect()
-
-  local oldY = r.ImGui_GetCursorPosY(ctx)
-
-  generateLabel('Selection Criteria')
-
-  r.ImGui_SetCursorPosY(ctx, oldY + scaled(20))
+  generateLabelOnLine('Selection Criteria', true)
 
   ---------------------------------------------------------------------------
   ------------------------------- FIND BUTTONS ------------------------------
@@ -949,7 +956,7 @@ local function windowFn()
   r.ImGui_Spacing(ctx)
   r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(10))
 
   r.ImGui_AlignTextToFramePadding(ctx)
 
@@ -958,13 +965,10 @@ local function windowFn()
     r.ImGui_OpenPopup(ctx, 'findScopeMenu')
   end
 
-  r.ImGui_SameLine(ctx)
-  local oldX, oldY = r.ImGui_GetCursorPos(ctx)
+  generateLabelOnLine('Selection Scope', true)
 
-  updateCurrentRect()
-  generateLabel('Selection Scope')
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) - scaled(40))
 
-  r.ImGui_SetCursorPos(ctx, oldX + 20, oldY)
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, findParserError)
 
@@ -1000,6 +1004,8 @@ local function windowFn()
 
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(10))
 
   r.ImGui_Button(ctx, 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1044,11 +1050,13 @@ local function windowFn()
     tx.processActionMacro(actionConsoleText)
   end
 
+  generateLabelOnLine('Action Console')
+
   r.ImGui_Spacing(ctx)
   r.ImGui_Separator(ctx)
   r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(12))
 
   ----------------------------------------------
   ---------------- ACTIONS TABLE ---------------
@@ -1185,13 +1193,7 @@ local function windowFn()
 
   r.ImGui_EndTable(ctx)
 
-  updateCurrentRect();
-
-  local oldY = r.ImGui_GetCursorPosY(ctx)
-
-  generateLabel('Actions')
-
-  r.ImGui_SetCursorPosY(ctx, oldY + scaled(20))
+  generateLabelOnLine('Actions', true)
 
   ---------------------------------------------------------------------------
   ------------------------------ ACTION BUTTONS -----------------------------
@@ -1201,7 +1203,7 @@ local function windowFn()
   r.ImGui_Spacing(ctx)
   r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(10))
 
   r.ImGui_AlignTextToFramePadding(ctx)
 
@@ -1315,7 +1317,7 @@ local function windowFn()
 
     if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
 
-    path = presetPath .. buf
+    path = presetPath .. '/' .. buf
     return path, buf
   end
 
@@ -1329,10 +1331,14 @@ local function windowFn()
       presetLabel = fname
       if saved and presetInputDoesScript then
         local scriptPath = path:gsub('%' .. presetExt .. '$', '.lua')
-        r.AddRemoveReaScript(true, 32060, scriptPath, false) -- add to MIDI Editors automagically -- is that desirable?
-        r.AddRemoveReaScript(true, 32061, scriptPath, false)
-        r.AddRemoveReaScript(true, 32062, scriptPath, false)
-        r.AddRemoveReaScript(true, 0, scriptPath, true)
+        if scriptWritesMainContext then
+          r.AddRemoveReaScript(true, 32060, scriptPath, false)
+        end
+        if scriptWritesMIDIContexts then
+          r.AddRemoveReaScript(true, 32061, scriptPath, false)
+          r.AddRemoveReaScript(true, 32062, scriptPath, false)
+          r.AddRemoveReaScript(true, 0, scriptPath, true)
+        end
       end
     else
       presetLabel = ''
@@ -1377,8 +1383,15 @@ local function windowFn()
   end
 
   if presetInputVisible then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      presetInputVisible = false
+      presetInputDoesScript = false
+      handledEscape = true
+    end
+
     r.ImGui_SameLine(ctx)
     r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
+
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', lastInputTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
     if kbdEntryIsCompleted(retval) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -1391,7 +1404,33 @@ local function windowFn()
       end
     else
       lastInputTextBuffer = buf
+      inOKDialog = false
     end
+
+    if refocusField then refocusField = false end
+
+    r.ImGui_SameLine(ctx)
+    local rv, sel = r.ImGui_Checkbox(ctx, 'Main', scriptWritesMainContext)
+    if rv then
+      scriptWritesMainContext = sel
+      r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
+    end
+    if r.ImGui_IsItemHovered(ctx) then
+      refocusField = true
+      inOKDialog = false
+    end
+
+    r.ImGui_SameLine(ctx)
+    rv, sel = r.ImGui_Checkbox(ctx, 'MIDI', scriptWritesMIDIContexts)
+    if rv then
+      scriptWritesMIDIContexts = sel
+      r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
+    end
+    if r.ImGui_IsItemHovered(ctx) then
+      refocusField = true
+      inOKDialog = false
+    end
+
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)
   end
 
@@ -1408,14 +1447,73 @@ local function windowFn()
 
   handleStatus(2)
 
-  createPopup('openPresetMenu', presetTable, -1, function(i)
-      local filename = presetTable[i].label .. presetExt
-      if tx.loadPreset(presetPath .. filename) then
-        presetLabel = presetTable[i].label
-        lastInputTextBuffer = presetLabel
-      end
-    end)
+  local function generatePresetMenu(source, path, lab)
+    local mousePos = {}
+    mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
+    local windowRect = {}
+    windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
+    windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+    windowRect.right = windowRect.right + windowRect.left
+    windowRect.bottom = windowRect.bottom + windowRect.top
 
+    for i = 1, #source do
+      local selectText = source[i].label
+      local saveX = r.ImGui_GetCursorPosX(ctx)
+      r.ImGui_BeginGroup(ctx)
+
+      local rv, selected
+
+      if source[i].sub then
+        if r.ImGui_BeginMenu(ctx, selectText) then
+          generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText)
+          r.ImGui_EndMenu(ctx)
+        end
+      else
+        rv, selected = r.ImGui_Selectable(ctx, selectText, false)
+      end
+
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
+
+      local _, itemTop = r.ImGui_GetItemRectMin(ctx)
+      local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+      local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
+      local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+      r.ImGui_EndGroup(ctx)
+
+      if rv or srv then
+        if selected or srv then
+          local filename = source[i].label .. presetExt
+          if tx.loadPreset(path .. '/' .. filename) then
+            presetLabel = source[i].label
+            lastInputTextBuffer = presetLabel
+          end
+        end
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+  end
+
+  if r.ImGui_BeginPopup(ctx, 'openPresetMenu') then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      if r.ImGui_IsPopupOpen(ctx, 'openPresetMenu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+        handledEscape = true
+      end
+    end
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    generatePresetMenu(presetTable, presetPath)
+
+    r.ImGui_PopStyleColor(ctx, 5)
+
+    r.ImGui_EndPopup(ctx)
+  end
 
   ---------------------------------------------------------------------------
   ------------------------------- MOD KEYS ------------------------------
@@ -1643,7 +1741,7 @@ local function openWindow()
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
 
   r.ImGui_PushFont(ctx, fontInfo.large)
-  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 30
+  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 29
   r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winheight, windowInfo.defaultWidth * 3, winheight)
   r.ImGui_PopFont(ctx)
 

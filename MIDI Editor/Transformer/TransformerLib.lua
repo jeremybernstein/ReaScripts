@@ -554,6 +554,8 @@ local actionOperationLine = { notation = ':line', label = 'Linear Change in Sele
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(entry.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
 
+local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', entry.projtime, true)', terms = 2, sub = true, split = {{ texteditor = true }, { timedur = true }}, range = {}, decimal = true, timearg = true }
+
 local function positionMod(op)
   local newop = tableCopy(op)
   newop.menu = false
@@ -580,7 +582,7 @@ local actionPositionOperationEntries = {
   positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, entry.projlen)', terms = 0, sub = true },
-  actionOperationScaleOff
+  actionOperationTimeScaleOff
 }
 
 local actionLengthOperationEntries = {
@@ -589,7 +591,7 @@ local actionLengthOperationEntries = {
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
-  actionOperationScaleOff
+  actionOperationTimeScaleOff
 }
 
 local actionChannelOperationEntries = {
@@ -1141,26 +1143,36 @@ local function parseMetricGridNotation(str)
   return 0, false, 0, 0
 end
 
-local function getEditorTypeForRow(target, condOp)
-  local paramType = condOp.menu and PARAM_TYPE_MENU
-    or condOp.texteditor and PARAM_TYPE_TEXTEDITOR
-    or condOp.time and PARAM_TYPE_TIME
-    or condOp.timedur and PARAM_TYPE_TIMEDUR
-    or condOp.metricgrid and PARAM_TYPE_METRICGRID
-    or 0
-  if paramType == PARAM_TYPE_UNKNOWN then
-    paramType = target.menu and PARAM_TYPE_MENU
-    or target.texteditor and PARAM_TYPE_TEXTEDITOR
-    or target.time and PARAM_TYPE_TIME
-    or target.timedur and PARAM_TYPE_TIMEDUR
-    or target.metricgrid and PARAM_TYPE_METRICGRID
-    or PARAM_TYPE_TEXTEDITOR
-  end
-  return paramType
+local function getParamType(src)
+  return src.menu and PARAM_TYPE_MENU
+    or src.texteditor and PARAM_TYPE_TEXTEDITOR
+    or src.time and PARAM_TYPE_TIME
+    or src.timedur and PARAM_TYPE_TIMEDUR
+    or src.metricgrid and PARAM_TYPE_METRICGRID
+    or PARAM_TYPE_UNKNOWN
 end
 
-local function handleParam(row, target, condOp, paramName, paramTab, paramStr)
-  local paramType = getEditorTypeForRow(target, condOp)
+local function getEditorTypeForRow(target, condOp)
+  local paramType = getParamType(condOp)
+  if paramType == PARAM_TYPE_UNKNOWN then
+    paramType = getParamType(target)
+  end
+  if paramType == PARAM_TYPE_UNKNOWN then
+    paramType = PARAM_TYPE_TEXTEDITOR
+  end
+  local split
+  if condOp.split then
+    split = {}
+    split[1], split[2] = getParamType(condOp.split[1]), getParamType(condOp.split[2])
+    paramType = split[1]
+  end
+  return paramType, split
+end
+
+local function handleParam(row, target, condOp, paramName, paramTab, paramStr, index)
+  local paramType, split = getEditorTypeForRow(target, condOp)
+  if split then paramType = split[index] end
+
   paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
   if #paramTab ~= 0 then
     for kk, vv in ipairs(paramTab) do
@@ -1320,6 +1332,7 @@ local function timeFormatToSeconds(buf, baseTime, isLength)
       beats = (beats and beats or 0) + retval
     end
     if not isLength and beats and beats > 0 then beats = beats - 1 end
+    if not beats then beats = 0 end
     return (r.TimeMap2_beatsToTime(0, beats + (fraction / 100.), bars) - adjust) * (isneg and -1 or 1)
   elseif format == TIME_FORMAT_MINUTES then
     local tminutes, tseconds, tfraction = string.match(buf, '(%d+):(%d+)%.(%d+)')
@@ -1372,6 +1385,7 @@ context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration
 context.ClampValue = ClampValue
 context.AddLength = AddLength
+context.TimeFormatToSeconds = timeFormatToSeconds
 
 local mainValueLabel
 local subtypeValueLabel
@@ -1406,9 +1420,9 @@ local function doProcessParams(row, target, condOp, paramName, paramType, paramT
 end
 
 local function processParams(row, target, condOp, param1Tab, param2Tab, notation)
-  local paramType = getEditorTypeForRow(target, condOp)
-  local param1Val = doProcessParams(row, target, condOp, 'param1', paramType, param1Tab, 1, notation)
-  local param2Val = doProcessParams(row, target, condOp, 'param2', paramType, param2Tab, 2, notation)
+  local paramType, split = getEditorTypeForRow(target, condOp)
+  local param1Val = doProcessParams(row, target, condOp, 'param1', split and split[1] or paramType, param1Tab, 1, notation)
+  local param2Val = doProcessParams(row, target, condOp, 'param2', split and split[2] or paramType, param2Tab, 2, notation)
 
   return param1Val, param2Val
 end
@@ -1626,7 +1640,7 @@ local function processActionMacroRow(buf)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
       if param1 and param1 ~= '' then
-        param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1)
+        param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1, 1)
       end
       row.param1Val = param1
       break
@@ -1637,10 +1651,10 @@ local function processActionMacroRow(buf)
         row.operationEntry = k
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
-          param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1)
+          param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1, 1)
         end
         if param2 and param2 ~= '' then
-          param2 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param2', param2Tab, param2)
+          param2 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param2', param2Tab, param2, 2)
         end
         row.param1Val = param1
         row.param2Val = param2

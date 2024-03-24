@@ -158,13 +158,26 @@ local function removeFindRow()
 end
 
 local function setupActionRowFormat(row, opTab)
-  if tx.actionTargetEntries[row.targetEntry].notation == '$length' or opTab[row.operationEntry].timedur then
-    row.param1TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
-    row.param2TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
-  else
-    row.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
-    row.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  local target = tx.actionTargetEntries[row.targetEntry]
+  local operation = opTab[row.operationEntry]
+  local paramType, split = tx.getEditorTypeForRow(target, operation)
+  local p1 = DEFAULT_TIMEFORMAT_STRING
+  local p2 = DEFAULT_TIMEFORMAT_STRING
+
+  if target.notation == '$length'
+    or paramType == tx.PARAM_TYPE_TIMEDUR
+  then
+    p1 = DEFAULT_LENGTHFORMAT_STRING
+    p2 = DEFAULT_LENGTHFORMAT_STRING
   end
+
+  if split then
+    if split[1] == tx.PARAM_TYPE_TIMEDUR then p1 = DEFAULT_LENGTHFORMAT_STRING end
+    if split[2] == tx.PARAM_TYPE_TIMEDUR then p2 = DEFAULT_LENGTHFORMAT_STRING end
+  end
+
+  row.param1TimeFormatStr = p1
+  row.param2TimeFormatStr = p2
 end
 
 local function addActionRow(idx, row)
@@ -1070,15 +1083,16 @@ local function windowFn()
       r.ImGui_OpenPopup(ctx, 'operationMenu')
     end
 
-    local paramType = tx.getEditorTypeForRow(currentActionTarget, currentActionOperation)
+    -- this split thing is a hack, but it's only used for 1 operation in 2 targets for the time being...
+    local paramType, split = tx.getEditorTypeForRow(currentActionTarget, currentActionOperation)
     local selected
 
     r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
-    selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, paramType, 1, k, tx.processAction)
+    selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, split and split[1] or paramType, 1, k, tx.processAction)
     if selected and selected > 0 then selectedActionRow = selected end
 
     r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
-    selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, paramType, 2, k, tx.processAction)
+    selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, split and split[2] or paramType, 2, k, tx.processAction)
     if selected and selected > 0 then selectedActionRow = selected end
 
     r.ImGui_SameLine(ctx)

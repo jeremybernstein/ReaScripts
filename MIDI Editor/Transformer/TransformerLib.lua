@@ -1276,7 +1276,7 @@ local function processFindMacroRow(buf, boolstr)
     if boolstr == '||' then row.booleanEntry = 2 end
     addFindRow(row)
   else
-    mu.post('Error parsing row: ' .. buf)
+    mu.post('Error parsing criteria: ' .. buf)
   end
 end
 
@@ -1426,42 +1426,47 @@ local function prepFindEntries(row)
   return condTab, param1Tab, param2Tab, curTarget, curCondition
 end
 
+local function findRowToNotation(row, index)
+  local rowText = ''
+
+  local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(row)
+  rowText = curTarget.notation .. ' ' .. curCondition.notation
+  local param1Val, param2Val
+  local paramType = getEditorTypeForRow(curTarget, curCondition)
+  if paramType == PARAM_TYPE_MENU then
+    param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
+    param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
+  else
+    param1Val, param2Val = processParams(row, curTarget, curCondition, param1Tab, param2Tab, true)
+  end
+  if string.match(curCondition.notation, '[!]*%:') then
+    rowText = rowText .. '('
+    if param1Val and param1Val ~= '' then
+      rowText = rowText .. param1Val
+      if param2Val and param2Val ~= '' then
+        rowText = rowText .. ', ' .. param2Val
+      end
+    end
+    rowText = rowText .. ')'
+  else
+    if param1Val and param1Val ~= '' then
+      rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
+    end
+  end
+
+  if row.startParenEntry > 1 then rowText = startParenEntries[row.startParenEntry].notation .. ' ' .. rowText end
+  if row.endParenEntry > 1 then rowText = rowText .. ' ' .. endParenEntries[row.endParenEntry].notation end
+
+  if index and index ~= #findRowTable then
+    rowText = rowText .. (row.booleanEntry == 2 and ' || ' or ' && ')
+  end
+  return rowText
+end
+
 local function findRowsToNotation()
   local notationString = ''
   for k, v in ipairs(findRowTable) do
-    local rowText = ''
-
-    local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(v)
-    rowText = curTarget.notation .. ' ' .. curCondition.notation
-    local param1Val, param2Val
-    local paramType = getEditorTypeForRow(curTarget, curCondition)
-    if paramType == PARAM_TYPE_MENU then
-      param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[v.param1Entry].notation or nil
-      param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[v.param2Entry].notation or nil
-    else
-      param1Val, param2Val = processParams(v, curTarget, curCondition, param1Tab, param2Tab, true)
-    end
-    if string.match(curCondition.notation, '[!]*%:') then
-      rowText = rowText .. '('
-      if param1Val and param1Val ~= '' then
-        rowText = rowText .. param1Val
-        if param2Val and param2Val ~= '' then
-          rowText = rowText .. ', ' .. param2Val
-        end
-      end
-      rowText = rowText .. ')'
-    else
-      if param1Val and param1Val ~= '' then
-        rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
-      end
-    end
-
-    if v.startParenEntry > 1 then rowText = startParenEntries[v.startParenEntry].notation .. ' ' .. rowText end
-    if v.endParenEntry > 1 then rowText = rowText .. ' ' .. endParenEntries[v.endParenEntry].notation end
-
-    if k ~= #findRowTable then
-      rowText = rowText .. (v.booleanEntry == 2 and ' || ' or ' && ')
-    end
+    local rowText = findRowToNotation(v, k)
     notationString = notationString .. rowText
   end
   -- mu.post('find macro: ' .. notationString)
@@ -1648,7 +1653,7 @@ local function processActionMacroRow(buf)
   if row.targetEntry ~= 0 and row.operationEntry ~= 0 then
     addActionRow(row)
   else
-    mu.post('Error parsing row: ' .. buf)
+    mu.post('Error parsing action: ' .. buf)
   end
 end
 
@@ -1780,39 +1785,44 @@ local function initializeTake(take)
   end
 end
 
+local function actionRowToNotation(row, index)
+  local rowText = ''
+
+  -- mu.tprint(v)
+  local opTab, param1Tab, param2Tab, curTarget, curOperation = prepActionEntries(row)
+  rowText = curTarget.notation .. ' ' .. curOperation.notation
+  local param1Val, param2Val
+  if curTarget.menu then
+    param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
+    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
+  else
+    param1Val, param2Val = processParams(row, curTarget, curOperation, param1Tab, param2Tab, true)
+  end
+  if string.match(curOperation.notation, '[!]*%:') then
+    rowText = rowText .. '('
+    if param1Val and param1Val ~= '' then
+      rowText = rowText .. param1Val
+      if param2Val and param2Val ~= '' then
+        rowText = rowText .. ', ' .. param2Val
+      end
+    end
+    rowText = rowText .. ')'
+  else
+    if param1Val and param1Val ~= '' then
+      rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
+    end
+  end
+
+  if index and index ~= #actionRowTable then
+    rowText = rowText .. ' && '
+  end
+  return rowText
+end
+
 local function actionRowsToNotation()
   local notationString = ''
   for k, v in ipairs(actionRowTable) do
-    local rowText = ''
-
-    -- mu.tprint(v)
-    local opTab, param1Tab, param2Tab, curTarget, curOperation = prepActionEntries(v)
-    rowText = curTarget.notation .. ' ' .. curOperation.notation
-    local param1Val, param2Val
-    if curTarget.menu then
-      param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[v.param1Entry].notation or nil
-      param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[v.param2Entry].notation or nil
-    else
-      param1Val, param2Val = processParams(v, curTarget, curOperation, param1Tab, param2Tab, true)
-    end
-    if string.match(curOperation.notation, '[!]*%:') then
-      rowText = rowText .. '('
-      if param1Val and param1Val ~= '' then
-        rowText = rowText .. param1Val
-        if param2Val and param2Val ~= '' then
-          rowText = rowText .. ', ' .. param2Val
-        end
-      end
-      rowText = rowText .. ')'
-    else
-      if param1Val and param1Val ~= '' then
-        rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
-      end
-    end
-
-    if k ~= #actionRowTable then
-      rowText = rowText .. ' && '
-    end
+    local rowText = actionRowToNotation(v, k)
     notationString = notationString .. rowText
   end
   -- mu.post('action macro: ' .. notationString)
@@ -2275,6 +2285,8 @@ TransformerLib.lengthFormatRebuf = lengthFormatRebuf
 TransformerLib.getEditorTypeForRow = getEditorTypeForRow
 TransformerLib.findTargetToTabs = findTargetToTabs
 TransformerLib.actionTargetToTabs = actionTargetToTabs
+TransformerLib.findRowToNotation = findRowToNotation
+TransformerLib.actionRowToNotation = actionRowToNotation
 
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
 TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU

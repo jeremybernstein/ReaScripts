@@ -119,13 +119,23 @@ local selectedActionRow = 0
 
 local showTimeFormatColumn = false
 
+local defaultFindRow
+local defaultActionRow
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
 local function addFindRow(idx, row)
   local findRowTable = tx.findRowTable()
   idx = (idx and idx ~= 0) and idx or #findRowTable+1
+
   if not row then
+    if defaultFindRow then
+      tx.processFindMacro(defaultFindRow)
+      selectedFindRow = idx
+      return
+    end
+
     row = tx.FindRow()
     for k, v in ipairs(tx.findTargetEntries) do
       if v.notation == '$type' then
@@ -134,6 +144,7 @@ local function addFindRow(idx, row)
       end
     end
   end
+
   table.insert(findRowTable, idx, row)
   selectedFindRow = idx
 end
@@ -159,11 +170,19 @@ end
 local function addActionRow(idx, row)
   local actionRowTable = tx.actionRowTable()
   idx = (idx and idx ~= 0) and idx or #actionRowTable+1
+
   if not row then
+    if defaultActionRow then
+      tx.processActionMacro(defaultActionRow)
+      selectedActionRow = idx
+      return
+    end
+
     row = tx.ActionRow()
     local opTab = tx.actionTargetToTabs(row.targetEntry)
     setupActionRowFormat(row, opTab)
   end
+
   table.insert(actionRowTable, idx, row)
   selectedActionRow = idx
 end
@@ -177,6 +196,17 @@ local function removeActionRow()
 end
 
 local function handleExtState()
+  local state
+
+  state = r.GetExtState(scriptID, 'defaultFindRow')
+  if state and state ~= '' then
+    defaultFindRow = state
+  end
+
+  state = r.GetExtState(scriptID, 'defaultActionRow')
+  if state and state ~= '' then
+    defaultActionRow = state
+  end
 end
 
 local function prepRandomShit()
@@ -728,11 +758,41 @@ local function windowFn()
 
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+    r.ImGui_BeginGroup(ctx)
     if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
       selectedFindRow = k
     end
+    r.ImGui_EndGroup(ctx)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
+
+    if r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+      r.ImGui_OpenPopup(ctx, 'defaultFindRow')
+    end
+
+    if r.ImGui_BeginPopup(ctx, 'defaultFindRow') then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        if r.ImGui_IsPopupOpen(ctx, 'defaultFindRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+          r.ImGui_CloseCurrentPopup(ctx)
+          handledEscape = true
+        end
+      end
+      r.ImGui_Separator(ctx)
+      if r.ImGui_Selectable(ctx, 'Make This Row Default For New Criteria', false) then
+        defaultFindRow = tx.findRowToNotation(tx.findRowTable()[selectedFindRow])
+        r.SetExtState(scriptID, 'defaultFindRow', defaultFindRow, true)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_Spacing(ctx)
+      if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
+        r.DeleteExtState(scriptID, 'defaultFindRow', true)
+        defaultFindRow = nil
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_EndPopup(ctx)
+    end
 
     createPopup('startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
         currentRow.startParenEntry = i
@@ -1025,11 +1085,40 @@ local function windowFn()
 
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+    r.ImGui_BeginGroup(ctx)
     if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
       selectedActionRow = k
     end
+    r.ImGui_EndGroup(ctx)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
+
+    if r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+      r.ImGui_OpenPopup(ctx, 'defaultActionRow')
+    end
+
+    if r.ImGui_BeginPopup(ctx, 'defaultActionRow') then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        if r.ImGui_IsPopupOpen(ctx, 'defaultActionRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+          r.ImGui_CloseCurrentPopup(ctx)
+          handledEscape = true
+        end
+      end
+      if r.ImGui_Selectable(ctx, 'Make This Row Default For New Actions', false) then
+        defaultActionRow = tx.actionRowToNotation(tx.actionRowTable()[selectedActionRow])
+        r.SetExtState(scriptID, 'defaultActionRow', defaultActionRow, true)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_Spacing(ctx)
+      if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
+        r.DeleteExtState(scriptID, 'defaultActionRow', true)
+        defaultActionRow = nil
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_EndPopup(ctx)
+    end
 
     createPopup('targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
         currentRow:init()

@@ -209,8 +209,7 @@ local function addActionRow(idx, row)
     end
 
     row = tx.ActionRow()
-    local opTab = tx.actionTargetToTabs(row.targetEntry)
-    setupRowFormat(row, opTab)
+    setupRowFormat(row, tx.actionOpTabFromTarget(row.targetEntry))
   end
 
   table.insert(actionRowTable, idx, row)
@@ -1812,12 +1811,27 @@ local function checkShortcuts()
   local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
   local noMod = keyMods == 0
 
+  local active = r.MIDIEditor_GetActive()
+  active = active and active or 0
+
   if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
-    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40013)
+    if active ~= 0 then
+      r.MIDIEditor_OnCommand(active, 40013)
+    else
+      r.Main_OnCommandEx(40029, -1, 0)
+    end
   elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
-    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40014)
+    if active ~= 0 then
+      r.MIDIEditor_OnCommand(active, 40014)
+    else
+      r.Main_OnCommandEx(40030, -1, 0)
+    end
   elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
-    r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40016)
+    if active ~= 0 then
+      r.MIDIEditor_OnCommand(active, 40016)
+    else
+      r.Main_OnCommandEx(40073, -1, 0)
+    end
   end
 end
 

@@ -506,7 +506,8 @@ local actionPositionOperationEntries = {
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveToCursor(event, {param1})', terms = 1, menu = true, sub = true },
-  { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, event.projlen)', terms = 0, sub = true },
+  -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true, sub = true },
+  { notation = ':addlength', label = 'Add Length', text = '= AddLength(event, {param1})', terms = 1, menu = true, sub = true },
   actionOperationTimeScaleOff
 }
 
@@ -516,6 +517,7 @@ local actionLengthOperationEntries = {
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
+  { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveLengthToCursor(event)', terms = 0, sub = true },
   actionOperationTimeScaleOff
 }
 
@@ -540,8 +542,14 @@ local actionPropertyParam1Entries = {
 }
 
 local actionMoveToCursorParam1Entries = {
-  { notation = '$relativefirstevent', label = 'Relative Across All Takes', text = '0'},
-  { notation = '$takeindependent', label = 'Take-Independent', text = '1'}
+  { notation = '$alltakes', label = 'Relative Across All Takes', text = '0'},
+  { notation = '$singletake', label = 'Take-Independent', text = '1'}
+}
+
+local actionAddLengthParam1Entries = {
+  { notation = '$alltakes', label = 'Relative Across All Takes', text = '0'},
+  { notation = '$singletake', label = 'Relative To First Note In Take', text = '1'},
+  { notation = '$note', label = 'Per Note', text = '2'}
 }
 
 local actionSubtypeOperationEntries = {
@@ -730,11 +738,20 @@ local function LinearChangeOverSelection(projTime, p1, p2, firstTime, lastTime)
   return 0
 end
 
-local function AddLength(projTime, projDur)
-  if projDur then
-    return projTime + projDur
+local addLengthFirstEventOffset
+local addLengthFirstEventOffset_Take
+
+local function AddLength(event, mode)
+  if event.type ~= NOTE_TYPE then return event.projtime end
+
+  if mode == 2 then
+    return event.projtime + event.projlen
+  elseif mode == 1 then
+    if not addLengthFirstEventOffset_Take then addLengthFirstEventOffset_Take = event.projlen end
+    return event.projtime + addLengthFirstEventOffset_Take
   end
-  return projTime
+  if not addLengthFirstEventOffset then addLengthFirstEventOffset = event.projlen end
+  return event.projtime + addLengthFirstEventOffset
 end
 
 local function InScale(event, scale, root)
@@ -749,17 +766,39 @@ local function InScale(event, scale, root)
   return false
 end
 
-local moveCursorFirstEventTime
-local moveCursorFirstEventTime_Take
+local moveCursorFirstEventPosition
+local moveCursorFirstEventPosition_Take
 
 local function MoveToCursor(event, mode)
   if mode == 1 then -- independent
-    if not moveCursorFirstEventTime_Take then moveCursorFirstEventTime_Take = event.projtime end
-    return (event.projtime - moveCursorFirstEventTime_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
-  else
-    if not moveCursorFirstEventTime then moveCursorFirstEventTime = event.projtime end
-    return (event.projtime - moveCursorFirstEventTime) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+    if not moveCursorFirstEventPosition_Take then moveCursorFirstEventPosition_Take = event.projtime end
+    return (event.projtime - moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
   end
+  if not moveCursorFirstEventPosition then moveCursorFirstEventPosition = event.projtime end
+  return (event.projtime - moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+end
+
+-- need to think about this
+-- local function MoveNoteOffToCursor(event, mode)
+--   if event.type ~= NOTE_TYPE then return event.projlen end
+
+--   if mode == 1 then -- independent
+--     if not moveCursorFirstEventLength_Take then moveCursorFirstEventLength_Take = event.projtime end
+--     return (event.projtime - moveCursorFirstEventLength_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+--   else
+--     if not moveCursorFirstEventLength then moveCursorFirstEventLength = event.projtime end
+--     return (event.projtime - moveCursorFirstEventLength) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+--   end
+-- end
+
+local function MoveLengthToCursor(event)
+  if event.type ~= NOTE_TYPE then return event.projlen end
+
+  local cursorPos = r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+
+  if event.projtime >= cursorPos then return event.projlen end
+
+  return cursorPos - event.projtime
 end
 
 -----------------------------------------------------------------------------
@@ -1511,6 +1550,7 @@ context.AddLength = AddLength
 context.TimeFormatToSeconds = timeFormatToSeconds
 context.InScale = InScale
 context.MoveToCursor = MoveToCursor
+context.MoveLengthToCursor = MoveLengthToCursor
 
 local mainValueLabel
 local subtypeValueLabel
@@ -1708,27 +1748,21 @@ local function processFind(take)
   return findFn, wantsInChord
 end
 
-local function actionTargetToTabs(targetEntry)
+local function actionOpTabFromTarget(targetEntry)
   local opTab = {}
-  local param1Tab = {}
-  local param2Tab = {}
 
   if targetEntry > 0 then
     local notation = actionTargetEntries[targetEntry].notation
     if notation == '$position' then
       opTab = actionPositionOperationEntries
-      param1Tab = actionMoveToCursorParam1Entries -- only position menu, can be default
     elseif notation == '$length' then
       opTab = actionLengthOperationEntries
     elseif notation == '$channel' then
       opTab = actionChannelOperationEntries
-      param1Tab = findChannelParam1Entries -- same as find
     elseif notation == '$type' then
       opTab = actionTypeOperationEntries
-      param1Tab = findTypeParam1Entries -- same entries as find
     elseif notation == '$property' then
       opTab = actionPropertyOperationEntries
-      param1Tab = actionPropertyParam1Entries
     elseif notation == '$value1' then
       opTab = actionSubtypeOperationEntries
     elseif notation == '$value2' then
@@ -1741,7 +1775,28 @@ local function actionTargetToTabs(targetEntry)
       opTab = actionGenericOperationEntries
     end
   end
-  return opTab, param1Tab, param2Tab
+  return opTab
+end
+
+local function actionConditionToTabs(target, condition)
+  local param1Tab = {}
+  local param2Tab = {}
+
+  local notation = target.notation
+  if notation == '$position' then
+    if condition.notation == ':tocursor' then
+      param1Tab = actionMoveToCursorParam1Entries
+    elseif condition.notation == ':addlength' then
+      param1Tab = actionAddLengthParam1Entries
+    end
+  elseif notation == '$channel' then
+    param1Tab = findChannelParam1Entries -- same as find
+  elseif notation == '$type' then
+    param1Tab = findTypeParam1Entries -- same entries as find
+  elseif notation == '$property' then
+    param1Tab = actionPropertyParam1Entries
+  end
+  return param1Tab, param2Tab
 end
 
 local function processActionMacroRow(buf)
@@ -1764,7 +1819,8 @@ local function processActionMacroRow(buf)
 
   if row.targetEntry < 1 then return end
 
-  local opTab, param1Tab, param2Tab = actionTargetToTabs(row.targetEntry) -- a little simpler than findTargets, no operation-based overrides (yet)
+  local opTab = actionOpTabFromTarget(row.targetEntry) -- a little simpler than findTargets, no operation-based overrides (yet)
+  local target = actionTargetEntries[row.targetEntry]
 
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(opTab) do
@@ -1772,11 +1828,13 @@ local function processActionMacroRow(buf)
     findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
     if findstart and findend then
       row.operationEntry = k
+      local operation = opTab[row.operationEntry]
+      local param1Tab = actionConditionToTabs(target, operation)
       bufstart = findend + (buf[findend] == '(' and 0 or 1)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
       if param1 and param1 ~= '' then
-        param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1, 1)
+        param1 = handleParam(row, target, operation, 'param1', param1Tab, param1, 1)
       end
       row.param1Val = param1
       break
@@ -1785,12 +1843,15 @@ local function processActionMacroRow(buf)
       findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
       if findstart and findend then
         row.operationEntry = k
+        local operation = opTab[row.operationEntry]
+        local param1Tab, param2Tab = actionConditionToTabs(target, operation)
+
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
-          param1 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param1', param1Tab, param1, 1)
+          param1 = handleParam(row, target, operation, 'param1', param1Tab, param1, 1)
         end
         if param2 and param2 ~= '' then
-          param2 = handleParam(row, actionTargetEntries[row.targetEntry], opTab[row.operationEntry], 'param2', param2Tab, param2, 2)
+          param2 = handleParam(row, target, operation, 'param2', param2Tab, param2, 2)
         end
         row.param1Val = param1
         row.param2Val = param2
@@ -1832,9 +1893,10 @@ end
 local function prepActionEntries(row)
   if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
 
-  local opTab, param1Tab, param2Tab = actionTargetToTabs(row.targetEntry)
+  local opTab = actionOpTabFromTarget(row.targetEntry)
   local curTarget = actionTargetEntries[row.targetEntry]
   local curOperation = opTab[row.operationEntry]
+  local param1Tab, param2Tab = actionConditionToTabs(curTarget, curOperation)
   return opTab, param1Tab, param2Tab, curTarget, curOperation
 end
 
@@ -2179,14 +2241,26 @@ local function grabAllTakes()
   if not take then return {} end
 
   local takes = {}
+  local activeTake
+
+  local activeEditor = r.MIDIEditor_GetActive()
+  if activeEditor then
+    activeTake = r.MIDIEditor_GetTake(activeEditor)
+  end
 
   while take do
     local _, _, _, ppqpos = r.MIDI_GetEvt(take, 0)
     local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
-    table.insert(takes, { take = take, firstTime = projTime })
+    local active = take == activeTake and true or false
+    table.insert(takes, { take = take, firstTime = projTime, active = active })
     take = getNextTake()
   end
-  table.sort(takes, function(a, b) return a.firstTime < b.firstTime end)
+  table.sort(takes, function(a, b)
+      if a.active then return true
+      elseif b.active then return false
+      else return a.firstTime < b.firstTime
+      end
+    end)
   return takes
 end
 
@@ -2261,7 +2335,8 @@ local function processAction(select)
     mu.post('============================')
   end
 
-  moveCursorFirstEventTime = takes[1].firstTime
+  moveCursorFirstEventPosition = nil
+  addLengthFirstEventOffset = nil
 
   r.Undo_BeginBlock2(0)
 
@@ -2269,7 +2344,8 @@ local function processAction(select)
     local take = v.take
     initializeTake(take)
 
-    moveCursorFirstEventTime_Take = nil
+    moveCursorFirstEventPosition_Take = nil
+    addLengthFirstEventOffset_Take = nil
 
     local actionFn
     local findFn, wantsInChord = processFind(take)
@@ -2506,7 +2582,7 @@ TransformerLib.lengthFormatRebuf = lengthFormatRebuf
 
 TransformerLib.getEditorTypeForRow = getEditorTypeForRow
 TransformerLib.findTargetToTabs = findTargetToTabs
-TransformerLib.actionTargetToTabs = actionTargetToTabs
+TransformerLib.actionOpTabFromTarget = actionOpTabFromTarget
 TransformerLib.findRowToNotation = findRowToNotation
 TransformerLib.actionRowToNotation = actionRowToNotation
 

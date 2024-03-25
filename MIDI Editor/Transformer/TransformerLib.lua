@@ -22,6 +22,7 @@ local mu = require 'MIDIUtils'
 mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = true
 mu.CLAMP_MIDI_BYTES = true
+mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true -- any downsides to having it on all the time?
 
 local DEBUG = false
 
@@ -504,7 +505,7 @@ local actionPositionOperationEntries = {
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
-  { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
+  { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveToCursor(event)', terms = 0, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, event.projlen)', terms = 0, sub = true },
   actionOperationTimeScaleOff
 }
@@ -741,6 +742,13 @@ local function InScale(event, scale, root)
     if note == v then return true end
   end
   return false
+end
+
+local moveCursorFirstEventTime
+
+local function MoveToCursor(event)
+  if not moveCursorFirstEventTime then moveCursorFirstEventTime = event.projtime end
+  return (event.projtime - moveCursorFirstEventTime) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
 end
 
 -----------------------------------------------------------------------------
@@ -1389,9 +1397,11 @@ local function processFindMacroRow(buf, boolstr)
   if row.targetEntry ~= 0 and row.conditionEntry ~= 0 then
     if boolstr == '||' then row.booleanEntry = 2 end
     addFindRow(row)
-  else
-    mu.post('Error parsing criteria: ' .. buf)
+    return true
   end
+
+  mu.post('Error parsing criteria: ' .. buf)
+  return false
 end
 
 local function processFindMacro(buf)
@@ -1489,6 +1499,7 @@ context.ClampValue = ClampValue
 context.AddLength = AddLength
 context.TimeFormatToSeconds = timeFormatToSeconds
 context.InScale = InScale
+context.MoveToCursor = MoveToCursor
 
 local mainValueLabel
 local subtypeValueLabel
@@ -1594,6 +1605,7 @@ local function processFind(take)
 
   local fnString = ''
   local wantsInChord = false
+  local somethingIsSelected = false
 
   for k, v in ipairs(findRowTable) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(v)
@@ -1778,9 +1790,11 @@ local function processActionMacroRow(buf)
 
   if row.targetEntry ~= 0 and row.operationEntry ~= 0 then
     addActionRow(row)
-  else
-    mu.post('Error parsing action: ' .. buf)
+    return true
   end
+
+  mu.post('Error parsing action: ' .. buf)
+  return false
 end
 
 local function processActionMacro(buf)
@@ -2234,6 +2248,8 @@ local function processAction(select)
       end
     end
 
+    moveCursorFirstEventTime = nil
+
     if findFn and actionFn then
       if not select then -- not select then -- DEBUG
         -- local event = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
@@ -2302,9 +2318,7 @@ local function processAction(select)
           mu.MIDI_OpenWriteTransaction(take)
           if #found ~=0 then
             insertEventsIntoTake(take, found, actionFn, contextTab, false)
-          end
-          if unfound and #unfound ~=0 then
-            for _, event in ipairs(unfound) do
+            if unfound and #unfound ~=0 then
               deleteEventsInTake(take, unfound, false)
             end
           end
@@ -2341,7 +2355,7 @@ local function processAction(select)
   r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
 end
 
-local function savePreset(presetPath, wantsScript)
+local function savePreset(presetPath, notes, wantsScript)
   local f = io.open(presetPath, 'wb')
   local saved = false
   if f then
@@ -2349,7 +2363,8 @@ local function savePreset(presetPath, wantsScript)
       findScope = findScopeTable[currentFindScope].notation,
       findMacro = findRowsToNotation(),
       actionScope = actionScopeTable[currentActionScope].notation,
-      actionMacro = actionRowsToNotation()
+      actionMacro = actionRowsToNotation(),
+      notes = notes
     }
     f:write(serialize(presetTab) .. '\n')
     f:close()
@@ -2386,10 +2401,11 @@ local function loadPresetFromTable(presetTab)
   processFindMacro(presetTab.findMacro)
   actionRowTable = {}
   processActionMacro(presetTab.actionMacro)
+  return presetTab.notes
 end
 
-local function loadPreset(presetPath)
-  local f = io.open(presetPath, 'r')
+local function loadPreset(pPath)
+  local f = io.open(pPath, 'r')
   if f then
     local presetStr = f:read('*all')
     f:close()
@@ -2406,13 +2422,13 @@ local function loadPreset(presetPath)
       if tabStr and tabStr ~= '' then
         local presetTab = deserialize(tabStr)
         if presetTab then
-          loadPresetFromTable(presetTab)
-          return true
+          local notes = loadPresetFromTable(presetTab)
+          return true, notes
         end
       end
     end
   end
-  return false
+  return false, nil
 end
 
 TransformerLib.findScopeTable = findScopeTable

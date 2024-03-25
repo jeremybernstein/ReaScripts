@@ -92,6 +92,7 @@ local presetTable = {}
 local presetLabel = ''
 local presetInputVisible = false
 local presetInputDoesScript = false
+local presetNotesBuffer = ''
 local scriptWritesMainContext = true
 local scriptWritesMIDIContexts = true
 local refocusField = false
@@ -139,9 +140,12 @@ local function addFindRow(idx, row)
 
   if not row then
     if defaultFindRow then
-      tx.processFindMacro(defaultFindRow)
-      selectedFindRow = idx
-      return
+      if tx.processFindMacro(defaultFindRow) then
+        selectedFindRow = idx
+        return
+      else
+        defaultFindRow = ''
+      end
     end
 
     row = tx.FindRow()
@@ -196,9 +200,12 @@ local function addActionRow(idx, row)
 
   if not row then
     if defaultActionRow then
-      tx.processActionMacro(defaultActionRow)
-      selectedActionRow = idx
-      return
+      if tx.processActionMacro(defaultActionRow) then
+        selectedActionRow = idx
+        return
+      else
+        defaultActionRow = ''
+      end
     end
 
     row = tx.ActionRow()
@@ -356,7 +363,8 @@ local function windowFn()
     r.ImGui_DrawList_AddRectFilled(r.ImGui_GetWindowDrawList(ctx), minx - fp, miny - fp, minx + tw + fp + 2, miny + th + fp + 1, 0xFFFFFF2F)
     minx = minx - vx
     miny = miny - vy
-    r.ImGui_SetCursorPos(ctx, minx + 1, miny)
+    r.ImGui_AlignTextToFramePadding(ctx)
+    r.ImGui_SetCursorPos(ctx, minx + 1, miny - scaled(1.5))
     r.ImGui_Text(ctx, label)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopFont(ctx)
@@ -1223,6 +1231,11 @@ local function windowFn()
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'actionScopeMenu')
   end
+
+  r.ImGui_SameLine(ctx)
+
+  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+
   updateCurrentRect()
   generateLabel('Action Scope')
 
@@ -1230,10 +1243,24 @@ local function windowFn()
       tx.setCurrentActionScope(i)
     end)
 
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx, 4)
+
+  r.ImGui_SetCursorPos(ctx, saveX + scaled(250), saveY)
+
+  local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, scaled(360), scaled(50))
+  if kbdEntryIsCompleted(retval) then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
+    else
+      presetNotesBuffer = buf
+    end
+  else
+    presetNotesBuffer = buf
+  end
+
+  updateCurrentRect()
+
+  generateLabel('Preset Notes')
 
   r.ImGui_NewLine(ctx)
   r.ImGui_Spacing(ctx)
@@ -1326,7 +1353,7 @@ local function windowFn()
   end
 
   local function doSavePreset(path, fname)
-    local saved = tx.savePreset(path, presetInputDoesScript)
+    local saved = tx.savePreset(path, presetNotesBuffer, presetInputDoesScript)
     statusMsg = (saved and 'Saved' or 'Failed to save') .. (presetInputDoesScript and ' + export' or '') .. ' ' .. fname
     statusTime = r.time_precise()
     statusContext = 2
@@ -1488,9 +1515,11 @@ local function windowFn()
       if rv or srv then
         if selected or srv then
           local filename = source[i].label .. presetExt
-          if tx.loadPreset(path .. '/' .. filename) then
+          local success, notes = tx.loadPreset(path .. '/' .. filename)
+          if success then
             presetLabel = source[i].label
             lastInputTextBuffer = presetLabel
+            presetNotesBuffer = notes and notes or ''
           end
         end
         r.ImGui_CloseCurrentPopup(ctx)

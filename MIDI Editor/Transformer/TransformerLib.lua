@@ -152,10 +152,10 @@ end
 local currentFindScope = findScopeFromNotation()
 
 local actionScopeTable = {
-  { notation = '$select', label = 'Select Matching' },
-  { notation = '$selectadd', label = 'Add Matching To Selection' },
-  { notation = '$invertselect', label = 'Select Non-Matching' },
-  { notation = '$deselect', label = 'Deselect Matching' },
+  { notation = '$select', label = 'Select' },
+  { notation = '$selectadd', label = 'Add To Selection' },
+  { notation = '$invertselect', label = 'Inverted Select' },
+  { notation = '$deselect', label = 'Deselect' },
   { notation = '$transform', label = 'Transform' },
   { notation = '$copy', label = 'Copy' }, -- creates new track/item?
   { notation = '$insert', label = 'Insert' },
@@ -286,8 +286,14 @@ local findTypeConditionEntries = {
 }
 
 local findPropertyConditionEntries = {
-  { notation = ':iset', label = 'Is Set', text = '({tgt} & {param1}) ~= 0', terms = 1, sub = true },
-  { notation = '!:isset', label = 'Is Not Set', text = '({tgt} & {param1}) == 0', terms = 1, sub = true }
+  { notation = ':isselected', label = 'Selected', text = '({tgt} & 0x01) ~= 0', terms = 0, sub = true },
+  { notation = '!:isselected', label = 'Not Selected', text = '({tgt} & 0x01) == 0', terms = 0, sub = true },
+  { notation = ':ismuted', label = 'Muted', text = '({tgt} & 0x02) ~= 0', terms = 0, sub = true },
+  { notation = '!:ismuted', label = 'Not Muted', text = '({tgt} & 0x02) == 0', terms = 0, sub = true },
+  { notation = ':inchord', label = 'In Chord', text = '({tgt} & 0x04) ~= 0', terms = 0, sub = true },
+  { notation = '!:inchord', label = 'Not In Chord', text = '({tgt} & 0x04) == 0', terms = 0, sub = true },
+  { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true, sub = true },
+  { notation = '!:inscale', label = 'Not In Scale', text = 'not InScale(event, {param1}, {param2})', terms = 2, menu = true, sub = true },
 }
 
 local findTypeParam1Entries = {
@@ -301,11 +307,6 @@ local findTypeParam1Entries = {
   -- { label = 'SMF Event', text = '0x90' },
   -- { label = 'Notation Event', text = '0x90' },
   -- { label = '...', text = '0x90' }
-}
-
-local findPropertyParam1Entries = {
-  { notation = '$selected', label = 'Selected', text = '0x01' },
-  { notation = '$muted', label = 'Muted', text = '0x02' }
 }
 
 local findChannelParam1Entries = {
@@ -351,6 +352,75 @@ local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a 
   { notation = '&&', label = 'And', text = 'and'},
   { notation = '||', label = 'Or', text = 'or'}
 }
+
+local nornsScales = { -- https://github.com/monome/norns/blob/main/lua/lib/musicutil.lua
+  { notation = '$major', text = '{0, 2, 4, 5, 7, 9, 11, 12}', label = "Major", alt_names = {"Ionian"}, intervals = {0, 2, 4, 5, 7, 9, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}} },
+  { notation = '$minor', text = '{0, 2, 3, 5, 7, 8, 10, 12}', label = "Natural Minor", alt_names = {"Minor", "Aeolian"}, intervals = {0, 2, 3, 5, 7, 8, 10, 12}, chords = {{14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}} },
+  { notation = '$harmonicmminor', text = '{0, 2, 3, 5, 7, 8, 11, 12}', label = "Harmonic Minor", intervals = {0, 2, 3, 5, 7, 8, 11, 12}, chords = {{14, 16, 17}, {24, 25, 26}, {12, 27}, {17, 18, 19, 20, 21, 24, 25, 26}, {1, 8, 12, 13, 14, 15}, {1, 2, 3, 16, 17, 18, 24, 25}, {12, 24, 25}, {14, 16, 17}} },
+  { notation = '$melodicminor', text = '{0, 2, 3, 5, 7, 9, 11, 12}', label = "Melodic Minor", intervals = {0, 2, 3, 5, 7, 9, 11, 12}, chords = {{14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}, {14, 16, 17, 18, 20}} },
+  { notation = '$dorian', text = '{0, 2, 3, 5, 7, 9, 10, 12}', label = "Dorian", intervals = {0, 2, 3, 5, 7, 9, 10, 12}, chords = {{14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}} },
+  { notation = '$phrygian', text = '{0, 1, 3, 5, 7, 8, 10, 12}', label = "Phrygian", intervals = {0, 1, 3, 5, 7, 8, 10, 12}, chords = {{14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}} },
+  { notation = '$lydian', text = '{0, 2, 4, 6, 7, 9, 11, 12}', label = "Lydian", intervals = {0, 2, 4, 6, 7, 9, 11, 12}, chords = {{1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}} },
+  { notation = '#mixolydian', text = '{0, 2, 4, 5, 7, 9, 10, 12}', label = "Mixolydian", intervals = {0, 2, 4, 5, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}} },
+  { notation = '$locrian', text = '{0, 1, 3, 5, 6, 8, 10, 12}', label = "Locrian", intervals = {0, 1, 3, 5, 6, 8, 10, 12}, chords = {{24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}} },
+  { notation = '$wholetone', text = '{0, 2, 4, 6, 8, 10, 12}', label = "Whole Tone", intervals = {0, 2, 4, 6, 8, 10, 12}, chords = {{12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}} },
+  { notation = '$majorpentatonic', text = '{0, 2, 4, 7, 9, 12}', label = "Major Pentatonic", alt_names = {"Gagaku Ryo Sen Pou"}, intervals = {0, 2, 4, 7, 9, 12}, chords = {{1, 2, 4}, {14, 15}, {}, {14}, {14, 15, 17, 19}, {1, 2, 4}} },
+  { notation = '$minorpentatonic', text = '{0, 3, 5, 7, 10, 12}', label = "Minor Pentatonic", alt_names = {"Zokugaku Yo Sen Pou"}, intervals = {0, 3, 5, 7, 10, 12}, chords = {{14, 15, 17, 19}, {1, 2, 4}, {14, 15}, {}, {14}, {14, 15, 17, 19}} },
+  { notation = '$majorbebop', text = '{0, 2, 4, 5, 7, 8, 9, 11, 12}', label = "Major Bebop", intervals = {0, 2, 4, 5, 7, 8, 9, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 12, 14, 27}, {14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, {1, 8, 12, 13, 14, 15, 17, 19}, {1, 2, 3, 4, 5, 16, 17, 18, 20, 24, 25}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {12, 24, 25, 27}, {14, 15, 16, 17, 19, 21, 22}, {24, 25, 26}, {1, 2, 3, 4, 5, 6, 7, 12, 14, 27}} },
+  { notation = '$alteredscale', text = '{0, 1, 3, 4, 6, 8, 10, 12}', label = "Altered Scale", intervals = {0, 1, 3, 4, 6, 8, 10, 12}, chords = {{12, 13, 24, 26}, {14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}} },
+  { notation = '$dorianbebop', text = '{0, 2, 3, 4, 5, 7, 9, 10, 12}', label = "Dorian Bebop", intervals = {0, 2, 3, 4, 5, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 21, 22}, {1, 2, 3, 4, 5}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}} },
+  { notation = '$mixolydianbebop', text = '{0, 2, 4, 5, 7, 9, 10, 11, 12}', label = "Mixolydian Bebop", intervals = {0, 2, 4, 5, 7, 9, 10, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 21, 22}, {1, 2, 3, 4, 5}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}} },
+  { notation = '$blues', text = '{0, 3, 5, 6, 7, 10, 12}', label = "Blues Scale", alt_names = {"Blues"}, intervals = {0, 3, 5, 6, 7, 10, 12}, chords = {{14, 15, 17, 19, 24, 26}, {1, 2, 4, 17, 18, 20}, {14, 15}, {}, {}, {14}, {14, 15, 17, 19, 24, 26}} },
+  { notation = '$dimwholehalf', text = '{0, 2, 3, 5, 6, 8, 9, 11, 12}', label = "Diminished Whole Half", intervals = {0, 2, 3, 5, 6, 8, 9, 11, 12}, chords = {{24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}} },
+  { notation = '$dimhalfwhole', text = '{0, 1, 3, 4, 6, 7, 9, 10, 12}', label = "Diminished Half Whole", intervals = {0, 1, 3, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}} },
+  { notation = '$neapolitanmajor', text = '{0, 1, 3, 5, 7, 9, 11, 12}', label = "Neapolitan Major", intervals = {0, 1, 3, 5, 7, 9, 11, 12}, chords = {{14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}} },
+  { notation = '$hungarianmajor', text = '{0, 3, 4, 6, 7, 9, 10, 12}', label = "Hungarian Major", intervals = {0, 3, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 8, 17, 18, 19, 24, 25, 26}, {1, 2, 17, 18, 24, 25}, {24}, {24, 25, 26}, {}, {17, 18, 19, 24, 25, 26}, {}, {1, 2, 8, 17, 18, 19, 24, 25, 26}} },
+  { notation = '$harmonicmajor', text = '{0, 2, 4, 5, 7, 8, 11, 12}', label = "Harmonic Major", intervals = {0, 2, 4, 5, 7, 8, 11, 12}, chords = {{1, 3, 5, 6, 12, 14, 27}, {24, 25, 26}, {1, 8, 12, 13, 17, 19}, {16, 17, 18, 20, 24, 25}, {1, 2, 8, 14, 15}, {12, 24, 25, 27}, {24, 25}, {1, 3, 5, 6, 12, 14, 27}} },
+  { notation = '$hungarianminor', text = '{0, 2, 3, 6, 7, 8, 11, 12}', label = "Hungarian Minor", intervals = {0, 2, 3, 6, 7, 8, 11, 12}, chords = {{16, 17, 24}, {}, {12, 27}, {}, {1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}} },
+  { notation = '$lydianminor', text = '{0, 2, 4, 6, 7, 8, 10, 12}', label = "Lydian Minor", intervals = {0, 2, 4, 6, 7, 8, 10, 12}, chords = {{1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}} },
+  { notation = '$neapolitanminor', text = '{0, 1, 3, 5, 7, 8, 11, 12}', label = "Neapolitan Minor", alt_names = {"Byzantine"}, intervals = {0, 1, 3, 5, 7, 8, 11, 12}, chords = {{14, 16, 17}, {1, 3, 5, 8, 9}, {12, 13}, {17, 19, 21, 24, 26}, {12, 13}, {1, 2, 3, 14, 16, 17, 18}, {12}, {14, 16, 17}} },
+  { notation = '$majorlocrian', text = '{0, 2, 4, 5, 6, 8, 10, 12}', label = "Major Locrian", intervals = {0, 2, 4, 5, 6, 8, 10, 12}, chords = {{12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}} },
+  { notation = '$leadingwholetone', text = '{0, 2, 4, 6, 8, 10, 11, 12}', label = "Leading Whole Tone", intervals = {0, 2, 4, 6, 8, 10, 11, 12}, chords = {{12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}} },
+  { notation = '$sixtone', text = '{0, 1, 4, 5, 8, 9, 11, 12}', label = "Six Tone Symmetrical", intervals = {0, 1, 4, 5, 8, 9, 11, 12}, chords = {{12, 27}, {1, 3, 8, 12, 13, 16, 17, 19, 27}, {1, 2, 12, 14}, {1, 3, 12, 16, 17, 24, 27}, {12}, {1, 3, 5, 12, 16, 17, 27}, {}, {12, 27}} },
+  { notation = '$balinese', text = '{0, 1, 3, 7, 8, 12}', label = "Balinese", intervals = {0, 1, 3, 7, 8, 12}, chords = {{17}, {}, {}, {}, {1, 3, 14}, {17}} },
+  { notation = '$persian', text = '{0, 1, 4, 5, 6, 8, 11, 12}', label = "Persian", intervals = {0, 1, 4, 5, 6, 8, 11, 12}, chords = {{12, 27}, {1, 3, 8, 14, 15, 16, 17, 19}, {1, 2, 4, 12}, {16, 17, 24}, {14, 15}, {12, 13}, {14}, {12, 27}} },
+  { notation = '$eastindianpurvi', text = '{0, 1, 4, 6, 7, 8, 11, 12}', label = "East Indian Purvi", intervals = {0, 1, 4, 6, 7, 8, 11, 12}, chords = {{1, 3, 12, 27}, {14, 15, 16, 17, 19, 24, 26}, {1, 2, 4, 12, 17, 18, 20}, {14, 15}, {}, {12, 13, 27}, {14}, {1, 3, 12, 27}} },
+  { notation = '$oriental', text = '{0, 1, 4, 5, 6, 9, 10, 12}', label = "Oriental", intervals = {0, 1, 4, 5, 6, 9, 10, 12}, chords = {{}, {12, 27}, {}, {1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}, {}} },
+  { notation = '$doubleharmonic', text = '{0, 1, 4, 5, 7, 8, 11, 12}', label = "Double Harmonic", intervals = {0, 1, 4, 5, 7, 8, 11, 12}, chords = {{1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}, {}, {12, 27}, {}, {1, 3, 12, 14, 27}} },
+  { notation = '$enigmatic', text = '{0, 1, 4, 6, 8, 10, 11, 12}', label = "Enigmatic", intervals = {0, 1, 4, 6, 8, 10, 11, 12}, chords = {{12, 13, 27}, {14, 15, 16, 17, 18, 19}, {1, 2, 4, 12}, {1, 8, 9, 10, 14, 15}, {12, 13}, {24, 26}, {14}, {12, 13, 27}} },
+  { notation = '$overtone', text = '{0, 2, 4, 6, 7, 9, 10, 12}', label = "Overtone", intervals = {0, 2, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}, {14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}} },
+  { notation = '$eighttonespanish', text = '{0, 1, 3, 4, 5, 6, 8, 10, 12}', label = "Eight Tone Spanish", intervals = {0, 1, 3, 4, 5, 6, 8, 10, 12}, chords = {{12, 13, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14, 16, 17, 18, 20}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {12, 27}, {14, 15, 16, 17, 19}, {1, 2, 3, 4, 5, 8, 9}, {1, 2, 4, 8, 9, 10, 11, 12, 13, 14, 15}, {14, 15, 17, 19, 21, 22, 24, 26}, {12, 13, 24, 26}} },
+  { notation = '$prometheus', text = '{0, 2, 4, 6, 9, 10, 12}', label = "Prometheus", intervals = {0, 2, 4, 6, 9, 10, 12}, chords = {{}, {1, 8, 9, 12, 13}, {}, {12, 13, 24, 26}, {14, 17, 18}, {12, 27}, {}} },
+  { notation = '$gagaku', text = '{0, 2, 5, 7, 9, 10, 12}', label = "Gagaku Rittsu Sen Pou", intervals = {0, 2, 5, 7, 9, 10, 12}, chords = {{14, 15}, {14, 15, 17, 19}, {1, 2, 4, 14}, {14, 15, 17, 19, 21, 22}, {}, {1, 2, 3, 4, 5}, {14, 15}} },
+  { notation = '$insenpou', text = '{0, 1, 5, 2, 8, 12}', label = "In Sen Pou", intervals = {0, 1, 5, 2, 8, 12}, chords = {{}, {1, 3}, {17, 18}, {24, 26}, {}, {}} },
+  { notation = '$okinawa', text = '{0, 4, 5, 7, 11, 12}', label = "Okinawa", intervals = {0, 4, 5, 7, 11, 12}, chords = {{1, 3, 14}, {17}, {}, {}, {}, {1, 3, 14}} },
+  { notation = '$chromatic', text = '{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}', label = "Chromatic", intervals = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}} }
+}
+
+local scaleRoots = {
+  { notation = 'c', label = 'C', text = '0' },
+  { notation = 'c#', label = 'C#', text = '1' },
+  { notation = 'd', label = 'D', text = '2' },
+  { notation = 'd#', label = 'D#', text = '3' },
+  { notation = 'e', label = 'E', text = '4' },
+  { notation = 'f', label = 'F', text = '5' },
+  { notation = 'f#', label = 'F#', text = '6' },
+  { notation = 'g', label = 'G', text = '7' },
+  { notation = 'g#', label = 'G#', text = '8' },
+  { notation = 'a', label = 'A', text = '9' },
+  { notation = 'a#', label = 'A#', text = '10' },
+  { notation = 'b', label = 'B', text = '11' },
+}
+
+local findPropertyParam1Entries = nornsScales
+local findPropertyParam2Entries = scaleRoots
+
+-- local findPropertyParam1Entries = {
+--   { notation = '$selected', label = 'Selected', text = '0x01' },
+--   { notation = '$muted', label = 'Muted', text = '0x02' },
+--   { notation = '$inchord', label = 'In Chord', text = '0x04' }, -- does this need an overlap term?
+-- --   { notation = '$inscale', label = 'In Scale', text = } -- this actually needs 3 params, in scale + scale + root note
+-- }
 
 -----------------------------------------------------------------------------
 ----------------------------- ACTION DEFS -----------------------------------
@@ -659,6 +729,18 @@ local function AddLength(projTime, projDur)
     return projTime + projDur
   end
   return projTime
+end
+
+local function InScale(event, scale, root)
+  if event.type ~= NOTE_TYPE then return false end
+
+  local note = event.msg2 % 12
+  note = note - root
+  if note < 0 then note = note + 12 end
+  for _, v in ipairs(scale) do
+    if note == v then return true end
+  end
+  return false
 end
 
 -----------------------------------------------------------------------------
@@ -1129,6 +1211,7 @@ local function findTargetToTabs(row, targetEntry)
     elseif notation == '$property' then
       condTab = findPropertyConditionEntries
       param1Tab = findPropertyParam1Entries
+      param2Tab = findPropertyParam2Entries
     -- elseif notation == '$value1' then
     -- elseif notation == '$value2' then
     -- elseif notation == '$velocity' then
@@ -1405,6 +1488,7 @@ context.SubtractDuration = SubtractDuration
 context.ClampValue = ClampValue
 context.AddLength = AddLength
 context.TimeFormatToSeconds = timeFormatToSeconds
+context.InScale = InScale
 
 local mainValueLabel
 local subtypeValueLabel
@@ -1509,6 +1593,7 @@ end
 local function processFind(take)
 
   local fnString = ''
+  local wantsInChord = false
 
   for k, v in ipairs(findRowTable) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(v)
@@ -1519,6 +1604,8 @@ local function processFind(take)
     local condition = curCondition
     local conditionVal = condition.text
     local findTerm = ''
+
+    if string.match(condition.notation, ':inchord') then wantsInChord = true end
 
     v.param1Val, v.param2Val = processParams(v, curTarget, condition, param1Tab, param2Tab)
 
@@ -1572,7 +1659,11 @@ local function processFind(take)
   end
 
   fnString = 'local event = ... \nreturn ' .. fnString
-  if DEBUG then mu.post(fnString) end
+  if DEBUG then
+    mu.post('======== FIND FUN ========')
+    mu.post(fnString)
+    mu.post('==========================')
+  end
 
   local findFn
 
@@ -1591,7 +1682,7 @@ local function processFind(take)
       end
     end
   end
-  return findFn
+  return findFn, wantsInChord
 end
 
 local function actionTargetToTabs(targetEntry)
@@ -1864,20 +1955,59 @@ local function actionRowsToNotation()
   return notationString
 end
 
-local function runFind(findFn, getUnfound)
+local function runFind(findFn, params, runFn)
+
+  local wantsInChord = params and params.wantsInChord or false
+  local getUnfound = params and params.wantsUnfound or false
+
   local found = {}
   local unfound = {}
 
   local firstTime = 0xFFFFFFFF
   local lastTime = -0xFFFFFFFF
+
+  if wantsInChord then
+    local firstNoteTime
+    local lastNoteTime
+    local prevEvent
+
+    for _, event in ipairs(allEvents) do
+      if event.type == NOTE_TYPE then -- note event
+        local ns, ne = event.projtime, event.projtime + event.projlen
+        if firstNoteTime and lastNoteTime then
+          local us = firstNoteTime < ns and ns or firstNoteTime
+          local ue = lastNoteTime > ne and ne or lastNoteTime
+          local overlap = (ue - us) / (ne - ns)
+          -- mu.post(ns, ne, overlap)
+          if overlap > 0.7 then
+            if ns < firstNoteTime then firstNoteTime = ns end
+            if ne > lastNoteTime then lastNoteTime = ne end
+            event.flags = event.flags | 4
+            if prevEvent then prevEvent.flags = prevEvent.flags | 4 end
+          else
+            firstNoteTime = ns
+            lastNoteTime = ne
+          end
+          prevEvent = event
+        else
+          firstNoteTime = ns
+          lastNoteTime = ne
+        end
+      end
+    end
+  end
+
   for _, event in ipairs(allEvents) do
+    local matches = false
     if findFn(event) then
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
       table.insert(found, event)
+      matches = true
     elseif getUnfound then
       table.insert(unfound, event)
     end
+    if runFn then runFn(event, matches) end
   end
   local contextTab = { firstSel = firstTime, lastSel = lastTime }
   return found, contextTab, getUnfound and unfound or nil
@@ -2081,7 +2211,11 @@ local function processAction(select)
 
   end
   fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\nreturn event' .. '\nend'
-  if DEBUG then mu.post(fnString) end
+  if DEBUG then
+    mu.post('======== ACTION FUN ========')
+    mu.post(fnString)
+    mu.post('============================')
+  end
 
   r.Undo_BeginBlock2(0)
 
@@ -2089,7 +2223,7 @@ local function processAction(select)
     initializeTake(take)
 
     local actionFn
-    local findFn = processFind(take)
+    local findFn, wantsInChord = processFind(take)
     if findFn then
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
@@ -2108,47 +2242,50 @@ local function processAction(select)
         -- mu.tprint(event, 2)
       else
         local notation = actionScopeTable[currentActionScope].notation
+        local defParams = { wantsInChord = wantsInChord }
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, event in ipairs(allEvents) do
-            event.selected = findFn(event)
-            setEntrySelectionInTake(take, event)
-          end
+          runFind(findFn, defParams,
+            function(event, matches)
+              event.selected = matches
+              setEntrySelectionInTake(take, event)
+            end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$selectadd' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, event in ipairs(allEvents) do
-            local matching = findFn(event)
-            if matching then
-              event.selected = true
-              setEntrySelectionInTake(take, event)
-            end
-          end
+          runFind(findFn, defParams,
+            function(event, matches)
+              if matches then
+                event.selected = true
+                setEntrySelectionInTake(take, event)
+              end
+            end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$invertselect' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, event in ipairs(allEvents) do
-            event.selected = (findFn(event) == false) and true or false
-            setEntrySelectionInTake(take, event)
-          end
+          runFind(findFn, defParams,
+            function(event, matches)
+              event.selected = not matches
+              setEntrySelectionInTake(take, event)
+            end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$deselect' then
           mu.MIDI_OpenWriteTransaction(take)
-          for _, event in ipairs(allEvents) do
-            local matching = findFn(event)
-            if matching then
-              event.selected = false
-              setEntrySelectionInTake(take, event)
-            end
-          end
+          runFind(findFn, defParams,
+            function(event, matches)
+              if matches then
+                event.selected = false
+                setEntrySelectionInTake(take, event)
+              end
+            end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$transform' then
-          local found, contextTab = runFind(findFn)
+          local found, contextTab = runFind(findFn, defParams)
           if #found ~=0 then
-            transformEntryInTake(take, found, actionFn, contextTab)
+            transformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
           end
         elseif notation == '$copy' then
-          local found, contextTab = runFind(findFn)
+          local found, contextTab = runFind(findFn, defParams)
           if #found ~=0 then
             local newtake = newTakeInNewTrack(take)
             if newtake then
@@ -2156,24 +2293,24 @@ local function processAction(select)
             end
           end
         elseif notation == '$insert' then
-          local found, contextTab = runFind(findFn)
+          local found, contextTab = runFind(findFn, defParams)
           if #found ~=0 then
-            insertEventsIntoTake(take, found, actionFn, contextTab)
+            insertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
           end
         elseif notation == '$insertexclusive' then
-          local found, contextTab, unfound = runFind(findFn, true)
+          local found, contextTab, unfound = runFind(findFn, { wantsInChord = wantsInChord, wantsUnfound = true })
           mu.MIDI_OpenWriteTransaction(take)
           if #found ~=0 then
             insertEventsIntoTake(take, found, actionFn, contextTab, false)
           end
-          if #unfound ~=0 then
+          if unfound and #unfound ~=0 then
             for _, event in ipairs(unfound) do
               deleteEventsInTake(take, unfound, false)
             end
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$extracttrack' then
-          local found, contextTab = runFind(findFn)
+          local found, contextTab = runFind(findFn, defParams)
           if #found ~=0 then
             deleteEventsInTake(take, found)
             local newtake = newTakeInNewTrack(take)
@@ -2182,7 +2319,7 @@ local function processAction(select)
             end
           end
         elseif notation == '$extractlane' then
-          local found, contextTab = runFind(findFn)
+          local found, contextTab = runFind(findFn, defParams)
           if #found ~=0 then
             deleteEventsInTake(take, found)
             local newtake = newTakeInNewLane(take)
@@ -2191,9 +2328,9 @@ local function processAction(select)
             end
           end
         elseif notation == '$delete' then
-          local found = runFind(findFn)
+          local found = runFind(findFn, defParams)
           if #found ~= 0 then
-            deleteEventsInTake(take, found)
+            deleteEventsInTake(take, found) -- could use runFn
           end
         end
       end

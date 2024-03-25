@@ -1219,7 +1219,7 @@ local function windowFn()
   r.ImGui_SameLine(ctx)
 
   r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(50))
-  r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, scaled(120))
+  r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, scaled(150))
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'actionScopeMenu')
   end

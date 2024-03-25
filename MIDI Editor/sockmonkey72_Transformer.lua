@@ -1440,26 +1440,28 @@ local function windowFn()
 
     if refocusField then refocusField = false end
 
-    r.ImGui_SameLine(ctx)
-    local rv, sel = r.ImGui_Checkbox(ctx, 'Main', scriptWritesMainContext)
-    if rv then
-      scriptWritesMainContext = sel
-      r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
-    end
-    if r.ImGui_IsItemHovered(ctx) then
-      refocusField = true
-      inOKDialog = false
-    end
+    if presetInputDoesScript then
+      r.ImGui_SameLine(ctx)
+      local rv, sel = r.ImGui_Checkbox(ctx, 'Main', scriptWritesMainContext)
+      if rv then
+        scriptWritesMainContext = sel
+        r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
+      end
+      if r.ImGui_IsItemHovered(ctx) then
+        refocusField = true
+        inOKDialog = false
+      end
 
-    r.ImGui_SameLine(ctx)
-    rv, sel = r.ImGui_Checkbox(ctx, 'MIDI', scriptWritesMIDIContexts)
-    if rv then
-      scriptWritesMIDIContexts = sel
-      r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
-    end
-    if r.ImGui_IsItemHovered(ctx) then
-      refocusField = true
-      inOKDialog = false
+      r.ImGui_SameLine(ctx)
+      rv, sel = r.ImGui_Checkbox(ctx, 'MIDI', scriptWritesMIDIContexts)
+      if rv then
+        scriptWritesMIDIContexts = sel
+        r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
+      end
+      if r.ImGui_IsItemHovered(ctx) then
+        refocusField = true
+        inOKDialog = false
+      end
     end
 
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)

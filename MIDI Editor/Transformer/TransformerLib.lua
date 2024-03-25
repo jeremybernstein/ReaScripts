@@ -505,7 +505,7 @@ local actionPositionOperationEntries = {
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
-  { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveToCursor(event)', terms = 0, sub = true },
+  { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveToCursor(event, {param1})', terms = 1, menu = true, sub = true },
   { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, event.projlen)', terms = 0, sub = true },
   actionOperationTimeScaleOff
 }
@@ -537,6 +537,11 @@ local actionPropertyParam1Entries = {
   { notation = '1', label = 'Selected', text = '1' },
   { notation = '2', label = 'Muted', text = '2' },
   { notation = '3', label = 'Selected + Muted', text = '3' },
+}
+
+local actionMoveToCursorParam1Entries = {
+  { notation = '$relativefirstevent', label = 'Relative Across All Takes', text = '0'},
+  { notation = '$takeindependent', label = 'Take-Independent', text = '1'}
 }
 
 local actionSubtypeOperationEntries = {
@@ -745,10 +750,16 @@ local function InScale(event, scale, root)
 end
 
 local moveCursorFirstEventTime
+local moveCursorFirstEventTime_Take
 
-local function MoveToCursor(event)
-  if not moveCursorFirstEventTime then moveCursorFirstEventTime = event.projtime end
-  return (event.projtime - moveCursorFirstEventTime) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+local function MoveToCursor(event, mode)
+  if mode == 1 then -- independent
+    if not moveCursorFirstEventTime_Take then moveCursorFirstEventTime_Take = event.projtime end
+    return (event.projtime - moveCursorFirstEventTime_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+  else
+    if not moveCursorFirstEventTime then moveCursorFirstEventTime = event.projtime end
+    return (event.projtime - moveCursorFirstEventTime) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1706,6 +1717,7 @@ local function actionTargetToTabs(targetEntry)
     local notation = actionTargetEntries[targetEntry].notation
     if notation == '$position' then
       opTab = actionPositionOperationEntries
+      param1Tab = actionMoveToCursorParam1Entries -- only position menu, can be default
     elseif notation == '$length' then
       opTab = actionLengthOperationEntries
     elseif notation == '$channel' then
@@ -1923,6 +1935,8 @@ local function initializeTake(take)
     table.insert(allEvents, e)
     syxidx = mu.MIDI_EnumSelTextSysexEvts(take, syxidx)
   end
+
+  table.sort(allEvents, function(a, b) return a.projtime < b.projtime end )
 end
 
 local function actionRowToNotation(row, index)
@@ -2160,12 +2174,28 @@ local function newTakeInNewLane(take)
   return newtake
 end
 
+local function grabAllTakes()
+  local take = getNextTake()
+  if not take then return {} end
+
+  local takes = {}
+
+  while take do
+    local _, _, _, ppqpos = r.MIDI_GetEvt(take, 0)
+    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
+    table.insert(takes, { take = take, firstTime = projTime })
+    take = getNextTake()
+  end
+  table.sort(takes, function(a, b) return a.firstTime < b.firstTime end)
+  return takes
+end
+
 local function processAction(select)
   mediaItemCount = nil
   mediaItemIndex = nil
 
-  local take = getNextTake()
-  if not take then return end
+  local takes = grabAllTakes()
+  if #takes == 0 then return end
 
   CACHED_METRIC = nil
   CACHED_WRAPPED = nil
@@ -2231,10 +2261,15 @@ local function processAction(select)
     mu.post('============================')
   end
 
+  moveCursorFirstEventTime = takes[1].firstTime
+
   r.Undo_BeginBlock2(0)
 
-  while take do
+  for _, v in ipairs(takes) do
+    local take = v.take
     initializeTake(take)
+
+    moveCursorFirstEventTime_Take = nil
 
     local actionFn
     local findFn, wantsInChord = processFind(take)
@@ -2247,8 +2282,6 @@ local function processAction(select)
         findParserError = 'Fatal error: could not load action description'
       end
     end
-
-    moveCursorFirstEventTime = nil
 
     if findFn and actionFn then
       if not select then -- not select then -- DEBUG
@@ -2348,7 +2381,6 @@ local function processAction(select)
           end
         end
       end
-      take = getNextTake()
     end
   end
 

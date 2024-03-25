@@ -165,10 +165,12 @@ local function removeFindRow()
   end
 end
 
-local function setupActionRowFormat(row, opTab)
+local function setupRowFormat(row, condOpTab)
+  local isFind = row:is_a(tx.FindRow)
+
   local target = tx.actionTargetEntries[row.targetEntry]
-  local operation = opTab[row.operationEntry]
-  local paramType, split = tx.getEditorTypeForRow(target, operation)
+  local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
+  local paramType, split = tx.getEditorTypeForRow(target, condOp)
   local p1 = DEFAULT_TIMEFORMAT_STRING
   local p2 = DEFAULT_TIMEFORMAT_STRING
 
@@ -201,7 +203,7 @@ local function addActionRow(idx, row)
 
     row = tx.ActionRow()
     local opTab = tx.actionTargetToTabs(row.targetEntry)
-    setupActionRowFormat(row, opTab)
+    setupRowFormat(row, opTab)
   end
 
   table.insert(actionRowTable, idx, row)
@@ -547,7 +549,8 @@ local function windowFn()
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, needsTerms, idx, procFn)
     local rv = 0
     if paramType == tx.PARAM_TYPE_METRICGRID and needsTerms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
-    local decimalFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
+    local isFloat = paramType == tx.PARAM_TYPE_FLOATEDITOR and true or false
+    local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
     if condOp.terms >= needsTerms then
         local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
         local target = targetTab[row.targetEntry]
@@ -557,9 +560,12 @@ local function windowFn()
           rv = idx
           r.ImGui_OpenPopup(ctx, paramName .. 'Menu')
         end
-      elseif paramType == tx.PARAM_TYPE_TEXTEDITOR or paramType == tx.PARAM_TYPE_METRICGRID then -- for now
+      elseif paramType == tx.PARAM_TYPE_INTEDITOR
+        or isFloat
+        or paramType == tx.PARAM_TYPE_METRICGRID
+      then
         r.ImGui_BeginGroup(ctx)
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], condOp.decimal and decimalFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), condOp.decimal and nil or numbersOnlyCallback)
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
           row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, condOp.range and condOp.range or target.range)
           procFn()
@@ -760,15 +766,15 @@ local function windowFn()
       r.ImGui_OpenPopup(ctx, 'conditionMenu')
     end
 
-    local paramType = tx.getEditorTypeForRow(currentFindTarget, currentFindCondition)
+    local paramType, split = tx.getEditorTypeForRow(currentFindTarget, currentFindCondition)
     local selected
 
     r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 1'
-    selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, paramType, 1, k, tx.processFind)
+    selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, split and split[1] or paramType, 1, k, tx.processFind)
     if selected and selected > 0 then selectedFindRow = selected end
 
     r.ImGui_TableSetColumnIndex(ctx, 4) -- 'Parameter 2'
-    selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramType, 2, k, tx.processFind)
+    selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, split and split[2] or paramType, 2, k, tx.processFind)
     if selected and selected > 0 then selectedFindRow = selected end
 
     if showTimeFormatColumn then
@@ -855,15 +861,13 @@ local function windowFn()
     createPopup('targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
         currentRow:init()
         currentRow.targetEntry = i
-        if tx.findTargetEntries[currentRow.targetEntry].notation == '$length' then
-          currentRow.param1TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
-          currentRow.param2TimeFormatStr = DEFAULT_LENGTHFORMAT_STRING
-        end
+        setupRowFormat(currentRow, conditionEntries)
         tx.processFind()
       end)
 
     createPopup('conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
         currentRow.conditionEntry = i
+        setupRowFormat(currentRow, conditionEntries)
         if string.match(conditionEntries[i].notation, 'metricgrid') then
           currentRow.param1Entry = metricLastUnit
           currentRow.mg = {
@@ -1166,13 +1170,13 @@ local function windowFn()
     createPopup('targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
         currentRow:init()
         currentRow.targetEntry = i
-        setupActionRowFormat(currentRow, operationEntries)
+        setupRowFormat(currentRow, operationEntries)
         tx.processAction()
       end)
 
     createPopup('operationMenu', operationEntries, currentRow.operationEntry, function(i)
         currentRow.operationEntry = i
-        setupActionRowFormat(currentRow, operationEntries)
+        setupRowFormat(currentRow, operationEntries)
         tx.processAction()
       end)
 

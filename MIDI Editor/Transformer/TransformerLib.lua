@@ -8,9 +8,8 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
--- metric grid: dotted/triplet, slop, length of range, reset at next bar after pattern concludes (added to end of menu?)
--- TODO: time input
--- TODO: functions
+-- TODO: if condition begins with '=', don't require 'sub'
+-- TODO: split integer/float entry
 
 local r = reaper
 
@@ -182,6 +181,9 @@ local currentActionScope = actionScopeFromNotation()
 local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
 local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
 
+-----------------------------------------------------------------------------
+------------------------------ FIND DEFS ------------------------------------
+
 local FindRow = class(nil, {})
 
 function FindRow:init()
@@ -227,25 +229,275 @@ local findTargetEntries = {
   { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
   { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
   { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
-  { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(event)', texteditor = true, range = {0, 127} }, -- different for AT and PB
-  { notation = '$value2', label = 'Value 2', text = 'GetMainValue(event)', texteditor = true, range = {0, 127} }, -- CC# or Note# or ...
-  { notation = '$velocity', label = 'Velocity', text = 'event.chanmsg == 0x90 and event.msg3', texteditor = true, range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', texteditor = true, range = {0, 127} }
+  { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(event)', inteditor = true, range = {0, 127} }, -- different for AT and PB
+  { notation = '$value2', label = 'Value 2', text = 'GetMainValue(event)', inteditor = true, range = {0, 127} }, -- CC# or Note# or ...
+  { notation = '$velocity', label = 'Velocity', text = 'event.chanmsg == 0x90 and event.msg3', inteditor = true, range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', inteditor = true, range = {0, 127} }
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
 findTargetEntries.targetTable = true
 
+local findConditionEqual = { notation = '==', label = 'Equal', text = '==', terms = 1 }
+local findConditionUnequal = { notation = '!=', label = 'Unequal', text = '~=', terms = 1 }
+local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = '>', terms = 1 }
+local findConditionGreaterThanEqual = { notation = '>=', label = 'Greater Than or Equal', text = '>=', terms = 1 }
+local findConditionLessThan = { notation = '<', label = 'Less Than', text = '<', terms = 1 }
+local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 }
+local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = '({tgt} >= {param1} and {tgt} <= {param2})', terms = 2, sub = true }
+local findConditionOutRange = { notation = '!:inrange', label = 'Outside Range', text = '({tgt} < {param1} or {tgt} > {param2})', terms = 2, sub = true }
+
 local findGenericConditionEntries = {
-  { notation = '==', label = 'Equal', text = '==', terms = 1 },
-  { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
-  { notation = '>', label = 'Greater Than', text = '>', terms = 1 },
-  { notation = '>=', label = 'Greater Than or Equal', text = '>=', terms = 1 },
-  { notation = '<', label = 'Less Than', text = '<', terms = 1 },
-  { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 },
-  { notation = ':inrange', label = 'Inside Range', text = '{tgt} >= {param1} and {tgt} <= {param2}', terms = 2, sub = true },
-  { notation = '!:inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true }
+  findConditionEqual, findConditionUnequal,
+  { notation = ':eqslop', label = 'Equal (Slop)', text = '({tgt} >= ({param1} - {param2}) and {tgt} <= ({param1} + {param2}))', terms = 2, inteditor = true, sub = true, freeterm = true },
+  { notation = '!:eqslop', label = 'Unequal (Slop)', text = '({tgt} < ({param1} - {param2}) or {tgt} > ({param1} + {param2}))', terms = 2, inteditor = true, sub = true, freeterm = true },
+  findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
+  findConditionInRange, findConditionOutRange
 }
+
+local findPositionConditionEntries = {
+  findConditionEqual, findConditionUnequal,
+  { notation = ':eqslop', label = 'Equal (Slop)', text = '({tgt} >= ({param1} - {param2}) and {tgt} <= ({param1} + {param2}))', terms = 2, split = { { time = true }, { timedur = true } }, sub = true, freeterm = true },
+  { notation = '!:eqslop', label = 'Unequal (Slop)', text = '({tgt} < ({param1} - {param2}) or {tgt} > ({param1} + {param2}))', terms = 2, split = { { time = true }, { timedur = true } }, sub = true, freeterm = true },
+  findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
+  findConditionInRange, findConditionOutRange,
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, floateditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, floateditor = true, range = { 0, 100 } },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
+  { notation = ':beforecursor', label = 'Before Cursor', text = '< (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
+  { notation = ':aftercursor', label = 'After Cursor', text = '>= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
+  { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
+  { notation = '!:intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0, sub = true },
+  -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
+}
+
+local findLengthConditionEntries = {
+  findConditionEqual, findConditionUnequal,
+  { notation = ':eqslop', label = 'Equal (Slop)', text = '({tgt} >= ({param1} - {param2}) and {tgt} <= ({param1} + {param2}))', terms = 2, timedur = true, sub = true, freeterm = true },
+  { notation = '!:eqslop', label = 'Unequal (Slop)', text = '({tgt} < ({param1} - {param2}) or {tgt} > ({param1} + {param2}))', terms = 2, timedur = true, sub = true, freeterm = true },
+  findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
+  findConditionInRange, findConditionOutRange
+}
+
+local findTypeConditionEntries = {
+  findConditionEqual, findConditionUnequal,
+  { notation = ':all', label = 'All', text = '~= nil', terms = 0 }
+}
+
+local findPropertyConditionEntries = {
+  { notation = ':iset', label = 'Is Set', text = '({tgt} & {param1}) ~= 0', terms = 1, sub = true },
+  { notation = '!:isset', label = 'Is Not Set', text = '({tgt} & {param1}) == 0', terms = 1, sub = true }
+}
+
+local findTypeParam1Entries = {
+  { notation = '$note', label = 'Note', text = '0x90' },
+  { notation = '$polyat', label = 'Poly Pressure', text = '0xA0' },
+  { notation = '$cc', label = 'Controller', text = '0xB0' },
+  { notation = '$pc', label = 'Program Change', text = '0xC0' },
+  { notation = '$at', label = 'Aftertouch', text = '0xD0' },
+  { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
+  { notation = '$syx', label = 'System Exclusive', text = '0xF0' }
+  -- { label = 'SMF Event', text = '0x90' },
+  -- { label = 'Notation Event', text = '0x90' },
+  -- { label = '...', text = '0x90' }
+}
+
+local findPropertyParam1Entries = {
+  { notation = '$selected', label = 'Selected', text = '0x01' },
+  { notation = '$muted', label = 'Muted', text = '0x02' }
+}
+
+local findChannelParam1Entries = {
+  { notation = '1', label = '1', text = '0' },
+  { notation = '2', label = '2', text = '1' },
+  { notation = '3', label = '3', text = '2' },
+  { notation = '4', label = '4', text = '3' },
+  { notation = '5', label = '5', text = '4' },
+  { notation = '6', label = '6', text = '5' },
+  { notation = '7', label = '7', text = '6' },
+  { notation = '8', label = '8', text = '7' },
+  { notation = '9', label = '9', text = '8' },
+  { notation = '10', label = '10', text = '9' },
+  { notation = '11', label = '11', text = '10' },
+  { notation = '12', label = '12', text = '11' },
+  { notation = '13', label = '13', text = '12' },
+  { notation = '14', label = '14', text = '13' },
+  { notation = '15', label = '15', text = '14' },
+  { notation = '16', label = '16', text = '15' },
+}
+
+local findTimeFormatEntries = {
+  { label = 'REAPER time' },
+  { label = 'Seconds' },
+  { label = 'Samples' },
+  -- { label = 'Frames' }
+}
+
+local findMetricGridParam1Entries = {
+  { notation = '$1/64', label = '1/64', text = '0,015625' },
+  { notation = '$1/32', label = '1/32', text = '0.03125' },
+  { notation = '$1/16', label = '1/16', text = '0.0625' },
+  { notation = '$1/8', label = '1/8', text = '0.125' },
+  { notation = '$1/4', label = '1/4', text = '0.25' },
+  { notation = '$1/2', label = '1/2', text = '0.5' },
+  { notation = '$1/1', label = '1/1', text = '1' },
+  { notation = '$2/1', label = '2/1', text = '2' },
+  { notation = '$4/1', label = '4/1', text = '4' },
+  -- we need some way to enable triplets and dotted notes, I guess as selections at the bottom of the menu?
+}
+
+local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
+  { notation = '&&', label = 'And', text = 'and'},
+  { notation = '||', label = 'Or', text = 'or'}
+}
+
+-----------------------------------------------------------------------------
+----------------------------- ACTION DEFS -----------------------------------
+
+local ActionRow = class(nil, {})
+
+function ActionRow:init()
+  self.targetEntry = 1
+  self.operationEntry = 1
+  self.param1Entry = 1
+  self.param1Val = ''
+  self.param2Entry = 1
+  self.param2Val = ''
+  self.param1TextEditorStr = '0'
+  self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  self.param2TextEditorStr = '0'
+  self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+end
+
+local actionRowTable = {}
+
+local function addActionRow(row)
+  table.insert(actionRowTable, #actionRowTable+1, row and row or ActionRow())
+end
+
+local actionTargetEntries = {
+  { notation = '$position', label = 'Position', text = 'event.projtime', time = true },
+  { notation = '$length', label = 'Length', text = 'event.projlen', timedur = true, cond = 'event.chanmsg == 0x90' },
+  { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
+  { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
+  { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
+  { notation = '$value1', label = 'Value 1', text = 'event[_value1]', inteditor = true, range = {0, 127} },
+  { notation = '$value2', label = 'Value 2', text = 'event[_value2]', inteditor = true, range = {0, 127} },
+  { notation = '$velocity', label = 'Velocity', text = 'event.msg3', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
+  -- { label = 'Last Event' },
+  -- { label = 'Context Variable' }
+}
+actionTargetEntries.targetTable = true
+
+local actionOperationPlus = { notation = '+', label = 'Add', text = '+', terms = 1, inteditor = true }
+local actionOperationMinus = { notation = '-', label = 'Subtract', text = '-', terms = 1, inteditor = true }
+
+local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, floateditor = true }
+local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, floateditor = true }
+local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, inteditor = true }
+local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, inteditor = true }
+local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, floateditor = true }
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, floateditor = true, range = { -127, 127 } }
+local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
+local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, inteditor = true, freeterm = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, inteditor = true, range = {-127, 127 }, freeterm = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, floateditor = true, range = {}, freeterm = true }
+local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true }
+
+local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', event.projtime, true)', terms = 2, sub = true, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
+
+local function positionMod(op)
+  local newop = tableCopy(op)
+  newop.menu = false
+  newop.inteditor = false
+  newop.floateditor = false
+  newop.timedur = false
+  newop.time = true
+  return newop
+end
+
+local function lengthMod(op)
+  local newop = tableCopy(op)
+  newop.menu = false
+  newop.inteditor = false
+  newop.floateditor = false
+  newop.time = false
+  newop.timedur = true
+  return newop
+end
+
+local actionPositionOperationEntries = {
+  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  actionOperationMult, actionOperationDivide,
+  lengthMod(actionOperationRound), positionMod(actionOperationFixed),
+  positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
+  { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
+  { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, event.projlen)', terms = 0, sub = true },
+  actionOperationTimeScaleOff
+}
+
+local actionLengthOperationEntries = {
+  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  actionOperationMult, actionOperationDivide,
+  lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
+  lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
+  actionOperationTimeScaleOff
+}
+
+local actionChannelOperationEntries = {
+  actionOperationPlus, actionOperationMinus, actionOperationFixed, actionOperationRandom,
+  actionOperationRelRandom, actionOperationLine, actionOperationRelLine
+}
+
+local actionTypeOperationEntries = {
+  actionOperationFixed
+}
+
+local actionPropertyOperationEntries = {
+  actionOperationFixed
+}
+
+local actionPropertyParam1Entries = {
+  { notation = '0', label = 'Clear', text = '0' },
+  { notation = '1', label = 'Selected', text = '1' },
+  { notation = '2', label = 'Muted', text = '2' },
+  { notation = '3', label = 'Selected + Muted', text = '3' },
+}
+
+local actionSubtypeOperationEntries = {
+  actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
+  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
+  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0, sub = true }, -- note that this is different for AT and PB
+  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+}
+
+local actionVelocityOperationEntries = {
+  actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
+  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
+  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0, sub = true }, -- ?? note that this is different for AT and PB
+  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+}
+
+local actionGenericOperationEntries = {
+  actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
+  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
+  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+}
+
+local PARAM_TYPE_UNKNOWN = 0
+local PARAM_TYPE_MENU = 1
+local PARAM_TYPE_INTEDITOR = 2
+local PARAM_TYPE_FLOATEDITOR = 2
+local PARAM_TYPE_TIME = 3
+local PARAM_TYPE_TIMEDUR = 4
+local PARAM_TYPE_METRICGRID = 5
+
+-----------------------------------------------------------------------------
+----------------------------- OPERATION FUNS --------------------------------
 
 local function RandomValue(min, max)
   if math.type(min) == 'integer' and math.type(max) == 'integer' then
@@ -408,239 +660,6 @@ local function AddLength(projTime, projDur)
   end
   return projTime
 end
-
-local findPositionConditionEntries = {
-  { notation = '==', label = 'Equal', text = '==', terms = 1 },
-  { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
-  { notation = '>', label = 'Greater Than', text = '>', terms = 1 },
-  { notation = '>=', label = 'Greater Than or Equal', text = '>=', terms = 1 },
-  { notation = '<', label = 'Less Than', text = '<', terms = 1 },
-  { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 },
-  { notation = ':inrange', label = 'Inside Range', text = '{tgt} >= {param1} and {tgt} <= {param2}', terms = 2, sub = true }, -- absolute position
-  { notation = '!:inrange', label = 'Outside Range', text = '{tgt} < {param1} or {tgt} > {param2}', terms = 2, sub = true },
-  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { 0, 100 } },
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
-  { notation = ':beforecursor', label = 'Before Cursor', text = '< (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
-  { notation = ':aftercursor', label = 'After Cursor', text = '>= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
-  { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
-  { notation = '!:intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0, sub = true },
-  -- { label = 'Inside Track Loop', text = '', terms = 1 },
-  -- { label = 'Exactly Matching Cycle', text = '', terms = 1 },
-  -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
-}
-
-local findTypeConditionEntries = {
-  { notation = '==', label = 'Equal', text = '==', terms = 1 },
-  { notation = '!=', label = 'Unequal', text = '~=', terms = 1 },
-  { notation = ':all', label = 'All', text = '~= nil', terms = 0 }
-}
-
-local findPropertyConditionEntries = {
-  { notation = ':iset', label = 'Is Set', text = '({tgt} & {param1}) ~= 0', terms = 1, sub = true },
-  { notation = '!:isset', label = 'Is Not Set', text = '({tgt} & {param1}) == 0', terms = 1, sub = true }
-}
-
-local findTypeParam1Entries = {
-  { notation = '$note', label = 'Note', text = '0x90' },
-  { notation = '$polyat', label = 'Poly Pressure', text = '0xA0' },
-  { notation = '$cc', label = 'Controller', text = '0xB0' },
-  { notation = '$pc', label = 'Program Change', text = '0xC0' },
-  { notation = '$at', label = 'Aftertouch', text = '0xD0' },
-  { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
-  { notation = '$syx', label = 'System Exclusive', text = '0xF0' }
-  -- { label = 'SMF Event', text = '0x90' },
-  -- { label = 'Notation Event', text = '0x90' },
-  -- { label = '...', text = '0x90' }
-}
-
-local findPropertyParam1Entries = {
-  { notation = '$selected', label = 'Selected', text = '0x01' },
-  { notation = '$muted', label = 'Muted', text = '0x02' }
-}
-
-local findChannelParam1Entries = {
-  { notation = '1', label = '1', text = '0' },
-  { notation = '2', label = '2', text = '1' },
-  { notation = '3', label = '3', text = '2' },
-  { notation = '4', label = '4', text = '3' },
-  { notation = '5', label = '5', text = '4' },
-  { notation = '6', label = '6', text = '5' },
-  { notation = '7', label = '7', text = '6' },
-  { notation = '8', label = '8', text = '7' },
-  { notation = '9', label = '9', text = '8' },
-  { notation = '10', label = '10', text = '9' },
-  { notation = '11', label = '11', text = '10' },
-  { notation = '12', label = '12', text = '11' },
-  { notation = '13', label = '13', text = '12' },
-  { notation = '14', label = '14', text = '13' },
-  { notation = '15', label = '15', text = '14' },
-  { notation = '16', label = '16', text = '15' },
-}
-
-local findTimeFormatEntries = {
-  { label = 'REAPER time' },
-  { label = 'Seconds' },
-  { label = 'Samples' },
-  -- { label = 'Frames' }
-}
-
-local findMetricGridParam1Entries = {
-  { notation = '$1/64', label = '1/64', text = '0,015625' },
-  { notation = '$1/32', label = '1/32', text = '0.03125' },
-  { notation = '$1/16', label = '1/16', text = '0.0625' },
-  { notation = '$1/8', label = '1/8', text = '0.125' },
-  { notation = '$1/4', label = '1/4', text = '0.25' },
-  { notation = '$1/2', label = '1/2', text = '0.5' },
-  { notation = '$1/1', label = '1/1', text = '1' },
-  { notation = '$2/1', label = '2/1', text = '2' },
-  { notation = '$4/1', label = '4/1', text = '4' },
-  -- we need some way to enable triplets and dotted notes, I guess as selections at the bottom of the menu?
-}
-
-local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
-  { notation = '&&', label = 'And', text = 'and'},
-  { notation = '||', label = 'Or', text = 'or'}
-}
-
-local ActionRow = class(nil, {})
-
-function ActionRow:init()
-  self.targetEntry = 1
-  self.operationEntry = 1
-  self.param1Entry = 1
-  self.param1Val = ''
-  self.param2Entry = 1
-  self.param2Val = ''
-  self.param1TextEditorStr = '0'
-  self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
-  self.param2TextEditorStr = '0'
-  self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
-end
-
-local actionRowTable = {}
-
-local function addActionRow(row)
-  table.insert(actionRowTable, #actionRowTable+1, row and row or ActionRow())
-end
-
-local actionTargetEntries = {
-  { notation = '$position', label = 'Position', text = 'event.projtime', time = true },
-  { notation = '$length', label = 'Length', text = 'event.projlen', timedur = true, cond = 'event.chanmsg == 0x90' },
-  { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
-  { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
-  { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
-  { notation = '$value1', label = 'Value 1', text = 'event[_value1]', texteditor = true, range = {0, 127} },
-  { notation = '$value2', label = 'Value 2', text = 'event[_value2]', texteditor = true, range = {0, 127} },
-  { notation = '$velocity', label = 'Velocity', text = 'event.msg3', texteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', texteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
-  -- { label = 'Last Event' },
-  -- { label = 'Context Variable' }
-}
-actionTargetEntries.targetTable = true
-
-local actionOperationPlus = { notation = '+', label = 'Add', text = '+', terms = 1, texteditor = true }
-local actionOperationMinus = { notation = '-', label = 'Subtract', text = '-', terms = 1, texteditor = true }
-
-local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, texteditor = true, decimal = true }
-local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, texteditor = true, decimal = true }
-local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, texteditor = true }
-local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, texteditor = true }
-local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, decimal = true }
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, texteditor = true, range = { -127, 127 }, decimal = true }
-local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
-local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, texteditor = true, range = {-127, 127 } }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, texteditor = true, range = {}, decimal = true }
-local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true }
-
-local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', event.projtime, true)', terms = 2, sub = true, split = {{ texteditor = true }, { timedur = true }}, range = {}, decimal = true, timearg = true }
-
-local function positionMod(op)
-  local newop = tableCopy(op)
-  newop.menu = false
-  newop.texteditor = false
-  newop.timedur = false
-  newop.time = true
-  return newop
-end
-
-local function lengthMod(op)
-  local newop = tableCopy(op)
-  newop.menu = false
-  newop.texteditor = false
-  newop.time = false
-  newop.timedur = true
-  return newop
-end
-
-local actionPositionOperationEntries = {
-  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
-  actionOperationMult, actionOperationDivide,
-  lengthMod(actionOperationRound), positionMod(actionOperationFixed),
-  positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
-  { notation = ':tocursor', label = 'Move to Cursor', text = '= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0, sub = true },
-  { notation = ':addlength', label = 'Add Length', text = '= AddLength({tgt}, event.projlen)', terms = 0, sub = true },
-  actionOperationTimeScaleOff
-}
-
-local actionLengthOperationEntries = {
-  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
-  actionOperationMult, actionOperationDivide,
-  lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
-  lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
-  actionOperationTimeScaleOff
-}
-
-local actionChannelOperationEntries = {
-  actionOperationPlus, actionOperationMinus, actionOperationFixed, actionOperationRandom,
-  actionOperationRelRandom, actionOperationLine, actionOperationRelLine
-}
-
-local actionTypeOperationEntries = {
-  actionOperationFixed
-}
-
-local actionPropertyOperationEntries = {
-  actionOperationFixed
-}
-
-local actionPropertyParam1Entries = {
-  { notation = '0', label = 'Clear', text = '0' },
-  { notation = '1', label = 'Selected', text = '1' },
-  { notation = '2', label = 'Muted', text = '2' },
-  { notation = '3', label = 'Selected + Muted', text = '3' },
-}
-
-local actionSubtypeOperationEntries = {
-  actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0, sub = true }, -- note that this is different for AT and PB
-  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
-}
-
-local actionVelocityOperationEntries = {
-  actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0, sub = true }, -- ?? note that this is different for AT and PB
-  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
-}
-
-local actionGenericOperationEntries = {
-  actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
-  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
-}
-
-local PARAM_TYPE_UNKNOWN = 0
-local PARAM_TYPE_MENU = 1
-local PARAM_TYPE_TEXTEDITOR = 2
-local PARAM_TYPE_TIME = 3
-local PARAM_TYPE_TIMEDUR = 4
-local PARAM_TYPE_METRICGRID = 5
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
@@ -1098,7 +1117,8 @@ local function findTargetToTabs(row, targetEntry)
       if condition and condition.metricgrid then
         param1Tab = findMetricGridParam1Entries
       end
-    -- elseif notation == '$length' then
+    elseif notation == '$length' then
+      condTab = findLengthConditionEntries
     elseif notation == '$channel' then
       condTab = findGenericConditionEntries
       param1Tab = findChannelParam1Entries
@@ -1143,7 +1163,8 @@ end
 
 local function getParamType(src)
   return src.menu and PARAM_TYPE_MENU
-    or src.texteditor and PARAM_TYPE_TEXTEDITOR
+    or src.inteditor and PARAM_TYPE_INTEDITOR
+    or src.floateditor and PARAM_TYPE_FLOATEDITOR
     or src.time and PARAM_TYPE_TIME
     or src.timedur and PARAM_TYPE_TIMEDUR
     or src.metricgrid and PARAM_TYPE_METRICGRID
@@ -1156,7 +1177,7 @@ local function getEditorTypeForRow(target, condOp)
     paramType = getParamType(target)
   end
   if paramType == PARAM_TYPE_UNKNOWN then
-    paramType = PARAM_TYPE_TEXTEDITOR
+    paramType = PARAM_TYPE_INTEDITOR
   end
   local split
   if condOp.split then
@@ -1184,7 +1205,7 @@ local function handleParam(row, target, condOp, paramName, paramTab, paramStr, i
         break
       end
     end
-  elseif paramType == PARAM_TYPE_TEXTEDITOR then
+  elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
     row[paramName .. 'TextEditorStr'] = ensureNumString(paramStr, condOp.range and condOp.range or target.range)
   elseif paramType == PARAM_TYPE_TIME then
     row[paramName .. 'TimeFormatStr'] = timeFormatRebuf(paramStr)
@@ -1406,7 +1427,7 @@ local function doProcessParams(row, target, condOp, paramName, paramType, paramT
     end
   end
   local paramVal = condOp.terms < terms and ''
-    or paramType == PARAM_TYPE_TEXTEDITOR and row[paramName .. 'TextEditorStr']
+    or (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) and row[paramName .. 'TextEditorStr']
     or paramType == PARAM_TYPE_TIME and ((notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(timeFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
     or paramType == PARAM_TYPE_TIMEDUR and ((notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(lengthFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
     or paramType == PARAM_TYPE_METRICGRID and row[paramName .. 'TextEditorStr']
@@ -1508,7 +1529,9 @@ local function processFind(take)
 
     local param1Num = tonumber(param1Term)
     local param2Num = tonumber(param2Term)
-    if param1Num and param2Num and param2Num < param1Num then
+    if param1Num and param2Num and param2Num < param1Num
+      and not curCondition.freeterm
+    then
       local tmp = param2Term
       param2Term = param1Term
       param1Term = tmp
@@ -2026,7 +2049,7 @@ local function processAction(select)
     local param1Num = tonumber(param1Term)
     local param2Num = tonumber(param2Term)
     if param1Num and param2Num and param2Num < param1Num
-      and curOperation.notation ~= ':scaleoffset' -- exception
+      and not curOperation.freeterm
     then
       local tmp = param2Term
       param2Term = param1Term
@@ -2304,7 +2327,8 @@ TransformerLib.actionRowToNotation = actionRowToNotation
 
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
 TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU
-TransformerLib.PARAM_TYPE_TEXTEDITOR = PARAM_TYPE_TEXTEDITOR
+TransformerLib.PARAM_TYPE_INTEDITOR = PARAM_TYPE_INTEDITOR
+TransformerLib.PARAM_TYPE_FLOATEDITOR = PARAM_TYPE_FLOATEDITOR
 TransformerLib.PARAM_TYPE_TIME = PARAM_TYPE_TIME
 TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
 TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID

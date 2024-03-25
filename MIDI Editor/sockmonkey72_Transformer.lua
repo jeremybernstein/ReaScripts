@@ -38,9 +38,16 @@ if not fileExists(imGuiPath) then
   canStart = false
 end
 
-if not r.APIExists('JS_Mouse_GetState') then
-  mu.post('MIDI Transformer requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
-  canStart = false
+-- if not r.APIExists('JS_Mouse_GetState') then
+--   mu.post('MIDI Transformer requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
+--   canStart = false
+-- end
+
+local canReveal = true
+
+if not r.APIExists('CF_LocateInExplorer') then
+  mu.post('MIDI Transformer appreciates the presence of the SWS extension (install from ReaPack)\n')
+  canReveal = false
 end
 
 if not mu.CheckDependencies('MIDI Transformer') then
@@ -1526,6 +1533,16 @@ local function windowFn()
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
+    if canReveal then
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_Spacing(ctx)
+      local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
+      if rv then
+        r.CF_LocateInExplorer(presetPath)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
   end
 
   if r.ImGui_BeginPopup(ctx, 'openPresetMenu') then
@@ -1558,7 +1575,7 @@ local function windowFn()
   -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
 
   -- current 'fix' is using the JS extension
-  local mods = r.JS_Mouse_GetState(24) -- shift key
+  -- local mods = r.JS_Mouse_GetState(24) -- shift key
   -- local shiftdown = mods & 8 ~= 0
   -- local optdown = mods & 16 ~= 0
   -- local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion

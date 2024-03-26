@@ -14,7 +14,8 @@
 local r = reaper
 local mu
 
-local DEBUG = false
+local DEBUG = true
+local DEBUGPOST = false
 
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
@@ -39,8 +40,6 @@ local TransformerLib = {}
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
 
-local viewPort
-
 local INVALID = -0xFFFFFFFF
 
 local disabledAutoOverlap = false
@@ -50,6 +49,7 @@ local CC_TYPE = 1
 local SYXTEXT_TYPE = 2
 
 local findParserError = ''
+local dirtyFind = false
 
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
@@ -166,10 +166,11 @@ local actionScopeTable = {
   { notation = '$invertselect', label = 'Inverted Select' },
   { notation = '$deselect', label = 'Deselect' },
   { notation = '$transform', label = 'Transform' },
-  { notation = '$copy', label = 'Copy' }, -- creates new track/item?
+  { notation = '$copy', label = 'Transform to Track' },
+  { notation = '$copylane', label = 'Transform to Lane' },
   { notation = '$insert', label = 'Insert' },
   { notation = '$insertexclusive', label = 'Insert Exclusive' },
-  { notation = '$extracttrack', label = 'Extract to Track' }, -- how is this different?
+  { notation = '$extracttrack', label = 'Extract to Track' },
   { notation = '$extractlane', label = 'Extract to Lanes' },
   { notation = '$delete', label = 'Delete' },
 }
@@ -1660,11 +1661,78 @@ local function findRowsToNotation()
   return notationString
 end
 
+local function runFind(findFn, params, runFn)
+
+  local wantsInChord = params and params.wantsInChord or false
+  local getUnfound = params and params.wantsUnfound or false
+  local hasTable = {}
+  hasTable[0x90] = false
+  hasTable[0xA0] = false
+  hasTable[0xB0] = false
+  hasTable[0xC0] = false
+  hasTable[0xD0] = false
+  hasTable[0xE0] = false
+  hasTable[0xF0] = false
+  hasTable['NRPN'] = false
+
+  local found = {}
+  local unfound = {}
+
+  local firstTime = 0xFFFFFFFF
+  local lastTime = -0xFFFFFFFF
+
+  if wantsInChord then
+    local firstNoteTime
+    local lastNoteTime
+    local prevEvent
+
+    for _, event in ipairs(allEvents) do
+      if event.type == NOTE_TYPE then -- note event
+        local ns, ne = event.projtime, event.projtime + event.projlen
+        if firstNoteTime and lastNoteTime then
+          local us = firstNoteTime < ns and ns or firstNoteTime
+          local ue = lastNoteTime > ne and ne or lastNoteTime
+          local overlap = (ue - us) / (ne - ns)
+          -- mu.post(ns, ne, overlap)
+          if overlap > 0.7 then
+            if ns < firstNoteTime then firstNoteTime = ns end
+            if ne > lastNoteTime then lastNoteTime = ne end
+            event.flags = event.flags | 4
+            if prevEvent then prevEvent.flags = prevEvent.flags | 4 end
+          else
+            firstNoteTime = ns
+            lastNoteTime = ne
+          end
+          prevEvent = event
+        else
+          firstNoteTime = ns
+          lastNoteTime = ne
+        end
+      end
+    end
+  end
+
+  for _, event in ipairs(allEvents) do
+    local matches = false
+    if findFn(event) then
+      hasTable[event.chanmsg] = true
+      if event.projtime < firstTime then firstTime = event.projtime end
+      if event.projtime > lastTime then lastTime = event.projtime end
+      table.insert(found, event)
+      matches = true
+    elseif getUnfound then
+      table.insert(unfound, event)
+    end
+    if runFn then runFn(event, matches) end
+  end
+  local contextTab = { firstSel = firstTime, lastSel = lastTime, hasTable = hasTable }
+  return found, contextTab, getUnfound and unfound or nil
+end
+
 local function processFind(take)
 
   local fnString = ''
   local wantsInChord = false
-  local somethingIsSelected = false
 
   for k, v in ipairs(findRowTable) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(v)
@@ -1726,11 +1794,10 @@ local function processFind(take)
     -- mu.post(k .. ': ' .. rowStr)
 
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr -- TODO Boolean
-
   end
 
   fnString = 'local event = ... \nreturn ' .. fnString
-  if DEBUG then
+  if DEBUGPOST then
     mu.post('======== FIND FUN ========')
     mu.post(fnString)
     mu.post('==========================')
@@ -1744,6 +1811,9 @@ local function processFind(take)
   if success then
     findFn = pret
     findParserError = ''
+    if not take then
+      dirtyFind = true
+    end
   else
     mu.post(pret)
     findParserError = 'Fatal error: could not load selection criteria'
@@ -2053,64 +2123,6 @@ local function actionRowsToNotation()
   return notationString
 end
 
-local function runFind(findFn, params, runFn)
-
-  local wantsInChord = params and params.wantsInChord or false
-  local getUnfound = params and params.wantsUnfound or false
-
-  local found = {}
-  local unfound = {}
-
-  local firstTime = 0xFFFFFFFF
-  local lastTime = -0xFFFFFFFF
-
-  if wantsInChord then
-    local firstNoteTime
-    local lastNoteTime
-    local prevEvent
-
-    for _, event in ipairs(allEvents) do
-      if event.type == NOTE_TYPE then -- note event
-        local ns, ne = event.projtime, event.projtime + event.projlen
-        if firstNoteTime and lastNoteTime then
-          local us = firstNoteTime < ns and ns or firstNoteTime
-          local ue = lastNoteTime > ne and ne or lastNoteTime
-          local overlap = (ue - us) / (ne - ns)
-          -- mu.post(ns, ne, overlap)
-          if overlap > 0.7 then
-            if ns < firstNoteTime then firstNoteTime = ns end
-            if ne > lastNoteTime then lastNoteTime = ne end
-            event.flags = event.flags | 4
-            if prevEvent then prevEvent.flags = prevEvent.flags | 4 end
-          else
-            firstNoteTime = ns
-            lastNoteTime = ne
-          end
-          prevEvent = event
-        else
-          firstNoteTime = ns
-          lastNoteTime = ne
-        end
-      end
-    end
-  end
-
-  for _, event in ipairs(allEvents) do
-    local matches = false
-    if findFn(event) then
-      if event.projtime < firstTime then firstTime = event.projtime end
-      if event.projtime > lastTime then lastTime = event.projtime end
-      table.insert(found, event)
-      matches = true
-    elseif getUnfound then
-      table.insert(unfound, event)
-    end
-    if runFn then runFn(event, matches) end
-  end
-  local contextTab = { firstSel = firstTime, lastSel = lastTime }
-  return found, contextTab, getUnfound and unfound or nil
-end
-
 local function deleteEventsInTake(take, eventTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
@@ -2129,18 +2141,18 @@ local function deleteEventsInTake(take, eventTab, doTx)
   end
 end
 
-local function insertEventsIntoTake(take, eventTab, actionFn, selStart, selEnd, doTx)
+local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
   for _, event in ipairs(eventTab) do
     local timeAdjust = r.GetProjectTimeOffset(0, false)
-    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), selStart, selEnd)
+    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
     event.muted = (event.flags & 2) ~= 0
     if event.type == NOTE_TYPE then
-      if event.projlen < 0 then event.projlen = 1 / context.PPQ end
+      if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
       event.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
       mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqos, event.chan, event.msg2, event.msg3, event.relvel)
@@ -2174,7 +2186,7 @@ local function transformEntryInTake(take, eventTab, actionFn, contextTab)
     event.selected = (event.flags & 1) ~= 0
     event.muted = (event.flags & 2) ~= 0
     if event.type == NOTE_TYPE then
-      if event.projlen < 0 then event.projlen = 1 / context.PPQ end
+      if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
       event.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
       mu.MIDI_SetNote(take, event.idx, event.selected, event.muted, event.ppqpos, event.endppqos, event.chan, event.msg2, event.msg3, event.relvel)
@@ -2337,7 +2349,7 @@ local function processAction(select)
 
   end
   fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\nreturn event' .. '\nend'
-  if DEBUG then
+  if DEBUGPOST then
     mu.post('======== ACTION FUN ========')
     mu.post(fnString)
     mu.post('============================')
@@ -2369,6 +2381,7 @@ local function processAction(select)
 
     if findFn and actionFn then
       if not select then -- not select then -- DEBUG
+        dirtyFind = true
         -- local event = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
         -- -- mu.tprint(event, 2)
         -- actionFn(event, GetSubtypeValueName(event), GetMainValueName(event)) -- always returns true
@@ -2421,6 +2434,14 @@ local function processAction(select)
           local found, contextTab = runFind(findFn, defParams)
           if #found ~=0 then
             local newtake = newTakeInNewTrack(take)
+            if newtake then
+              insertEventsIntoTake(newtake, found, actionFn, contextTab)
+            end
+          end
+        elseif notation == '$copylane' then
+          local found, contextTab = runFind(findFn, defParams)
+          if #found ~=0 then
+            local newtake = newTakeInNewLane(take)
             if newtake then
               insertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
@@ -2593,6 +2614,36 @@ TransformerLib.findTargetToTabs = findTargetToTabs
 TransformerLib.actionOpTabFromTarget = actionOpTabFromTarget
 TransformerLib.findRowToNotation = findRowToNotation
 TransformerLib.actionRowToNotation = actionRowToNotation
+
+local lastHasTable = {}
+
+TransformerLib.getHasTable = function()
+  if dirtyFind then
+    local hasTable = {}
+
+    mediaItemCount = nil
+    mediaItemIndex = nil
+
+    local takes = grabAllTakes()
+
+    CACHED_METRIC = nil
+    CACHED_WRAPPED = nil
+    SOM = nil
+
+    for _, v in ipairs(takes) do
+      initializeTake(v.take)
+      local findFn = processFind(v.take)
+      local _, contextTab = runFind(findFn)
+      local tab = contextTab.hasTable
+      for kk, vv in pairs(tab) do
+        if vv == true then hasTable[kk] = true end
+      end
+    end
+    dirtyFind = false
+    lastHasTable = hasTable
+  end
+  return lastHasTable
+end
 
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
 TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU

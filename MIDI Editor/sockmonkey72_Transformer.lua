@@ -20,7 +20,7 @@ local r = reaper
 -- local fontStyle = 'monospace'
 local fontStyle = 'sans-serif'
 
-local DEBUG = false
+local DEBUG = true
 
 local mu
 
@@ -193,6 +193,7 @@ local function addFindRow(idx, row)
 
   table.insert(findRowTable, idx, row)
   selectedFindRow = idx
+  tx.processFind()
 end
 
 local function removeFindRow()
@@ -200,6 +201,7 @@ local function removeFindRow()
   if selectedFindRow ~= 0 then
     table.remove(findRowTable, selectedFindRow) -- shifts
     selectedFindRow = selectedFindRow <= #findRowTable and selectedFindRow or #findRowTable
+    tx.processFind()
   end
 end
 
@@ -248,6 +250,7 @@ local function addActionRow(idx, row)
 
   table.insert(actionRowTable, idx, row)
   selectedActionRow = idx
+  tx.processAction()
 end
 
 local function removeActionRow()
@@ -255,6 +258,7 @@ local function removeActionRow()
   if selectedActionRow ~= 0 then
     table.remove(actionRowTable, selectedActionRow) -- shifts
     selectedActionRow = selectedActionRow <= #actionRowTable and selectedActionRow or #actionRowTable
+    tx.processAction()
   end
 end
 
@@ -666,6 +670,16 @@ local function windowFn()
         or isFloat
         or paramType == tx.PARAM_TYPE_METRICGRID
       then
+        local hasPB = false
+        local hasNonPB = false
+        if paramType == tx.PARAM_TYPE_INTEDITOR then
+          local hasTable = tx.getHasTable()
+          hasPB = hasTable[0xE0] and true or false
+          hasNonPB = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
+          if hasPB or hasNonPB then
+            -- mu.post(hasPB, hasNonPB)
+          end
+        end
         r.ImGui_BeginGroup(ctx)
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
@@ -1559,6 +1573,8 @@ local function windowFn()
     presetNotesBuffer = buf
   end
 
+  restoreY = r.ImGui_GetCursorPosY(ctx)
+
   updateCurrentRect()
 
   generateLabel('Preset Notes')
@@ -1573,6 +1589,9 @@ local function windowFn()
       end
     end
   end
+
+  r.ImGui_SetCursorPosY(ctx, restoreY)
+  r.ImGui_NewLine(ctx)
 
   handleStatus(2)
 
@@ -1618,18 +1637,9 @@ local function windowFn()
             presetLabel = source[i].label
             lastInputTextBuffer = presetLabel
             presetNotesBuffer = notes and notes or ''
+            tx.processAction()
           end
         end
-        r.ImGui_CloseCurrentPopup(ctx)
-      end
-    end
-    if canReveal then
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_Spacing(ctx)
-      local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
-      if rv then
-        r.CF_LocateInExplorer(presetPath)
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
@@ -1650,6 +1660,17 @@ local function windowFn()
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
 
     generatePresetMenu(presetTable, presetPath)
+
+    if canReveal then
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_Spacing(ctx)
+      local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
+      if rv then
+        r.CF_LocateInExplorer(presetPath)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
 
     r.ImGui_PopStyleColor(ctx, 5)
 

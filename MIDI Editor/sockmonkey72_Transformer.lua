@@ -1,5 +1,5 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.0
+-- @version 1.0-alpha.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
@@ -13,50 +13,58 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.0'
+local versionStr = '1.0-alpha.1'
 
 local r = reaper
 
 -- local fontStyle = 'monospace'
 local fontStyle = 'sans-serif'
 
-package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-local mu = require 'MIDIUtils'
-mu.ENFORCE_ARGS = false -- turn off type checking
-mu.CORRECT_OVERLAPS = true
-mu.CLAMP_MIDI_BYTES = true
+local DEBUG = false
+
+local mu
+
+if DEBUG then
+  package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
+  mu = require 'MIDIUtils' -- for post/tprint/whatever
+end
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
--- local mu = require 'MIDIUtils'
 local tx = require 'TransformerLib'
+
+local canStart = true
 
 local function fileExists(name)
   local f = io.open(name,'r')
   if f ~= nil then io.close(f) return true else return false end
 end
 
-local canStart = true
+if not tx then
+  r.ShowConsoleMsg('MIDI Transformer requires TransformerLib, which appears to not be present (should have been installed by ReaPack when installing this script. Please reinstall.\n')
+  canStart = false
+end
+
+if canStart and not tx.startup() then
+  r.ShowConsoleMsg('MIDI Transformer requires MIDIUtils, which appears to not be present (should have been installed by ReaPack when installing this script. Please reinstall.\n')
+  canStart = false
+end
 
 local imGuiPath = r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua'
-if not fileExists(imGuiPath) then
-  mu.post('MIDI Transformer requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
+if canStart and not fileExists(imGuiPath) then
+  r.ShowConsoleMsg('MIDI Transformer requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
   canStart = false
 end
 
 -- if not r.APIExists('JS_Mouse_GetState') then
---   mu.post('MIDI Transformer requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
+--   r.ShowConsoleMsg('MIDI Transformer requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
 --   canStart = false
 -- end
 
 local canReveal = true
 
-if not r.APIExists('CF_LocateInExplorer') then
-  mu.post('MIDI Transformer appreciates the presence of the SWS extension (install from ReaPack)\n')
+if canStart and not r.APIExists('CF_LocateInExplorer') then
+  r.ShowConsoleMsg('MIDI Transformer appreciates the presence of the SWS extension (install from ReaPack)\n')
   canReveal = false
-end
-
-if not mu.CheckDependencies('MIDI Transformer') then
-  canStart = false
 end
 
 if not canStart then return end
@@ -77,13 +85,14 @@ if GearImage then r.ImGui_Attach(ctx, GearImage) end
 
 local viewPort
 
+local CANONICAL_FONTSIZE_LARGE = 13
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
 local DEFAULT_WIDTH = 68 * FONTSIZE_LARGE
 local DEFAULT_HEIGHT = 40 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 70
 
-local canonicalFont = r.ImGui_CreateFont(fontStyle, FONTSIZE_LARGE)
+local canonicalFont = r.ImGui_CreateFont(fontStyle, CANONICAL_FONTSIZE_LARGE)
 r.ImGui_Attach(ctx, canonicalFont)
 
 local PAREN_COLUMN_WIDTH = 20
@@ -92,8 +101,9 @@ local windowInfo
 local fontInfo
 
 local canonicalFontWidth
-local currentFrameHeight
+
 local currentFontWidth
+local currentFrameHeight
 
 local canvasScale = 1.0
 local fontWidScale = 1.0
@@ -1760,6 +1770,7 @@ end
 local function doClose()
   r.ImGui_Detach(ctx, fontInfo.large)
   r.ImGui_Detach(ctx, fontInfo.small)
+  r.ImGui_Detach(ctx, canonicalFont)
   r.ImGui_DestroyContext(ctx)
   ctx = nil
   if disabledAutoOverlap then

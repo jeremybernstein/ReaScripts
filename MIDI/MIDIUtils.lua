@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.21
+-- @version 0.1.22
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - commit comparator final fix (thanks Talagan)
+--   - add option to clamp MIDI bytes, rather than modulo
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*

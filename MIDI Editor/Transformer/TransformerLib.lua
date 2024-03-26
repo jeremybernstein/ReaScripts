@@ -12,19 +12,27 @@
 -- TODO: split integer/float entry
 
 local r = reaper
+local mu
 
-package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-local mu = require 'MIDIUtils'
+local DEBUG = false
 
--- package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
--- local mu = require 'MIDIUtils'
+if DEBUG then
+  package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
+  mu = require 'MIDIUtils'
+else
+  package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
+  mu = require 'MIDIUtils'
+end
 
 mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = true
 mu.CLAMP_MIDI_BYTES = true
 mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true -- any downsides to having it on all the time?
 
-local DEBUG = false
+local function startup(scriptName)
+  if mu then return mu.CheckDependencies() end
+  return false
+end
 
 local TransformerLib = {}
 
@@ -2593,6 +2601,8 @@ TransformerLib.PARAM_TYPE_FLOATEDITOR = PARAM_TYPE_FLOATEDITOR
 TransformerLib.PARAM_TYPE_TIME = PARAM_TYPE_TIME
 TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
 TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
+
+TransformerLib.startup = startup
 
 return TransformerLib
 

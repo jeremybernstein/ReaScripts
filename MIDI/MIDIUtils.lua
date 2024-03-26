@@ -5,7 +5,8 @@
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - add option to clamp MIDI bytes, rather than modulo
+--   - add option (CLAMP_MIDI_BYTES) to clamp MIDI bytes, rather than modulo
+--   - add option (CORRECT_EXTENTS) to auto-adjust item extents if modified events exceed the item extents
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -25,6 +26,7 @@ MIDIUtils.CORRECT_OVERLAPS = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
 MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END = true
 MIDIUtils.CLAMP_MIDI_BYTES = false
+MIDIUtils.CORRECT_EXTENTS = false
 
 local NOTE_TYPE = 0
 local NOTEOFF_TYPE = 1
@@ -826,20 +828,79 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   local lastPPQPos = 0
 
   -- iterate sorted to avoid (REAPER Inline MIDI Editor) problems with offset calculation
-  local comparator = function(t, a, b) -- thanks Talagan (Ben Babut) for this improvement
-    if (t[a].ppqpos == t[b].ppqpos) then
-      local aprio = (t[a]:type() == NOTEOFF_TYPE) and 0 or 1
-      local bprio = (t[b]:type() == NOTEOFF_TYPE) and 0 or 1
+  local comparator = function(a, b) -- thanks Talagan (Ben Babut) for this improvement
+    if (a.ppqpos == b.ppqpos) then
+      local aprio = (a:type() == NOTEOFF_TYPE) and 0 or 1
+      local bprio = (b:type() == NOTEOFF_TYPE) and 0 or 1
 
       return aprio < bprio
     else
-      return (t[a].ppqpos < t[b].ppqpos)
+      return (a.ppqpos < b.ppqpos)
     end
   end
 
-  for _, event in spairs(MIDIEvents, comparator) do
-    event.offset = math.floor(event.ppqpos - lastPPQPos)
-    lastPPQPos = event.ppqpos
+  local correct = 0
+  table.sort(MIDIEvents, comparator)
+
+  if MIDIUtils.CORRECT_EXTENTS then
+    local item = r.GetMediaItemTake_Item(take)
+    local itemStartTime = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+    local itemEndTime = itemStartTime + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+
+    local itemStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemStartTime)
+    local itemEndPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemEndTime)
+
+    local firstEventPPQ
+    local lastEventPPQ
+
+    if item then
+      -- find the first and last _touched_ events
+      for _, event in ipairs(MIDIEvents) do
+        if event.ppqpos > itemStartPPQ then break end
+        if not event.delete and event.recalcMIDI then
+          if event.ppqpos < itemStartPPQ then
+            firstEventPPQ = event.ppqpos
+            break
+          end
+        end
+      end
+      for i = #MIDIEvents, 1, -1 do
+        local event = MIDIEvents[i]
+        if event.ppqpos < itemEndPPQ then break end
+        if not event.delete and event.recalcMIDI then
+          if event.ppqpos > itemEndPPQ then
+            lastEventPPQ = event.ppqpos
+            break
+          end
+        end
+      end
+
+      local firstEventTime = firstEventPPQ and r.MIDI_GetProjTimeFromPPQPos(take, firstEventPPQ) or nil
+      local lastEventTime = lastEventPPQ and r.MIDI_GetProjTimeFromPPQPos(take, lastEventPPQ) or nil
+
+      if firstEventTime or lastEventTime then
+        local newItemStartQN, newItemEndQN
+        if firstEventTime then
+          newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ)
+        end
+        if lastEventTime then
+          newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ)
+        end
+
+        if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end
+        if not newItemEndQN then newItemEndQN = r.TimeMap2_timeToQN(0, itemEndTime) end
+        -- resize to nearest QN
+        local floorStartTime = math.floor(newItemStartQN)
+        correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime)
+        r.MIDI_SetItemExtents(item, floorStartTime, math.ceil(newItemEndQN))
+      end
+    end
+  end
+
+  for _, event in ipairs(MIDIEvents) do
+  -- for _, event in spairs(MIDIEvents, comparator) do
+    event.offset = math.floor(event.ppqpos - lastPPQPos + correct)
+    lastPPQPos = event.ppqpos + correct
     local MIDIStr = event:GetMIDIString()
     if event.delete then
       event.flags = 0

@@ -85,6 +85,9 @@ if GearImage then r.ImGui_Attach(ctx, GearImage) end
 
 local viewPort
 
+local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
+local presetExt = '.tfmrPreset'
+
 local CANONICAL_FONTSIZE_LARGE = 13
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
@@ -104,6 +107,8 @@ local canonicalFontWidth
 
 local currentFontWidth
 local currentFrameHeight
+
+local updateItemBoundsOnEdit = true
 
 local canvasScale = 1.0
 local fontWidScale = 1.0
@@ -127,6 +132,9 @@ local presetLabel = ''
 local presetInputVisible = false
 local presetInputDoesScript = false
 local presetNotesBuffer = ''
+local presetNotesViewEditor = false
+local justChanged = false
+
 local scriptWritesMainContext = true
 local scriptWritesMIDIContexts = true
 local refocusField = false
@@ -284,6 +292,12 @@ local function handleExtState()
   if state and state ~= '' then
     scriptWritesMIDIContexts = tonumber(state) == 1 and true or false
   end
+
+  state = r.GetExtState(scriptID, 'updateItemBoundsOnEdit')
+  if state and state ~= '' then
+    updateItemBoundsOnEdit = state == '1' and true or false
+    tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
+  end
 end
 
 local function prepRandomShit()
@@ -428,7 +442,16 @@ local function windowFn()
       end
 
       r.ImGui_Spacing(ctx)
-      -- r.ImGui_Separator(ctx)
+      r.ImGui_Separator(ctx)
+
+      r.ImGui_Spacing(ctx)
+      rv, v = r.ImGui_Checkbox(ctx, 'Update item bounds on edit', updateItemBoundsOnEdit)
+      if rv then
+        updateItemBoundsOnEdit = v
+        r.SetExtState(scriptID, 'updateItemBoundsOnEdit', v and '1' or '0', true)
+        tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
+        -- r.ImGui_CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
+      end
 
       r.ImGui_EndPopup(ctx)
     end
@@ -514,9 +537,6 @@ local function windowFn()
     end
     return tostring(num)
   end
-
-  local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
-  local presetExt = '.tfmrPreset'
 
   local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
     -- collect the keys
@@ -1369,6 +1389,8 @@ local function windowFn()
     r.ImGui_SetKeyboardFocusHere(ctx)
   end
 
+  local handleStatusPosX, handStatusPosY = r.ImGui_GetCursorPos(ctx)
+
   local function positionModalWindow(yOff)
     local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
     local winHgt = FONTSIZE_LARGE * 7
@@ -1562,20 +1584,39 @@ local function windowFn()
   r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
 
   local windowSizeX = r.ImGui_GetWindowSize(ctx)
-  local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY)
-  if kbdEntryIsCompleted(retval) then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
+
+  if not presetNotesViewEditor then
+    r.ImGui_BeginGroup(ctx)
+    r.ImGui_SetCursorPos(ctx, restoreX + 2, restoreY + 3)
+    local noBuf = false
+    if presetNotesBuffer == '' then noBuf = true end
+    if noBuf then r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFF7F) end
+    r.ImGui_TextWrapped(ctx, presetNotesBuffer == '' and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, 0) then
+      presetNotesViewEditor = true
+      justChanged = true
+    end
+    if noBuf then r.ImGui_PopStyleColor(ctx) end
+    r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
+    r.ImGui_EndGroup(ctx)
+    updateCurrentRect()
+  else
+    if justChanged then r.ImGui_SetKeyboardFocusHere(ctx) justChanged = false end
+    local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, r.ImGui_InputTextFlags_AutoSelectAll())
+    if kbdEntryIsCompleted(retval) and not r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
+      else
+        presetNotesBuffer = buf
+      end
+      presetNotesViewEditor = false
     else
       presetNotesBuffer = buf
     end
-  else
-    presetNotesBuffer = buf
+    updateCurrentRect()
   end
 
-  restoreY = r.ImGui_GetCursorPosY(ctx)
-
-  updateCurrentRect()
+  restoreY = r.ImGui_GetCursorPosY(ctx) - 10 * canvasScale
 
   generateLabel('Preset Notes')
 
@@ -1590,9 +1631,8 @@ local function windowFn()
     end
   end
 
-  r.ImGui_SetCursorPosY(ctx, restoreY)
-  r.ImGui_NewLine(ctx)
-
+  r.ImGui_SetCursorPos(ctx, handleStatusPosX, handStatusPosY - r.ImGui_GetFrameHeightWithSpacing(ctx))
+  r.ImGui_Dummy(ctx, DEFAULT_ITEM_WIDTH * 1.5, 1)
   handleStatus(2)
 
   local function generatePresetMenu(source, path, lab)
@@ -1667,7 +1707,7 @@ local function windowFn()
       r.ImGui_Spacing(ctx)
       local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
       if rv then
-        r.CF_LocateInExplorer(presetPath)
+        r.CF_ShellExecute(presetPath) -- try this until it breaks
         r.ImGui_CloseCurrentPopup(ctx)
       end
     end
@@ -2000,7 +2040,21 @@ local function loop()
       fontWidScale = currentFontWidth / canonicalFontWidth
     end
 
+    r.ImGui_BeginGroup(ctx)
     windowFn()
+    r.ImGui_EndGroup(ctx)
+
+    -- handle drag and drop of preset files using the entire frame
+    if r.ImGui_BeginDragDropTarget(ctx) then
+      if r.ImGui_AcceptDragDropPayloadFiles(ctx) then
+        local retdrag, filedrag = r.ImGui_GetDragDropPayloadFile(ctx, 0)
+        if retdrag and string.match(filedrag, presetExt .. '$') then
+          tx.loadPreset(filedrag)
+        end
+      end
+      r.ImGui_EndDragDropTarget(ctx)
+    end
+
     r.ImGui_PopFont(ctx)
 
     updateWindowPosition()

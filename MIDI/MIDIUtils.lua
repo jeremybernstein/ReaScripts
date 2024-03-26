@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.1.19
+-- @version 0.1.21
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -161,7 +161,7 @@ local function tprint (tbl, indent)
     elseif type(v) == 'boolean' then
       post(formatting .. tostring(v))
     else
-      post(formatting .. v)
+      post(formatting .. tostring(v))
     end
   end
 end

@@ -13,7 +13,12 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
+local versionStr = '1.0-alpha.0'
+
 local r = reaper
+
+-- local fontStyle = 'monospace'
+local fontStyle = 'sans-serif'
 
 package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
 local mu = require 'MIDIUtils'
@@ -63,6 +68,10 @@ local scriptID = 'sockmonkey72_Transformer'
 local ctx = r.ImGui_CreateContext(scriptID)
 r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1)
 
+local IMAGEBUTTON_SIZE = 13
+local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/' .. 'gear_40031.png')
+if GearImage then r.ImGui_Attach(ctx, GearImage) end
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
 
@@ -74,15 +83,23 @@ local DEFAULT_WIDTH = 68 * FONTSIZE_LARGE
 local DEFAULT_HEIGHT = 40 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 70
 
+local canonicalFont = r.ImGui_CreateFont(fontStyle, FONTSIZE_LARGE)
+r.ImGui_Attach(ctx, canonicalFont)
+
 local PAREN_COLUMN_WIDTH = 20
 
 local windowInfo
 local fontInfo
 
+local canonicalFontWidth
+local currentFrameHeight
+local currentFontWidth
+
 local canvasScale = 1.0
+local fontWidScale = 1.0
 
 local function scaled(num)
-  return num * canvasScale
+  return num * canvasScale * fontWidScale
 end
 
 local DEFAULT_TITLEBAR_TEXT = 'Transformer'
@@ -283,7 +300,7 @@ local function processBaseFontUpdate(baseFontSize)
 
   windowInfo.defaultWidth = 68 * fontInfo.largeDefaultSize
   windowInfo.defaultHeight = 40 * fontInfo.smallDefaultSize
-  DEFAULT_ITEM_WIDTH = 4.6 * FONTSIZE_LARGE
+
   windowInfo.width = windowInfo.defaultWidth -- * canvasScale
   windowInfo.height = windowInfo.defaultHeight -- * canvasScale
   windowInfo.wantsResize = true
@@ -304,8 +321,8 @@ local function prepWindowAndFont()
   }
 
   fontInfo = {
-    large = r.ImGui_CreateFont('sans-serif', FONTSIZE_LARGE), largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
-    small = r.ImGui_CreateFont('sans-serif', FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL
+    large = r.ImGui_CreateFont(fontStyle, FONTSIZE_LARGE), largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
+    small = r.ImGui_CreateFont(fontStyle, FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL
   }
   r.ImGui_Attach(ctx, fontInfo.large)
   r.ImGui_Attach(ctx, fontInfo.small)
@@ -351,6 +368,59 @@ local function windowFn()
 
   local currentRect = {}
 
+  local function MakeGearPopup()
+    r.ImGui_SameLine(ctx)
+
+    local ibSize = FONTSIZE_LARGE * canvasScale
+    local x = r.ImGui_GetWindowSize(ctx)
+    local textWidth = ibSize -- r.ImGui_CalcTextSize(ctx, 'Gear')
+    r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+
+    local wantsPop = false
+    if r.ImGui_ImageButton(ctx, 'gear', GearImage, ibSize, ibSize) then
+      wantsPop = true
+    end
+
+    if wantsPop then
+      r.ImGui_OpenPopup(ctx, 'gear menu')
+    end
+
+    if r.ImGui_BeginPopup(ctx, 'gear menu') then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then -- and not IsOKDialogOpen() then
+        r.ImGui_CloseCurrentPopup(ctx)
+        handledEscape = true
+      end
+      local rv, selected, v
+
+      r.ImGui_BeginDisabled(ctx)
+      r.ImGui_Text(ctx, 'Version ' .. versionStr)
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_EndDisabled(ctx)
+
+      -----------------------------------------------------------------------------
+      ---------------------------------- BASE FONT --------------------------------
+
+      r.ImGui_Spacing(ctx)
+
+      r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
+      rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                     + r.ImGui_InputTextFlags_CharsDecimal())
+      if rv then
+        v = processBaseFontUpdate(tonumber(v))
+        r.SetExtState(scriptID, 'baseFont', tostring(v), true)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      r.ImGui_Spacing(ctx)
+      -- r.ImGui_Separator(ctx)
+
+      r.ImGui_EndPopup(ctx)
+    end
+    r.ImGui_PopStyleColor(ctx)
+  end
+
   local function updateCurrentRect()
     -- cache the positions to generate next box position
     currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
@@ -377,13 +447,14 @@ local function windowFn()
   end
 
   local function generateLabelOnLine(label, advance)
+    local restoreY = r.ImGui_GetCursorPosY(ctx)
     if not advance then
       r.ImGui_SameLine(ctx)
     end
     updateCurrentRect()
     local oldX, oldY = r.ImGui_GetCursorPos(ctx)
     generateLabel(label)
-    r.ImGui_SetCursorPosY(ctx, oldY + scaled(20))
+    r.ImGui_SetCursorPosY(ctx, restoreY)
   end
 
   local function kbdEntryIsCompleted(retval)
@@ -497,9 +568,14 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------- PRESET RECALL -----------------------------
 
-  r.ImGui_Spacing(ctx)
+  local function Spacing(half)
+    local posy = r.ImGui_GetCursorPosY(ctx)
+    r.ImGui_SetCursorPosY(ctx, posy + (currentFrameHeight / (half and 4 or 2)))
+  end
+
+  Spacing(true)
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Button(ctx, 'Recall Preset...', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     presetTable = enumerateTransformerPresets(presetPath)
     if #presetTable ~= 0 then
@@ -511,6 +587,11 @@ local function windowFn()
   r.ImGui_TextColored(ctx, 0x00AAFFFF, presetLabel)
 
   ---------------------------------------------------------------------------
+  ----------------------------------- GEAR ----------------------------------
+
+  MakeGearPopup()
+
+  ---------------------------------------------------------------------------
   --------------------------------- FIND ROWS -------------------------------
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x006655FF)
@@ -518,27 +599,24 @@ local function windowFn()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x007766FF)
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x006655FF)
 
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
+  Spacing()
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
 
   local optDown = false
   if r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() then
     optDown = true
   end
 
-  r.ImGui_Button(ctx, 'Insert Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, 'Insert Criteria', DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     addFindRow()
   end
 
   r.ImGui_SameLine(ctx)
-  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
   if selectedFindRow == 0 then
     r.ImGui_BeginDisabled(ctx)
   end
-  r.ImGui_Button(ctx, optDown and 'Clear All Criteria' or 'Remove Criteria', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, optDown and 'Clear All Criteria' or 'Remove Criteria', DEFAULT_ITEM_WIDTH * 2)
   if selectedFindRow == 0 then
     r.ImGui_EndDisabled(ctx)
   end
@@ -605,6 +683,7 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
+  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
   local fcrv, fcbuf = r.ImGui_InputText(ctx, '##findConsole', findConsoleText)
   if kbdEntryIsCompleted(fcrv) then
     findConsoleText = fcbuf
@@ -613,11 +692,10 @@ local function windowFn()
 
   generateLabelOnLine('Selection Criteria Console')
 
-  r.ImGui_Spacing(ctx)
+  Spacing(true)
   r.ImGui_Separator(ctx)
-  r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(12))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
 
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE GEN ------------------------------
@@ -705,7 +783,10 @@ local function windowFn()
     'Boolean'
   }
 
-  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, r.ImGui_GetFrameHeightWithSpacing(ctx) * 6.2)
+  local tableHeight = currentFrameHeight * 6.2
+  local restoreY = r.ImGui_GetCursorPosY(ctx) + tableHeight
+
+  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight)
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
@@ -756,7 +837,7 @@ local function windowFn()
 
     r.ImGui_TableSetColumnIndex(ctx, 0) -- '('
     if currentRow.startParenEntry < 2 then
-      r.ImGui_InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), r.ImGui_GetFrameHeight(ctx)) -- or we can't test hover/click properly
+      r.ImGui_InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
     else
       r.ImGui_Button(ctx, tx.startParenEntries[currentRow.startParenEntry].label)
     end
@@ -804,7 +885,7 @@ local function windowFn()
 
     r.ImGui_TableSetColumnIndex(ctx, 6 - (showTimeFormatColumn == false and 1 or 0)) -- End Paren
     if currentRow.endParenEntry < 2 then
-      r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), r.ImGui_GetFrameHeight(ctx)) -- or we can't test hover/click properly
+      r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
     else
       r.ImGui_Button(ctx, tx.endParenEntries[currentRow.endParenEntry].label)
     end
@@ -969,23 +1050,21 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------- FIND BUTTONS ------------------------------
 
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Separator(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
+  r.ImGui_SetCursorPosY(ctx, restoreY)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(10))
+  Spacing(true)
+  r.ImGui_Separator(ctx)
+
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
 
   r.ImGui_AlignTextToFramePadding(ctx)
 
-  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, scaled(150))
+  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'findScopeMenu')
   end
 
   generateLabelOnLine('Selection Scope', true)
-
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) - scaled(40))
 
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, findParserError)
@@ -996,21 +1075,16 @@ local function windowFn()
       tx.setCurrentFindScope(i)
     end)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(20))
-
   r.ImGui_PopStyleColor(ctx)
   r.ImGui_PopStyleColor(ctx)
   r.ImGui_PopStyleColor(ctx)
   r.ImGui_PopStyleColor(ctx)
 
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
+  Spacing(true)
   r.ImGui_Separator(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
+  r.ImGui_SameLine(ctx)
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + 15)
   r.ImGui_Separator(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
 
   ---------------------------------------------------------------------------
   -------------------------------- ACTION ROWS ------------------------------
@@ -1021,11 +1095,10 @@ local function windowFn()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x440066FF)
 
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(10))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight * 0.75)
 
-  r.ImGui_Button(ctx, 'Insert Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, 'Insert Action', DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     local numRows = #tx.actionRowTable()
     addActionRow()
@@ -1043,11 +1116,10 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
-  r.ImGui_SetNextItemWidth(ctx, scaled(DEFAULT_ITEM_WIDTH))
   if selectedActionRow == 0 then
     r.ImGui_BeginDisabled(ctx)
   end
-  r.ImGui_Button(ctx, optDown and 'Clear All Actions' or 'Remove Action', scaled(DEFAULT_ITEM_WIDTH) * 1.5)
+  r.ImGui_Button(ctx, optDown and 'Clear All Actions' or 'Remove Action', DEFAULT_ITEM_WIDTH * 2)
   if selectedActionRow == 0 then
     r.ImGui_EndDisabled(ctx)
   end
@@ -1062,6 +1134,7 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
+  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
   local acrv, acbuf = r.ImGui_InputText(ctx, '##actionConsole', actionConsoleText)
   if kbdEntryIsCompleted(acrv) then
     actionConsoleText = acbuf
@@ -1070,11 +1143,10 @@ local function windowFn()
 
   generateLabelOnLine('Action Console')
 
-  r.ImGui_Spacing(ctx)
+  Spacing(true)
   r.ImGui_Separator(ctx)
-  r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(12))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
 
   ----------------------------------------------
   ---------------- ACTIONS TABLE ---------------
@@ -1087,7 +1159,9 @@ local function windowFn()
     'Parameter 2'
   }
 
-  r.ImGui_BeginTable(ctx, 'Actions', #actionColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, r.ImGui_GetFrameHeightWithSpacing(ctx) * 6.2)
+  restoreY = r.ImGui_GetCursorPosY(ctx) + tableHeight
+
+  r.ImGui_BeginTable(ctx, 'Actions', #actionColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight)
 
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
@@ -1211,19 +1285,22 @@ local function windowFn()
 
   r.ImGui_EndTable(ctx)
 
+  r.ImGui_SetCursorPosY(ctx, restoreY)
+
   generateLabelOnLine('Actions', true)
 
   ---------------------------------------------------------------------------
   ------------------------------ ACTION BUTTONS -----------------------------
 
-  r.ImGui_Spacing(ctx)
+  Spacing(true)
   r.ImGui_Separator(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + scaled(10))
+  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
 
   r.ImGui_AlignTextToFramePadding(ctx)
+
+  local restoreX
+  restoreX, restoreY = r.ImGui_GetCursorPos(ctx)
 
   r.ImGui_Button(ctx, 'Apply')
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1232,8 +1309,9 @@ local function windowFn()
 
   r.ImGui_SameLine(ctx)
 
-  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(50))
-  r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, scaled(150))
+  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(20))
+
+  r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'actionScopeMenu')
   end
@@ -1251,30 +1329,15 @@ local function windowFn()
 
   r.ImGui_PopStyleColor(ctx, 4)
 
-  r.ImGui_SetCursorPos(ctx, saveX + scaled(250), saveY)
-
-  local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, scaled(360), scaled(50))
-  if kbdEntryIsCompleted(retval) then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
-    else
-      presetNotesBuffer = buf
-    end
-  else
-    presetNotesBuffer = buf
-  end
-
-  updateCurrentRect()
-
-  generateLabel('Preset Notes')
-
   r.ImGui_NewLine(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
-  r.ImGui_Spacing(ctx)
+  Spacing()
+  Spacing(true)
 
-  r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', scaled(DEFAULT_ITEM_WIDTH + 30))
+  local presetButtonBottom = r.ImGui_GetCursorPosY(ctx)
+  r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', DEFAULT_ITEM_WIDTH * 1.5)
+  local _, presetButtonHeight = r.ImGui_GetItemRectSize(ctx)
+  presetButtonBottom = presetButtonBottom + presetButtonHeight
+
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) or refocusInput then
     presetInputVisible = true
     presetInputDoesScript = optDown
@@ -1427,8 +1490,7 @@ local function windowFn()
     end
 
     r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, 3.75 * DEFAULT_ITEM_WIDTH * canvasScale)
-
+    r.ImGui_SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', lastInputTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
     if kbdEntryIsCompleted(retval) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -1469,9 +1531,27 @@ local function windowFn()
         inOKDialog = false
       end
     end
-
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)
   end
+
+  restoreX = restoreX + 57 * (currentFontWidth and currentFontWidth or canonicalFontWidth)
+  r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
+
+  local windowSizeX = r.ImGui_GetWindowSize(ctx)
+  local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY)
+  if kbdEntryIsCompleted(retval) then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
+    else
+      presetNotesBuffer = buf
+    end
+  else
+    presetNotesBuffer = buf
+  end
+
+  updateCurrentRect()
+
+  generateLabel('Preset Notes')
 
   local function handleStatus(ctext)
     if statusMsg ~= '' and statusTime and statusContext == ctext then
@@ -1758,13 +1838,13 @@ end
 local function updateOneFont(name)
   if not fontInfo[name] then return end
 
-  local newFontSize = math.floor(scaled(fontInfo[name..'DefaultSize']))
+  local newFontSize = math.floor(fontInfo[name..'DefaultSize'] * canvasScale)
   if newFontSize < 1 then newFontSize = 1 end
   local fontSize = fontInfo[name..'Size']
 
   if newFontSize ~= fontSize then
     r.ImGui_Detach(ctx, fontInfo[name])
-    fontInfo[name] = r.ImGui_CreateFont('sans-serif', newFontSize)
+    fontInfo[name] = r.ImGui_CreateFont(fontStyle, newFontSize)
     r.ImGui_Attach(ctx, fontInfo[name])
     fontInfo[name..'Size'] = newFontSize
   end
@@ -1792,7 +1872,7 @@ local function openWindow()
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
 
   r.ImGui_PushFont(ctx, fontInfo.large)
-  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 29
+  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 27
   r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winheight, windowInfo.defaultWidth * 3, winheight)
   r.ImGui_PopFont(ctx)
 
@@ -1855,6 +1935,8 @@ end
 -----------------------------------------------------------------------------
 -------------------------------- MAIN LOOP ----------------------------------
 
+local prepped = false
+
 local function loop()
 
   if isClosing then
@@ -1872,6 +1954,20 @@ local function loop()
     checkShortcuts()
 
     r.ImGui_PushFont(ctx, fontInfo.large)
+
+    if not prepped then
+      r.ImGui_PushFont(ctx, canonicalFont)
+      canonicalFontWidth = r.ImGui_CalcTextSize(ctx, '0', nil, nil)
+      currentFrameHeight = r.ImGui_GetFrameHeight(ctx)
+      r.ImGui_PopFont(ctx)
+      prepped = true
+    else
+      currentFontWidth = r.ImGui_CalcTextSize(ctx, '0', nil, nil)
+      DEFAULT_ITEM_WIDTH = 10 * currentFontWidth -- (currentFontWidth / canonicalFontWidth)
+      currentFrameHeight = r.ImGui_GetFrameHeight(ctx)
+      fontWidScale = currentFontWidth / canonicalFontWidth
+    end
+
     windowFn()
     r.ImGui_PopFont(ctx)
 

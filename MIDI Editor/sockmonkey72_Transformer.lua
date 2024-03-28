@@ -13,6 +13,8 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
+-- the problem with the percentages/pitch bend/etc is that the row isn't so easy to save/restore
+
 local versionStr = '1.0-alpha.1'
 
 local r = reaper
@@ -157,6 +159,7 @@ local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
 
 local isClosing = false
 
+local lastSelectedRowType
 local selectedFindRow = 0
 local selectedActionRow = 0
 
@@ -164,6 +167,8 @@ local showTimeFormatColumn = false
 
 local defaultFindRow
 local defaultActionRow
+
+local newHasTable = false
 
 -- local focuswait
 -- local wantsRecede -- = tonumber(r.GetExtState('sm72_CreateCrossfade', 'ConfigWantsRecede'))
@@ -184,6 +189,7 @@ local function addFindRow(idx, row)
     if defaultFindRow then
       if tx.processFindMacro(defaultFindRow) then
         selectedFindRow = idx
+        lastSelectedRowType = 0 -- Find
         return
       else
         defaultFindRow = ''
@@ -201,6 +207,7 @@ local function addFindRow(idx, row)
 
   table.insert(findRowTable, idx, row)
   selectedFindRow = idx
+  lastSelectedRowType = 0 -- Find
   tx.processFind()
 end
 
@@ -218,21 +225,17 @@ local function setupRowFormat(row, condOpTab)
 
   local target = tx.actionTargetEntries[row.targetEntry]
   local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
-  local paramType, split = tx.getEditorTypeForRow(target, condOp)
+  local paramTypes = tx.getEditorTypesForRow(row, target, condOp)
   local p1 = DEFAULT_TIMEFORMAT_STRING
   local p2 = DEFAULT_TIMEFORMAT_STRING
 
-  if target.notation == '$length'
-    or paramType == tx.PARAM_TYPE_TIMEDUR
-  then
+  if target.notation == '$length' then
     p1 = DEFAULT_LENGTHFORMAT_STRING
     p2 = DEFAULT_LENGTHFORMAT_STRING
   end
 
-  if split then
-    if split[1] == tx.PARAM_TYPE_TIMEDUR then p1 = DEFAULT_LENGTHFORMAT_STRING end
-    if split[2] == tx.PARAM_TYPE_TIMEDUR then p2 = DEFAULT_LENGTHFORMAT_STRING end
-  end
+  if paramTypes[1] == tx.PARAM_TYPE_TIMEDUR then p1 = DEFAULT_LENGTHFORMAT_STRING end
+  if paramTypes[2] == tx.PARAM_TYPE_TIMEDUR then p2 = DEFAULT_LENGTHFORMAT_STRING end
 
   row.param1TimeFormatStr = p1
   row.param2TimeFormatStr = p2
@@ -246,6 +249,7 @@ local function addActionRow(idx, row)
     if defaultActionRow then
       if tx.processActionMacro(defaultActionRow) then
         selectedActionRow = idx
+        lastSelectedRowType = 1
         return
       else
         defaultActionRow = ''
@@ -258,6 +262,7 @@ local function addActionRow(idx, row)
 
   table.insert(actionRowTable, idx, row)
   selectedActionRow = idx
+  lastSelectedRowType = 1
   tx.processAction()
 end
 
@@ -266,6 +271,7 @@ local function removeActionRow()
   if selectedActionRow ~= 0 then
     table.remove(actionRowTable, selectedActionRow) -- shifts
     selectedActionRow = selectedActionRow <= #actionRowTable and selectedActionRow or #actionRowTable
+    lastSelectedRowType = 1
     tx.processAction()
   end
 end
@@ -356,6 +362,38 @@ local function prepWindowAndFont()
   r.ImGui_Attach(ctx, fontInfo.small)
 
   processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
+end
+
+local function check14Bit(paramType)
+  local has14bit = false
+  local hasOther = false
+  if paramType == tx.PARAM_TYPE_INTEDITOR then
+    local hasTable, fresh = tx.getHasTable()
+    has14bit = hasTable[0xE0] and true or false
+    hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
+    if fresh then newHasTable = true end
+  end
+  return has14bit, hasOther
+end
+
+local function overrideEditorType(row, target, condOp, paramTypes, idx)
+  local has14bit, hasOther = check14Bit(paramTypes[idx])
+  if not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR) or condOp.norange then
+    tx.setEditorTypeForRow(row, idx, nil)
+  elseif target.notation == '$velocity' or  target.notation == '$relvel' then
+      if target.notation == '$velocity' and not condOp.fullrange then
+        tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
+      else
+        tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+      end
+  elseif has14bit then
+    -- paramTypes[idx] = hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND
+    tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
+  elseif target.notation ~= '$position' and target.notation ~= '$length' then
+    tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+  else
+    tx.setEditorTypeForRow(row, idx, nil)
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -599,6 +637,73 @@ local function windowFn()
     return sorted
   end
 
+  local mainValueLabel
+  local subtypeValueLabel
+
+  local function decorateTargetLabel(label)
+    if label == 'Value 1' then
+      label = label .. ((subtypeValueLabel and subtypeValueLabel ~= '') and ' (' .. subtypeValueLabel .. ')' or '')
+    elseif label == 'Value 2' then
+      label = label .. ((mainValueLabel and mainValueLabel ~= '') and ' (' .. mainValueLabel .. ')' or '')
+    end
+    return label
+  end
+
+  local function createPopup(name, source, selEntry, fun, special)
+    if r.ImGui_BeginPopup(ctx, name) then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        if r.ImGui_IsPopupOpen(ctx, name, r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+          r.ImGui_CloseCurrentPopup(ctx)
+          handledEscape = true
+        end
+      end
+
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+      local mousePos = {}
+      mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
+      local windowRect = {}
+      windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
+      windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+      windowRect.right = windowRect.right + windowRect.left
+      windowRect.bottom = windowRect.bottom + windowRect.top
+
+      for i = 1, #source do
+        local selectText = source[i].label
+        if source.targetTable then
+          selectText = decorateTargetLabel(selectText)
+        end
+        if not selEntry then selEntry = 1 end
+        local factoryFn = selEntry == -1 and r.ImGui_Selectable or r.ImGui_Checkbox
+        local oldX = r.ImGui_GetCursorPosX(ctx)
+        r.ImGui_BeginGroup(ctx)
+        local rv, selected = factoryFn(ctx, selectText, selEntry == i and true or false)
+        r.ImGui_SameLine(ctx)
+        r.ImGui_SetCursorPosX(ctx, oldX) -- ugly, but the selectable needs info from the checkbox
+        local rect = {}
+        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
+        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
+        local srv = r.ImGui_Selectable(ctx, '##popup' .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+        r.ImGui_EndGroup(ctx)
+
+        if rv or srv then
+          if selected or srv then fun(i) end
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+      end
+
+      r.ImGui_PopStyleColor(ctx, 5)
+
+      if special then special(fun) end
+      r.ImGui_EndPopup(ctx)
+    end
+  end
+
   ---------------------------------------------------------------------------
   ------------------------------- PRESET RECALL -----------------------------
 
@@ -612,9 +717,7 @@ local function windowFn()
   r.ImGui_Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     presetTable = enumerateTransformerPresets(presetPath)
-    if #presetTable ~= 0 then
-      r.ImGui_OpenPopup(ctx, 'openPresetMenu') -- defined far below
-    end
+    r.ImGui_OpenPopup(ctx, 'openPresetMenu') -- defined far below
   end
 
   r.ImGui_SameLine(ctx)
@@ -674,13 +777,14 @@ local function windowFn()
 
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, needsTerms, idx, procFn)
     local rv = 0
+    local editorType = row[paramName .. 'EditorType']
     if paramType == tx.PARAM_TYPE_METRICGRID and needsTerms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
-    local isFloat = paramType == tx.PARAM_TYPE_FLOATEDITOR and true or false
+    local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
     if condOp.terms >= needsTerms then
-        local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
-        local target = targetTab[row.targetEntry]
-        if paramType == tx.PARAM_TYPE_MENU then
+      local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
+      local target = targetTab[row.targetEntry]
+      if paramType == tx.PARAM_TYPE_MENU then
         r.ImGui_Button(ctx, #paramTab ~= 0 and paramTab[row[paramName .. 'Entry']].label or '---')
         if (#paramTab ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
           rv = idx
@@ -689,26 +793,47 @@ local function windowFn()
       elseif paramType == tx.PARAM_TYPE_INTEDITOR
         or isFloat
         or paramType == tx.PARAM_TYPE_METRICGRID
+        or editorType == tx.EDITOR_TYPE_PITCHBEND
+        or editorType == tx.EDITOR_TYPE_PERCENT
       then
-        local hasPB = false
-        local hasNonPB = false
-        if paramType == tx.PARAM_TYPE_INTEDITOR then
-          local hasTable = tx.getHasTable()
-          hasPB = hasTable[0xE0] and true or false
-          hasNonPB = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
-          if hasPB or hasNonPB then
-            -- mu.post(hasPB, hasNonPB)
-          end
-        end
+        local range = tx.getRowParamRange(row, target, condOp, paramType, editorType)
         r.ImGui_BeginGroup(ctx)
+        if newHasTable then
+          local strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range)
+          if range and row[paramName .. 'PercentVal'] then
+            local scaledVal = ((row[paramName .. 'PercentVal'] / 100) * (range[2] - range[1])) + range[1]
+            if paramType == tx.PARAM_TYPE_INTEDITOR then
+              scaledVal = math.floor(scaledVal + 0.5)
+            end
+            strVal = tostring(scaledVal)
+          end
+          row[paramName .. 'TextEditorStr'] = strVal
+        end
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
-          row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, condOp.range and condOp.range or target.range)
+          tx.setRowParam(row, paramName, paramType, editorType, buf, range)
+          -- row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, range)
           procFn()
         end
+        if range then
+          r.ImGui_SameLine(ctx)
+          r.ImGui_AlignTextToFramePadding(ctx)
+          r.ImGui_PushFont(ctx, fontInfo.small)
+          if editorType == tx.EDITOR_TYPE_PERCENT then
+            r.ImGui_TextColored(ctx, 0xFFFFFF7F, '%')
+          elseif range and range[1] and range[2] then
+            r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. range[1] .. ' - ' .. range[2] .. ')')
+          end
+          r.ImGui_PopFont(ctx)
+        end
         r.ImGui_EndGroup(ctx)
-        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-          rv = idx
+        if r.ImGui_IsItemHovered(ctx) then
+          if r.ImGui_IsMouseClicked(ctx, 0) then
+            rv = idx
+          -- elseif r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() and r.ImGui_IsMouseClicked(ctx, 1) then
+          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. needsTerms .. 'Type')
+          --   rv = idx
+          end
         end
       elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
         r.ImGui_BeginGroup(ctx)
@@ -718,10 +843,39 @@ local function windowFn()
           procFn()
         end
         r.ImGui_EndGroup(ctx)
-        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-          rv = idx
+        if r.ImGui_IsItemHovered(ctx) then
+          if r.ImGui_IsMouseClicked(ctx, 0) then
+            rv = idx
+          -- elseif r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() and r.ImGui_IsMouseClicked(ctx, 1) then
+          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. needsTerms .. 'Type')
+          --   rv = idx
+          end
         end
       end
+
+      -- not working yet
+      -- local paramTypeMenu = {
+      --   { label = 'Default', value = nil },
+      --   { label = 'Integer', value = tx.PARAM_TYPE_INTEDITOR },
+      --   { label = 'Float', value = tx.PARAM_TYPE_FLOATEDITOR },
+      --   { label = 'Time',  value = tx.PARAM_TYPE_TIME },
+      --   { label = 'Duration',  value = tx.PARAM_TYPE_TIMEDUR },
+      --   { label = 'Percent',  value = tx.PARAM_TYPE_PERCENT },
+      --   { label = 'Pitch Bend', value = tx.PARAM_TYPE_PITCHBEND }
+      --   -- { label = '14-bit', value = tx.PARAM_TYPE_14BIT },
+      -- }
+
+      -- local function paramTypeToMenuIdx(paramType)
+      --   for k, v in ipairs(paramTypeMenu) do
+      --     if v.value == paramType then return k end
+      --   end
+      --   return 1
+      -- end
+
+      -- createPopup('forceParam' .. needsTerms .. 'Type', paramTypeMenu, paramTypeToMenuIdx(row['forceParam' .. needsTerms .. 'Type']), function(i)
+      --   row['forceParam' .. needsTerms .. 'Type'] = paramTypeMenu[i].value
+      -- end)
+
     end
     return rv
   end
@@ -744,70 +898,28 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE GEN ------------------------------
 
-  local mainValueLabel
-  local subtypeValueLabel
-
-  local function decorateTargetLabel(label)
-    if label == 'Value 1' then
-      label = label .. ((subtypeValueLabel and subtypeValueLabel ~= '') and ' (' .. subtypeValueLabel .. ')' or '')
-    elseif label == 'Value 2' then
-      label = label .. ((mainValueLabel and mainValueLabel ~= '') and ' (' .. mainValueLabel .. ')' or '')
-    end
-    return label
-  end
-
-  local function createPopup(name, source, selEntry, fun, special)
-    if r.ImGui_BeginPopup(ctx, name) then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        if r.ImGui_IsPopupOpen(ctx, name, r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-          r.ImGui_CloseCurrentPopup(ctx)
-          handledEscape = true
-        end
+  local function handleValueLabels()
+    local hasTable, fresh = tx.getHasTable()
+    local numTypes = 0
+    local foundType
+    for k, v in pairs(hasTable) do
+      if v == true then
+        numTypes = numTypes + 1
+        foundType = numTypes > 1 and nil or tonumber(k)
       end
-
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
-
-      local mousePos = {}
-      mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
-      local windowRect = {}
-      windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
-      windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
-      windowRect.right = windowRect.right + windowRect.left
-      windowRect.bottom = windowRect.bottom + windowRect.top
-
-      for i = 1, #source do
-        local selectText = source[i].label
-        if source.targetTable then
-          selectText = decorateTargetLabel(selectText)
-        end
-        local factoryFn = selEntry == -1 and r.ImGui_Selectable or r.ImGui_Checkbox
-        local oldX = r.ImGui_GetCursorPosX(ctx)
-        r.ImGui_BeginGroup(ctx)
-        local rv, selected = factoryFn(ctx, selectText, selEntry == i and true or false)
-        r.ImGui_SameLine(ctx)
-        r.ImGui_SetCursorPosX(ctx, oldX) -- ugly, but the selectable needs info from the checkbox
-        local rect = {}
-        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
-        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
-        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-        local srv = r.ImGui_Selectable(ctx, '##popup' .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
-        r.ImGui_EndGroup(ctx)
-
-        if rv or srv then
-          if selected or srv then fun(i) end
-          r.ImGui_CloseCurrentPopup(ctx)
-        end
-      end
-
-      r.ImGui_PopStyleColor(ctx, 5)
-
-      if special then special(fun) end
-      r.ImGui_EndPopup(ctx)
     end
+
+    if numTypes == 0 then
+      subtypeValueLabel = 'Databyte 1'
+      mainValueLabel = 'Databyte 2'
+    elseif numTypes == 1 then
+      subtypeValueLabel = tx.GetSubtypeValueLabel((foundType >> 4) - 8)
+      mainValueLabel = tx.GetMainValueLabel((foundType >> 4) - 8)
+    else
+      subtypeValueLabel = 'Multiple (Databyte 1)'
+      mainValueLabel = 'Multiple (Databyte 2)'
+    end
+    if fresh then newHasTable = true end
   end
 
   ----------------------------------------------
@@ -846,21 +958,7 @@ local function windowFn()
   r.ImGui_PopStyleColor(ctx)
   r.ImGui_PopStyleColor(ctx)
 
-  for k, v in ipairs(tx.findRowTable()) do
-    if tx.findTargetEntries[v.targetEntry].notation == '$type' then
-      local label = tx.GetSubtypeValueLabel(v.param1Entry)
-      if not subtypeValueLabel or subtypeValueLabel == label then subtypeValueLabel = label
-      else subtypeValueLabel = 'Multiple'
-      end
-      label = tx.GetMainValueLabel(v.param1Entry)
-      if not mainValueLabel or mainValueLabel == label then mainValueLabel = label
-      else mainValueLabel = 'Multiple'
-      end
-    end
-  end
-
-  if not subtypeValueLabel then subtypeValueLabel = tx.GetSubtypeValueLabel(1) end
-  if not mainValueLabel then mainValueLabel = tx.GetMainValueLabel(1) end
+  handleValueLabels()
 
   for k, v in ipairs(tx.findRowTable()) do
     r.ImGui_PushID(ctx, tostring(k))
@@ -888,6 +986,7 @@ local function windowFn()
     if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       r.ImGui_OpenPopup(ctx, 'startParenMenu')
       selectedFindRow = k
+      lastSelectedRowType = 0 -- Find
     end
 
     r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Target'
@@ -895,6 +994,7 @@ local function windowFn()
     r.ImGui_Button(ctx, decorateTargetLabel(targetText))
     if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       selectedFindRow = k
+      lastSelectedRowType = 0 -- Find
       r.ImGui_OpenPopup(ctx, 'targetMenu')
     end
 
@@ -902,26 +1002,31 @@ local function windowFn()
     r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
     if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       selectedFindRow = k
+      lastSelectedRowType = 0 -- Find
       r.ImGui_OpenPopup(ctx, 'conditionMenu')
     end
 
-    local paramType, split = tx.getEditorTypeForRow(currentFindTarget, currentFindCondition)
+    local paramTypes = tx.getEditorTypesForRow(currentRow, currentFindTarget, currentFindCondition)
     local selected
 
     r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 1'
-    selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, split and split[1] or paramType, 1, k, tx.processFind)
-    if selected and selected > 0 then selectedFindRow = selected end
+    overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
+    selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, paramTypes[1], 1, k, tx.processFind)
+    if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
 
     r.ImGui_TableSetColumnIndex(ctx, 4) -- 'Parameter 2'
-    selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, split and split[2] or paramType, 2, k, tx.processFind)
-    if selected and selected > 0 then selectedFindRow = selected end
+    overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
+    selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramTypes[2], 2, k, tx.processFind)
+    if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
 
+    -- unused currently
     if showTimeFormatColumn then
       r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
-      if (paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
+      if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
         r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
         if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
           selectedFindRow = k
+          lastSelectedRowType = 0
           r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
         end
       end
@@ -936,6 +1041,7 @@ local function windowFn()
     if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       r.ImGui_OpenPopup(ctx, 'endParenMenu')
       selectedFindRow = k
+      lastSelectedRowType = 0
     end
 
     r.ImGui_TableSetColumnIndex(ctx, 7 - (showTimeFormatColumn == false and 1 or 0)) -- Boolean
@@ -944,6 +1050,7 @@ local function windowFn()
       if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
         currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
         selectedFindRow = k
+        lastSelectedRowType = 0
         tx.processFind()
       end
     end
@@ -954,12 +1061,14 @@ local function windowFn()
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
     if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
       selectedFindRow = k
+      lastSelectedRowType = 0
     end
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
       selectedFindRow = k
+      lastSelectedRowType = 0
       r.ImGui_OpenPopup(ctx, 'defaultFindRow')
     end
 
@@ -998,8 +1107,13 @@ local function windowFn()
       end)
 
     createPopup('targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
+      local oldNotation = currentFindCondition.notation
         currentRow:init()
         currentRow.targetEntry = i
+        conditionEntries = tx.prepFindEntries(currentRow)
+        for kk, vv in ipairs(conditionEntries) do
+          if vv.notation == oldNotation then currentRow.conditionEntry = kk break end
+        end
         setupRowFormat(currentRow, conditionEntries)
         tx.processFind()
       end)
@@ -1069,7 +1183,7 @@ local function windowFn()
         end
         tx.processFind()
       end,
-      paramType == tx.PARAM_TYPE_METRICGRID and metricParam1Special or nil)
+      paramTypes[1] == tx.PARAM_TYPE_METRICGRID and metricParam1Special or nil)
 
     createPopup('param2Menu', param2Entries, currentRow.param2Entry, function(i)
         currentRow.param2Entry = i
@@ -1239,6 +1353,7 @@ local function windowFn()
     r.ImGui_Button(ctx, decorateTargetLabel(targetText))
     if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       selectedActionRow = k
+      lastSelectedRowType = 1
       r.ImGui_OpenPopup(ctx, 'targetMenu')
     end
 
@@ -1246,20 +1361,22 @@ local function windowFn()
     r.ImGui_Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---')
     if (#operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       selectedActionRow = k
+      lastSelectedRowType = 1
       r.ImGui_OpenPopup(ctx, 'operationMenu')
     end
 
-    -- this split thing is a hack, but it's only used for 1 operation in 2 targets for the time being...
-    local paramType, split = tx.getEditorTypeForRow(currentActionTarget, currentActionOperation)
+    local paramTypes = tx.getEditorTypesForRow(currentRow, currentActionTarget, currentActionOperation)
     local selected
 
     r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
-    selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, split and split[1] or paramType, 1, k, tx.processAction)
-    if selected and selected > 0 then selectedActionRow = selected end
+    overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
+    selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, paramTypes[1], 1, k, tx.processAction)
+    if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
 
     r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
-    selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, split and split[2] or paramType, 2, k, tx.processAction)
-    if selected and selected > 0 then selectedActionRow = selected end
+    overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
+    selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, paramTypes[2], 2, k, tx.processAction)
+    if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
 
     r.ImGui_SameLine(ctx)
 
@@ -1267,12 +1384,14 @@ local function windowFn()
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
     if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
       selectedActionRow = k
+      lastSelectedRowType = 1
     end
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
       selectedActionRow = k
+      lastSelectedRowType = 1
       r.ImGui_OpenPopup(ctx, 'defaultActionRow')
     end
 
@@ -1300,8 +1419,13 @@ local function windowFn()
     end
 
     createPopup('targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
+        local oldNotation = currentActionOperation.notation
         currentRow:init()
         currentRow.targetEntry = i
+        operationEntries = tx.prepActionEntries(currentRow)
+        for kk, vv in ipairs(operationEntries) do
+          if vv.notation == oldNotation then currentRow.operationEntry = kk break end
+        end
         setupRowFormat(currentRow, operationEntries)
         tx.processAction()
       end)
@@ -1478,12 +1602,12 @@ local function windowFn()
       if saved and presetInputDoesScript then
         local scriptPath = path:gsub('%' .. presetExt .. '$', '.lua')
         if scriptWritesMainContext then
-          r.AddRemoveReaScript(true, 32060, scriptPath, false)
+          r.AddRemoveReaScript(true, 0, scriptPath, true)
         end
         if scriptWritesMIDIContexts then
+          r.AddRemoveReaScript(true, 32060, scriptPath, false)
           r.AddRemoveReaScript(true, 32061, scriptPath, false)
           r.AddRemoveReaScript(true, 32062, scriptPath, false)
-          r.AddRemoveReaScript(true, 0, scriptPath, true)
         end
       end
     else
@@ -1731,9 +1855,6 @@ local function windowFn()
   -- local optdown = mods & 16 ~= 0
   -- local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
 
-  ---------------------------------------------------------------------------
-  ------------------------------- ARROW KEYS ------------------------------
-
   -- escape key kills our arrow key focus
   if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
     if focusKeyboardHere then focusKeyboardHere = nil
@@ -1743,86 +1864,14 @@ local function windowFn()
     end
   end
 
-  -- local arrowAdjust = r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) and 1
-  --                  or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) and -1
-  --                  or 0
-  -- if arrowAdjust ~= 0 and (activeFieldName or focusKeyboardHere) then
-  --   for _, hitTest in ipairs(itemBounds) do
-  --     if (hitTest.name == focusKeyboardHere
-  --         or hitTest.name == activeFieldName)
-  --       and hitTest.name ~= 'textmsg'
-  --     then
-  --       if hitTest.recalcSelection and optdown then
-  --         arrowAdjust = arrowAdjust * PPQ -- beats instead of ticks
-  --       elseif needsBBUConversion(hitTest.name) then
-  --         arrowAdjust = arrowAdjust * PPQCent
-  --       end
-
-  --       userValues[hitTest.name].operation = OP_ADD
-  --       userValues[hitTest.name].opval = arrowAdjust
-  --       changedParameter = hitTest.name
-  --       if hitTest.recalcEvent then recalcEventTimes = true
-  --       elseif hitTest.recalcSelection then recalcSelectionTimes = true
-  --       else canProcess = true end
-  --       if hitTest.name == activeFieldName then
-  --         rewriteIDForAFrame = hitTest.name
-  --         focusKeyboardHere = hitTest.name
-  --       end
-  --       break
-  --     end
-  --   end
-  -- end
-
-  ---------------------------------------------------------------------------
-  ------------------------------- MOUSE SCROLL ------------------------------
-
-  -- local vertMouseWheel = r.ImGui_GetMouseWheel(ctx)
-  -- local mScrollAdjust = vertMouseWheel > 0 and -1 or vertMouseWheel < 0 and 1 or 0
-  -- if reverseScroll then mScrollAdjust = mScrollAdjust * -1 end
-
-  -- local posx, posy = r.ImGui_GetMousePos(ctx)
-  -- posx = posx - vx
-  -- posy = posy - vy
-  -- if mScrollAdjust ~= 0 then
-  --   if shiftdown then
-  --     mScrollAdjust = mScrollAdjust * 3
-  --   end
-
-  --   for _, hitTest in ipairs(itemBounds) do
-  --     if userValues[hitTest.name].operation == OP_ABS -- and userValues[hitTest.name].opval ~= INVALID
-  --       and posy > hitTest.hity[1] and posy < hitTest.hity[2]
-  --       and posx > hitTest.hitx[1] and posx < hitTest.hitx[2]
-  --       and hitTest.name ~= 'textmsg'
-  --     then
-  --       if hitTest.name == activeFieldName then
-  --         rewriteIDForAFrame = activeFieldName
-  --       end
-
-  --       if hitTest.name == 'ticks' and shiftdown then
-  --         mScrollAdjust = mScrollAdjust > 1 and 5 or -5
-  --       elseif hitTest.name == 'notedur' and shiftdown then
-  --         mScrollAdjust = mScrollAdjust > 1 and 10 or -10
-  --       end
-
-  --       if hitTest.recalcSelection and optdown then
-  --         mScrollAdjust = mScrollAdjust * PPQ -- beats instead of ticks
-  --       elseif needsBBUConversion(hitTest.name) then
-  --         mScrollAdjust = mScrollAdjust * PPQCent
-  --       end
-
-  --       userValues[hitTest.name].operation = OP_ADD
-  --       userValues[hitTest.name].opval = mScrollAdjust
-  --       changedParameter = hitTest.name
-  --       if hitTest.recalcEvent then recalcEventTimes = true
-  --       elseif hitTest.recalcSelection then recalcSelectionTimes = true
-  --       else canProcess = true end
-  --       break
-  --     end
-  --   end
-  -- end
+  if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace()) then
+    if lastSelectedRowType == 0 then removeFindRow()
+    elseif lastSelectedRowType == 1 then removeActionRow()
+    end
+  end
 
   -- if recalcEventTimes or recalcSelectionTimes then canProcess = true end
-
+  if newHasTable then newHasTable = false end
 end
 
 -----------------------------------------------------------------------------
@@ -2049,7 +2098,13 @@ local function loop()
       if r.ImGui_AcceptDragDropPayloadFiles(ctx) then
         local retdrag, filedrag = r.ImGui_GetDragDropPayloadFile(ctx, 0)
         if retdrag and string.match(filedrag, presetExt .. '$') then
-          tx.loadPreset(filedrag)
+          local success, notes = tx.loadPreset(filedrag)
+          if success then
+            presetLabel = string.match(filedrag, '.*[/\\](.*)' .. presetExt)
+            lastInputTextBuffer = presetLabel
+            presetNotesBuffer = notes and notes or ''
+            tx.processAction()
+          end
         end
       end
       r.ImGui_EndDragDropTarget(ctx)

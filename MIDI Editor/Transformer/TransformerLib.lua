@@ -8,8 +8,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
--- TODO: if condition begins with '=', don't require 'sub'
--- TODO: split integer/float entry
+-- function in this file mostly global due to Lua's 200 global variable limitation... not ideal.
 
 local r = reaper
 local mu
@@ -148,7 +147,7 @@ local findScopeTable = {
   { notation = '$midieditor', label = 'Active MIDI Editor' }
 }
 
-local function findScopeFromNotation(notation)
+function FindScopeFromNotation(notation)
   if notation then
     for k, v in ipairs(findScopeTable) do
       if v.notation == notation then
@@ -156,10 +155,10 @@ local function findScopeFromNotation(notation)
       end
     end
   end
-  return findScopeFromNotation('$midieditor') -- default
+  return FindScopeFromNotation('$midieditor') -- default
 end
 
-local currentFindScope = findScopeFromNotation()
+local currentFindScope = FindScopeFromNotation()
 
 local actionScopeTable = {
   { notation = '$select', label = 'Select' },
@@ -176,7 +175,7 @@ local actionScopeTable = {
   { notation = '$delete', label = 'Delete' },
 }
 
-local function actionScopeFromNotation(notation)
+function ActionScopeFromNotation(notation)
   if notation then
     for k, v in ipairs(actionScopeTable) do
       if v.notation == notation then
@@ -184,10 +183,10 @@ local function actionScopeFromNotation(notation)
       end
     end
   end
-  return actionScopeFromNotation('$select') -- default
+  return ActionScopeFromNotation('$select') -- default
 end
 
-local currentActionScope = actionScopeFromNotation()
+local currentActionScope = ActionScopeFromNotation()
 
 local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
 local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
@@ -212,11 +211,17 @@ function FindRow:init()
   self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
   self.startParenEntry = 1
   self.endParenEntry = 1
+  self.param1EditorType = nil
+  self.param2EditorType = nil
+  self.param1PercentVal = nil
+  self.param2PercentVal = nil
+  -- self.forceParam1Type = nil
+  -- self.forceParam2Type = nil
 end
 
 local findRowTable = {}
 
-local function addFindRow(row)
+function AddFindRow(row)
   table.insert(findRowTable, #findRowTable+1, row and row or FindRow())
 end
 
@@ -242,8 +247,8 @@ local findTargetEntries = {
   { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
   { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(event)', inteditor = true, range = {0, 127} }, -- different for AT and PB
   { notation = '$value2', label = 'Value 2', text = 'GetMainValue(event)', inteditor = true, range = {0, 127} }, -- CC# or Note# or ...
-  { notation = '$velocity', label = 'Velocity', text = 'event.chanmsg == 0x90 and event.msg3', inteditor = true, range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', inteditor = true, range = {0, 127} }
+  { notation = '$velocity', label = 'Velocity (Notes)', text = 'event.chanmsg == 0x90 and event.msg3', inteditor = true, range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity (Notes)', text = 'event.relvel', inteditor = true, range = {0, 127} }
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
@@ -449,45 +454,59 @@ function ActionRow:init()
   self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
   self.param2TextEditorStr = '0'
   self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  self.param1EditorType = nil
+  self.param2EditorType = nil
+  self.param1PercentVal = nil
+  self.param2PercentVal = nil
+  -- self.forceParam1Type = nil
+  -- self.forceParam2Type = nil
 end
 
 local actionRowTable = {}
 
-local function addActionRow(row)
+function AddActionRow(row)
   table.insert(actionRowTable, #actionRowTable+1, row and row or ActionRow())
 end
 
 local actionTargetEntries = {
-  { notation = '$position', label = 'Position', text = 'event.projtime', time = true },
-  { notation = '$length', label = 'Length', text = 'event.projlen', timedur = true, cond = 'event.chanmsg == 0x90' },
-  { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
-  { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
-  { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
-  { notation = '$value1', label = 'Value 1', text = 'event[_value1]', inteditor = true, range = {0, 127} },
-  { notation = '$value2', label = 'Value 2', text = 'event[_value2]', inteditor = true, range = {0, 127} },
-  { notation = '$velocity', label = 'Velocity', text = 'event.msg3', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity', text = 'event.relvel', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
+  { notation = '$position', label = 'Position', text = '\'projtime\'', time = true },
+  { notation = '$length', label = 'Length', text = '\'projlen\'', timedur = true, cond = 'event.chanmsg == 0x90' },
+  { notation = '$channel', label = 'Channel', text = '\'chan\'', menu = true },
+  { notation = '$type', label = 'Type', text = '\'chanmsg\'', menu = true },
+  { notation = '$property', label = 'Property', text = '\'flags\'', menu = true },
+  { notation = '$value1', label = 'Value 1', text = '_value1', inteditor = true, range = {0, 127} },
+  { notation = '$value2', label = 'Value 2', text = '_value2', inteditor = true, range = {0, 127} },
+  { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
 actionTargetEntries.targetTable = true
 
-local actionOperationPlus = { notation = '+', label = 'Add', text = '+', terms = 1, inteditor = true }
-local actionOperationMinus = { notation = '-', label = 'Subtract', text = '-', terms = 1, inteditor = true }
+local OP_ADD = 1
+local OP_SUB = 2
+local OP_MULT = 3
+local OP_DIV = 4
+local OP_FIXED = 5
+local OP_SCALEOFF = 6
 
-local actionOperationMult = { notation = '*', label = 'Multiply', text = '*', terms = 1, floateditor = true }
-local actionOperationDivide = { notation = '/', label = 'Divide By', text = '/', terms = 1, floateditor = true }
-local actionOperationRound = { notation = ':round', label = 'Round By', text = '= QuantizeTo({tgt}, {param1})', terms = 1, sub = true, inteditor = true }
-local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = '= ClampValue({tgt}, {param1}, {param2})', terms = 2, sub = true, inteditor = true }
-local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = '= RandomValue({param1}, {param2})', terms = 2, sub = true, floateditor = true }
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = '= {tgt} + RandomValue({param1}, {param2})', terms = 2, sub = true, floateditor = true, range = { -127, 127 } }
-local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = '= {param1}', terms = 1, sub = true }
-local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = '= LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, inteditor = true, freeterm = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = '= {tgt} + LinearChangeOverSelection(event.projtime, {param1}, {param2}, _context.firstSel, _context.lastSel)', terms = 2, sub = true, inteditor = true, range = {-127, 127 }, freeterm = true }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + {param2}', terms = 2, sub = true, floateditor = true, range = {}, freeterm = true }
-local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = '= Mirror({tgt}, {param1})', terms = 1, sub = true }
+-- TODO rebuild action construction
 
-local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = '= ({tgt} * {param1}) + TimeFormatToSeconds(\'{param2}\', event.projtime, true)', terms = 2, sub = true, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
+local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1}, _context)', terms = 1, inteditor = true, fullrange = true }
+local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1}, _context)', terms = 1, inteditor = true, fullrange = true }
+local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1}, _context)', terms = 1, floateditor = true, norange = true }
+local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1}, _context)', terms = 1, floateditor = true, norange = true }
+local actionOperationRound = { notation = ':round', label = 'Round By', text = 'QuantizeTo(event, {tgt}, {param1})', terms = 1, inteditor = true }
+local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = 'ClampValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
+local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, floateditor = true }
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}), _context)', terms = 2, floateditor = true, range = { -127, 127 }, fullrange = true }
+local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1}, _context)', terms = 1 }
+local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, _context)', terms = 2, inteditor = true, freeterm = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context), _context)', terms = 2, inteditor = true, range = {-127, 127 }, freeterm = true, fullrange = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2}, _context)', terms = 2, floateditor = true, range = {}, freeterm = true, fullrange = true }
+local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
+
+local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, true), _context)', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
 
 local function positionMod(op)
   local newop = tableCopy(op)
@@ -496,6 +515,7 @@ local function positionMod(op)
   newop.floateditor = false
   newop.timedur = false
   newop.time = true
+  newop.range = nil
   return newop
 end
 
@@ -506,28 +526,29 @@ local function lengthMod(op)
   newop.floateditor = false
   newop.time = false
   newop.timedur = true
+  newop.range = nil
   return newop
 end
 
 local actionPositionOperationEntries = {
-  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projtime)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
-  positionMod(actionOperationRandom), positionMod(actionOperationRelRandom),
-  { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveToCursor(event, {param1})', terms = 1, menu = true, sub = true },
-  -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true, sub = true },
-  { notation = ':addlength', label = 'Add Length', text = '= AddLength(event, {param1})', terms = 1, menu = true, sub = true },
+  positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
+  { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
+  -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
+  { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1})', terms = 1, menu = true },
   actionOperationTimeScaleOff
 }
 
 local actionLengthOperationEntries = {
-  { notation = '+', label = 'Add', text = '= AddDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = '= SubtractDuration(\'{param1}\', event.projlen)', terms = 1, timedur = true, sub = true, timearg = true },
+  { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projlen)', terms = 1, timedur = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projlen)', terms = 1, timedur = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
-  { notation = ':tocursor', label = 'Move to Cursor', text = '= MoveLengthToCursor(event)', terms = 0, sub = true },
+  { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
   actionOperationTimeScaleOff
 }
 
@@ -565,14 +586,14 @@ local actionAddLengthParam1Entries = {
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue2', label = 'Use Value 2', text = '= GetMainValue(event)', terms = 0, sub = true }, -- note that this is different for AT and PB
+  { notation = ':getvalue2', label = 'Use Value 2', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetMainValue(event))', terms = 0 }, -- note that this is different for AT and PB
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
-  { notation = ':getvalue1', label = 'Use Value 1', text = '= GetSubtypeValue(event)', terms = 0, sub = true }, -- ?? note that this is different for AT and PB
+  { notation = ':getvalue1', label = 'Use Value 1', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetSubtypeValue(event))', terms = 0 }, -- ?? note that this is different for AT and PB
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
@@ -585,95 +606,81 @@ local actionGenericOperationEntries = {
 local PARAM_TYPE_UNKNOWN = 0
 local PARAM_TYPE_MENU = 1
 local PARAM_TYPE_INTEDITOR = 2
-local PARAM_TYPE_FLOATEDITOR = 2
-local PARAM_TYPE_TIME = 3
-local PARAM_TYPE_TIMEDUR = 4
-local PARAM_TYPE_METRICGRID = 5
+local PARAM_TYPE_FLOATEDITOR = 3
+local PARAM_TYPE_TIME = 4
+local PARAM_TYPE_TIMEDUR = 5
+local PARAM_TYPE_METRICGRID = 6
+
+local EDITOR_TYPE_PITCHBEND = 100
+local EDITOR_TYPE_PERCENT = 101
+local EDITOR_TYPE_7BIT = 102
+local EDITOR_TYPE_7BIT_NOZERO = 103
+local EDITOR_TYPE_7BIT_PLUS_MINUS = 104
+local EDITOR_TYPE_14BIT = 105
+local EDITOR_TYPE_14BIT_PLUS_MINUS = 106
 
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
-local function RandomValue(min, max)
-  if math.type(min) == 'integer' and math.type(max) == 'integer' then
-    return math.random(min, max)
-  end
-  local rnd = math.random()
-  return (rnd * (max - min)) + min
-end
-
-local function GetTimeSelectionStart()
+function GetTimeSelectionStart()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return ts_start
+  return ts_start + r.GetProjectTimeOffset(0, false)
 end
 
-local function GetTimeSelectionEnd()
+function GetTimeSelectionEnd()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return ts_end
+  return ts_end + r.GetProjectTimeOffset(0, false)
 end
 
-local function GetSubtypeValue(event)
+function GetSubtypeValue(event)
   if event.type == SYXTEXT_TYPE then return 0
   else return event.msg2
   end
 end
 
-local function GetSubtypeValueName(event)
+function GetSubtypeValueName(event)
   if event.type == SYXTEXT_TYPE then return 'devnull'
   else return 'msg2'
   end
 end
 
-local function GetSubtypeValueLabel(typeIndex)
+function GetSubtypeValueLabel(typeIndex)
   if typeIndex == 1 then return 'Note #'
   elseif typeIndex == 2 then return 'Note #'
   elseif typeIndex == 3 then return 'CC #'
   elseif typeIndex == 4 then return 'Pgm #'
   elseif typeIndex == 5 then return 'Pressure Amount'
-  elseif typeIndex == 6 then return 'PBnd LSB'
+  elseif typeIndex == 6 then return 'PBnd'
   else return ''
   end
 end
 
-local function GetMainValue(event)
-  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 then return event.msg2
+function GetMainValue(event)
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 0
   elseif event.type == SYXTEXT_TYPE then return 0
   else return event.msg3
   end
 end
 
-local function GetMainValueName(event)
-  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 then return 'msg2'
+function GetMainValueName(event)
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'devnull'
   elseif event.type == SYXTEXT_TYPE then return 'devnull'
   else return 'msg3'
   end
 end
 
-local function GetMainValueLabel(typeIndex)
+function GetMainValueLabel(typeIndex)
   if typeIndex == 1 then return 'Velocity'
   elseif typeIndex == 2 then return 'Pressure Amount'
   elseif typeIndex == 3 then return 'CC Value'
   elseif typeIndex == 4 then return 'unused'
   elseif typeIndex == 5 then return 'unused'
-  elseif typeIndex == 6 then return 'PBnd MSB'
+  elseif typeIndex == 6 then return 'unused'
   else return ''
   end
 end
 
-local function ClampValue(val, low, high)
-  return val < low and low or val > high and high or val
-end
-
-local function QuantizeTo(val, quant)
-  if quant == 0 then return val end
-  local newval = quant * math.floor((val / quant) + 0.5)
-  return newval
-end
-
-local function Mirror(val, mirrorVal)
-  return mirrorVal - (val - mirrorVal)
-end
-
-local function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
+function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
   if not take then return false end
 
   local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
@@ -687,7 +694,7 @@ local function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
   return barpos >= (rangeStart / 100) and barpos <= (rangeEnd / 100)
 end
 
-local function OnMetricGrid(take, PPQ, ppqpos, mgParams)
+function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   if not take then return false end
 
   local subdiv = mgParams.param1
@@ -739,32 +746,7 @@ local function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   return false
 end
 
-local function LinearChangeOverSelection(projTime, p1, p2, firstTime, lastTime)
-  if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
-    local linearPos = (projTime - firstTime) / (lastTime - firstTime)
-    local val = ((p2 - p1) * linearPos) + p1
-    return val
-  end
-  return 0
-end
-
-local addLengthFirstEventOffset
-local addLengthFirstEventOffset_Take
-
-local function AddLength(event, mode)
-  if event.type ~= NOTE_TYPE then return event.projtime end
-
-  if mode == 2 then
-    return event.projtime + event.projlen
-  elseif mode == 1 then
-    if not addLengthFirstEventOffset_Take then addLengthFirstEventOffset_Take = event.projlen end
-    return event.projtime + addLengthFirstEventOffset_Take
-  end
-  if not addLengthFirstEventOffset then addLengthFirstEventOffset = event.projlen end
-  return event.projtime + addLengthFirstEventOffset
-end
-
-local function InScale(event, scale, root)
+function InScale(event, scale, root)
   if event.type ~= NOTE_TYPE then return false end
 
   local note = event.msg2 % 12
@@ -776,20 +758,136 @@ local function InScale(event, scale, root)
   return false
 end
 
+-----------------------------------------------------------------------------
+----------------------------- OPERATION FUNS --------------------------------
+
+function GetValue(event, property)
+  if not property then return 0 end
+  local is14bit = false
+  if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
+  local oldval = is14bit and ((event.msg3 << 7) + event.msg2) or event[property]
+  return oldval
+end
+
+function SetValue(event, property, newval)
+  if not property then return newval end
+  local is14bit = false
+  if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
+  if is14bit then
+    newval = newval < 0 and 0 or newval > ((1 << 14) - 1) and ((1 << 14) - 1) or newval
+    newval = math.floor(newval + 0.5)
+    event.msg2 = newval & 0x7F
+    event.msg3 = (newval >> 7) & 0x7F
+  else
+    event[property] = newval
+  end
+  return newval
+end
+
+function OperateEvent1(event, property, op, param1, context)
+  local oldval = GetValue(event, property)
+  local newval = oldval
+
+  if op == OP_ADD then
+    newval = oldval + param1
+  elseif op == OP_SUB then
+    newval = oldval - param1
+  elseif op == OP_MULT then
+    newval = oldval * param1
+  elseif op == OP_DIV then
+    newval = oldval / param1
+  elseif op == OP_FIXED then
+    newval = param1
+  end
+  return SetValue(event, property, newval)
+end
+
+function OperateEvent2(event, property, op, param1, param2, context)
+  local oldval = GetValue(event, property)
+  local newval = oldval
+  if op == OP_SCALEOFF then
+    newval = (oldval * param1) + param2
+  end
+  return SetValue(event, property, newval)
+end
+
+function RandomValue(event, property, min, max)
+  local oldval = GetValue(event, property)
+  local newval = oldval
+
+  if math.type(min) == 'integer' and math.type(max) == 'integer' then
+    newval = math.random(min, max)
+    return SetValue(event, property, newval)
+  end
+  local rnd = math.random()
+  newval = (rnd * (max - min)) + min
+
+  return SetValue(event, property, newval)
+end
+
+function ClampValue(event, property, low, high)
+  local oldval = GetValue(event, property)
+  local newval = oldval < low and low or oldval > high and high or oldval
+  return SetValue(event, property, newval)
+end
+
+function QuantizeTo(event, property, quant)
+  local oldval = GetValue(event, property)
+  if quant == 0 then return oldval end
+  local newval = quant * math.floor((oldval / quant) + 0.5)
+  return SetValue(event, property, newval)
+end
+
+function Mirror(event, property, mirrorVal)
+  local oldval = GetValue(event, property)
+  local newval = mirrorVal - (oldval - mirrorVal)
+  return SetValue(event, property, newval)
+end
+
+function LinearChangeOverSelection(event, property, projTime, p1, p2, context)
+  local firstTime = context.firstTime
+  local lastTime = context.lastTime
+  if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
+    local linearPos = (projTime - firstTime) / (lastTime - firstTime)
+    local newval = ((p2 - p1) * linearPos) + p1
+    return SetValue(event, property, newval)
+  end
+  return SetValue(event, property, 0)
+end
+
+local addLengthFirstEventOffset
+local addLengthFirstEventOffset_Take
+
+function AddLength(event, property, mode)
+  if event.type ~= NOTE_TYPE then return event.projtime end
+
+  if mode == 2 then
+    return event.projtime + event.projlen
+  elseif mode == 1 then
+    if not addLengthFirstEventOffset_Take then addLengthFirstEventOffset_Take = event.projlen end
+    return event.projtime + addLengthFirstEventOffset_Take
+  end
+  if not addLengthFirstEventOffset then addLengthFirstEventOffset = event.projlen end
+  event.projtime = event.projtime + addLengthFirstEventOffset
+  return event.projtime
+end
+
 local moveCursorFirstEventPosition
 local moveCursorFirstEventPosition_Take
 
-local function MoveToCursor(event, mode)
+function MoveToCursor(event, property, mode)
   if mode == 1 then -- independent
     if not moveCursorFirstEventPosition_Take then moveCursorFirstEventPosition_Take = event.projtime end
-    return (event.projtime - moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+    event.projtime = (event.projtime - moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+    return event.projtime
   end
   if not moveCursorFirstEventPosition then moveCursorFirstEventPosition = event.projtime end
-  return (event.projtime - moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+  event.projtime = (event.projtime - moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+  return event.projtime
 end
 
 -- need to think about this
--- local function MoveNoteOffToCursor(event, mode)
+-- function MoveNoteOffToCursor(event, mode)
 --   if event.type ~= NOTE_TYPE then return event.projlen end
 
 --   if mode == 1 then -- independent
@@ -801,26 +899,27 @@ end
 --   end
 -- end
 
-local function MoveLengthToCursor(event)
+function MoveLengthToCursor(event)
   if event.type ~= NOTE_TYPE then return event.projlen end
 
   local cursorPos = r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
 
   if event.projtime >= cursorPos then return event.projlen end
 
-  return cursorPos - event.projtime
+  event.projlen = cursorPos - event.projtime
+  return event.projlen
 end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
-local function gooseAutoOverlap()
+function GooseAutoOverlap()
   -- r.SetToggleCommandState(sectionID, 40681, 0) -- this doesn't work
   r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
   disabledAutoOverlap = not disabledAutoOverlap
 end
 
-local function sysexStringToBytes(input)
+function SysexStringToBytes(input)
   local result = {}
   local currentByte = 0
   local nibbleCount = 0
@@ -858,7 +957,7 @@ local function sysexStringToBytes(input)
   return table.concat(result)
 end
 
-local function sysexBytesToString(bytes)
+function SysexBytesToString(bytes)
   local str = ''
   for i = 1, string.len(bytes) do
     str = str .. string.format('%02X', tonumber(string.byte(bytes, i)))
@@ -867,13 +966,13 @@ local function sysexBytesToString(bytes)
   return str
 end
 
-local function notationStringToString(notStr)
+function NotationStringToString(notStr)
   local a, b = string.find(notStr, 'TRAC ')
   if a and b then return string.sub(notStr, b + 1) end
   return notStr
 end
 
-local function stringToNotationString(str)
+function StringToNotationString(str)
   local a, b = string.find(str, 'TRAC ')
   if a and b then return str end
   return 'TRAC ' .. str
@@ -890,17 +989,17 @@ local allEvents = {}
 ---------------------------------------------------------------------------
 --------------------------- BUNCH OF FUNCTIONS ----------------------------
 
--- local function getPPQ()
+-- function GetPPQ()
 --   local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
 --   local qn2 = qn1 + 1
 --   return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
 -- end
 
--- local function needsBBUConversion(name)
+-- function NeedsBBUConversion(name)
 --   return wantsBBU and (name == 'ticks' or name == 'notedur' or name == 'selposticks' or name == 'seldurticks')
 -- end
 
-local function BBTToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
+function BBTToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
   local nilmeas = measures == nil
   if not measures then measures = 0 end
   if not beats then beats = 0 end
@@ -934,7 +1033,7 @@ function PpqToTime(take, ppqpos, projtime)
   return measures, beats, beatsmax, ticks
 end
 
-  -- local function ppqToLength(ppqpos, ppqlen)
+  -- function PpqToLength(ppqpos, ppqlen)
   --   -- REAPER, why is this so difficult?
   --   -- get the PPQ position of the nearest measure start (to ensure that we're dealing with round values)
   --   local _, startMeasures, _, startBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
@@ -952,7 +1051,7 @@ end
   --   return measures, beats, ticks
   -- end
 
-local function calcMIDITime(take, e)
+function CalcMIDITime(take, e)
   local timeAdjust = r.GetProjectTimeOffset(0, false)
   e.projtime = r.MIDI_GetProjTimeFromPPQPos(take, e.ppqpos) + timeAdjust
   if e.endppqpos then
@@ -985,7 +1084,7 @@ local function dirExists(path)
   return filePathExists(path:match('/$') and path or path..'/')
 end
 
-local function ensureNumString(str, range)
+function EnsureNumString(str, range)
   local num = tonumber(str)
   if not num then num = 0 end
   if range then
@@ -995,7 +1094,7 @@ local function ensureNumString(str, range)
   return tostring(num)
 end
 
-local function timeFormatClampPad(str, min, max, fmt, startVal)
+function TimeFormatClampPad(str, min, max, fmt, startVal)
   local num = tonumber(str)
   if not num then num = 0 end
   num = num + (startVal and startVal or 0)
@@ -1008,7 +1107,7 @@ local TIME_FORMAT_MEASURES = 1
 local TIME_FORMAT_MINUTES = 2
 local TIME_FORMAT_HMSF = 3
 
-local function determineTimeFormatStringType(buf)
+function DetermineTimeFormatStringType(buf)
   if string.match(buf, '%d+') then
     local isMSF = false
     local isHMSF = false
@@ -1024,8 +1123,8 @@ local function determineTimeFormatStringType(buf)
   return TIME_FORMAT_UNKNOWN
 end
 
-local function lengthFormatRebuf(buf)
-  local format = determineTimeFormatStringType(buf)
+function LengthFormatRebuf(buf)
+  local format = DetermineTimeFormatStringType(buf)
   if format == TIME_FORMAT_UNKNOWN then return DEFAULT_LENGTHFORMAT_STRING end
 
   local isneg = string.match(buf, '^%s*%-')
@@ -1039,11 +1138,11 @@ local function lengthFormatRebuf(buf)
       end
     end
     if not bars or bars == '' then bars = 0 end
-    bars = timeFormatClampPad(bars, 0, nil, '%d')
+    bars = TimeFormatClampPad(bars, 0, nil, '%d')
     if not beats or beats == '' then beats = 0 end
-    beats = timeFormatClampPad(beats, 0, nil, '%d')
+    beats = TimeFormatClampPad(beats, 0, nil, '%d')
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
     return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction
   elseif format == TIME_FORMAT_MINUTES then
     local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
@@ -1056,14 +1155,14 @@ local function lengthFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
+    fraction = TimeFormatClampPad(fraction, 0, 999, '%03d')
+    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
+    minutes = TimeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
     return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
   elseif format == TIME_FORMAT_HMSF then
     local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
@@ -1071,32 +1170,32 @@ local function lengthFormatRebuf(buf)
     local frate = r.TimeMap_curFrameRate(0)
 
     if not frames or frames == '' then frames = 0 end
-    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
+    frames, framesVal = TimeFormatClampPad(frames, 0, nil, '%02d')
     if framesVal > frate then
       secondsVal = math.floor(framesVal / frate)
       frames = string.format('%03d', framesVal % frate)
     end
     if not seconds or seconds == '' then seconds = 0 end
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
+    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
+    minutes, minutesVal = TimeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
     if minutesVal > 59 then
       hoursVal = math.floor(minutesVal / 60)
       minutes = string.format('%02d', minutesVal % 60)
     end
     if not hours or hours == '' then hours = 0 end
-    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
+    hours = TimeFormatClampPad(hours, 0, nil, '%d', hoursVal)
     return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
   return DEFAULT_LENGTHFORMAT_STRING
 end
 
-local function timeFormatRebuf(buf)
-  local format = determineTimeFormatStringType(buf)
+function TimeFormatRebuf(buf)
+  local format = DetermineTimeFormatStringType(buf)
   if format == TIME_FORMAT_UNKNOWN then return DEFAULT_TIMEFORMAT_STRING end
 
   local isneg = string.match(buf, '^%s*%-')
@@ -1110,11 +1209,11 @@ local function timeFormatRebuf(buf)
       end
     end
     if not bars or bars == '' then bars = 0 end
-    bars = timeFormatClampPad(bars, nil, nil, '%d')
+    bars = TimeFormatClampPad(bars, nil, nil, '%d')
     if not beats or beats == '' then beats = 1 end
-    beats = timeFormatClampPad(beats, 1, nil, '%d')
+    beats = TimeFormatClampPad(beats, 1, nil, '%d')
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
+    fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
     return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction
   elseif format == TIME_FORMAT_MINUTES then
     local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
@@ -1127,14 +1226,14 @@ local function timeFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
+    fraction = TimeFormatClampPad(fraction, 0, 999, '%03d')
+    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
+    minutes = TimeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
     return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
   elseif format == TIME_FORMAT_HMSF then
     local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
@@ -1142,25 +1241,25 @@ local function timeFormatRebuf(buf)
     local frate = r.TimeMap_curFrameRate(0)
 
     if not frames or frames == '' then frames = 0 end
-    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
+    frames, framesVal = TimeFormatClampPad(frames, 0, nil, '%02d')
     if framesVal > frate then
       secondsVal = math.floor(framesVal / frate)
       frames = string.format('%02d', framesVal % frate)
     end
     if not seconds or seconds == '' then seconds = 0 end
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
+    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
+    minutes, minutesVal = TimeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
     if minutesVal > 59 then
       hoursVal = math.floor(minutesVal / 60)
       minutes = string.format('%02d', minutesVal % 60)
     end
     if not hours or hours == '' then hours = 0 end
-    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
+    hours = TimeFormatClampPad(hours, 0, nil, '%d', hoursVal)
     return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
   return DEFAULT_TIMEFORMAT_STRING
@@ -1190,7 +1289,7 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
   end
 end
 
-local function enumerateTransformerPresets()
+function EnumerateTransformerPresets()
   if not dirExists(presetPath) then return {} end
 
   local idx = 0
@@ -1219,7 +1318,7 @@ local function deserialize(str)
   return f ~= nil and f() or nil
 end
 
-local function OrderByKey(t, a, b)
+local function orderByKey(t, a, b)
   return a < b
 end
 
@@ -1238,7 +1337,7 @@ local function serialize(val, name, skipnewlines, depth)
   end
   if type(val) == 'table' then
     tmp = tmp .. '{' .. (not skipnewlines and '\n' or '')
-    for k, v in spairs(val, OrderByKey) do
+    for k, v in spairs(val, orderByKey) do
       tmp =  tmp .. serialize(v, k, skipnewlines, depth + 1) .. ',' .. (not skipnewlines and '\n' or '')
     end
     tmp = tmp .. string.rep(' ', depth) .. '}'
@@ -1254,7 +1353,7 @@ local function serialize(val, name, skipnewlines, depth)
   return tmp
 end
 
-local function findTargetToTabs(row, targetEntry)
+function FindTargetToTabs(row, targetEntry)
   local condTab = {}
   local param1Tab = {}
   local param2Tab = {}
@@ -1291,7 +1390,7 @@ local function findTargetToTabs(row, targetEntry)
   return condTab, param1Tab, param2Tab
 end
 
-local function generateMetricGridNotation(row)
+function GenerateMetricGridNotation(row)
   if not row.mg then return '' end
   local mgStr = '|'
   mgStr = mgStr .. (((row.mg.modifiers & 2) ~= 0) and 't' or ((row.mg.modifiers & 1) ~= 0) and 'd' or '-')
@@ -1300,7 +1399,7 @@ local function generateMetricGridNotation(row)
   return mgStr
 end
 
-local function parseMetricGridNotation(str)
+function ParseMetricGridNotation(str)
   local fs, fe, mod, rst, pre, post = string.find(str, '|([td%-])([b-])|(.-)|(.-)$')
   if fs and fe then
     local modval = mod == 't' and 2 or mod == 'd' and 1 or 0
@@ -1312,7 +1411,7 @@ local function parseMetricGridNotation(str)
   return 0, false, 0, 0
 end
 
-local function getParamType(src)
+function GetParamType(src)
   return src.menu and PARAM_TYPE_MENU
     or src.inteditor and PARAM_TYPE_INTEDITOR
     or src.floateditor and PARAM_TYPE_FLOATEDITOR
@@ -1322,26 +1421,50 @@ local function getParamType(src)
     or PARAM_TYPE_UNKNOWN
 end
 
-local function getEditorTypeForRow(target, condOp)
-  local paramType = getParamType(condOp)
+function GetEditorTypesForRow(row, target, condOp)
+  local paramType = GetParamType(condOp)
   if paramType == PARAM_TYPE_UNKNOWN then
-    paramType = getParamType(target)
+    paramType = GetParamType(target)
   end
   if paramType == PARAM_TYPE_UNKNOWN then
     paramType = PARAM_TYPE_INTEDITOR
   end
-  local split
+  local split = { paramType, paramType }
   if condOp.split then
     split = {}
-    split[1], split[2] = getParamType(condOp.split[1]), getParamType(condOp.split[2])
-    paramType = split[1]
+    split[1], split[2] = GetParamType(condOp.split[1]), GetParamType(condOp.split[2])
   end
-  return paramType, split
+  -- if row.forceParam1Type then split[1] = row.forceParam1Type end -- not working yet
+  -- if row.forceParam2Type then split[2] = row.forceParam2Type end
+  return split
 end
 
-local function handleParam(row, target, condOp, paramName, paramTab, paramStr, index)
-  local paramType, split = getEditorTypeForRow(target, condOp)
-  if split then paramType = split[index] end
+function Check14Bit(paramType)
+  local has14bit = false
+  local hasOther = false
+  if paramType == PARAM_TYPE_INTEDITOR then
+    local hasTable = TransformerLib.getHasTable()
+    has14bit = hasTable[0xE0] and true or false
+    hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
+  end
+  return has14bit, hasOther
+end
+
+function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
+  local paramType
+  local paramTypes = GetEditorTypesForRow(row, target, condOp)
+  paramType = paramTypes[index]
+
+  local percent = string.match(paramStr, 'percent<(.-)>')
+  if percent then
+    local percentNum = tonumber(percent)
+    if percentNum then
+      percentNum = percentNum < 0 and 0 or percentNum > 100 and 100 or percentNum -- what about negative percents???
+      row[paramName .. 'PercentVal'] = percentNum
+      row[paramName .. 'TextEditorStr'] = string.format('%g', percentNum)
+      return row[paramName .. 'TextEditorStr']
+    end
+  end
 
   paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
   if #paramTab ~= 0 then
@@ -1351,24 +1474,31 @@ local function handleParam(row, target, condOp, paramName, paramTab, paramStr, i
         row[paramName .. 'Entry'] = kk
         if paramType == PARAM_TYPE_METRICGRID then
           row.mg = {}
-          row.mg.modifiers, row.mg.wantsBarRestart, row.mg.preSlopPercent, row.mg.postSlopPercent = parseMetricGridNotation(paramStr:sub(pb + 1))
+          row.mg.modifiers, row.mg.wantsBarRestart, row.mg.preSlopPercent, row.mg.postSlopPercent = ParseMetricGridNotation(paramStr:sub(pb + 1))
         end
         break
       end
     end
   elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
-    row[paramName .. 'TextEditorStr'] = ensureNumString(paramStr, condOp.range and condOp.range or target.range)
+    local range = condOp.range and condOp.range or target.range
+    local has14bit, hasOther = Check14Bit(paramType)
+    if has14bit then
+      if hasOther then range = TransformerLib.PARAM_PERCENT_RANGE
+      else range = TransformerLib.PARAM_PITCHBEND_RANGE
+      end
+    end
+    row[paramName .. 'TextEditorStr'] = EnsureNumString(paramStr, range)
   elseif paramType == PARAM_TYPE_TIME then
-    row[paramName .. 'TimeFormatStr'] = timeFormatRebuf(paramStr)
+    row[paramName .. 'TimeFormatStr'] = TimeFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_TIMEDUR then
-    row[paramName .. 'TimeFormatStr'] = lengthFormatRebuf(paramStr)
+    row[paramName .. 'TimeFormatStr'] = LengthFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_METRICGRID then
     row[paramName .. 'TextEditorStr'] = paramStr
   end
   return paramStr
 end
 
-local function processFindMacroRow(buf, boolstr)
+function ProcessFindMacroRow(buf, boolstr)
   local row = FindRow()
   local bufstart = 0
   local findstart, findend, parens = string.find(buf, '^%s*(%(+)%s*')
@@ -1399,7 +1529,7 @@ local function processFindMacroRow(buf, boolstr)
   if row.targetEntry < 1 then return end
 
   local param1Tab, param2Tab
-  local condTab = findTargetToTabs(row, row.targetEntry)
+  local condTab = FindTargetToTabs(row, row.targetEntry)
 
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(condTab) do
@@ -1410,11 +1540,11 @@ local function processFindMacroRow(buf, boolstr)
     if findstart and findend then
       row.conditionEntry = k
       bufstart = findend + 1
-      condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
+      condTab, param1Tab, param2Tab = FindTargetToTabs(row, row.targetEntry)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
       if param1 and param1 ~= '' then
         bufstart = findend + 1
-        param1 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1)
+        param1 = HandleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
       end
       row.param1Val = param1
       break
@@ -1427,13 +1557,13 @@ local function processFindMacroRow(buf, boolstr)
         row.conditionEntry = k
         bufstart = findend + 1
 
-        condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
+        condTab, param1Tab, param2Tab = FindTargetToTabs(row, row.targetEntry)
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
-          param1 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1)
+          param1 = HandleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
         end
         if param2 and param2 ~= '' then
-          param2 = handleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param2', param2Tab, param2)
+          param2 = HandleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param2', param2Tab, param2, 2)
         end
         row.param1Val = param1
         row.param2Val = param2
@@ -1456,7 +1586,7 @@ local function processFindMacroRow(buf, boolstr)
 
   if row.targetEntry ~= 0 and row.conditionEntry ~= 0 then
     if boolstr == '||' then row.booleanEntry = 2 end
-    addFindRow(row)
+    AddFindRow(row)
     return true
   end
 
@@ -1464,7 +1594,7 @@ local function processFindMacroRow(buf, boolstr)
   return false
 end
 
-local function processFindMacro(buf)
+function ProcessFindMacro(buf)
   local bufstart = 0
   local rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+')
   if not (rowstart and rowend) then
@@ -1473,7 +1603,7 @@ local function processFindMacro(buf)
   while rowstart and rowend do
     local rowbuf = string.sub(buf, bufstart, rowend)
     -- mu.post('got row: ' .. rowbuf) -- process
-    processFindMacroRow(rowbuf, boolstr)
+    ProcessFindMacroRow(rowbuf, boolstr)
     bufstart = rowend + 1
     rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+', bufstart)
     if not (rowstart and rowend) then
@@ -1482,11 +1612,11 @@ local function processFindMacro(buf)
   end
   -- last iteration
   -- mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
-  processFindMacroRow(string.sub(buf, bufstart))
+  ProcessFindMacroRow(string.sub(buf, bufstart))
 end
 
-local function timeFormatToSeconds(buf, baseTime, isLength)
-  local format = determineTimeFormatStringType(buf)
+function TimeFormatToSeconds(buf, baseTime, isLength)
+  local format = DetermineTimeFormatStringType(buf)
 
   local isneg = string.match(buf, '^%s*%-')
 
@@ -1526,23 +1656,27 @@ local function timeFormatToSeconds(buf, baseTime, isLength)
   return 0
 end
 
-local function lengthFormatToSeconds(buf, baseTime)
-  return timeFormatToSeconds(buf, baseTime, true)
+function LengthFormatToSeconds(buf, baseTime)
+  return TimeFormatToSeconds(buf, baseTime, true)
 end
 
-local function AddDuration(duration, baseTime)
-  local adjustedTime = lengthFormatToSeconds(duration, baseTime)
-  return baseTime + adjustedTime
+function AddDuration(event, property, duration, baseTime)
+  local adjustedTime = LengthFormatToSeconds(duration, baseTime)
+  event[property] = baseTime + adjustedTime
+  return event[property]
 end
 
-local function SubtractDuration(duration, baseTime)
-  local adjustedTime = lengthFormatToSeconds(duration, baseTime)
-  return baseTime - adjustedTime
+function SubtractDuration(event, property, duration, baseTime)
+  local adjustedTime = LengthFormatToSeconds(duration, baseTime)
+  event[property] = baseTime - adjustedTime
+  return event[property]
 end
 
 local context = {}
 context.r = reaper
 context.math = math
+context.OperateEvent1 = OperateEvent1
+context.OperateEvent2 = OperateEvent2
 context.RandomValue = RandomValue
 context.GetTimeSelectionStart = GetTimeSelectionStart
 context.GetTimeSelectionEnd = GetTimeSelectionEnd
@@ -1557,24 +1691,18 @@ context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration
 context.ClampValue = ClampValue
 context.AddLength = AddLength
-context.TimeFormatToSeconds = timeFormatToSeconds
+context.TimeFormatToSeconds = TimeFormatToSeconds
 context.InScale = InScale
 context.MoveToCursor = MoveToCursor
 context.MoveLengthToCursor = MoveLengthToCursor
+context.OP_ADD = OP_ADD
+context.OP_SUB = OP_SUB
+context.OP_MULT = OP_MULT
+context.OP_DIV = OP_DIV
+context.OP_FIXED = OP_FIXED
+context.OP_SCALEOFF = OP_SCALEOFF
 
-local mainValueLabel
-local subtypeValueLabel
-
-local function decorateTargetLabel(label)
-  if label == 'Value 1' then
-    label = label .. ((subtypeValueLabel and subtypeValueLabel ~= '') and ' (' .. subtypeValueLabel .. ')' or '')
-  elseif label == 'Value 2' then
-    label = label .. ((mainValueLabel and mainValueLabel ~= '') and ' (' .. mainValueLabel .. ')' or '')
-  end
-  return label
-end
-
-local function doProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation)
+function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation)
   local addMetricGridNotation = false
   if paramType == PARAM_TYPE_METRICGRID then
     if terms == 1 then
@@ -1582,22 +1710,48 @@ local function doProcessParams(row, target, condOp, paramName, paramType, paramT
       paramType = PARAM_TYPE_MENU
     end
   end
-  local paramVal = condOp.terms < terms and ''
-    or (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) and row[paramName .. 'TextEditorStr']
-    or paramType == PARAM_TYPE_TIME and ((notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(timeFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
-    or paramType == PARAM_TYPE_TIMEDUR and ((notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(lengthFormatToSeconds(row[paramName .. 'TimeFormatStr'])))
-    or paramType == PARAM_TYPE_METRICGRID and row[paramName .. 'TextEditorStr']
-    or #paramTab ~= 0 and (notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text)
+
+  local percentFormat = 'percent<%0.4f>'
+  local override = row['param' .. terms .. 'EditorType']
+  local percentVal = row[paramName .. 'PercentVal']
+  local paramVal
+  if condOp.terms < terms then
+    paramVal = ''
+  elseif (notation and override == EDITOR_TYPE_PERCENT) then
+    paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
+  elseif (notation and override == EDITOR_TYPE_PITCHBEND) then
+    paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) + (1 << 13)) / ((1 << 14) - 1) * 100)
+  elseif (notation and (override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_PLUS_MINUS)) then
+     paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 14) - 1)) * 100)
+  elseif (notation
+    and (override == EDITOR_TYPE_7BIT
+      or override == EDITOR_TYPE_7BIT_NOZERO
+      or override == EDITOR_TYPE_7BIT_PLUS_MINUS))
+    then
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 7) - 1)) * 100)
+  elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
+    paramVal = percentVal and string.format('%g', percentVal) or row[paramName .. 'TextEditorStr']
+  elseif paramType == PARAM_TYPE_TIME then
+    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr']))
+  elseif paramType == PARAM_TYPE_TIMEDUR then
+    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr']))
+  elseif paramType == PARAM_TYPE_METRICGRID then
+    paramVal = row[paramName .. 'TextEditorStr']
+  elseif #paramTab ~= 0 then
+    paramVal = notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text
+  end
+
   if addMetricGridNotation then
-    paramVal = paramVal .. generateMetricGridNotation(row)
+    paramVal = paramVal .. GenerateMetricGridNotation(row)
   end
   return paramVal
 end
 
-local function processParams(row, target, condOp, param1Tab, param2Tab, notation)
-  local paramType, split = getEditorTypeForRow(target, condOp)
-  local param1Val = doProcessParams(row, target, condOp, 'param1', split and split[1] or paramType, param1Tab, 1, notation)
-  local param2Val = doProcessParams(row, target, condOp, 'param2', split and split[2] or paramType, param2Tab, 2, notation)
+function ProcessParams(row, target, condOp, param1Tab, param2Tab, notation)
+  local paramTypes = GetEditorTypesForRow(row, target, condOp)
+
+  local param1Val = DoProcessParams(row, target, condOp, 'param1', paramTypes[1], param1Tab, 1, notation)
+  local param2Val = DoProcessParams(row, target, condOp, 'param2', paramTypes[2], param2Tab, 2, notation)
 
   return param1Val, param2Val
 end
@@ -1605,29 +1759,32 @@ end
   ---------------------------------------------------------------------------
   -------------------------------- FIND UTILS -------------------------------
 
-local function prepFindEntries(row)
+function PrepFindEntries(row)
   if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
 
-  local condTab, param1Tab, param2Tab = findTargetToTabs(row, row.targetEntry)
+  local condTab, param1Tab, param2Tab = FindTargetToTabs(row, row.targetEntry)
   local curTarget = findTargetEntries[row.targetEntry]
   local curCondition = condTab[row.conditionEntry]
 
   return condTab, param1Tab, param2Tab, curTarget, curCondition
 end
 
-local function findRowToNotation(row, index)
+function FindRowToNotation(row, index)
   local rowText = ''
 
-  local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(row)
+  local condTab, param1Tab, param2Tab, curTarget, curCondition = PrepFindEntries(row)
   rowText = curTarget.notation .. ' ' .. curCondition.notation
   local param1Val, param2Val
-  local paramType = getEditorTypeForRow(curTarget, curCondition)
-  if paramType == PARAM_TYPE_MENU then
+  local paramTypes = GetEditorTypesForRow(row, curTarget, curCondition)
+
+  param1Val, param2Val = ProcessParams(row, curTarget, curCondition, param1Tab, param2Tab, true)
+  if paramTypes[1] == PARAM_TYPE_MENU then
     param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
-    param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
-  else
-    param1Val, param2Val = processParams(row, curTarget, curCondition, param1Tab, param2Tab, true)
   end
+  if paramTypes[2] == PARAM_TYPE_MENU then
+    param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
+  end
+
   if string.match(curCondition.notation, '[!]*%:') then
     rowText = rowText .. '('
     if param1Val and param1Val ~= '' then
@@ -1652,17 +1809,17 @@ local function findRowToNotation(row, index)
   return rowText
 end
 
-local function findRowsToNotation()
+function FindRowsToNotation()
   local notationString = ''
   for k, v in ipairs(findRowTable) do
-    local rowText = findRowToNotation(v, k)
+    local rowText = FindRowToNotation(v, k)
     notationString = notationString .. rowText
   end
   -- mu.post('find macro: ' .. notationString)
   return notationString
 end
 
-local function runFind(findFn, params, runFn)
+function RunFind(findFn, params, runFn)
 
   local wantsInChord = params and params.wantsInChord or false
   local getUnfound = params and params.wantsUnfound or false
@@ -1726,17 +1883,17 @@ local function runFind(findFn, params, runFn)
     end
     if runFn then runFn(event, matches) end
   end
-  local contextTab = { firstSel = firstTime, lastSel = lastTime, hasTable = hasTable }
+  local contextTab = { firstTime = firstTime, lastTime = lastTime, hasTable = hasTable }
   return found, contextTab, getUnfound and unfound or nil
 end
 
-local function processFind(take)
+function ProcessFind(take)
 
   local fnString = ''
   local wantsInChord = false
 
   for k, v in ipairs(findRowTable) do
-    local condTab, param1Tab, param2Tab, curTarget, curCondition = prepFindEntries(v)
+    local condTab, param1Tab, param2Tab, curTarget, curCondition = PrepFindEntries(v)
 
     if (#condTab == 0) then return end -- continue?
 
@@ -1747,7 +1904,7 @@ local function processFind(take)
 
     if string.match(condition.notation, ':inchord') then wantsInChord = true end
 
-    v.param1Val, v.param2Val = processParams(v, curTarget, condition, param1Tab, param2Tab)
+    v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab)
 
     local param1Term = v.param1Val -- param1Entries[currentFindParam1Entry].text
     local param2Term = v.param2Val -- (condition.terms > 1 and #param2Entries ~= 0) and param2Entries[currentFindParam2Entry].text or ''
@@ -1766,14 +1923,15 @@ local function processFind(take)
 
     findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
 
-    local paramType = getEditorTypeForRow(curTarget, condition)
+    local paramTypes = GetEditorTypesForRow(v, curTarget, condition)
+    local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
 
     if condition.sub then
       findTerm = conditionVal
       findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
       findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
       findTerm = string.gsub(findTerm, '{param2}', tostring(param2Term))
-      if paramType == PARAM_TYPE_METRICGRID then
+      if isMetricGrid then
         local mgParams = tableCopy(v.mg)
         mgParams.param1 = param1Num
         mgParams.param2 = param2Term
@@ -1827,7 +1985,7 @@ local function processFind(take)
   return findFn, wantsInChord
 end
 
-local function actionOpTabFromTarget(targetEntry)
+function ActionOpTabFromTarget(targetEntry)
   local opTab = {}
 
   if targetEntry > 0 then
@@ -1857,7 +2015,7 @@ local function actionOpTabFromTarget(targetEntry)
   return opTab
 end
 
-local function actionConditionToTabs(target, condition)
+function ActionConditionToTabs(target, condition)
   local param1Tab = {}
   local param2Tab = {}
 
@@ -1878,7 +2036,7 @@ local function actionConditionToTabs(target, condition)
   return param1Tab, param2Tab
 end
 
-local function processActionMacroRow(buf)
+function ProcessActionMacroRow(buf)
   local row = ActionRow()
   local bufstart = 0
   local findstart, findend
@@ -1898,7 +2056,7 @@ local function processActionMacroRow(buf)
 
   if row.targetEntry < 1 then return end
 
-  local opTab = actionOpTabFromTarget(row.targetEntry) -- a little simpler than findTargets, no operation-based overrides (yet)
+  local opTab = ActionOpTabFromTarget(row.targetEntry) -- a little simpler than findTargets, no operation-based overrides (yet)
   local target = actionTargetEntries[row.targetEntry]
 
   -- do we need some way to filter out extraneous (/) chars?
@@ -1908,12 +2066,12 @@ local function processActionMacroRow(buf)
     if findstart and findend then
       row.operationEntry = k
       local operation = opTab[row.operationEntry]
-      local param1Tab = actionConditionToTabs(target, operation)
+      local param1Tab = ActionConditionToTabs(target, operation)
       bufstart = findend + (buf[findend] == '(' and 0 or 1)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
       if param1 and param1 ~= '' then
-        param1 = handleParam(row, target, operation, 'param1', param1Tab, param1, 1)
+        param1 = HandleParam(row, target, operation, 'param1', param1Tab, param1, 1)
       end
       row.param1Val = param1
       break
@@ -1923,14 +2081,14 @@ local function processActionMacroRow(buf)
       if findstart and findend then
         row.operationEntry = k
         local operation = opTab[row.operationEntry]
-        local param1Tab, param2Tab = actionConditionToTabs(target, operation)
+        local param1Tab, param2Tab = ActionConditionToTabs(target, operation)
 
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
-          param1 = handleParam(row, target, operation, 'param1', param1Tab, param1, 1)
+          param1 = HandleParam(row, target, operation, 'param1', param1Tab, param1, 1)
         end
         if param2 and param2 ~= '' then
-          param2 = handleParam(row, target, operation, 'param2', param2Tab, param2, 2)
+          param2 = HandleParam(row, target, operation, 'param2', param2Tab, param2, 2)
         end
         row.param1Val = param1
         row.param2Val = param2
@@ -1941,7 +2099,7 @@ local function processActionMacroRow(buf)
   end
 
   if row.targetEntry ~= 0 and row.operationEntry ~= 0 then
-    addActionRow(row)
+    AddActionRow(row)
     return true
   end
 
@@ -1949,19 +2107,19 @@ local function processActionMacroRow(buf)
   return false
 end
 
-local function processActionMacro(buf)
+function ProcessActionMacro(buf)
   local bufstart = 0
   local rowstart, rowend = string.find(buf, '%s+(&&)%s+')
   while rowstart and rowend do
     local rowbuf = string.sub(buf, bufstart, rowend)
     -- mu.post('got row: ' .. rowbuf) -- process
-    processActionMacroRow(rowbuf)
+    ProcessActionMacroRow(rowbuf)
     bufstart = rowend + 1
     rowstart, rowend = string.find(buf, '%s+(&&)%s+', bufstart)
   end
   -- last iteration
   -- mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
-  processActionMacroRow(string.sub(buf, bufstart))
+  ProcessActionMacroRow(string.sub(buf, bufstart))
 end
 
 
@@ -1969,20 +2127,20 @@ end
   ---------------- ACTIONS TABLE ---------------
   ----------------------------------------------
 
-local function prepActionEntries(row)
+function PrepActionEntries(row)
   if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
 
-  local opTab = actionOpTabFromTarget(row.targetEntry)
+  local opTab = ActionOpTabFromTarget(row.targetEntry)
   local curTarget = actionTargetEntries[row.targetEntry]
   local curOperation = opTab[row.operationEntry]
-  local param1Tab, param2Tab = actionConditionToTabs(curTarget, curOperation)
+  local param1Tab, param2Tab = ActionConditionToTabs(curTarget, curOperation)
   return opTab, param1Tab, param2Tab, curTarget, curOperation
 end
 
 local mediaItemCount
 local mediaItemIndex
 
-local function getNextTake()
+function GetNextTake()
   local take
   local notation = findScopeTable[currentFindScope].notation
   if notation == '$midieditor' and not mediaItemCount then
@@ -2029,7 +2187,7 @@ local function getNextTake()
   return nil
 end
 
-local function initializeTake(take)
+function InitializeTake(take)
   allEvents = {}
   mu.MIDI_InitializeTake(take) -- reset this each cycle
   local noteidx = mu.MIDI_EnumNotes(take, -1)
@@ -2041,7 +2199,7 @@ local function initializeTake(take)
     e.notedur = e.endppqpos - e.ppqpos
     e.chanmsg = 0x90
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-    calcMIDITime(take, e)
+    CalcMIDITime(take, e)
     table.insert(allEvents, e)
     noteidx = mu.MIDI_EnumNotes(take, noteidx)
   end
@@ -2062,7 +2220,7 @@ local function initializeTake(take)
       e.ccval = e.msg3
     end
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-    calcMIDITime(take, e)
+    CalcMIDITime(take, e)
     table.insert(allEvents, e)
     ccidx = mu.MIDI_EnumCC(take, ccidx)
   end
@@ -2072,7 +2230,7 @@ local function initializeTake(take)
     local e = { type = SYXTEXT_TYPE, idx = syxidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.textmsg = mu.MIDI_GetTextSysexEvt(take, syxidx)
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-    calcMIDITime(take, e)
+    CalcMIDITime(take, e)
     table.insert(allEvents, e)
     syxidx = mu.MIDI_EnumSelTextSysexEvts(take, syxidx)
   end
@@ -2080,19 +2238,22 @@ local function initializeTake(take)
   table.sort(allEvents, function(a, b) return a.projtime < b.projtime end )
 end
 
-local function actionRowToNotation(row, index)
+function ActionRowToNotation(row, index)
   local rowText = ''
 
-  -- mu.tprint(v)
-  local opTab, param1Tab, param2Tab, curTarget, curOperation = prepActionEntries(row)
+  local opTab, param1Tab, param2Tab, curTarget, curOperation = PrepActionEntries(row)
   rowText = curTarget.notation .. ' ' .. curOperation.notation
   local param1Val, param2Val
-  if curTarget.menu then
+  local paramTypes = GetEditorTypesForRow(row, curTarget, curOperation)
+
+  param1Val, param2Val = ProcessParams(row, curTarget, curOperation, param1Tab, param2Tab, true)
+  if paramTypes[1] == PARAM_TYPE_MENU then
     param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
-    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
-  else
-    param1Val, param2Val = processParams(row, curTarget, curOperation, param1Tab, param2Tab, true)
   end
+  if paramTypes[2] == PARAM_TYPE_MENU then
+    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
+  end
+
   if string.match(curOperation.notation, '[!]*%:') then
     rowText = rowText .. '('
     if param1Val and param1Val ~= '' then
@@ -2114,17 +2275,17 @@ local function actionRowToNotation(row, index)
   return rowText
 end
 
-local function actionRowsToNotation()
+function ActionRowsToNotation()
   local notationString = ''
   for k, v in ipairs(actionRowTable) do
-    local rowText = actionRowToNotation(v, k)
+    local rowText = ActionRowToNotation(v, k)
     notationString = notationString .. rowText
   end
   -- mu.post('action macro: ' .. notationString)
   return notationString
 end
 
-local function deleteEventsInTake(take, eventTab, doTx)
+function DeleteEventsInTake(take, eventTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
@@ -2142,7 +2303,7 @@ local function deleteEventsInTake(take, eventTab, doTx)
   end
 end
 
-local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
+function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
@@ -2168,7 +2329,7 @@ local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   end
 end
 
-local function setEntrySelectionInTake(take, event)
+function SetEntrySelectionInTake(take, event)
   if event.type == NOTE_TYPE then
     mu.MIDI_SetNote(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil, nil)
   elseif event.type == CC_TYPE then
@@ -2178,7 +2339,7 @@ local function setEntrySelectionInTake(take, event)
   end
 end
 
-local function transformEntryInTake(take, eventTab, actionFn, contextTab)
+function TransformEntryInTake(take, eventTab, actionFn, contextTab)
   mu.MIDI_OpenWriteTransaction(take)
   for _, event in ipairs(eventTab) do
     local timeAdjust = r.GetProjectTimeOffset(0, false)
@@ -2200,7 +2361,7 @@ local function transformEntryInTake(take, eventTab, actionFn, contextTab)
   mu.MIDI_CommitWriteTransaction(take, false, true)
 end
 
-local function newTakeInNewTrack(take)
+function NewTakeInNewTrack(take)
   local track = r.GetMediaItemTake_Track(take)
   local item = r.GetMediaItemTake_Item(take)
   local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
@@ -2220,7 +2381,7 @@ local function newTakeInNewTrack(take)
   return newtake
 end
 
-local function newTakeInNewLane(take)
+function NewTakeInNewLane(take)
   local newtake
   local track = r.GetMediaItemTake_Track(take)
   local item = r.GetMediaItemTake_Item(take)
@@ -2257,8 +2418,8 @@ local function newTakeInNewLane(take)
   return newtake
 end
 
-local function grabAllTakes()
-  local take = getNextTake()
+function GrabAllTakes()
+  local take = GetNextTake()
   if not take then return {} end
 
   local takes = {}
@@ -2274,7 +2435,7 @@ local function grabAllTakes()
     local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
     local active = take == activeTake and true or false
     table.insert(takes, { take = take, firstTime = projTime, active = active })
-    take = getNextTake()
+    take = GetNextTake()
   end
   table.sort(takes, function(a, b)
       if a.active then return true
@@ -2285,11 +2446,11 @@ local function grabAllTakes()
   return takes
 end
 
-local function processAction(select)
+function ProcessAction(select)
   mediaItemCount = nil
   mediaItemIndex = nil
 
-  local takes = grabAllTakes()
+  local takes = GrabAllTakes()
   if #takes == 0 then return end
 
   CACHED_METRIC = nil
@@ -2299,7 +2460,7 @@ local function processAction(select)
   local fnString = ''
 
   for k, v in ipairs(actionRowTable) do
-    local opTab, param1Tab, param2Tab, curTarget, curOperation = prepActionEntries(v)
+    local opTab, param1Tab, param2Tab, curTarget, curOperation = PrepActionEntries(v)
 
     if (#opTab == 0) then return end -- continue?
 
@@ -2308,7 +2469,7 @@ local function processAction(select)
     local operationVal = operation.text
     local actionTerm = ''
 
-    v.param1Val, v.param2Val = processParams(v, curTarget, curOperation, param1Tab, param2Tab)
+    v.param1Val, v.param2Val = ProcessParams(v, curTarget, curOperation, param1Tab, param2Tab)
 
     local param1Term = v.param1Val
     local param2Term = v.param2Val
@@ -2325,18 +2486,21 @@ local function processAction(select)
       param1Term = tmp
     end
 
-    if not operation.sub then
-      targetTerm = targetTerm .. ' = ' .. targetTerm
-      actionTerm = targetTerm .. ' ' .. operationVal .. (operation.terms == 0 and '' or ' ' .. param1Term)
-    else
-      actionTerm = targetTerm .. ' ' .. operationVal
+    local paramTypes = GetEditorTypesForRow(v, curTarget, curOperation)
+    if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and v.param1PercentVal then
+      local percent = param1Num / 100 -- it's a percent coming from the system
+      param1Term = '(event.chanmsg == 0xE0 and (((1 << 14) - 1) * ' ..  percent .. ') or (((1 << 7) - 1) * ' .. (percent < 0 and 0 or percent) .. '))'
+    end
+    if param2Num and (paramTypes[2] == PARAM_TYPE_INTEDITOR or paramTypes[2] == PARAM_TYPE_FLOATEDITOR) and v.param2PercentVal then
+      local percent = param2Num / 100 -- it's a percent coming from the system
+      param2Term = '(event.chanmsg == 0xE0 and (((1 << 14) - 1) * ' ..  percent .. ') or (((1 << 7) - 1) * ' .. (percent < 0 and 0 or percent) .. '))'
     end
 
-    if operation.sub then
-      actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
-      actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
-      actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
-    end
+    -- always sub
+    actionTerm = operationVal
+    actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
+    actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
+    actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
 
     actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
 
@@ -2363,13 +2527,13 @@ local function processAction(select)
 
   for _, v in ipairs(takes) do
     local take = v.take
-    initializeTake(take)
+    InitializeTake(take)
 
     moveCursorFirstEventPosition_Take = nil
     addLengthFirstEventOffset_Take = nil
 
     local actionFn
-    local findFn, wantsInChord = processFind(take)
+    local findFn, wantsInChord = ProcessFind(take)
     if findFn then
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
@@ -2392,98 +2556,98 @@ local function processAction(select)
         local defParams = { wantsInChord = wantsInChord }
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
-          runFind(findFn, defParams,
+          RunFind(findFn, defParams,
             function(event, matches)
               event.selected = matches
-              setEntrySelectionInTake(take, event)
+              SetEntrySelectionInTake(take, event)
             end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$selectadd' then
           mu.MIDI_OpenWriteTransaction(take)
-          runFind(findFn, defParams,
+          RunFind(findFn, defParams,
             function(event, matches)
               if matches then
                 event.selected = true
-                setEntrySelectionInTake(take, event)
+                SetEntrySelectionInTake(take, event)
               end
             end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$invertselect' then
           mu.MIDI_OpenWriteTransaction(take)
-          runFind(findFn, defParams,
+          RunFind(findFn, defParams,
             function(event, matches)
               event.selected = not matches
-              setEntrySelectionInTake(take, event)
+              SetEntrySelectionInTake(take, event)
             end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$deselect' then
           mu.MIDI_OpenWriteTransaction(take)
-          runFind(findFn, defParams,
+          RunFind(findFn, defParams,
             function(event, matches)
               if matches then
                 event.selected = false
-                setEntrySelectionInTake(take, event)
+                SetEntrySelectionInTake(take, event)
               end
             end)
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$transform' then
-          local found, contextTab = runFind(findFn, defParams)
+          local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            transformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
+            TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
           end
         elseif notation == '$copy' then
-          local found, contextTab = runFind(findFn, defParams)
+          local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            local newtake = newTakeInNewTrack(take)
+            local newtake = NewTakeInNewTrack(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, contextTab)
+              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$copylane' then
-          local found, contextTab = runFind(findFn, defParams)
+          local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            local newtake = newTakeInNewLane(take)
+            local newtake = NewTakeInNewLane(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, contextTab)
+              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$insert' then
-          local found, contextTab = runFind(findFn, defParams)
+          local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            insertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
+            InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
           end
         elseif notation == '$insertexclusive' then
-          local found, contextTab, unfound = runFind(findFn, { wantsInChord = wantsInChord, wantsUnfound = true })
+          local found, contextTab, unfound = RunFind(findFn, { wantsInChord = wantsInChord, wantsUnfound = true })
           mu.MIDI_OpenWriteTransaction(take)
           if #found ~=0 then
-            insertEventsIntoTake(take, found, actionFn, contextTab, false)
+            InsertEventsIntoTake(take, found, actionFn, contextTab, false)
             if unfound and #unfound ~=0 then
-              deleteEventsInTake(take, unfound, false)
+              DeleteEventsInTake(take, unfound, false)
             end
           end
           mu.MIDI_CommitWriteTransaction(take, false, true)
         elseif notation == '$extracttrack' then
-          local found, contextTab = runFind(findFn, defParams)
+          local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            deleteEventsInTake(take, found)
-            local newtake = newTakeInNewTrack(take)
+            DeleteEventsInTake(take, found)
+            local newtake = NewTakeInNewTrack(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, contextTab)
+              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$extractlane' then
-          local found, contextTab = runFind(findFn, defParams)
+          local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            deleteEventsInTake(take, found)
-            local newtake = newTakeInNewLane(take)
+            DeleteEventsInTake(take, found)
+            local newtake = NewTakeInNewLane(take)
             if newtake then
-              insertEventsIntoTake(newtake, found, actionFn, contextTab)
+              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         elseif notation == '$delete' then
-          local found = runFind(findFn, defParams)
+          local found = RunFind(findFn, defParams)
           if #found ~= 0 then
-            deleteEventsInTake(take, found) -- could use runFn
+            DeleteEventsInTake(take, found) -- could use runFn
           end
         end
       end
@@ -2493,15 +2657,15 @@ local function processAction(select)
   r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
 end
 
-local function savePreset(presetPath, notes, wantsScript)
+function SavePreset(presetPath, notes, wantsScript)
   local f = io.open(presetPath, 'wb')
   local saved = false
   if f then
     local presetTab = {
       findScope = findScopeTable[currentFindScope].notation,
-      findMacro = findRowsToNotation(),
+      findMacro = FindRowsToNotation(),
       actionScope = actionScopeTable[currentActionScope].notation,
-      actionMacro = actionRowsToNotation(),
+      actionMacro = ActionRowsToNotation(),
       notes = notes
     }
     f:write(serialize(presetTab) .. '\n')
@@ -2532,17 +2696,17 @@ local function savePreset(presetPath, notes, wantsScript)
   return saved
 end
 
-local function loadPresetFromTable(presetTab)
-  currentActionScope = actionScopeFromNotation(presetTab.actionScope)
-  currentFindScope = findScopeFromNotation(presetTab.findScope)
+function LoadPresetFromTable(presetTab)
+  currentActionScope = ActionScopeFromNotation(presetTab.actionScope)
+  currentFindScope = FindScopeFromNotation(presetTab.findScope)
   findRowTable = {}
-  processFindMacro(presetTab.findMacro)
+  ProcessFindMacro(presetTab.findMacro)
   actionRowTable = {}
-  processActionMacro(presetTab.actionMacro)
+  ProcessActionMacro(presetTab.actionMacro)
   return presetTab.notes
 end
 
-local function loadPreset(pPath)
+function LoadPreset(pPath)
   local f = io.open(pPath, 'r')
   if f then
     local presetStr = f:read('*all')
@@ -2560,13 +2724,46 @@ local function loadPreset(pPath)
       if tabStr and tabStr ~= '' then
         local presetTab = deserialize(tabStr)
         if presetTab then
-          local notes = loadPresetFromTable(presetTab)
+          local notes = LoadPresetFromTable(presetTab)
           return true, notes
         end
       end
     end
   end
   return false, nil
+end
+
+function PitchBendTo14Bit(val)
+  if val < 0 then val = val + (1 << 13) else val = val + ((1 << 13) - 1) end
+  return (val / ((1 << 14) - 1)) * 100
+end
+
+function SetRowParam(row, paramName, paramType, editorType, strVal, range)
+  row[paramName .. 'TextEditorStr'] = paramType == PARAM_TYPE_METRICGRID and strVal or EnsureNumString(strVal, range)
+  if paramType == PARAM_TYPE_METRICGRID or not editorType then
+    row[paramName .. 'PercentVal'] = nil
+    -- nothing
+  else
+    local val = tonumber(row[paramName .. 'TextEditorStr'])
+    if editorType == EDITOR_TYPE_PERCENT then
+      row[paramName .. 'PercentVal'] = val
+    elseif editorType == EDITOR_TYPE_PITCHBEND then
+      row[paramName .. 'PercentVal'] = PitchBendTo14Bit(val)
+    elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO then
+      row[paramName .. 'PercentVal'] = (val / ((1 << 7) - 1)) * 100
+    end
+  end
+end
+
+function GetRowParamRange(row, target, condOp, paramType, editorType)
+  local range = condOp.norange and {} or condOp.range and condOp.range or target.range
+  if editorType == EDITOR_TYPE_PITCHBEND then range = TransformerLib.EDITOR_PITCHBEND_RANGE
+  elseif editorType == EDITOR_TYPE_PERCENT then range = TransformerLib.EDITOR_PERCENT_RANGE
+  elseif editorType == EDITOR_TYPE_7BIT then range = TransformerLib.EDITOR_7BIT_RANGE
+  elseif editorType == EDITOR_TYPE_7BIT_NOZERO then range = TransformerLib.EDITOR_7BIT_NOZERO_RANGE
+  end
+  if range and #range == 0 then range = nil end
+  return range
 end
 
 TransformerLib.findScopeTable = findScopeTable
@@ -2595,46 +2792,50 @@ TransformerLib.actionTargetEntries = actionTargetEntries
 TransformerLib.GetSubtypeValueLabel = GetSubtypeValueLabel
 TransformerLib.GetMainValueLabel = GetMainValueLabel
 
-TransformerLib.processFindMacro = processFindMacro
-TransformerLib.processActionMacro = processActionMacro
+TransformerLib.processFindMacro = ProcessFindMacro
+TransformerLib.processActionMacro = ProcessActionMacro
 
-TransformerLib.processFind = processFind
-TransformerLib.processAction = processAction
+TransformerLib.processFind = ProcessFind
+TransformerLib.processAction = ProcessAction
 
-TransformerLib.prepFindEntries = prepFindEntries
-TransformerLib.prepActionEntries = prepActionEntries
+TransformerLib.prepFindEntries = PrepFindEntries
+TransformerLib.prepActionEntries = PrepActionEntries
 
-TransformerLib.savePreset = savePreset
-TransformerLib.loadPreset = loadPreset
+TransformerLib.savePreset = SavePreset
+TransformerLib.loadPreset = LoadPreset
 
-TransformerLib.timeFormatRebuf = timeFormatRebuf
-TransformerLib.lengthFormatRebuf = lengthFormatRebuf
+TransformerLib.timeFormatRebuf = TimeFormatRebuf
+TransformerLib.lengthFormatRebuf = LengthFormatRebuf
 
-TransformerLib.getEditorTypeForRow = getEditorTypeForRow
-TransformerLib.findTargetToTabs = findTargetToTabs
-TransformerLib.actionOpTabFromTarget = actionOpTabFromTarget
-TransformerLib.findRowToNotation = findRowToNotation
-TransformerLib.actionRowToNotation = actionRowToNotation
+TransformerLib.getEditorTypesForRow = GetEditorTypesForRow
+TransformerLib.findTargetToTabs = FindTargetToTabs
+TransformerLib.actionOpTabFromTarget = ActionOpTabFromTarget
+TransformerLib.findRowToNotation = FindRowToNotation
+TransformerLib.actionRowToNotation = ActionRowToNotation
+
+TransformerLib.setRowParam = SetRowParam
+TransformerLib.getRowParamRange = GetRowParamRange
 
 local lastHasTable = {}
 
 TransformerLib.getHasTable = function()
+  local fresh = false
   if dirtyFind then
     local hasTable = {}
 
     mediaItemCount = nil
     mediaItemIndex = nil
 
-    local takes = grabAllTakes()
+    local takes = GrabAllTakes()
 
     CACHED_METRIC = nil
     CACHED_WRAPPED = nil
     SOM = nil
 
     for _, v in ipairs(takes) do
-      initializeTake(v.take)
-      local findFn = processFind(v.take)
-      local _, contextTab = runFind(findFn)
+      InitializeTake(v.take)
+      local findFn = ProcessFind(v.take)
+      local _, contextTab = RunFind(findFn)
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
         if vv == true then hasTable[kk] = true end
@@ -2642,8 +2843,13 @@ TransformerLib.getHasTable = function()
     end
     dirtyFind = false
     lastHasTable = hasTable
+    fresh = true
   end
-  return lastHasTable
+  return lastHasTable, fresh
+end
+
+TransformerLib.setEditorTypeForRow = function(row, idx, type)
+  row['param' .. idx .. 'EditorType'] = type
 end
 
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
@@ -2653,6 +2859,21 @@ TransformerLib.PARAM_TYPE_FLOATEDITOR = PARAM_TYPE_FLOATEDITOR
 TransformerLib.PARAM_TYPE_TIME = PARAM_TYPE_TIME
 TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
 TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
+
+TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
+TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }
+TransformerLib.EDITOR_TYPE_PERCENT = EDITOR_TYPE_PERCENT
+TransformerLib.EDITOR_PERCENT_RANGE = { 0, 100 }
+TransformerLib.EDITOR_TYPE_14BIT = EDITOR_TYPE_14BIT
+TransformerLib.EDITOR_14BIT_RANGE = { 0, (1 << 14) - 1 }
+TransformerLib.EDITOR_TYPE_14BIT_PLUS_MINUS = EDITOR_TYPE_14BIT_PLUS_MINUS
+TransformerLib.EDITOR_14BIT_PLUS_MINUS_RANGE = { -(1 << 14), (1 << 14) - 1 }
+TransformerLib.EDITOR_TYPE_7BIT = EDITOR_TYPE_7BIT
+TransformerLib.EDITOR_7BIT_RANGE = { 0, (1 << 7) - 1 }
+TransformerLib.EDITOR_TYPE_7BIT_NOZERO = EDITOR_TYPE_7BIT_NOZERO
+TransformerLib.EDITOR_7BIT_NOZERO_RANGE = { 1, (1 << 7) - 1 }
+TransformerLib.EDITOR_TYPE_7BIT_PLUS_MINUS = EDITOR_TYPE_7BIT_PLUS_MINUS
+TransformerLib.EDITOR_7BIT_PLUS_MINUS_RANGE = { -(1 << 7), (1 << 7) - 1 }
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 

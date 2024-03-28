@@ -169,6 +169,7 @@ local defaultFindRow
 local defaultActionRow
 
 local newHasTable = false
+local inTextInput = false
 
 -- local focuswait
 -- local wantsRecede -- = tonumber(r.GetExtState('sm72_CreateCrossfade', 'ConfigWantsRecede'))
@@ -814,6 +815,8 @@ local function windowFn()
           tx.setRowParam(row, paramName, paramType, editorType, buf, range)
           -- row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, range)
           procFn()
+          inTextInput = false
+        elseif retval then inTextInput = true
         end
         if range then
           r.ImGui_SameLine(ctx)
@@ -841,6 +844,8 @@ local function windowFn()
         if kbdEntryIsCompleted(retval) then
           row[paramName .. 'TimeFormatStr'] = paramType == tx.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
           procFn()
+          inTextInput = false
+        elseif retval then inTextInput = true
         end
         r.ImGui_EndGroup(ctx)
         if r.ImGui_IsItemHovered(ctx) then
@@ -886,6 +891,8 @@ local function windowFn()
   if kbdEntryIsCompleted(fcrv) then
     findConsoleText = fcbuf
     tx.processFindMacro(findConsoleText)
+    inTextInput = false
+  elseif fcrv then inTextInput = true
   end
 
   generateLabelOnLine('Selection Criteria Console')
@@ -1297,6 +1304,8 @@ local function windowFn()
   if kbdEntryIsCompleted(acrv) then
     actionConsoleText = acbuf
     tx.processActionMacro(actionConsoleText)
+    inTextInput = false
+  elseif acrv then inTextInput = true
   end
 
   generateLabelOnLine('Action Console')
@@ -1394,6 +1403,11 @@ local function windowFn()
       lastSelectedRowType = 1
       r.ImGui_OpenPopup(ctx, 'defaultActionRow')
     end
+    -- TODO: row drag/drop
+    -- if r.ImGui_BeginDragDropSource(ctx) then
+    --   r.ImGui_SetDragDropPayload(ctx, 'row', 'somedata')
+    --   r.ImGui_EndDragDropSource(ctx)
+    -- end
 
     if r.ImGui_BeginPopup(ctx, 'defaultActionRow') then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -1671,9 +1685,11 @@ local function windowFn()
         lastInputTextBuffer = buf
         inOKDialog = true
       end
+      inTextInput = false
     else
       lastInputTextBuffer = buf
       inOKDialog = false
+      if retval then inTextInput = true end
     end
 
     if refocusField then refocusField = false end
@@ -1734,7 +1750,9 @@ local function windowFn()
         presetNotesBuffer = buf
       end
       presetNotesViewEditor = false
+      inTextInput = false
     else
+      if retval then inTextInput = true end
       presetNotesBuffer = buf
     end
     updateCurrentRect()
@@ -1864,7 +1882,7 @@ local function windowFn()
     end
   end
 
-  if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace()) then
+  if not inTextInput and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace()) then
     if lastSelectedRowType == 0 then removeFindRow()
     elseif lastSelectedRowType == 1 then removeActionRow()
     end

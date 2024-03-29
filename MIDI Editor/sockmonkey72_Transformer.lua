@@ -379,8 +379,11 @@ end
 
 local function overrideEditorType(row, target, condOp, paramTypes, idx)
   local has14bit, hasOther = check14Bit(paramTypes[idx])
-  if not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR) or condOp.norange then
-    tx.setEditorTypeForRow(row, idx, nil)
+  if not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
+      or condOp.norange
+      or condOp.split and condOp.split[idx].norange
+    then
+      tx.setEditorTypeForRow(row, idx, nil)
   elseif target.notation == '$velocity' or  target.notation == '$relvel' then
     if condOp.bipolar then
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
@@ -576,13 +579,14 @@ local function windowFn()
     return filePathExists(path:match('/$') and path or path..'/')
   end
 
-  local function ensureNumString(str, range)
+  local function ensureNumString(str, range, floor)
     local num = tonumber(str)
     if not num then num = 0 end
     if range then
       if range[1] and num < range[1] then num = range[1] end
       if range[2] and num > range[2] then num = range[2] end
     end
+    if floor then num = math.floor(num + 0.5) end
     return tostring(num)
   end
 
@@ -785,19 +789,19 @@ local function windowFn()
     (EventChar < '0' || EventChar > '9') && EventChar != '-' && EventChar != ':' && EventChar != '.' ? EventChar = 0;
   ]])
 
-  local function handleTableParam(row, condOp, paramName, paramTab, paramType, needsTerms, idx, procFn)
+  local function handleTableParam(row, condOp, paramName, paramTab, paramType, terms, rowIdx, procFn)
     local rv = 0
     local editorType = row[paramName .. 'EditorType']
-    if paramType == tx.PARAM_TYPE_METRICGRID and needsTerms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
+    if paramType == tx.PARAM_TYPE_METRICGRID and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
     local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
-    if condOp.terms >= needsTerms then
+    if condOp.terms >= terms then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
       local target = targetTab[row.targetEntry]
       if paramType == tx.PARAM_TYPE_MENU then
         r.ImGui_Button(ctx, #paramTab ~= 0 and paramTab[row[paramName .. 'Entry']].label or '---')
         if (#paramTab ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-          rv = idx
+          rv = rowIdx
           r.ImGui_OpenPopup(ctx, paramName .. 'Menu')
         end
       elseif paramType == tx.PARAM_TYPE_INTEDITOR
@@ -806,16 +810,16 @@ local function windowFn()
         or editorType == tx.EDITOR_TYPE_PITCHBEND
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
-        local range = tx.getRowParamRange(row, target, condOp, paramType, editorType)
+        local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, terms)
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
-          local strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range)
+          local strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR)
           if range and row[paramName .. 'PercentVal'] then
             local percentVal = row[paramName .. 'PercentVal'] / 100
             local scaledVal
             if editorType == tx.EDITOR_TYPE_PITCHBEND and condOp.literal then
               scaledVal = percentVal * ((1 << 14) - 1)
-            elseif condOp.bipolar then
+            elseif bipolar then
               scaledVal = percentVal * range[2]
             else
               scaledVal = (percentVal * (range[2] - range[1])) + range[1]
@@ -849,10 +853,10 @@ local function windowFn()
         r.ImGui_EndGroup(ctx)
         if r.ImGui_IsItemHovered(ctx) then
           if r.ImGui_IsMouseClicked(ctx, 0) then
-            rv = idx
+            rv = rowIdx
           -- elseif r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() and r.ImGui_IsMouseClicked(ctx, 1) then
-          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. needsTerms .. 'Type')
-          --   rv = idx
+          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. terms .. 'Type')
+          --   rv = rowIdx
           end
         end
       elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
@@ -867,10 +871,10 @@ local function windowFn()
         r.ImGui_EndGroup(ctx)
         if r.ImGui_IsItemHovered(ctx) then
           if r.ImGui_IsMouseClicked(ctx, 0) then
-            rv = idx
+            rv = rowIdx
           -- elseif r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() and r.ImGui_IsMouseClicked(ctx, 1) then
-          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. needsTerms .. 'Type')
-          --   rv = idx
+          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. terms .. 'Type')
+          --   rv = rowIdx
           end
         end
       end
@@ -894,8 +898,8 @@ local function windowFn()
       --   return 1
       -- end
 
-      -- createPopup('forceParam' .. needsTerms .. 'Type', paramTypeMenu, paramTypeToMenuIdx(row['forceParam' .. needsTerms .. 'Type']), function(i)
-      --   row['forceParam' .. needsTerms .. 'Type'] = paramTypeMenu[i].value
+      -- createPopup('forceParam' .. terms .. 'Type', paramTypeMenu, paramTypeToMenuIdx(row['forceParam' .. terms .. 'Type']), function(i)
+      --   row['forceParam' .. terms .. 'Type'] = paramTypeMenu[i].value
       -- end)
 
     end

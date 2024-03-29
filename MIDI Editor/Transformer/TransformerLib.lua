@@ -503,7 +503,9 @@ local OP_DIV = 4
 local OP_FIXED = 5
 local OP_SCALEOFF = 6
 
--- TODO rebuild action construction
+-- fullrange is just for velocity, allowing 0
+-- norange...
+
 
 local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
 local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
@@ -515,8 +517,8 @@ local actionOperationRandom = { notation = ':random', label = 'Random Values Bet
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1})', terms = 1 }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, _context)', terms = 2, inteditor = true, freeterm = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context))', terms = 2, inteditor = true, range = {-127, 127 }, freeterm = true, fullrange = true, bipolar = true }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, floateditor = true, range = {}, freeterm = true, fullrange = true, literal = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context))', terms = 2, inteditor = true, range = { -127, 127 }, freeterm = true, fullrange = true, bipolar = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 
 local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, true))', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
@@ -2841,8 +2843,9 @@ function SetRowParam(row, paramName, paramType, editorType, strVal, range, liter
     -- nothing
   else
     local val = tonumber(row[paramName .. 'TextEditorStr'])
+    mu.post(paramType, editorType, strVal, literal, range and range[1] or '-', range and range[2] or '-')
     if editorType == EDITOR_TYPE_PERCENT or editorType == EDITOR_TYPE_PERCENT_BIPOLAR then
-      row[paramName .. 'PercentVal'] = val
+      row[paramName .. 'PercentVal'] = literal and nil or val
     elseif editorType == EDITOR_TYPE_PITCHBEND or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then
       row[paramName .. 'PercentVal'] = PitchBendTo14Bit(val, literal or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR)
     elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO or editorType == EDITOR_TYPE_7BIT_BIPOLAR then
@@ -2851,20 +2854,25 @@ function SetRowParam(row, paramName, paramType, editorType, strVal, range, liter
   end
 end
 
-function GetRowParamRange(row, target, condOp, paramType, editorType)
-  local range = condOp.norange and {} or condOp.range and condOp.range or target.range
+function GetRowParamRange(row, target, condOp, paramType, editorType, idx)
+  local range = ((condOp.split and condOp.split[idx].norange) or condOp.norange) and {}
+                  or condOp.range and condOp.range
+                  or target.range
+  local bipolar = false
+
   if editorType == EDITOR_TYPE_PITCHBEND then range = TransformerLib.EDITOR_PITCHBEND_RANGE
-  elseif editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then range = TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE
+  elseif editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then range = TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE bipolar = true
   elseif editorType == EDITOR_TYPE_PERCENT then range = TransformerLib.EDITOR_PERCENT_RANGE
-  elseif editorType == EDITOR_TYPE_PERCENT_BIPOLAR then range = TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE
+  elseif editorType == EDITOR_TYPE_PERCENT_BIPOLAR then range = TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE bipolar = true
   elseif editorType == EDITOR_TYPE_7BIT then range = TransformerLib.EDITOR_7BIT_RANGE
-  elseif editorType == EDITOR_TYPE_7BIT_BIPOLAR then range = TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE
+  elseif editorType == EDITOR_TYPE_7BIT_BIPOLAR then range = TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE bipolar = true
   elseif editorType == EDITOR_TYPE_7BIT_NOZERO then range = TransformerLib.EDITOR_7BIT_NOZERO_RANGE
   elseif editorType == EDITOR_TYPE_14BIT then range = TransformerLib.EDITOR_14BIT_RANGE
-  elseif editorType == EDITOR_TYPE_14BIT_BIPOLAR then range = TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE
+  elseif editorType == EDITOR_TYPE_14BIT_BIPOLAR then range = TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE bipolar = true
   end
+
   if range and #range == 0 then range = nil end
-  return range
+  return range, bipolar
 end
 
 TransformerLib.findScopeTable = findScopeTable

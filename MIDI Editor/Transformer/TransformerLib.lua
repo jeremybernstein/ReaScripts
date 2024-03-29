@@ -978,70 +978,64 @@ end
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
-function GooseAutoOverlap()
-  -- r.SetToggleCommandState(sectionID, 40681, 0) -- this doesn't work
-  r.MIDIEditor_OnCommand(r.MIDIEditor_GetActive(), 40681) -- but this does
-  disabledAutoOverlap = not disabledAutoOverlap
-end
+-- function SysexStringToBytes(input)
+--   local result = {}
+--   local currentByte = 0
+--   local nibbleCount = 0
+--   local count = 0
 
-function SysexStringToBytes(input)
-  local result = {}
-  local currentByte = 0
-  local nibbleCount = 0
-  local count = 0
+--   for hex in input:gmatch("%x+") do
+--     for nibble in hex:gmatch("%x") do
+--       currentByte = currentByte * 16 + tonumber(nibble, 16)
+--       nibbleCount = nibbleCount + 1
 
-  for hex in input:gmatch("%x+") do
-    for nibble in hex:gmatch("%x") do
-      currentByte = currentByte * 16 + tonumber(nibble, 16)
-      nibbleCount = nibbleCount + 1
+--       if nibbleCount == 2 then
+--         if count == 0 and currentByte == 0xF0 then
+--         elseif currentByte == 0xF7 then
+--           return table.concat(result)
+--         else
+--           table.insert(result, string.char(currentByte))
+--         end
+--         currentByte = 0
+--         nibbleCount = 0
+--       elseif nibbleCount == 1 and #hex == 1 then
+--         -- Handle a single nibble in the middle of the string
+--         table.insert(result, string.char(currentByte))
+--         currentByte = 0
+--         nibbleCount = 0
+--       end
+--     end
+--   end
 
-      if nibbleCount == 2 then
-        if count == 0 and currentByte == 0xF0 then
-        elseif currentByte == 0xF7 then
-          return table.concat(result)
-        else
-          table.insert(result, string.char(currentByte))
-        end
-        currentByte = 0
-        nibbleCount = 0
-      elseif nibbleCount == 1 and #hex == 1 then
-        -- Handle a single nibble in the middle of the string
-        table.insert(result, string.char(currentByte))
-        currentByte = 0
-        nibbleCount = 0
-      end
-    end
-  end
+--   if nibbleCount == 1 then
+--     -- Handle a single trailing nibble
+--     currentByte = currentByte * 16
+--     table.insert(result, string.char(currentByte))
+--   end
 
-  if nibbleCount == 1 then
-    -- Handle a single trailing nibble
-    currentByte = currentByte * 16
-    table.insert(result, string.char(currentByte))
-  end
+--   return table.concat(result)
+-- end
 
-  return table.concat(result)
-end
+-- function SysexBytesToString(bytes)
+--   local str = ''
+--   for i = 1, string.len(bytes) do
+--     str = str .. string.format('%02X', tonumber(string.byte(bytes, i)))
+--     if i ~= string.len(bytes) then str = str .. ' ' end
+--   end
+--   return str
+-- end
 
-function SysexBytesToString(bytes)
-  local str = ''
-  for i = 1, string.len(bytes) do
-    str = str .. string.format('%02X', tonumber(string.byte(bytes, i)))
-    if i ~= string.len(bytes) then str = str .. ' ' end
-  end
-  return str
-end
+-- function NotationStringToString(notStr)
+--   local a, b = string.find(notStr, 'TRAC ')
+--   if a and b then return string.sub(notStr, b + 1) end
+--   return notStr
+-- end
 
-function NotationStringToString(notStr)
-  local a, b = string.find(notStr, 'TRAC ')
-  if a and b then return string.sub(notStr, b + 1) end
-  return notStr
-end
-
-function StringToNotationString(str)
-  local a, b = string.find(str, 'TRAC ')
-  if a and b then return str end
-  return 'TRAC ' .. str
-end
+-- function StringToNotationString(str)
+--   local a, b = string.find(str, 'TRAC ')
+--   if a and b then return str end
+--   return 'TRAC ' .. str
+-- end
 
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
@@ -1810,7 +1804,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   local paramVal
   if condOp.terms < terms then
     paramVal = ''
-  elseif notation then
+  elseif notation and override then
     if (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
       paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
     elseif (override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
@@ -1822,6 +1816,8 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
         or override == EDITOR_TYPE_7BIT_BIPOLAR))
       then
         paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 7) - 1)) * 100)
+    else
+      mu.post('unknown override: ' .. override)
     end
   elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
     paramVal = percentVal and string.format('%g', percentVal) or row[paramName .. 'TextEditorStr']

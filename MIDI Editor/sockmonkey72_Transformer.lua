@@ -409,6 +409,50 @@ local function overrideEditorType(row, target, condOp, paramTypes, idx)
   end
 end
 
+local function moveFindRowUp()
+  local index = selectedFindRow
+  if index > 1 then
+    local rows = tx.findRowTable()
+    local tmp = rows[index - 1]
+    rows[index - 1] = rows[index]
+    rows[index] = tmp
+    selectedFindRow = index - 1
+  end
+end
+
+local function moveFindRowDown()
+  local index = selectedFindRow
+  local rows = tx.findRowTable()
+  if index < #rows then
+    local tmp = rows[index + 1]
+    rows[index + 1] = rows[index]
+    rows[index] = tmp
+    selectedFindRow = index + 1
+  end
+end
+
+local function moveActionRowUp()
+  local index = selectedActionRow
+  if index > 1 then
+    local rows = tx.actionRowTable()
+    local tmp = rows[index - 1]
+    rows[index - 1] = rows[index]
+    rows[index] = tmp
+    selectedActionRow = index - 1
+  end
+end
+
+local function moveActionRowDown()
+  local index = selectedActionRow
+  local rows = tx.actionRowTable()
+  if index < #rows then
+    local tmp = rows[index + 1]
+    rows[index + 1] = rows[index]
+    rows[index] = tmp
+    selectedActionRow = index + 1
+  end
+end
+
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
 
@@ -1906,6 +1950,22 @@ local function windowFn()
   if not inTextInput and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace()) then
     if lastSelectedRowType == 0 then removeFindRow()
     elseif lastSelectedRowType == 1 then removeActionRow()
+    end
+  end
+
+  if not inTextInput and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Shortcut() then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) then
+      if lastSelectedRowType == 0 then
+        moveFindRowUp()
+      elseif lastSelectedRowType == 1 then
+        moveActionRowUp()
+      end
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) then
+      if lastSelectedRowType == 0 then
+        moveFindRowDown()
+      elseif lastSelectedRowType == 1 then
+        moveActionRowDown()
+      end
     end
   end
 

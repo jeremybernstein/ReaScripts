@@ -553,7 +553,8 @@ end
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
-  actionOperationMult, actionOperationDivide,
+  { notation = '*', label = 'Multiply (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1}, _context)', terms = 1, floateditor = true, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel. item start)', text = 'MultiplyPosition(event, {tgt}, 1 / {param1}, _context)', terms = 1, floateditor = true, norange = true, literal = true },
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -1754,6 +1755,21 @@ function SubtractDuration(event, property, duration, baseTime)
   return event[property]
 end
 
+function MultiplyPosition(event, property, param, context)
+  local take = context.take
+  if not take then return event[property] end
+
+  local item = r.GetMediaItemTake_Item(take)
+  if not item then return event[property] end
+
+  local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + r.GetProjectTimeOffset(0, false)
+  local distanceFromStart = event.projtime - itemStartPos
+  local scaledPosition = distanceFromStart * param
+
+  event[property] = scaledPosition
+  return scaledPosition
+end
+
 local context = {}
 context.r = reaper
 context.math = math
@@ -1789,6 +1805,7 @@ context.InBarRange = InBarRange
 context.LinearChangeOverSelection = LinearChangeOverSelection
 context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration
+context.MultiplyPosition = MultiplyPosition
 context.ClampValue = ClampValue
 context.AddLength = AddLength
 context.TimeFormatToSeconds = TimeFormatToSeconds
@@ -1986,7 +2003,7 @@ function RunFind(findFn, params, runFn)
     end
     if runFn then runFn(event, matches) end
   end
-  local contextTab = { firstTime = firstTime, lastTime = lastTime, hasTable = hasTable }
+  local contextTab = { firstTime = firstTime, lastTime = lastTime, hasTable = hasTable, take = params and params.take }
   return found, contextTab, getUnfound and unfound or nil
 end
 
@@ -2659,7 +2676,7 @@ function ProcessAction(select)
         -- mu.tprint(event, 2)
       else
         local notation = actionScopeTable[currentActionScope].notation
-        local defParams = { wantsInChord = wantsInChord }
+        local defParams = { wantsInChord = wantsInChord, take = take }
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
           RunFind(findFn, defParams,
@@ -2723,7 +2740,7 @@ function ProcessAction(select)
             InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
           end
         elseif notation == '$insertexclusive' then
-          local found, contextTab, unfound = RunFind(findFn, { wantsInChord = wantsInChord, wantsUnfound = true })
+          local found, contextTab, unfound = RunFind(findFn, { wantsInChord = wantsInChord, wantsUnfound = true, take = take })
           mu.MIDI_OpenWriteTransaction(take)
           if #found ~=0 then
             InsertEventsIntoTake(take, found, actionFn, contextTab, false)

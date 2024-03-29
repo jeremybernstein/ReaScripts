@@ -498,18 +498,18 @@ local OP_SCALEOFF = 6
 
 -- TODO rebuild action construction
 
-local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true }
-local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true }
-local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1})', terms = 1, floateditor = true, norange = true }
-local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1})', terms = 1, floateditor = true, norange = true }
-local actionOperationRound = { notation = ':round', label = 'Round By', text = 'QuantizeTo(event, {tgt}, {param1})', terms = 1, inteditor = true }
+local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
+local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
+local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1})', terms = 1, floateditor = true, norange = true, literal = true }
+local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1})', terms = 1, floateditor = true, norange = true, literal = true }
+local actionOperationRound = { notation = ':round', label = 'Round By', text = 'QuantizeTo(event, {tgt}, {param1})', terms = 1, inteditor = true, literal = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = 'ClampValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
 local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true }
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1})', terms = 1 }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, _context)', terms = 2, inteditor = true, freeterm = true }
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context))', terms = 2, inteditor = true, range = {-127, 127 }, freeterm = true, fullrange = true, bipolar = true }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, floateditor = true, range = {}, freeterm = true, fullrange = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, floateditor = true, range = {}, freeterm = true, fullrange = true, literal = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 
 local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, true))', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
@@ -1776,18 +1776,19 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   local paramVal
   if condOp.terms < terms then
     paramVal = ''
-  elseif (notation and override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
-    paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
-  elseif (notation and override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
-    paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) + (1 << 13)) / ((1 << 14) - 1) * 100)
-  elseif (notation and (override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_BIPOLAR)) then
-     paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 14) - 1)) * 100)
-  elseif (notation
-    and (override == EDITOR_TYPE_7BIT
-      or override == EDITOR_TYPE_7BIT_NOZERO
-      or override == EDITOR_TYPE_7BIT_BIPOLAR))
-    then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 7) - 1)) * 100)
+  elseif notation then
+    if (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
+      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
+    elseif (override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) + (1 << 13)) / ((1 << 14) - 1) * 100)
+    elseif ((override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_BIPOLAR)) then
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 14) - 1)) * 100)
+    elseif ((override == EDITOR_TYPE_7BIT
+        or override == EDITOR_TYPE_7BIT_NOZERO
+        or override == EDITOR_TYPE_7BIT_BIPOLAR))
+      then
+        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 7) - 1)) * 100)
+    end
   elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
     paramVal = percentVal and string.format('%g', percentVal) or row[paramName .. 'TextEditorStr']
   elseif paramType == PARAM_TYPE_TIME then
@@ -2795,25 +2796,29 @@ function LoadPreset(pPath)
   return false, nil
 end
 
-function PitchBendTo14Bit(val)
-  if val < 0 then val = val + (1 << 13) else val = val + ((1 << 13) - 1) end
+-- literal means (-16394/0) - 16393, otherwise it's -8192 - 8191 and needs to be shifted
+function PitchBendTo14Bit(val, literal)
+  if not literal then
+    if val < 0 then val = val + (1 << 13) else val = val + ((1 << 13) - 1) end
+  end
   return (val / ((1 << 14) - 1)) * 100
 end
 
-function SetRowParam(row, paramName, paramType, editorType, strVal, range)
+function SetRowParam(row, paramName, paramType, editorType, strVal, range, literal)
   row[paramName .. 'TextEditorStr'] = paramType == PARAM_TYPE_METRICGRID and strVal or EnsureNumString(strVal, range)
   if paramType == PARAM_TYPE_METRICGRID or not editorType then
     row[paramName .. 'PercentVal'] = nil
     -- nothing
   else
     local val = tonumber(row[paramName .. 'TextEditorStr'])
-    if editorType == EDITOR_TYPE_PERCENT then
+    if editorType == EDITOR_TYPE_PERCENT or editorType == EDITOR_TYPE_PERCENT_BIPOLAR then
       row[paramName .. 'PercentVal'] = val
-    elseif editorType == EDITOR_TYPE_PITCHBEND then
-      row[paramName .. 'PercentVal'] = PitchBendTo14Bit(val)
-    elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO then
+    elseif editorType == EDITOR_TYPE_PITCHBEND or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then
+      row[paramName .. 'PercentVal'] = PitchBendTo14Bit(val, literal or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR)
+    elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO or editorType == EDITOR_TYPE_7BIT_BIPOLAR then
       row[paramName .. 'PercentVal'] = (val / ((1 << 7) - 1)) * 100
     end
+    mu.post(val, editorType, row[paramName .. 'PercentVal'])
   end
 end
 

@@ -13,7 +13,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
--- the problem with the percentages/pitch bend/etc is that the row isn't so easy to save/restore
+-- TODO: bipolar multiplication / pitchbend
 
 local versionStr = '1.0-alpha.1'
 
@@ -811,7 +811,13 @@ local function windowFn()
         if newHasTable then
           local strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range)
           if range and row[paramName .. 'PercentVal'] then
-            local scaledVal = ((row[paramName .. 'PercentVal'] / 100) * (range[2] - range[1])) + range[1]
+            local percentVal = row[paramName .. 'PercentVal'] / 100
+            local scaledVal
+            if editorType == tx.EDITOR_TYPE_PITCHBEND and condOp.literal then
+              scaledVal = percentVal * ((1 << 14) - 1)
+            else
+              scaledVal = (percentVal * (range[2] - range[1])) + range[1]
+            end
             if paramType == tx.PARAM_TYPE_INTEDITOR then
               scaledVal = math.floor(scaledVal + 0.5)
             end
@@ -821,7 +827,7 @@ local function windowFn()
         end
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
-          tx.setRowParam(row, paramName, paramType, editorType, buf, range)
+          tx.setRowParam(row, paramName, paramType, editorType, buf, range, condOp.literal and true or false)
           -- row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, range)
           procFn()
           inTextInput = false

@@ -287,8 +287,7 @@ local findPositionConditionEntries = {
   { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true },
-  { notation = ':beforecursor', label = 'Before Cursor', text = 'TestEvent1(event, {tgt}, OP_LT, r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
-  { notation = ':aftercursor', label = 'After Cursor', text = 'TestEvent1(event, {tgt}, OP, GTE, r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
+  { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false), {param1})', terms = 1, menu = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   { notation = '!:intimesel', label = 'Outside Time Selection', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
@@ -355,6 +354,14 @@ local findTimeFormatEntries = {
   { label = 'Seconds' },
   { label = 'Samples' },
   -- { label = 'Frames' }
+}
+
+local findCursorParam1Entries = {
+  { notation = '$before', label = "Before Cursor", text = '1' }, -- todo search for notation
+  { notation = '$after', label = "After Cursor", text = '2' },
+  { notation = '$at', label = "At Cursor", text = '3' },
+  { notation = '$before_at', label = "Before or At Cursor", text = '4' },
+  { notation = '$after_at', label = "After or At Cursor", text = '5' },
 }
 
 local findMetricGridParam1Entries = {
@@ -666,6 +673,23 @@ function TestEvent2(event, property, op, param1, param2)
     retval = (val >= (param1 - param2) and val <= (param1 + param2))
   end
   return retval
+end
+
+function CursorPosition(event, property, cursorPosProj, which)
+  local time = event[property]
+
+  if which == 1 then -- before
+    return time < cursorPosProj
+  elseif which == 2 then -- after
+    return time > cursorPosProj
+  elseif which == 3 then -- at
+    return time == cursorPosProj
+  elseif which == 4 then -- before/at
+    return time <= cursorPosProj
+  elseif which == 5 then -- after/at
+    return time >= cursorPosProj
+  end
+  return false
 end
 
 function GetTimeSelectionStart()
@@ -1401,8 +1425,12 @@ function FindTargetToTabs(row, targetEntry)
     if notation == '$position' then
       condTab = findPositionConditionEntries
       local condition = condTab[row.conditionEntry]
-      if condition and condition.metricgrid then
-        param1Tab = findMetricGridParam1Entries
+      if condition then
+        if condition.metricgrid then
+          param1Tab = findMetricGridParam1Entries
+        elseif condition.notation == ':cursorpos' then
+          param1Tab = findCursorParam1Entries
+        end
       end
     elseif notation == '$length' then
       condTab = findLengthConditionEntries
@@ -1616,6 +1644,8 @@ function ProcessFindMacroRow(buf, boolstr)
         row.param1Val = param1
         row.param2Val = param2
         break
+      -- else -- still not found, maybe an old thing (can be removed post-release)
+      --   findstart, findend = string.find(buf, '^%s*:beforecursor%s+', bufstart) -- :aftercursor
       end
     end
   end
@@ -1726,6 +1756,7 @@ context.math = math
 
 context.TestEvent1 = TestEvent1
 context.TestEvent2 = TestEvent2
+context.CursorPosition = CursorPosition
 context.OP_EQ = OP_EQ
 context.OP_GT = OP_GT
 context.OP_GTE = OP_GTE
@@ -2080,15 +2111,15 @@ function ActionOpTabFromTarget(targetEntry)
   return opTab
 end
 
-function ActionConditionToTabs(target, condition)
+function ActionOperationToTabs(target, operation)
   local param1Tab = {}
   local param2Tab = {}
 
   local notation = target.notation
   if notation == '$position' then
-    if condition.notation == ':tocursor' then
+    if operation.notation == ':tocursor' then
       param1Tab = actionMoveToCursorParam1Entries
-    elseif condition.notation == ':addlength' then
+    elseif operation.notation == ':addlength' then
       param1Tab = actionAddLengthParam1Entries
     end
   elseif notation == '$channel' then
@@ -2131,7 +2162,7 @@ function ProcessActionMacroRow(buf)
     if findstart and findend then
       row.operationEntry = k
       local operation = opTab[row.operationEntry]
-      local param1Tab = ActionConditionToTabs(target, operation)
+      local param1Tab = ActionOperationToTabs(target, operation)
       bufstart = findend + (buf[findend] == '(' and 0 or 1)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
@@ -2146,7 +2177,7 @@ function ProcessActionMacroRow(buf)
       if findstart and findend then
         row.operationEntry = k
         local operation = opTab[row.operationEntry]
-        local param1Tab, param2Tab = ActionConditionToTabs(target, operation)
+        local param1Tab, param2Tab = ActionOperationToTabs(target, operation)
 
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
@@ -2198,7 +2229,7 @@ function PrepActionEntries(row)
   local opTab = ActionOpTabFromTarget(row.targetEntry)
   local curTarget = actionTargetEntries[row.targetEntry]
   local curOperation = opTab[row.operationEntry]
-  local param1Tab, param2Tab = ActionConditionToTabs(curTarget, curOperation)
+  local param1Tab, param2Tab = ActionOperationToTabs(curTarget, curOperation)
   return opTab, param1Tab, param2Tab, curTarget, curOperation
 end
 

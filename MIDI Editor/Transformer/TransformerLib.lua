@@ -14,7 +14,7 @@ local r = reaper
 local mu
 
 local DEBUG = true
-local DEBUGPOST = true
+local DEBUGPOST = false
 
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'

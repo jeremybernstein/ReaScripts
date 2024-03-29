@@ -28,6 +28,7 @@ mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = true
 mu.CLAMP_MIDI_BYTES = true
 mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true -- any downsides to having it on all the time?
+mu.CORRECT_OVERLAPS_FAVOR_NOTEON = true
 mu.CORRECT_EXTENTS = true
 
 local function startup(scriptName)
@@ -1492,7 +1493,7 @@ function GetParamType(src)
     or PARAM_TYPE_UNKNOWN
 end
 
-function GetEditorTypesForRow(row, target, condOp)
+function GetParamTypesForRow(row, target, condOp)
   local paramType = GetParamType(condOp)
   if paramType == PARAM_TYPE_UNKNOWN then
     paramType = GetParamType(target)
@@ -1523,7 +1524,7 @@ end
 
 function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
   local paramType
-  local paramTypes = GetEditorTypesForRow(row, target, condOp)
+  local paramTypes = GetParamTypesForRow(row, target, condOp)
   paramType = paramTypes[index]
 
   local percent = string.match(paramStr, 'percent<(.-)>')
@@ -1868,7 +1869,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
 end
 
 function ProcessParams(row, target, condOp, param1Tab, param2Tab, notation)
-  local paramTypes = GetEditorTypesForRow(row, target, condOp)
+  local paramTypes = GetParamTypesForRow(row, target, condOp)
 
   local param1Val = DoProcessParams(row, target, condOp, 'param1', paramTypes[1], param1Tab, 1, notation)
   local param2Val = DoProcessParams(row, target, condOp, 'param2', paramTypes[2], param2Tab, 2, notation)
@@ -1895,7 +1896,7 @@ function FindRowToNotation(row, index)
   local condTab, param1Tab, param2Tab, curTarget, curCondition = PrepFindEntries(row)
   rowText = curTarget.notation .. ' ' .. curCondition.notation
   local param1Val, param2Val
-  local paramTypes = GetEditorTypesForRow(row, curTarget, curCondition)
+  local paramTypes = GetParamTypesForRow(row, curTarget, curCondition)
 
   param1Val, param2Val = ProcessParams(row, curTarget, curCondition, param1Tab, param2Tab, true)
   if paramTypes[1] == PARAM_TYPE_MENU then
@@ -2022,12 +2023,13 @@ function ProcessFind(take)
     local conditionVal = condition.text
     local findTerm = ''
 
+    -- this involves extra processing and is therefore only done if necessary
     if string.match(condition.notation, ':inchord') then wantsInChord = true end
 
     v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab)
 
-    local param1Term = v.param1Val -- param1Entries[currentFindParam1Entry].text
-    local param2Term = v.param2Val -- (condition.terms > 1 and #param2Entries ~= 0) and param2Entries[currentFindParam2Entry].text or ''
+    local param1Term = v.param1Val
+    local param2Term = v.param2Val
 
     if curCondition.terms > 0 and param1Term == '' then return end
 
@@ -2041,7 +2043,7 @@ function ProcessFind(take)
       param1Term = tmp
     end
 
-    local paramTypes = GetEditorTypesForRow(v, curTarget, condition)
+    local paramTypes = GetParamTypesForRow(v, curTarget, condition)
     local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
     if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and v.param1PercentVal then
       param1Term = GetParamPercentTerm(param1Num, curCondition.bipolar) -- it's a percent coming from the system
@@ -2369,7 +2371,7 @@ function ActionRowToNotation(row, index)
   local opTab, param1Tab, param2Tab, curTarget, curOperation = PrepActionEntries(row)
   rowText = curTarget.notation .. ' ' .. curOperation.notation
   local param1Val, param2Val
-  local paramTypes = GetEditorTypesForRow(row, curTarget, curOperation)
+  local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
 
   param1Val, param2Val = ProcessParams(row, curTarget, curOperation, param1Tab, param2Tab, true)
   if paramTypes[1] == PARAM_TYPE_MENU then
@@ -2611,7 +2613,7 @@ function ProcessAction(select)
       param1Term = tmp
     end
 
-    local paramTypes = GetEditorTypesForRow(v, curTarget, curOperation)
+    local paramTypes = GetParamTypesForRow(v, curTarget, curOperation)
     if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and v.param1PercentVal then
       param1Term = GetParamPercentTerm(param1Num, curOperation.bipolar)
     end
@@ -2944,7 +2946,7 @@ TransformerLib.loadPreset = LoadPreset
 TransformerLib.timeFormatRebuf = TimeFormatRebuf
 TransformerLib.lengthFormatRebuf = LengthFormatRebuf
 
-TransformerLib.getEditorTypesForRow = GetEditorTypesForRow
+TransformerLib.GetParamTypesForRow = GetParamTypesForRow
 TransformerLib.findTargetToTabs = FindTargetToTabs
 TransformerLib.actionOpTabFromTarget = ActionOpTabFromTarget
 TransformerLib.findRowToNotation = FindRowToNotation

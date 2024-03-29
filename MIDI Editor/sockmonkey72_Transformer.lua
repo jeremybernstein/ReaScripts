@@ -226,7 +226,7 @@ local function setupRowFormat(row, condOpTab)
 
   local target = tx.actionTargetEntries[row.targetEntry]
   local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
-  local paramTypes = tx.getEditorTypesForRow(row, target, condOp)
+  local paramTypes = tx.GetParamTypesForRow(row, target, condOp)
   local p1 = DEFAULT_TIMEFORMAT_STRING
   local p2 = DEFAULT_TIMEFORMAT_STRING
 
@@ -1078,7 +1078,7 @@ local function windowFn()
       r.ImGui_OpenPopup(ctx, 'conditionMenu')
     end
 
-    local paramTypes = tx.getEditorTypesForRow(currentRow, currentFindTarget, currentFindCondition)
+    local paramTypes = tx.GetParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
     local selected
 
     r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 1'
@@ -1439,7 +1439,7 @@ local function windowFn()
       r.ImGui_OpenPopup(ctx, 'operationMenu')
     end
 
-    local paramTypes = tx.getEditorTypesForRow(currentRow, currentActionTarget, currentActionOperation)
+    local paramTypes = tx.GetParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
     local selected
 
     r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'

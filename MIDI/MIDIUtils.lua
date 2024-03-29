@@ -24,6 +24,7 @@ local MIDIUtils = {}
 MIDIUtils.ENFORCE_ARGS = true -- turn off for efficiency
 MIDIUtils.CORRECT_OVERLAPS = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
+MIDIUtils.CORRECT_OVERLAPS_FAVOR_NOTEON = false
 MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END = true
 MIDIUtils.CLAMP_MIDI_BYTES = false
 MIDIUtils.CORRECT_EXTENTS = false
@@ -752,6 +753,7 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
   if testEvent.chan == selectedEvent.chan
     and testEvent.msg2 == selectedEvent.msg2
   then
+    local protectNoteOns = MIDIUtils.CORRECT_OVERLAPS_FAVOR_NOTEON
     -- quick test for equality, in which case we should prioritize a selected event over an unselected one
     -- regardless of the overlap selection setting
     if testEvent.ppqpos == selectedEvent.ppqpos and testEvent.endppqpos == selectedEvent.endppqpos then
@@ -765,7 +767,7 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
       MIDIUtils.MIDI_SetNote(take, testEvent.idx, nil, nil, nil, selectedEvent.ppqpos, nil, nil, nil)
       modified = true
     elseif testEvent.ppqpos >= selectedEvent.ppqpos and testEvent.ppqpos <= selectedEvent.endppqpos then
-      if favorSelection then
+      if favorSelection and not (testEvent:IsSelected() and protectNoteOns) then
         MIDIUtils.MIDI_SetNote(take, testEvent.idx, nil, nil, selectedEvent.endppqpos, nil, nil, nil, nil)
       else
         MIDIUtils.MIDI_SetNote(take, selectedEvent.idx, nil, nil, nil, testEvent.ppqpos, nil, nil, nil)

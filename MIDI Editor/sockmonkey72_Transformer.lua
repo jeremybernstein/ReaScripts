@@ -815,12 +815,10 @@ local function windowFn()
             local scaledVal
             if editorType == tx.EDITOR_TYPE_PITCHBEND and condOp.literal then
               scaledVal = percentVal * ((1 << 14) - 1)
-            else -- this feels hacky
-              local mult = (percentVal < 0 and condOp.bipolar) and -1 or 1
-              percentVal = math.abs(percentVal)
-              local range1 = condOp.bipolar and 0 or range[1]
-              scaledVal = ((percentVal * (range[2] - range1)) + range1) * mult
-              -- mu.post(percentVal, scaledVal)
+            elseif condOp.bipolar then
+              scaledVal = percentVal * range[2]
+            else
+              scaledVal = (percentVal * (range[2] - range[1])) + range[1]
             end
             if paramType == tx.PARAM_TYPE_INTEDITOR then
               scaledVal = math.floor(scaledVal + 0.5)

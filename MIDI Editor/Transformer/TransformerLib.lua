@@ -216,8 +216,6 @@ function FindRow:init()
   self.param2EditorType = nil
   self.param1PercentVal = nil
   self.param2PercentVal = nil
-  -- self.forceParam1Type = nil
-  -- self.forceParam2Type = nil
 end
 
 local findRowTable = {}
@@ -264,7 +262,7 @@ local OP_EQ_SLOP = 7
 local findConditionEqual = { notation = '==', label = 'Equal', text = 'TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
 local findConditionUnequal = { notation = '!=', label = 'Unequal', text = 'not TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
 local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = 'TestEvent1(event, {tgt}, OP_GT, {param1})', terms = 1 }
-local findConditionGreaterThanEqual = { notation = '>=', label = 'TestEvent1(event, {tgt}, OP_GTE, {param1})', text = '>=', terms = 1 }
+local findConditionGreaterThanEqual = { notation = '>=', label = 'Greater Than or Equal', text = 'TestEvent1(event, {tgt}, OP_GTE, {param1})', terms = 1 }
 local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'TestEvent1(event, {tgt}, OP_LT, {param1})', terms = 1 }
 local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1 }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
@@ -288,7 +286,7 @@ local findPositionConditionEntries = {
   { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true },
-  { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false), {param1})', terms = 1, menu = true },
+  { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   { notation = '!:intimesel', label = 'Outside Time Selection', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
@@ -478,8 +476,6 @@ function ActionRow:init()
   self.param2EditorType = nil
   self.param1PercentVal = nil
   self.param2PercentVal = nil
-  -- self.forceParam1Type = nil
-  -- self.forceParam2Type = nil
 end
 
 local actionRowTable = {}
@@ -704,12 +700,12 @@ end
 
 function GetTimeSelectionStart()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return ts_start + r.GetProjectTimeOffset(0, false)
+  return ts_start + GetTimeOffset()
 end
 
 function GetTimeSelectionEnd()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return ts_end + r.GetProjectTimeOffset(0, false)
+  return ts_end + GetTimeOffset()
 end
 
 function GetSubtypeValue(event)
@@ -760,10 +756,31 @@ function GetMainValueLabel(typeIndex)
   end
 end
 
+function GetTimeOffset(correctMeasures)
+  local offset = r.GetProjectTimeOffset(0, false)
+  if correctMeasures then
+    local rv, measoff = r.get_config_var_string('projmeasoffs')
+    if rv then
+      local mo = tonumber(measoff)
+      if mo then
+        local qn1, qn2
+        rv, qn1 = r.TimeMap_GetMeasureInfo(0, measoff)
+        rv, qn2 = r.TimeMap_GetMeasureInfo(0, -1) -- 0 in the prefs interface is -1, go figure
+        if qn1 and qn2 then
+          local time1 = r.TimeMap2_QNToTime(0, qn1)
+          local time2 = r.TimeMap2_QNToTime(0, qn2)
+          offset = offset + (time2 - time1)
+        end
+      end
+    end
+  end
+  return offset
+end
+
 function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
   if not take then return false end
 
-  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
+  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + GetTimeOffset()
   local _, _, cml, _, cdenom = r.TimeMap2_timeToBeats(0, tpos)
   local beatPPQ = (4 / cdenom) * PPQ
   local measurePPQ = beatPPQ * cml
@@ -952,11 +969,11 @@ local moveCursorFirstEventPosition_Take
 function MoveToCursor(event, property, mode)
   if mode == 1 then -- independent
     if not moveCursorFirstEventPosition_Take then moveCursorFirstEventPosition_Take = event.projtime end
-    event.projtime = (event.projtime - moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+    event.projtime = (event.projtime - moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + GetTimeOffset()
     return event.projtime
   end
   if not moveCursorFirstEventPosition then moveCursorFirstEventPosition = event.projtime end
-  event.projtime = (event.projtime - moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+  event.projtime = (event.projtime - moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + GetTimeOffset()
   return event.projtime
 end
 
@@ -966,17 +983,17 @@ end
 
 --   if mode == 1 then -- independent
 --     if not moveCursorFirstEventLength_Take then moveCursorFirstEventLength_Take = event.projtime end
---     return (event.projtime - moveCursorFirstEventLength_Take) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+--     return (event.projtime - moveCursorFirstEventLength_Take) + r.GetCursorPositionEx(0) + GetTimeOffset()
 --   else
 --     if not moveCursorFirstEventLength then moveCursorFirstEventLength = event.projtime end
---     return (event.projtime - moveCursorFirstEventLength) + r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+--     return (event.projtime - moveCursorFirstEventLength) + r.GetCursorPositionEx(0) + GetTimeOffset()
 --   end
 -- end
 
 function MoveLengthToCursor(event)
   if event.type ~= NOTE_TYPE then return event.projlen end
 
-  local cursorPos = r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false)
+  local cursorPos = r.GetCursorPositionEx(0) + GetTimeOffset()
 
   if event.projtime >= cursorPos then return event.projlen end
 
@@ -1120,7 +1137,7 @@ end
   -- end
 
 function CalcMIDITime(take, e)
-  local timeAdjust = r.GetProjectTimeOffset(0, false)
+  local timeAdjust = GetTimeOffset()
   e.projtime = r.MIDI_GetProjTimeFromPPQPos(take, e.ppqpos) + timeAdjust
   if e.endppqpos then
     e.projlen = (r.MIDI_GetProjTimeFromPPQPos(take, e.endppqpos) + timeAdjust) - e.projtime
@@ -1506,8 +1523,6 @@ function GetParamTypesForRow(row, target, condOp)
     split = {}
     split[1], split[2] = GetParamType(condOp.split[1]), GetParamType(condOp.split[2])
   end
-  -- if row.forceParam1Type then split[1] = row.forceParam1Type end -- not working yet
-  -- if row.forceParam2Type then split[2] = row.forceParam2Type end
   return split
 end
 
@@ -1710,7 +1725,7 @@ function TimeFormatToSeconds(buf, baseTime, isLength)
     local beats = tonumber(tbeats)
     local fraction = tonumber(tfraction)
     local adjust = baseTime and baseTime or 0
-    if not isLength then adjust = adjust - r.GetProjectTimeOffset(0, false) end
+    if not isLength then adjust = adjust - GetTimeOffset(true) end
     fraction = not fraction and 0 or fraction > 99 and 99 or fraction < 0 and 0 or fraction
     if baseTime then
       local retval, measures = r.TimeMap2_timeToBeats(0, baseTime)
@@ -1763,7 +1778,7 @@ function MultiplyPosition(event, property, param, context)
   local item = r.GetMediaItemTake_Item(take)
   if not item then return event[property] end
 
-  local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + r.GetProjectTimeOffset(0, false)
+  local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
   local distanceFromStart = event.projtime - itemStartPos
   local scaledPosition = distanceFromStart * param
 
@@ -1791,6 +1806,8 @@ context.CURSOR_GT = CURSOR_GT
 context.CURSOR_AT = CURSOR_AT
 context.CURSOR_LTE = CURSOR_LTE
 context.CURSOR_GTE = CURSOR_GTE
+
+context.GetTimeOffset = GetTimeOffset
 
 context.OperateEvent1 = OperateEvent1
 context.OperateEvent2 = OperateEvent2
@@ -2435,7 +2452,7 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
     mu.MIDI_OpenWriteTransaction(take)
   end
   for _, event in ipairs(eventTab) do
-    local timeAdjust = r.GetProjectTimeOffset(0, false)
+    local timeAdjust = GetTimeOffset()
     actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
@@ -2469,7 +2486,7 @@ end
 function TransformEntryInTake(take, eventTab, actionFn, contextTab)
   mu.MIDI_OpenWriteTransaction(take)
   for _, event in ipairs(eventTab) do
-    local timeAdjust = r.GetProjectTimeOffset(0, false)
+    local timeAdjust = GetTimeOffset()
     actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
@@ -2559,7 +2576,7 @@ function GrabAllTakes()
 
   while take do
     local _, _, _, ppqpos = r.MIDI_GetEvt(take, 0)
-    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + r.GetProjectTimeOffset(0, false)
+    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + GetTimeOffset()
     local active = take == activeTake and true or false
     table.insert(takes, { take = take, firstTime = projTime, active = active })
     take = GetNextTake()
@@ -2636,7 +2653,6 @@ function ProcessAction(select)
     -- mu.post(k .. ': ' .. rowStr)
 
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr ..'\n'
-
   end
   fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\nreturn event' .. '\nend'
   if DEBUGPOST then
@@ -2873,7 +2889,6 @@ function SetRowParam(row, paramName, paramType, editorType, strVal, range, liter
     -- nothing
   else
     local val = tonumber(row[paramName .. 'TextEditorStr'])
-    mu.post(paramType, editorType, strVal, literal, range and range[1] or '-', range and range[2] or '-')
     if editorType == EDITOR_TYPE_PERCENT or editorType == EDITOR_TYPE_PERCENT_BIPOLAR then
       row[paramName .. 'PercentVal'] = literal and nil or val
     elseif editorType == EDITOR_TYPE_PITCHBEND or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then

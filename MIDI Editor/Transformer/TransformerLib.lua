@@ -2039,7 +2039,6 @@ function ProcessFind(take)
       dirtyFind = true
     end
   else
-    mu.post(pret)
     findParserError = 'Fatal error: could not load selection criteria'
     if err then
       if string.match(err, '\'%)\' expected') then
@@ -2601,7 +2600,7 @@ function ProcessAction(select)
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
         actionFn = pret()
-      else
+      elseif err then
         mu.post(err)
         findParserError = 'Fatal error: could not load action description'
       end

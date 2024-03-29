@@ -2964,7 +2964,7 @@ TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }
 TransformerLib.EDITOR_TYPE_PITCHBEND_BIPOLAR = EDITOR_TYPE_PITCHBEND_BIPOLAR
-TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE = { -(1 << 14), (1 << 14) - 1 }
+TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE = { -((1 << 14) - 1), (1 << 14) - 1 }
 TransformerLib.EDITOR_TYPE_PERCENT = EDITOR_TYPE_PERCENT
 TransformerLib.EDITOR_PERCENT_RANGE = { 0, 100 }
 TransformerLib.EDITOR_TYPE_PERCENT_BIPOLAR = EDITOR_TYPE_PERCENT_BIPOLAR
@@ -2972,13 +2972,13 @@ TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE = { -100, 100 }
 TransformerLib.EDITOR_TYPE_14BIT = EDITOR_TYPE_14BIT
 TransformerLib.EDITOR_14BIT_RANGE = { 0, (1 << 14) - 1 }
 TransformerLib.EDITOR_TYPE_14BIT_BIPOLAR = EDITOR_TYPE_14BIT_BIPOLAR
-TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE = { -(1 << 14), (1 << 14) - 1 }
+TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE = { -((1 << 14) - 1), (1 << 14) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT = EDITOR_TYPE_7BIT
 TransformerLib.EDITOR_7BIT_RANGE = { 0, (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT_NOZERO = EDITOR_TYPE_7BIT_NOZERO
 TransformerLib.EDITOR_7BIT_NOZERO_RANGE = { 1, (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT_BIPOLAR = EDITOR_TYPE_7BIT_BIPOLAR
-TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -(1 << 7), (1 << 7) - 1 }
+TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -((1 << 7) - 1), (1 << 7) - 1 }
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 

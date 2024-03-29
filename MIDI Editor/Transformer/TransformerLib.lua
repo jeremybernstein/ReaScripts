@@ -356,12 +356,18 @@ local findTimeFormatEntries = {
   -- { label = 'Frames' }
 }
 
+local CURSOR_LT = 1
+local CURSOR_GT = 2
+local CURSOR_AT = 3
+local CURSOR_LTE = 4
+local CURSOR_GTE = 5
+
 local findCursorParam1Entries = {
-  { notation = '$before', label = "Before Cursor", text = '1' }, -- todo search for notation
-  { notation = '$after', label = "After Cursor", text = '2' },
-  { notation = '$at', label = "At Cursor", text = '3' },
-  { notation = '$before_at', label = "Before or At Cursor", text = '4' },
-  { notation = '$after_at', label = "After or At Cursor", text = '5' },
+  { notation = '$before', label = "Before Cursor", text = 'CURSOR_LT' }, -- todo search for notation
+  { notation = '$after', label = "After Cursor", text = 'CURSOR_GT' },
+  { notation = '$at', label = "At Cursor", text = 'CURSOR_AT' },
+  { notation = '$before_at', label = "Before or At Cursor", text = 'CURSOR_LTE' },
+  { notation = '$after_at', label = "After or At Cursor", text = 'CURSOR_GTE' },
 }
 
 local findMetricGridParam1Entries = {
@@ -504,8 +510,7 @@ local OP_FIXED = 5
 local OP_SCALEOFF = 6
 
 -- fullrange is just for velocity, allowing 0
--- norange...
-
+-- norange can be used to turn off editor type range hints (and disable the range)
 
 local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
 local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
@@ -1763,6 +1768,12 @@ context.OP_LT = OP_LT
 context.OP_LTE = OP_LTE
 context.OP_INRANGE = OP_INRANGE
 context.OP_EQ_SLOP = OP_EQ_SLOP
+
+context.CURSOR_LT = CURSOR_LT
+context.CURSOR_GT = CURSOR_GT
+context.CURSOR_AT = CURSOR_AT
+context.CURSOR_LTE = CURSOR_LTE
+context.CURSOR_GTE = CURSOR_GTE
 
 context.OperateEvent1 = OperateEvent1
 context.OperateEvent2 = OperateEvent2

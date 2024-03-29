@@ -14,7 +14,7 @@ local r = reaper
 local mu
 
 local DEBUG = true
-local DEBUGPOST = false
+local DEBUGPOST = true
 
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
@@ -304,7 +304,7 @@ local findLengthConditionEntries = {
 
 local findTypeConditionEntries = {
   findConditionEqual, findConditionUnequal,
-  { notation = ':all', label = 'All', text = '~= nil', terms = 0 }
+  { notation = ':all', label = 'All', text = 'event.chanmsg ~= nil', terms = 0 }
 }
 
 local findPropertyConditionEntries = {

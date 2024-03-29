@@ -637,11 +637,12 @@ local EDITOR_TYPE_14BIT_BIPOLAR = 108
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
-function GetValue(event, property)
+function GetValue(event, property, bipolar)
   if not property then return 0 end
   local is14bit = false
   if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
   local oldval = is14bit and ((event.msg3 << 7) + event.msg2) or event[property]
+  if is14bit and bipolar then oldval = (oldval - (1 << 13)) end
   return oldval
 end
 
@@ -831,11 +832,12 @@ end
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
-function SetValue(event, property, newval)
+function SetValue(event, property, newval, bipolar)
   if not property then return newval end
   local is14bit = false
   if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
   if is14bit then
+    if bipolar then newval = newval + (1 << 13) end
     newval = newval < 0 and 0 or newval > ((1 << 14) - 1) and ((1 << 14) - 1) or newval
     newval = math.floor(newval + 0.5)
     event.msg2 = newval & 0x7F
@@ -847,7 +849,8 @@ function SetValue(event, property, newval)
 end
 
 function OperateEvent1(event, property, op, param1)
-  local oldval = GetValue(event, property)
+  local bipolar = (op == OP_MULT or op == OP_DIV) and true or false
+  local oldval = GetValue(event, property, bipolar)
   local newval = oldval
 
   if op == OP_ADD then
@@ -861,7 +864,7 @@ function OperateEvent1(event, property, op, param1)
   elseif op == OP_FIXED then
     newval = param1
   end
-  return SetValue(event, property, newval)
+  return SetValue(event, property, newval, bipolar)
 end
 
 function OperateEvent2(event, property, op, param1, param2)
@@ -2849,7 +2852,6 @@ function SetRowParam(row, paramName, paramType, editorType, strVal, range, liter
     elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO or editorType == EDITOR_TYPE_7BIT_BIPOLAR then
       row[paramName .. 'PercentVal'] = (val / ((1 << 7) - 1)) * 100
     end
-    mu.post(val, editorType, row[paramName .. 'PercentVal'])
   end
 end
 

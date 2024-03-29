@@ -240,58 +240,64 @@ local endParenEntries = {
 }
 
 local findTargetEntries = {
-  { notation = '$position', label = 'Position', text = 'event.projtime', time = true },
-  { notation = '$length', label = 'Length', text = 'event.chanmsg == 0x90 and event.projlen', timedur = true },
-  { notation = '$channel', label = 'Channel', text = 'event.chan', menu = true },
-  { notation = '$type', label = 'Type', text = 'event.chanmsg', menu = true },
-  { notation = '$property', label = 'Property', text = 'event.flags', menu = true },
-  { notation = '$value1', label = 'Value 1', text = 'GetSubtypeValue(event)', inteditor = true, range = {0, 127} }, -- different for AT and PB
-  { notation = '$value2', label = 'Value 2', text = 'GetMainValue(event)', inteditor = true, range = {0, 127} }, -- CC# or Note# or ...
-  { notation = '$velocity', label = 'Velocity (Notes)', text = 'event.chanmsg == 0x90 and event.msg3', inteditor = true, range = {1, 127} },
-  { notation = '$relvel', label = 'Release Velocity (Notes)', text = 'event.relvel', inteditor = true, range = {0, 127} }
-  -- { label = 'Last Event' },
-  -- { label = 'Context Variable' }
+  { notation = '$position', label = 'Position', text = '\'projtime\'', time = true },
+  { notation = '$length', label = 'Length', text = '\'projlen\'', timedur = true, cond = 'event.chanmsg == 0x90' },
+  { notation = '$channel', label = 'Channel', text = '\'chan\'', menu = true },
+  { notation = '$type', label = 'Type', text = '\'chanmsg\'', menu = true },
+  { notation = '$property', label = 'Property', text = '\'flags\'', menu = true },
+  { notation = '$value1', label = 'Value 1', text = '_value1', inteditor = true, range = {0, 127} },
+  { notation = '$value2', label = 'Value 2', text = '_value2', inteditor = true, range = {0, 127} },
+  { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
+  { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
 }
 findTargetEntries.targetTable = true
 
-local findConditionEqual = { notation = '==', label = 'Equal', text = '==', terms = 1 }
-local findConditionUnequal = { notation = '!=', label = 'Unequal', text = '~=', terms = 1 }
-local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = '>', terms = 1 }
-local findConditionGreaterThanEqual = { notation = '>=', label = 'Greater Than or Equal', text = '>=', terms = 1 }
-local findConditionLessThan = { notation = '<', label = 'Less Than', text = '<', terms = 1 }
-local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = '<=', terms = 1 }
-local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = '({tgt} >= {param1} and {tgt} <= {param2})', terms = 2, sub = true }
-local findConditionOutRange = { notation = '!:inrange', label = 'Outside Range', text = '({tgt} < {param1} or {tgt} > {param2})', terms = 2, sub = true }
+local OP_EQ = 1
+local OP_GT = 2
+local OP_GTE = 3
+local OP_LT = 4
+local OP_LTE = 5
+local OP_INRANGE = 6
+local OP_EQ_SLOP = 7
+
+local findConditionEqual = { notation = '==', label = 'Equal', text = 'TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
+local findConditionUnequal = { notation = '!=', label = 'Unequal', text = 'not TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
+local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = 'TestEvent1(event, {tgt}, OP_GT, {param1})', terms = 1 }
+local findConditionGreaterThanEqual = { notation = '>=', label = 'TestEvent1(event, {tgt}, OP_GTE, {param1})', text = '>=', terms = 1 }
+local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'TestEvent1(event, {tgt}, OP_LT, {param1})', terms = 1 }
+local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1 }
+local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
+local findConditionOutRange = { notation = '!:inrange', label = 'Outside Range', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
 
 local findGenericConditionEntries = {
   findConditionEqual, findConditionUnequal,
-  { notation = ':eqslop', label = 'Equal (Slop)', text = '({tgt} >= ({param1} - {param2}) and {tgt} <= ({param1} + {param2}))', terms = 2, inteditor = true, sub = true, freeterm = true },
-  { notation = '!:eqslop', label = 'Unequal (Slop)', text = '({tgt} < ({param1} - {param2}) or {tgt} > ({param1} + {param2}))', terms = 2, inteditor = true, sub = true, freeterm = true },
+  { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
+  { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange, findConditionOutRange
 }
 
 local findPositionConditionEntries = {
   findConditionEqual, findConditionUnequal,
-  { notation = ':eqslop', label = 'Equal (Slop)', text = '({tgt} >= ({param1} - {param2}) and {tgt} <= ({param1} + {param2}))', terms = 2, split = { { time = true }, { timedur = true } }, sub = true, freeterm = true },
-  { notation = '!:eqslop', label = 'Unequal (Slop)', text = '({tgt} < ({param1} - {param2}) or {tgt} > ({param1} + {param2}))', terms = 2, split = { { time = true }, { timedur = true } }, sub = true, freeterm = true },
+  { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
+  { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange, findConditionOutRange,
-  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, floateditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, sub = true, floateditor = true, range = { 0, 100 } },
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, sub = true, metricgrid = true },
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
+  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true },
   { notation = ':beforecursor', label = 'Before Cursor', text = '< (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
   { notation = ':aftercursor', label = 'After Cursor', text = '>= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
-  { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0, sub = true },
-  { notation = '!:intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0, sub = true },
+  { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0 },
+  { notation = '!:intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
 local findLengthConditionEntries = {
   findConditionEqual, findConditionUnequal,
-  { notation = ':eqslop', label = 'Equal (Slop)', text = '({tgt} >= ({param1} - {param2}) and {tgt} <= ({param1} + {param2}))', terms = 2, timedur = true, sub = true, freeterm = true },
-  { notation = '!:eqslop', label = 'Unequal (Slop)', text = '({tgt} < ({param1} - {param2}) or {tgt} > ({param1} + {param2}))', terms = 2, timedur = true, sub = true, freeterm = true },
+  { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, timedur = true, freeterm = true },
+  { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, timedur = true, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange, findConditionOutRange
 }
@@ -302,14 +308,14 @@ local findTypeConditionEntries = {
 }
 
 local findPropertyConditionEntries = {
-  { notation = ':isselected', label = 'Selected', text = '({tgt} & 0x01) ~= 0', terms = 0, sub = true },
-  { notation = '!:isselected', label = 'Not Selected', text = '({tgt} & 0x01) == 0', terms = 0, sub = true },
-  { notation = ':ismuted', label = 'Muted', text = '({tgt} & 0x02) ~= 0', terms = 0, sub = true },
-  { notation = '!:ismuted', label = 'Not Muted', text = '({tgt} & 0x02) == 0', terms = 0, sub = true },
-  { notation = ':inchord', label = 'In Chord', text = '({tgt} & 0x04) ~= 0', terms = 0, sub = true },
-  { notation = '!:inchord', label = 'Not In Chord', text = '({tgt} & 0x04) == 0', terms = 0, sub = true },
-  { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true, sub = true },
-  { notation = '!:inscale', label = 'Not In Scale', text = 'not InScale(event, {param1}, {param2})', terms = 2, menu = true, sub = true },
+  { notation = ':isselected', label = 'Selected', text = '({tgt} & 0x01) ~= 0', terms = 0 },
+  { notation = '!:isselected', label = 'Not Selected', text = '({tgt} & 0x01) == 0', terms = 0 },
+  { notation = ':ismuted', label = 'Muted', text = '({tgt} & 0x02) ~= 0', terms = 0 },
+  { notation = '!:ismuted', label = 'Not Muted', text = '({tgt} & 0x02) == 0', terms = 0 },
+  { notation = ':inchord', label = 'In Chord', text = '({tgt} & 0x04) ~= 0', terms = 0 },
+  { notation = '!:inchord', label = 'Not In Chord', text = '({tgt} & 0x04) == 0', terms = 0 },
+  { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true },
+  { notation = '!:inscale', label = 'Not In Scale', text = 'not InScale(event, {param1}, {param2})', terms = 2, menu = true },
 }
 
 local findTypeParam1Entries = {
@@ -492,21 +498,21 @@ local OP_SCALEOFF = 6
 
 -- TODO rebuild action construction
 
-local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1}, _context)', terms = 1, inteditor = true, fullrange = true }
-local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1}, _context)', terms = 1, inteditor = true, fullrange = true }
-local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1}, _context)', terms = 1, floateditor = true, norange = true }
-local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1}, _context)', terms = 1, floateditor = true, norange = true }
+local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true }
+local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true }
+local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1})', terms = 1, floateditor = true, norange = true }
+local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1})', terms = 1, floateditor = true, norange = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = 'QuantizeTo(event, {tgt}, {param1})', terms = 1, inteditor = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = 'ClampValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
-local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, floateditor = true }
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}), _context)', terms = 2, floateditor = true, range = { -127, 127 }, fullrange = true }
-local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1}, _context)', terms = 1 }
+local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true }
+local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1})', terms = 1 }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, _context)', terms = 2, inteditor = true, freeterm = true }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context), _context)', terms = 2, inteditor = true, range = {-127, 127 }, freeterm = true, fullrange = true }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2}, _context)', terms = 2, floateditor = true, range = {}, freeterm = true, fullrange = true }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context))', terms = 2, inteditor = true, range = {-127, 127 }, freeterm = true, fullrange = true, bipolar = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, floateditor = true, range = {}, freeterm = true, fullrange = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 
-local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, true), _context)', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
+local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, true))', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
 
 local function positionMod(op)
   local newop = tableCopy(op)
@@ -612,15 +618,55 @@ local PARAM_TYPE_TIMEDUR = 5
 local PARAM_TYPE_METRICGRID = 6
 
 local EDITOR_TYPE_PITCHBEND = 100
-local EDITOR_TYPE_PERCENT = 101
-local EDITOR_TYPE_7BIT = 102
-local EDITOR_TYPE_7BIT_NOZERO = 103
-local EDITOR_TYPE_7BIT_PLUS_MINUS = 104
-local EDITOR_TYPE_14BIT = 105
-local EDITOR_TYPE_14BIT_PLUS_MINUS = 106
+local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
+local EDITOR_TYPE_PERCENT = 102
+local EDITOR_TYPE_PERCENT_BIPOLAR = 103
+local EDITOR_TYPE_7BIT = 104
+local EDITOR_TYPE_7BIT_NOZERO = 105
+local EDITOR_TYPE_7BIT_BIPOLAR = 106
+local EDITOR_TYPE_14BIT = 107
+local EDITOR_TYPE_14BIT_BIPOLAR = 108
 
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
+
+function GetValue(event, property)
+  if not property then return 0 end
+  local is14bit = false
+  if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
+  local oldval = is14bit and ((event.msg3 << 7) + event.msg2) or event[property]
+  return oldval
+end
+
+function TestEvent1(event, property, op, param1)
+  local val = GetValue(event, property)
+  local retval = false
+
+  if op == OP_EQ then
+    retval = val == param1
+  elseif op == OP_GT then
+    retval = val > param1
+  elseif op == OP_GTE then
+    retval = val >= param1
+  elseif op == OP_LT then
+    retval = val < param1
+  elseif op == OP_LTE then
+    retval = val <= param1
+  end
+  return retval
+end
+
+function TestEvent2(event, property, op, param1, param2)
+  local val = GetValue(event, property)
+  local retval
+
+  if op == OP_INRANGE then
+    retval = (val >= param1 and val <= param2)
+  elseif op == OP_EQ_SLOP then
+    retval = (val >= (param1 - param2) and val <= (param1 + param2))
+  end
+  return retval
+end
 
 function GetTimeSelectionStart()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
@@ -634,7 +680,7 @@ end
 
 function GetSubtypeValue(event)
   if event.type == SYXTEXT_TYPE then return 0
-  else return event.msg2
+  else return event.msg2 / 127
   end
 end
 
@@ -658,7 +704,7 @@ end
 function GetMainValue(event)
   if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 0
   elseif event.type == SYXTEXT_TYPE then return 0
-  else return event.msg3
+  else return event.msg3 / 127
   end
 end
 
@@ -761,14 +807,6 @@ end
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
-function GetValue(event, property)
-  if not property then return 0 end
-  local is14bit = false
-  if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
-  local oldval = is14bit and ((event.msg3 << 7) + event.msg2) or event[property]
-  return oldval
-end
-
 function SetValue(event, property, newval)
   if not property then return newval end
   local is14bit = false
@@ -784,7 +822,7 @@ function SetValue(event, property, newval)
   return newval
 end
 
-function OperateEvent1(event, property, op, param1, context)
+function OperateEvent1(event, property, op, param1)
   local oldval = GetValue(event, property)
   local newval = oldval
 
@@ -802,7 +840,7 @@ function OperateEvent1(event, property, op, param1, context)
   return SetValue(event, property, newval)
 end
 
-function OperateEvent2(event, property, op, param1, param2, context)
+function OperateEvent2(event, property, op, param1, param2)
   local oldval = GetValue(event, property)
   local newval = oldval
   if op == OP_SCALEOFF then
@@ -1459,7 +1497,8 @@ function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
   if percent then
     local percentNum = tonumber(percent)
     if percentNum then
-      percentNum = percentNum < 0 and 0 or percentNum > 100 and 100 or percentNum -- what about negative percents???
+      local min = condOp.bipolar and -100 or 0
+      percentNum = percentNum < min and min or percentNum > 100 and 100 or percentNum -- what about negative percents???
       row[paramName .. 'PercentVal'] = percentNum
       row[paramName .. 'TextEditorStr'] = string.format('%g', percentNum)
       return row[paramName .. 'TextEditorStr']
@@ -1483,8 +1522,8 @@ function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
     local range = condOp.range and condOp.range or target.range
     local has14bit, hasOther = Check14Bit(paramType)
     if has14bit then
-      if hasOther then range = TransformerLib.PARAM_PERCENT_RANGE
-      else range = TransformerLib.PARAM_PITCHBEND_RANGE
+      if hasOther then range = condOp.bipolar and TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE or TransformerLib.PARAM_PERCENT_RANGE
+      else range = condOp.bipolar and TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE or TransformerLib.PARAM_PITCHBEND_RANGE
       end
     end
     row[paramName .. 'TextEditorStr'] = EnsureNumString(paramStr, range)
@@ -1496,6 +1535,15 @@ function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
     row[paramName .. 'TextEditorStr'] = paramStr
   end
   return paramStr
+end
+
+function GetParamPercentTerm(val, bipolar)
+  local percent = val / 100 -- it's a percent coming from the system
+  local min = bipolar and -100 or 0
+  local max = 100
+  if percent < min then percent = min end
+  if percent > max then percent = max end
+  return '(event.chanmsg == 0xE0 and math.floor((((1 << 14) - 1) * ' ..  percent .. ') + 0.5) or math.floor((((1 << 7) - 1) * ' .. percent .. ') + 0.5))'
 end
 
 function ProcessFindMacroRow(buf, boolstr)
@@ -1675,6 +1723,17 @@ end
 local context = {}
 context.r = reaper
 context.math = math
+
+context.TestEvent1 = TestEvent1
+context.TestEvent2 = TestEvent2
+context.OP_EQ = OP_EQ
+context.OP_GT = OP_GT
+context.OP_GTE = OP_GTE
+context.OP_LT = OP_LT
+context.OP_LTE = OP_LTE
+context.OP_INRANGE = OP_INRANGE
+context.OP_EQ_SLOP = OP_EQ_SLOP
+
 context.OperateEvent1 = OperateEvent1
 context.OperateEvent2 = OperateEvent2
 context.RandomValue = RandomValue
@@ -1717,16 +1776,16 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   local paramVal
   if condOp.terms < terms then
     paramVal = ''
-  elseif (notation and override == EDITOR_TYPE_PERCENT) then
+  elseif (notation and override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
     paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
-  elseif (notation and override == EDITOR_TYPE_PITCHBEND) then
+  elseif (notation and override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
     paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) + (1 << 13)) / ((1 << 14) - 1) * 100)
-  elseif (notation and (override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_PLUS_MINUS)) then
+  elseif (notation and (override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_BIPOLAR)) then
      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 14) - 1)) * 100)
   elseif (notation
     and (override == EDITOR_TYPE_7BIT
       or override == EDITOR_TYPE_7BIT_NOZERO
-      or override == EDITOR_TYPE_7BIT_PLUS_MINUS))
+      or override == EDITOR_TYPE_7BIT_BIPOLAR))
     then
       paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 7) - 1)) * 100)
   elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
@@ -1872,7 +1931,7 @@ function RunFind(findFn, params, runFn)
 
   for _, event in ipairs(allEvents) do
     local matches = false
-    if findFn(event) then
+    if findFn(event, GetSubtypeValueName(event), GetMainValueName(event)) then
       hasTable[event.chanmsg] = true
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
@@ -1921,24 +1980,28 @@ function ProcessFind(take)
       param1Term = tmp
     end
 
-    findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
-
     local paramTypes = GetEditorTypesForRow(v, curTarget, condition)
     local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
+    if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and v.param1PercentVal then
+      param1Term = GetParamPercentTerm(param1Num, curCondition.bipolar) -- it's a percent coming from the system
+    end
+    if param2Num and (paramTypes[2] == PARAM_TYPE_INTEDITOR or paramTypes[2] == PARAM_TYPE_FLOATEDITOR) and v.param2PercentVal then
+      param2Term = GetParamPercentTerm(param2Num, curCondition.bipolar)
+    end
 
-    if condition.sub then
-      findTerm = conditionVal
-      findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
-      findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
-      findTerm = string.gsub(findTerm, '{param2}', tostring(param2Term))
-      if isMetricGrid then
-        local mgParams = tableCopy(v.mg)
-        mgParams.param1 = param1Num
-        mgParams.param2 = param2Term
-        findTerm = string.gsub(findTerm, '{metricgridparams}', serialize(mgParams))
-      end
-    else
-      findTerm = targetTerm .. ' ' .. conditionVal .. (condition.terms == 0 and '' or ' ' .. param1Term)
+    -- always sub
+    findTerm = conditionVal
+    findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
+    findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
+    findTerm = string.gsub(findTerm, '{param2}', tostring(param2Term))
+    if isMetricGrid then
+      local mgParams = tableCopy(v.mg)
+      mgParams.param1 = param1Num
+      mgParams.param2 = param2Term
+      findTerm = string.gsub(findTerm, '{metricgridparams}', serialize(mgParams))
+    end
+    if curTarget.cond then
+      findTerm = curTarget.cond .. ' and ' .. findTerm
     end
 
     findTerm = string.gsub(findTerm, '^%s*(.-)%s*$', '%1')
@@ -1955,7 +2018,9 @@ function ProcessFind(take)
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr -- TODO Boolean
   end
 
-  fnString = 'local event = ... \nreturn ' .. fnString
+  fnString = 'return function(event, _value1, _value2)\nreturn ' .. fnString .. '\nend'
+
+  -- fnString = 'local event = ... \nreturn ' .. fnString
   if DEBUGPOST then
     mu.post('======== FIND FUN ========')
     mu.post(fnString)
@@ -1967,8 +2032,8 @@ function ProcessFind(take)
   context.take = take
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960 -- REAPER default, we could look this up from the prefs
   local success, pret, err = pcall(load, fnString, nil, nil, context)
-  if success then
-    findFn = pret
+  if success and pret then
+    findFn = pret()
     findParserError = ''
     if not take then
       dirtyFind = true
@@ -2488,12 +2553,10 @@ function ProcessAction(select)
 
     local paramTypes = GetEditorTypesForRow(v, curTarget, curOperation)
     if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and v.param1PercentVal then
-      local percent = param1Num / 100 -- it's a percent coming from the system
-      param1Term = '(event.chanmsg == 0xE0 and (((1 << 14) - 1) * ' ..  percent .. ') or (((1 << 7) - 1) * ' .. (percent < 0 and 0 or percent) .. '))'
+      param1Term = GetParamPercentTerm(param1Num, curOperation.bipolar)
     end
     if param2Num and (paramTypes[2] == PARAM_TYPE_INTEDITOR or paramTypes[2] == PARAM_TYPE_FLOATEDITOR) and v.param2PercentVal then
-      local percent = param2Num / 100 -- it's a percent coming from the system
-      param2Term = '(event.chanmsg == 0xE0 and (((1 << 14) - 1) * ' ..  percent .. ') or (((1 << 7) - 1) * ' .. (percent < 0 and 0 or percent) .. '))'
+      param2Term = GetParamPercentTerm(param2Num, curOperation.bipolar)
     end
 
     -- always sub
@@ -2758,9 +2821,14 @@ end
 function GetRowParamRange(row, target, condOp, paramType, editorType)
   local range = condOp.norange and {} or condOp.range and condOp.range or target.range
   if editorType == EDITOR_TYPE_PITCHBEND then range = TransformerLib.EDITOR_PITCHBEND_RANGE
+  elseif editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then range = TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE
   elseif editorType == EDITOR_TYPE_PERCENT then range = TransformerLib.EDITOR_PERCENT_RANGE
+  elseif editorType == EDITOR_TYPE_PERCENT_BIPOLAR then range = TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE
   elseif editorType == EDITOR_TYPE_7BIT then range = TransformerLib.EDITOR_7BIT_RANGE
+  elseif editorType == EDITOR_TYPE_7BIT_BIPOLAR then range = TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE
   elseif editorType == EDITOR_TYPE_7BIT_NOZERO then range = TransformerLib.EDITOR_7BIT_NOZERO_RANGE
+  elseif editorType == EDITOR_TYPE_14BIT then range = TransformerLib.EDITOR_14BIT_RANGE
+  elseif editorType == EDITOR_TYPE_14BIT_BIPOLAR then range = TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE
   end
   if range and #range == 0 then range = nil end
   return range
@@ -2862,18 +2930,22 @@ TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }
+TransformerLib.EDITOR_TYPE_PITCHBEND_BIPOLAR = EDITOR_TYPE_PITCHBEND_BIPOLAR
+TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE = { -(1 << 14), (1 << 14) - 1 }
 TransformerLib.EDITOR_TYPE_PERCENT = EDITOR_TYPE_PERCENT
 TransformerLib.EDITOR_PERCENT_RANGE = { 0, 100 }
+TransformerLib.EDITOR_TYPE_PERCENT_BIPOLAR = EDITOR_TYPE_PERCENT_BIPOLAR
+TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE = { -100, 100 }
 TransformerLib.EDITOR_TYPE_14BIT = EDITOR_TYPE_14BIT
 TransformerLib.EDITOR_14BIT_RANGE = { 0, (1 << 14) - 1 }
-TransformerLib.EDITOR_TYPE_14BIT_PLUS_MINUS = EDITOR_TYPE_14BIT_PLUS_MINUS
-TransformerLib.EDITOR_14BIT_PLUS_MINUS_RANGE = { -(1 << 14), (1 << 14) - 1 }
+TransformerLib.EDITOR_TYPE_14BIT_BIPOLAR = EDITOR_TYPE_14BIT_BIPOLAR
+TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE = { -(1 << 14), (1 << 14) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT = EDITOR_TYPE_7BIT
 TransformerLib.EDITOR_7BIT_RANGE = { 0, (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT_NOZERO = EDITOR_TYPE_7BIT_NOZERO
 TransformerLib.EDITOR_7BIT_NOZERO_RANGE = { 1, (1 << 7) - 1 }
-TransformerLib.EDITOR_TYPE_7BIT_PLUS_MINUS = EDITOR_TYPE_7BIT_PLUS_MINUS
-TransformerLib.EDITOR_7BIT_PLUS_MINUS_RANGE = { -(1 << 7), (1 << 7) - 1 }
+TransformerLib.EDITOR_TYPE_7BIT_BIPOLAR = EDITOR_TYPE_7BIT_BIPOLAR
+TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -(1 << 7), (1 << 7) - 1 }
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 

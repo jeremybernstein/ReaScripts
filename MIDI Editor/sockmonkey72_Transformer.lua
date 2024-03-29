@@ -382,16 +382,25 @@ local function overrideEditorType(row, target, condOp, paramTypes, idx)
   if not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR) or condOp.norange then
     tx.setEditorTypeForRow(row, idx, nil)
   elseif target.notation == '$velocity' or  target.notation == '$relvel' then
-      if target.notation == '$velocity' and not condOp.fullrange then
-        tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
-      else
-        tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
-      end
+    if condOp.bipolar then
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
+    elseif target.notation == '$velocity' and not condOp.fullrange then
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
+    else
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+    end
   elseif has14bit then
-    -- paramTypes[idx] = hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND
-    tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
+    if condOp.bipolar then
+      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT_BIPOLAR or tx.EDITOR_TYPE_PITCHBEND_BIPOLAR)
+    else
+      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
+    end
   elseif target.notation ~= '$position' and target.notation ~= '$length' then
-    tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+    if condOp.bipolar then
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
+    else
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+    end
   else
     tx.setEditorTypeForRow(row, idx, nil)
   end

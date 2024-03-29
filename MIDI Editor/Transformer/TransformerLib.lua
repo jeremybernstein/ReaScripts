@@ -287,10 +287,10 @@ local findPositionConditionEntries = {
   { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true },
-  { notation = ':beforecursor', label = 'Before Cursor', text = '< (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
-  { notation = ':aftercursor', label = 'After Cursor', text = '>= (r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
-  { notation = ':intimesel', label = 'Inside Time Selection', text = '{tgt} >= GetTimeSelectionStart() and {tgt} <= GetTimeSelectionEnd()', terms = 0 },
-  { notation = '!:intimesel', label = 'Outside Time Selection', text = '{tgt} < GetTimeSelectionStart() or {tgt} > GetTimeSelectionEnd()', terms = 0 },
+  { notation = ':beforecursor', label = 'Before Cursor', text = 'TestEvent1(event, {tgt}, OP_LT, r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
+  { notation = ':aftercursor', label = 'After Cursor', text = 'TestEvent1(event, {tgt}, OP, GTE, r.GetCursorPositionEx(0) + r.GetProjectTimeOffset(0, false))', terms = 0 },
+  { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
+  { notation = '!:intimesel', label = 'Outside Time Selection', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -308,12 +308,12 @@ local findTypeConditionEntries = {
 }
 
 local findPropertyConditionEntries = {
-  { notation = ':isselected', label = 'Selected', text = '({tgt} & 0x01) ~= 0', terms = 0 },
-  { notation = '!:isselected', label = 'Not Selected', text = '({tgt} & 0x01) == 0', terms = 0 },
-  { notation = ':ismuted', label = 'Muted', text = '({tgt} & 0x02) ~= 0', terms = 0 },
-  { notation = '!:ismuted', label = 'Not Muted', text = '({tgt} & 0x02) == 0', terms = 0 },
-  { notation = ':inchord', label = 'In Chord', text = '({tgt} & 0x04) ~= 0', terms = 0 },
-  { notation = '!:inchord', label = 'Not In Chord', text = '({tgt} & 0x04) == 0', terms = 0 },
+  { notation = ':isselected', label = 'Selected', text = '(event.flags & 0x01) ~= 0', terms = 0 },
+  { notation = '!:isselected', label = 'Not Selected', text = '(event.flags & 0x01) == 0', terms = 0 },
+  { notation = ':ismuted', label = 'Muted', text = '(event.flags & 0x02) ~= 0', terms = 0 },
+  { notation = '!:ismuted', label = 'Not Muted', text = '(event.flags & 0x02) == 0', terms = 0 },
+  { notation = ':inchord', label = 'In Chord', text = '(event.flags & 0x04) ~= 0', terms = 0 },
+  { notation = '!:inchord', label = 'Not In Chord', text = '(event.flags & 0x04) == 0', terms = 0 },
   { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true },
   { notation = '!:inscale', label = 'Not In Scale', text = 'not InScale(event, {param1}, {param2})', terms = 2, menu = true },
 }

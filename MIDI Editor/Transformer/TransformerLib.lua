@@ -48,6 +48,7 @@ local disabledAutoOverlap = false
 local NOTE_TYPE = 0
 local CC_TYPE = 1
 local SYXTEXT_TYPE = 2
+local OTHER_TYPE = 7
 
 local findParserError = ''
 local dirtyFind = false
@@ -296,6 +297,8 @@ local findLengthConditionEntries = {
   findConditionEqual, findConditionUnequal,
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, timedur = true, freeterm = true },
   { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, timedur = true, freeterm = true },
+  { notation = ':eqmusical', label = 'Equal (Musical)', text = 'EqualsMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
+  { notation = '!:eqmusical', label = 'Unequal (Musical)', text = 'not EqualsMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange, findConditionOutRange
 }
@@ -369,8 +372,8 @@ local findCursorParam1Entries = {
   { notation = '$after_at', label = "After or At Cursor", text = 'CURSOR_GTE' },
 }
 
-local findMetricGridParam1Entries = {
-  { notation = '$1/64', label = '1/64', text = '0,015625' },
+local findMusicalParam1Entries = {
+  { notation = '$1/64', label = '1/64', text = '0.015625' },
   { notation = '$1/32', label = '1/32', text = '0.03125' },
   { notation = '$1/16', label = '1/16', text = '0.0625' },
   { notation = '$1/8', label = '1/8', text = '0.125' },
@@ -551,7 +554,7 @@ local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '*', label = 'Multiply (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1}, _context)', terms = 1, floateditor = true, norange = true, literal = true },
-  { notation = '/', label = 'Divide (rel. item start)', text = 'MultiplyPosition(event, {tgt}, 1 / {param1}, _context)', terms = 1, floateditor = true, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1 ~= 0 and (1 / {param1}) or 0, _context)', terms = 1, floateditor = true, norange = true, literal = true },
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -565,6 +568,7 @@ local actionLengthOperationEntries = {
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projlen)', terms = 1, timedur = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
+  { notation = ':quantmusical', label = 'Set to Musical Length', text = 'SetMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
   actionOperationTimeScaleOff
@@ -628,6 +632,7 @@ local PARAM_TYPE_FLOATEDITOR = 3
 local PARAM_TYPE_TIME = 4
 local PARAM_TYPE_TIMEDUR = 5
 local PARAM_TYPE_METRICGRID = 6
+local PARAM_TYPE_MUSICAL = 7
 
 local EDITOR_TYPE_PITCHBEND = 100
 local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
@@ -681,6 +686,43 @@ function TestEvent2(event, property, op, param1, param2)
   return retval
 end
 
+function EqualsMusicalLength(event, take, PPQ, mgParams)
+  if not take then return false end
+
+  if GetEventType(event) ~= NOTE_TYPE then return false end
+
+  local subdiv = mgParams.param1
+  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
+  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
+  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+
+  local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
+  local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
+  if postSlop == 0 then postSlop = 1 end
+
+  local ppqlen = event.endppqpos - event.ppqpos
+  return ppqlen >= gridUnit - preSlop and ppqlen <= gridUnit + postSlop
+end
+
+function SetMusicalLength(event, take, PPQ, mgParams)
+  if not take then return event.projlen end
+
+  if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
+
+  local subdiv = mgParams.param1
+  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
+  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
+  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+
+  local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
+  local newppqpos = oldppqpos + gridUnit
+  local newprojpos = r.MIDI_GetProjTimeFromPPQPos(take, newppqpos)
+  local newprojlen = newprojpos - event.projtime
+
+  event.projlen = newprojlen
+  return newprojlen
+end
+
 function CursorPosition(event, property, cursorPosProj, which)
   local time = event[property]
 
@@ -708,14 +750,26 @@ function GetTimeSelectionEnd()
   return ts_end + GetTimeOffset()
 end
 
+function ChanMsgToType(chanmsg)
+  if chanmsg == 0x90 then return NOTE_TYPE
+  elseif chanmsg == 0xF0 then return SYXTEXT_TYPE
+  elseif chanmsg >= 0xA0 and chanmsg <= 0xEF then return CC_TYPE
+  else return OTHER_TYPE
+  end
+end
+
+function GetEventType(event)
+  return ChanMsgToType(event.chanmsg)
+end
+
 function GetSubtypeValue(event)
-  if event.type == SYXTEXT_TYPE then return 0
+  if GetEventType(event) == SYXTEXT_TYPE then return 0
   else return event.msg2 / 127
   end
 end
 
 function GetSubtypeValueName(event)
-  if event.type == SYXTEXT_TYPE then return 'devnull'
+  if GetEventType(event) == SYXTEXT_TYPE then return 'devnull'
   else return 'msg2'
   end
 end
@@ -733,14 +787,14 @@ end
 
 function GetMainValue(event)
   if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 0
-  elseif event.type == SYXTEXT_TYPE then return 0
+  elseif GetEventType(event) == SYXTEXT_TYPE then return 0
   else return event.msg3 / 127
   end
 end
 
 function GetMainValueName(event)
   if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'devnull'
-  elseif event.type == SYXTEXT_TYPE then return 'devnull'
+  elseif GetEventType(event) == SYXTEXT_TYPE then return 'devnull'
   else return 'msg3'
   end
 end
@@ -844,7 +898,7 @@ function OnMetricGrid(take, PPQ, ppqpos, mgParams)
 end
 
 function InScale(event, scale, root)
-  if event.type ~= NOTE_TYPE then return false end
+  if GetEventType(event) ~= NOTE_TYPE then return false end
 
   local note = event.msg2 % 12
   note = note - root
@@ -860,6 +914,19 @@ end
 
 function SetValue(event, property, newval, bipolar)
   if not property then return newval end
+
+  if property == 'chanmsg' then
+    local oldtype = GetEventType(event)
+    local newtype = ChanMsgToType(newval)
+    if oldtype ~= newtype then
+      if event.orig_type then
+        if newval == event.orig_type then event.orig_type = nil end -- if multiple steps change and then unchange the type (edge case)
+      else
+        event.orig_type = oldtype -- will be compared against chanmsg before writing and Delete+New as necessary
+      end
+    end
+  end
+
   local is14bit = false
   if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
   if is14bit then
@@ -886,7 +953,7 @@ function OperateEvent1(event, property, op, param1)
   elseif op == OP_MULT then
     newval = oldval * param1
   elseif op == OP_DIV then
-    newval = oldval / param1
+    newval = param1 ~= 0 and (oldval / param1) or 0
   elseif op == OP_FIXED then
     newval = param1
   end
@@ -950,7 +1017,7 @@ local addLengthFirstEventOffset
 local addLengthFirstEventOffset_Take
 
 function AddLength(event, property, mode)
-  if event.type ~= NOTE_TYPE then return event.projtime end
+  if GetEventType(event) ~= NOTE_TYPE then return event.projtime end
 
   if mode == 2 then
     return event.projtime + event.projlen
@@ -979,7 +1046,7 @@ end
 
 -- need to think about this
 -- function MoveNoteOffToCursor(event, mode)
---   if event.type ~= NOTE_TYPE then return event.projlen end
+--   if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
 
 --   if mode == 1 then -- independent
 --     if not moveCursorFirstEventLength_Take then moveCursorFirstEventLength_Take = event.projtime end
@@ -991,7 +1058,7 @@ end
 -- end
 
 function MoveLengthToCursor(event)
-  if event.type ~= NOTE_TYPE then return event.projlen end
+  if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
 
   local cursorPos = r.GetCursorPositionEx(0) + GetTimeOffset()
 
@@ -1438,45 +1505,59 @@ local function serialize(val, name, skipnewlines, depth)
   return tmp
 end
 
-function FindTargetToTabs(row, targetEntry)
+function FindTabsFromTarget(row)
   local condTab = {}
   local param1Tab = {}
   local param2Tab = {}
+  local target = {}
+  local condition = {}
 
-  if targetEntry > 0 then
-    local notation = findTargetEntries[targetEntry].notation
-    if notation == '$position' then
-      condTab = findPositionConditionEntries
-      local condition = condTab[row.conditionEntry]
-      if condition then
-        if condition.metricgrid then
-          param1Tab = findMetricGridParam1Entries
-        elseif condition.notation == ':cursorpos' then
-          param1Tab = findCursorParam1Entries
-        end
+  if not row or row.targetEntry < 1 then return condTab, param1Tab, param2Tab, target, condition end
+
+  target = findTargetEntries[row.targetEntry]
+  if not target then return condTab, param1Tab, param2Tab, {}, condition end
+
+  local notation = target.notation
+  if notation == '$position' then
+    condTab = findPositionConditionEntries
+    local condition = condTab[row.conditionEntry]
+    if condition then
+      if condition.metricgrid then
+        param1Tab = findMusicalParam1Entries
+      elseif condition.notation == ':cursorpos' then
+        param1Tab = findCursorParam1Entries
       end
-    elseif notation == '$length' then
-      condTab = findLengthConditionEntries
-    elseif notation == '$channel' then
-      condTab = findGenericConditionEntries
-      param1Tab = findChannelParam1Entries
-      param2Tab = findChannelParam1Entries
-    elseif notation == '$type' then
-      condTab = findTypeConditionEntries
-      param1Tab = findTypeParam1Entries
-    elseif notation == '$property' then
-      condTab = findPropertyConditionEntries
-      param1Tab = findPropertyParam1Entries
-      param2Tab = findPropertyParam2Entries
-    -- elseif notation == '$value1' then
-    -- elseif notation == '$value2' then
-    -- elseif notation == '$velocity' then
-    -- elseif notation == '$relvel' then
-    else
-      condTab = findGenericConditionEntries
     end
+  elseif notation == '$length' then
+    condTab = findLengthConditionEntries
+    local condition = condTab[row.conditionEntry]
+    if condition then
+      if string.match(condition.notation, ':eqmusical') then
+        param1Tab = findMusicalParam1Entries
+      end
+    end
+  elseif notation == '$channel' then
+    condTab = findGenericConditionEntries
+    param1Tab = findChannelParam1Entries
+    param2Tab = findChannelParam1Entries
+  elseif notation == '$type' then
+    condTab = findTypeConditionEntries
+    param1Tab = findTypeParam1Entries
+  elseif notation == '$property' then
+    condTab = findPropertyConditionEntries
+    param1Tab = findPropertyParam1Entries
+    param2Tab = findPropertyParam2Entries
+  -- elseif notation == '$value1' then
+  -- elseif notation == '$value2' then
+  -- elseif notation == '$velocity' then
+  -- elseif notation == '$relvel' then
+  else
+    condTab = findGenericConditionEntries
   end
-  return condTab, param1Tab, param2Tab
+
+  condition = condTab[row.conditionEntry]
+
+  return condTab, param1Tab, param2Tab, target, condition and condition or {}
 end
 
 function GenerateMetricGridNotation(row)
@@ -1507,6 +1588,7 @@ function GetParamType(src)
     or src.time and PARAM_TYPE_TIME
     or src.timedur and PARAM_TYPE_TIMEDUR
     or src.metricgrid and PARAM_TYPE_METRICGRID
+    or src.musical and PARAM_TYPE_MUSICAL
     or PARAM_TYPE_UNKNOWN
 end
 
@@ -1560,7 +1642,7 @@ function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
       local pa, pb = string.find(paramStr, vv.notation)
       if pa and pb then
         row[paramName .. 'Entry'] = kk
-        if paramType == PARAM_TYPE_METRICGRID then
+        if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
           row.mg = {}
           row.mg.modifiers, row.mg.wantsBarRestart, row.mg.preSlopPercent, row.mg.postSlopPercent = ParseMetricGridNotation(paramStr:sub(pb + 1))
         end
@@ -1580,7 +1662,7 @@ function HandleParam(row, target, condOp, paramName, paramTab, paramStr, index)
     row[paramName .. 'TimeFormatStr'] = TimeFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_TIMEDUR then
     row[paramName .. 'TimeFormatStr'] = LengthFormatRebuf(paramStr)
-  elseif paramType == PARAM_TYPE_METRICGRID then
+  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
     row[paramName .. 'TextEditorStr'] = paramStr
   end
   return paramStr
@@ -1626,7 +1708,7 @@ function ProcessFindMacroRow(buf, boolstr)
   if row.targetEntry < 1 then return end
 
   local param1Tab, param2Tab
-  local condTab = FindTargetToTabs(row, row.targetEntry)
+  local condTab = FindTabsFromTarget(row)
 
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(condTab) do
@@ -1637,7 +1719,7 @@ function ProcessFindMacroRow(buf, boolstr)
     if findstart and findend then
       row.conditionEntry = k
       bufstart = findend + 1
-      condTab, param1Tab, param2Tab = FindTargetToTabs(row, row.targetEntry)
+      condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
       if param1 and param1 ~= '' then
         bufstart = findend + 1
@@ -1654,7 +1736,7 @@ function ProcessFindMacroRow(buf, boolstr)
         row.conditionEntry = k
         bufstart = findend + 1
 
-        condTab, param1Tab, param2Tab = FindTargetToTabs(row, row.targetEntry)
+        condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
           param1 = HandleParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
@@ -1792,7 +1874,9 @@ context.math = math
 
 context.TestEvent1 = TestEvent1
 context.TestEvent2 = TestEvent2
+context.EqualsMusicalLength = EqualsMusicalLength
 context.CursorPosition = CursorPosition
+
 context.OP_EQ = OP_EQ
 context.OP_GT = OP_GT
 context.OP_GTE = OP_GTE
@@ -1830,6 +1914,8 @@ context.TimeFormatToSeconds = TimeFormatToSeconds
 context.InScale = InScale
 context.MoveToCursor = MoveToCursor
 context.MoveLengthToCursor = MoveLengthToCursor
+context.SetMusicalLength = SetMusicalLength
+
 context.OP_ADD = OP_ADD
 context.OP_SUB = OP_SUB
 context.OP_MULT = OP_MULT
@@ -1839,7 +1925,7 @@ context.OP_SCALEOFF = OP_SCALEOFF
 
 function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation)
   local addMetricGridNotation = false
-  if paramType == PARAM_TYPE_METRICGRID then
+  if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
     if terms == 1 then
       if notation then addMetricGridNotation = true end
       paramType = PARAM_TYPE_MENU
@@ -1873,7 +1959,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr']))
   elseif paramType == PARAM_TYPE_TIMEDUR then
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr']))
-  elseif paramType == PARAM_TYPE_METRICGRID then
+  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
     paramVal = row[paramName .. 'TextEditorStr']
   elseif #paramTab ~= 0 then
     paramVal = notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text
@@ -1897,20 +1983,10 @@ end
   ---------------------------------------------------------------------------
   -------------------------------- FIND UTILS -------------------------------
 
-function PrepFindEntries(row)
-  if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
-
-  local condTab, param1Tab, param2Tab = FindTargetToTabs(row, row.targetEntry)
-  local curTarget = findTargetEntries[row.targetEntry]
-  local curCondition = condTab[row.conditionEntry]
-
-  return condTab, param1Tab, param2Tab, curTarget, curCondition
-end
-
 function FindRowToNotation(row, index)
   local rowText = ''
 
-  local condTab, param1Tab, param2Tab, curTarget, curCondition = PrepFindEntries(row)
+  local _, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(row)
   rowText = curTarget.notation .. ' ' .. curCondition.notation
   local param1Val, param2Val
   local paramTypes = GetParamTypesForRow(row, curTarget, curCondition)
@@ -1983,7 +2059,7 @@ function RunFind(findFn, params, runFn)
     local prevEvent
 
     for _, event in ipairs(allEvents) do
-      if event.type == NOTE_TYPE then -- note event
+      if GetEventType(event) == NOTE_TYPE then -- note event
         local ns, ne = event.projtime, event.projtime + event.projlen
         if firstNoteTime and lastNoteTime then
           local us = firstNoteTime < ns and ns or firstNoteTime
@@ -2031,7 +2107,7 @@ function ProcessFind(take)
   local wantsInChord = false
 
   for k, v in ipairs(findRowTable) do
-    local condTab, param1Tab, param2Tab, curTarget, curCondition = PrepFindEntries(v)
+    local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
 
     if (#condTab == 0) then return end -- continue?
 
@@ -2061,7 +2137,6 @@ function ProcessFind(take)
     end
 
     local paramTypes = GetParamTypesForRow(v, curTarget, condition)
-    local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
     if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and v.param1PercentVal then
       param1Term = GetParamPercentTerm(param1Num, curCondition.bipolar) -- it's a percent coming from the system
     end
@@ -2074,12 +2149,17 @@ function ProcessFind(take)
     findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
     findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
     findTerm = string.gsub(findTerm, '{param2}', tostring(param2Term))
-    if isMetricGrid then
+
+    local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
+    local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
+
+    if isMetricGrid or isMusical then
       local mgParams = tableCopy(v.mg)
       mgParams.param1 = param1Num
       mgParams.param2 = param2Term
-      findTerm = string.gsub(findTerm, '{metricgridparams}', serialize(mgParams))
+      findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', serialize(mgParams))
     end
+
     if curTarget.cond then
       findTerm = curTarget.cond .. ' and ' .. findTerm
     end
@@ -2129,46 +2209,53 @@ function ProcessFind(take)
   return findFn, wantsInChord
 end
 
-function ActionOpTabFromTarget(targetEntry)
+function ActionTabsFromTarget(row)
   local opTab = {}
-
-  if targetEntry > 0 then
-    local notation = actionTargetEntries[targetEntry].notation
-    if notation == '$position' then
-      opTab = actionPositionOperationEntries
-    elseif notation == '$length' then
-      opTab = actionLengthOperationEntries
-    elseif notation == '$channel' then
-      opTab = actionChannelOperationEntries
-    elseif notation == '$type' then
-      opTab = actionTypeOperationEntries
-    elseif notation == '$property' then
-      opTab = actionPropertyOperationEntries
-    elseif notation == '$value1' then
-      opTab = actionSubtypeOperationEntries
-    elseif notation == '$value2' then
-      opTab = actionVelocityOperationEntries
-    elseif notation == '$velocity' then
-      opTab = actionVelocityOperationEntries
-    elseif notation == '$relvel' then
-      opTab = actionVelocityOperationEntries
-    else
-      opTab = actionGenericOperationEntries
-    end
-  end
-  return opTab
-end
-
-function ActionOperationToTabs(target, operation)
   local param1Tab = {}
   local param2Tab = {}
+  local target = {}
+  local operation = {}
+
+  if not row or row.targetEntry < 1 then return opTab, param1Tab, param2Tab, target, operation end
+
+  target = actionTargetEntries[row.targetEntry]
+  if not target then return opTab, param1Tab, param2Tab, {}, operation end
 
   local notation = target.notation
+  if notation == '$position' then
+    opTab = actionPositionOperationEntries
+  elseif notation == '$length' then
+    opTab = actionLengthOperationEntries
+  elseif notation == '$channel' then
+    opTab = actionChannelOperationEntries
+  elseif notation == '$type' then
+    opTab = actionTypeOperationEntries
+  elseif notation == '$property' then
+    opTab = actionPropertyOperationEntries
+  elseif notation == '$value1' then
+    opTab = actionSubtypeOperationEntries
+  elseif notation == '$value2' then
+    opTab = actionVelocityOperationEntries
+  elseif notation == '$velocity' then
+    opTab = actionVelocityOperationEntries
+  elseif notation == '$relvel' then
+    opTab = actionVelocityOperationEntries
+  else
+    opTab = actionGenericOperationEntries
+  end
+
+  operation = opTab[row.operationEntry]
+  if not operation then return opTab, param1Tab, param2Tab, target, {} end
+
   if notation == '$position' then
     if operation.notation == ':tocursor' then
       param1Tab = actionMoveToCursorParam1Entries
     elseif operation.notation == ':addlength' then
       param1Tab = actionAddLengthParam1Entries
+    end
+  elseif notation == '$length' then
+    if operation.notation == ':quantmusical' then
+      param1Tab = findMusicalParam1Entries
     end
   elseif notation == '$channel' then
     param1Tab = findChannelParam1Entries -- same as find
@@ -2177,7 +2264,8 @@ function ActionOperationToTabs(target, operation)
   elseif notation == '$property' then
     param1Tab = actionPropertyParam1Entries
   end
-  return param1Tab, param2Tab
+
+  return opTab, param1Tab, param2Tab, target, operation
 end
 
 function ProcessActionMacroRow(buf)
@@ -2200,8 +2288,11 @@ function ProcessActionMacroRow(buf)
 
   if row.targetEntry < 1 then return end
 
-  local opTab = ActionOpTabFromTarget(row.targetEntry) -- a little simpler than findTargets, no operation-based overrides (yet)
-  local target = actionTargetEntries[row.targetEntry]
+  local opTab, _, _, target = ActionTabsFromTarget(row) -- a little simpler than findTargets, no operation-based overrides (yet)
+  if not (target and opTab) then
+    mu.post('could not process action macro row: ' .. buf)
+    return false
+  end
 
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(opTab) do
@@ -2209,8 +2300,7 @@ function ProcessActionMacroRow(buf)
     findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
     if findstart and findend then
       row.operationEntry = k
-      local operation = opTab[row.operationEntry]
-      local param1Tab = ActionOperationToTabs(target, operation)
+      local _, param1Tab, _, _, operation = ActionTabsFromTarget(row)
       bufstart = findend + (buf[findend] == '(' and 0 or 1)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s]*)%s*', bufstart)
@@ -2224,8 +2314,7 @@ function ProcessActionMacroRow(buf)
       findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
       if findstart and findend then
         row.operationEntry = k
-        local operation = opTab[row.operationEntry]
-        local param1Tab, param2Tab = ActionOperationToTabs(target, operation)
+        local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
 
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
@@ -2270,16 +2359,6 @@ end
   ----------------------------------------------
   ---------------- ACTIONS TABLE ---------------
   ----------------------------------------------
-
-function PrepActionEntries(row)
-  if row.targetEntry < 1 then return {}, {}, {}, {}, {} end
-
-  local opTab = ActionOpTabFromTarget(row.targetEntry)
-  local curTarget = actionTargetEntries[row.targetEntry]
-  local curOperation = opTab[row.operationEntry]
-  local param1Tab, param2Tab = ActionOperationToTabs(curTarget, curOperation)
-  return opTab, param1Tab, param2Tab, curTarget, curOperation
-end
 
 local mediaItemCount
 local mediaItemIndex
@@ -2385,7 +2464,7 @@ end
 function ActionRowToNotation(row, index)
   local rowText = ''
 
-  local opTab, param1Tab, param2Tab, curTarget, curOperation = PrepActionEntries(row)
+  local _, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(row)
   rowText = curTarget.notation .. ' ' .. curOperation.notation
   local param1Val, param2Val
   local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
@@ -2434,11 +2513,11 @@ function DeleteEventsInTake(take, eventTab, doTx)
     mu.MIDI_OpenWriteTransaction(take)
   end
   for _, event in ipairs(eventTab) do
-    if event.type == NOTE_TYPE then
+    if GetEventType(event) == NOTE_TYPE then
       mu.MIDI_DeleteNote(take, event.idx)
-    elseif event.type == CC_TYPE then
+    elseif GetEventType(event) == CC_TYPE then
       mu.MIDI_DeleteCC(take, event.idx)
-    elseif event.type == SYXTEXT_TYPE then
+    elseif GetEventType(event) == SYXTEXT_TYPE then
       mu.MIDI_DeleteTextSysexEvt(take, event.idx)
     end
   end
@@ -2457,14 +2536,14 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
     event.muted = (event.flags & 2) ~= 0
-    if event.type == NOTE_TYPE then
+    if GetEventType(event) == NOTE_TYPE then
       if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
-      event.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
+      event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
-      mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqos, event.chan, event.msg2, event.msg3, event.relvel)
-    elseif event.type == CC_TYPE then
+      mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
+    elseif GetEventType(event) == CC_TYPE then
       mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
-    elseif event.type == SYXTEXT_TYPE then
+    elseif GetEventType(event) == SYXTEXT_TYPE then
       mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
     end
   end
@@ -2474,11 +2553,11 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
 end
 
 function SetEntrySelectionInTake(take, event)
-  if event.type == NOTE_TYPE then
+  if GetEventType(event) == NOTE_TYPE then
     mu.MIDI_SetNote(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil, nil)
-  elseif event.type == CC_TYPE then
+  elseif GetEventType(event) == CC_TYPE then
     mu.MIDI_SetCC(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil)
-  elseif event.type == SYXTEXT_TYPE then
+  elseif GetEventType(event) == SYXTEXT_TYPE then
     mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, nil, nil, nil, nil)
   end
 end
@@ -2491,15 +2570,41 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
     event.muted = (event.flags & 2) ~= 0
-    if event.type == NOTE_TYPE then
-      if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
-      event.endppqos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
+    if GetEventType(event) == NOTE_TYPE then
+      if (not event.projlen or event.projlen <= 0) then event.projlen = 1 / context.PPQ end
+      event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
-      mu.MIDI_SetNote(take, event.idx, event.selected, event.muted, event.ppqpos, event.endppqos, event.chan, event.msg2, event.msg3, event.relvel)
-    elseif event.type == CC_TYPE then
-      mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
-    elseif event.type == SYXTEXT_TYPE then
-      mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
+      if not event.orig_type or event.orig_type == NOTE_TYPE then
+        mu.MIDI_SetNote(take, event.idx, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
+      else
+        mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
+        if event.orig_type == CC_TYPE then
+          mu.MIDI_DeleteCC(take, event.idx)
+        elseif event.orig_type == SYXTEXT_TYPE then
+          mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+        end
+      end
+    elseif GetEventType(event) == CC_TYPE then
+      if not event.orig_type or event.orig_type == CC_TYPE then
+        mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+      else
+        mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+        if event.orig_type == NOTE_TYPE then
+          mu.MIDI_DeleteNote(take, event.idx)
+        elseif event.orig_type == SYXTEXT_TYPE then
+          mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+        end
+      end
+    elseif GetEventType(event) == SYXTEXT_TYPE then
+      if not event.orig_type or event.orig_type == SYXTEXT_TYPE then
+        mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
+      else
+        if event.orig_type == NOTE_TYPE then
+          mu.MIDI_DeleteNote(take, event.idx)
+        elseif event.orig_type == CC_TYPE then
+          mu.MIDI_DeleteCC(take, event.idx)
+        end
+      end
     end
   end
   mu.MIDI_CommitWriteTransaction(take, false, true)
@@ -2604,7 +2709,7 @@ function ProcessAction(select)
   local fnString = ''
 
   for k, v in ipairs(actionRowTable) do
-    local opTab, param1Tab, param2Tab, curTarget, curOperation = PrepActionEntries(v)
+    local opTab, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(v)
 
     if (#opTab == 0) then return end -- continue?
 
@@ -2643,6 +2748,15 @@ function ProcessAction(select)
     actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
     actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
     actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
+
+    local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
+
+    if isMusical then
+      local mgParams = tableCopy(v.mg)
+      mgParams.param1 = param1Num
+      mgParams.param2 = param2Term
+      actionTerm = string.gsub(actionTerm, '{musicalparams}', serialize(mgParams))
+    end
 
     actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
 
@@ -2883,8 +2997,9 @@ function PitchBendTo14Bit(val, literal)
 end
 
 function SetRowParam(row, paramName, paramType, editorType, strVal, range, literal)
-  row[paramName .. 'TextEditorStr'] = paramType == PARAM_TYPE_METRICGRID and strVal or EnsureNumString(strVal, range)
-  if paramType == PARAM_TYPE_METRICGRID or not editorType then
+  local isMetricOrMusical = (paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL)
+  row[paramName .. 'TextEditorStr'] = isMetricOrMusical and strVal or EnsureNumString(strVal, range)
+  if isMetricOrMusical or not editorType then
     row[paramName .. 'PercentVal'] = nil
     -- nothing
   else
@@ -2952,9 +3067,6 @@ TransformerLib.processActionMacro = ProcessActionMacro
 TransformerLib.processFind = ProcessFind
 TransformerLib.processAction = ProcessAction
 
-TransformerLib.prepFindEntries = PrepFindEntries
-TransformerLib.prepActionEntries = PrepActionEntries
-
 TransformerLib.savePreset = SavePreset
 TransformerLib.loadPreset = LoadPreset
 
@@ -2962,8 +3074,8 @@ TransformerLib.timeFormatRebuf = TimeFormatRebuf
 TransformerLib.lengthFormatRebuf = LengthFormatRebuf
 
 TransformerLib.GetParamTypesForRow = GetParamTypesForRow
-TransformerLib.findTargetToTabs = FindTargetToTabs
-TransformerLib.actionOpTabFromTarget = ActionOpTabFromTarget
+TransformerLib.findTabsFromTarget = FindTabsFromTarget
+TransformerLib.actionTabsFromTarget = ActionTabsFromTarget
 TransformerLib.findRowToNotation = FindRowToNotation
 TransformerLib.actionRowToNotation = ActionRowToNotation
 
@@ -3013,6 +3125,7 @@ TransformerLib.PARAM_TYPE_FLOATEDITOR = PARAM_TYPE_FLOATEDITOR
 TransformerLib.PARAM_TYPE_TIME = PARAM_TYPE_TIME
 TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
 TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
+TransformerLib.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }

@@ -13,8 +13,6 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
--- TODO: bipolar multiplication / pitchbend
-
 local versionStr = '1.0-alpha.1'
 
 local r = reaper
@@ -152,6 +150,7 @@ local findParserError = ''
 local refocusInput = false
 
 local metricLastUnit = 3 -- 1/16 in findMetricGridParam1Entries
+local musicalLastUnit = 3 -- 1/16 in findMetricGridParam1Entries
 local metricLastBarRestart = false
 
 local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
@@ -258,7 +257,7 @@ local function addActionRow(idx, row)
     end
 
     row = tx.ActionRow()
-    setupRowFormat(row, tx.actionOpTabFromTarget(row.targetEntry))
+    setupRowFormat(row, tx.actionTabsFromTarget(row))
   end
 
   table.insert(actionRowTable, idx, row)
@@ -707,7 +706,7 @@ local function windowFn()
     return label
   end
 
-  local function createPopup(name, source, selEntry, fun, special)
+  local function createPopup(row, name, source, selEntry, fun, special)
     if r.ImGui_BeginPopup(ctx, name) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         if r.ImGui_IsPopupOpen(ctx, name, r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
@@ -757,7 +756,7 @@ local function windowFn()
 
       r.ImGui_PopStyleColor(ctx, 5)
 
-      if special then special(fun) end
+      if special then special(fun, row) end
       r.ImGui_EndPopup(ctx)
     end
   end
@@ -836,7 +835,8 @@ local function windowFn()
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, terms, rowIdx, procFn)
     local rv = 0
     local editorType = row[paramName .. 'EditorType']
-    if paramType == tx.PARAM_TYPE_METRICGRID and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
+    local isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
+    if isMetricOrMusical and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
     local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
     if condOp.terms >= terms then
@@ -850,7 +850,7 @@ local function windowFn()
         end
       elseif paramType == tx.PARAM_TYPE_INTEDITOR
         or isFloat
-        or paramType == tx.PARAM_TYPE_METRICGRID
+        or isMetricOrMusical
         or editorType == tx.EDITOR_TYPE_PITCHBEND
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
@@ -878,7 +878,6 @@ local function windowFn()
         local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
           tx.setRowParam(row, paramName, paramType, editorType, buf, range, condOp.literal and true or false)
-          -- row[paramName .. 'TextEditorStr'] = paramType == tx.PARAM_TYPE_METRICGRID and buf or ensureNumString(buf, range)
           procFn()
           inTextInput = false
         elseif retval then inTextInput = true
@@ -922,30 +921,6 @@ local function windowFn()
           end
         end
       end
-
-      -- not working yet
-      -- local paramTypeMenu = {
-      --   { label = 'Default', value = nil },
-      --   { label = 'Integer', value = tx.PARAM_TYPE_INTEDITOR },
-      --   { label = 'Float', value = tx.PARAM_TYPE_FLOATEDITOR },
-      --   { label = 'Time',  value = tx.PARAM_TYPE_TIME },
-      --   { label = 'Duration',  value = tx.PARAM_TYPE_TIMEDUR },
-      --   { label = 'Percent',  value = tx.PARAM_TYPE_PERCENT },
-      --   { label = 'Pitch Bend', value = tx.PARAM_TYPE_PITCHBEND }
-      --   -- { label = '14-bit', value = tx.PARAM_TYPE_14BIT },
-      -- }
-
-      -- local function paramTypeToMenuIdx(paramType)
-      --   for k, v in ipairs(paramTypeMenu) do
-      --     if v.value == paramType then return k end
-      --   end
-      --   return 1
-      -- end
-
-      -- createPopup('forceParam' .. terms .. 'Type', paramTypeMenu, paramTypeToMenuIdx(row['forceParam' .. terms .. 'Type']), function(i)
-      --   row['forceParam' .. terms .. 'Type'] = paramTypeMenu[i].value
-      -- end)
-
     end
     return rv
   end
@@ -992,6 +967,62 @@ local function windowFn()
       mainValueLabel = 'Multiple (Databyte 2)'
     end
     if fresh then newHasTable = true end
+  end
+
+  local function musicalActionParam1Special(fun, row, addMetric, addSlop)
+    r.ImGui_Separator(ctx)
+
+    local mg = row.mg
+
+    local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', mg.modifiers & 1 ~= 0)
+    if rv then
+      mg.modifiers = sel and 1 or 0
+      fun(1, true)
+    end
+
+    rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', mg.modifiers & 2 ~= 0)
+    if rv then
+      mg.modifiers = sel and 2 or 0
+      fun(2, true)
+    end
+
+    r.ImGui_Separator(ctx)
+
+    if addMetric then
+      rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
+      if rv then
+        mg.wantsBarRestart = sel
+        fun(3, true)
+      end
+      r.ImGui_Spacing(ctx)
+    end
+
+    if addSlop then
+      r.ImGui_Text(ctx, 'Slop (% of unit)')
+      r.ImGui_SameLine(ctx)
+      local tbuf
+      r.ImGui_SetNextItemWidth(ctx, scaled(50))
+      rv, tbuf = r.ImGui_InputDouble(ctx, 'Pre', mg.preSlopPercent, nil, nil, '%0.2f')
+      if kbdEntryIsCompleted(rv) then
+        mg.preSlopPercent = tbuf
+        fun(4, true)
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetNextItemWidth(ctx, scaled(50))
+      rv, tbuf = r.ImGui_InputDouble(ctx, 'Post', mg.postSlopPercent, nil, nil, '%0.2f')
+      if kbdEntryIsCompleted(rv) then
+        mg.postSlopPercent = tbuf
+        fun(5, true)
+      end
+    end
+  end
+
+  local function musicalParam1Special(fun, row, addMetric)
+    musicalActionParam1Special(fun, row, addMetric, true)
+  end
+
+  local function metricParam1Special(fun, row)
+    musicalParam1Special(fun, row, true)
   end
 
   ----------------------------------------------
@@ -1041,7 +1072,7 @@ local function windowFn()
     local param1Entries = {}
     local param2Entries = {}
 
-    conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.prepFindEntries(currentRow)
+    conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
 
     r.ImGui_TableNextRow(ctx)
 
@@ -1168,21 +1199,21 @@ local function windowFn()
       r.ImGui_EndPopup(ctx)
     end
 
-    createPopup('startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
+    createPopup(currentRow, 'startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
         currentRow.startParenEntry = i
         tx.processFind()
       end)
 
-    createPopup('endParenMenu', tx.endParenEntries, currentRow.endParenEntry, function(i)
+    createPopup(currentRow, 'endParenMenu', tx.endParenEntries, currentRow.endParenEntry, function(i)
         currentRow.endParenEntry = i
         tx.processFind()
       end)
 
-    createPopup('targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
-      local oldNotation = currentFindCondition.notation
+    createPopup(currentRow, 'targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
+        local oldNotation = currentFindCondition.notation
         currentRow:init()
         currentRow.targetEntry = i
-        conditionEntries = tx.prepFindEntries(currentRow)
+        conditionEntries = tx.findTabsFromTarget(currentRow)
         for kk, vv in ipairs(conditionEntries) do
           if vv.notation == oldNotation then currentRow.conditionEntry = kk break end
         end
@@ -1190,11 +1221,13 @@ local function windowFn()
         tx.processFind()
       end)
 
-    createPopup('conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
+    createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
         currentRow.conditionEntry = i
         setupRowFormat(currentRow, conditionEntries)
-        if string.match(conditionEntries[i].notation, 'metricgrid') then
-          currentRow.param1Entry = metricLastUnit
+        local isMetric = string.match(conditionEntries[i].notation, 'metricgrid')
+        local isMusical = string.match(conditionEntries[i].notation, 'eqmusical')
+        if isMetric or isMusical then
+          currentRow.param1Entry = isMetric and metricLastUnit or musicalLastUnit
           currentRow.mg = {
             wantsBarRestart = metricLastBarRestart,
             preSlopPercent = 0,
@@ -1205,66 +1238,32 @@ local function windowFn()
         tx.processFind()
       end)
 
-    local function metricParam1Special(fun)
-      r.ImGui_Separator(ctx)
-
-      local mg = currentRow.mg
-
-      local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', mg.modifiers & 1 ~= 0)
-      if rv then
-        mg.modifiers = sel and 1 or 0
-        fun(1, true)
-      end
-
-      rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', mg.modifiers & 2 ~= 0)
-      if rv then
-        mg.modifiers = sel and 2 or 0
-        fun(2, true)
-      end
-
-      r.ImGui_Separator(ctx)
-
-      rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
-      if rv then
-        mg.wantsBarRestart = sel
-        fun(3, true)
-      end
-      r.ImGui_Text(ctx, 'Slop (% of unit)')
-      r.ImGui_SameLine(ctx)
-      local tbuf
-      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPreInput', mg.preSlopPercent, nil, nil, '%0.2f') -- TODO: regular text input (allow float)
-      if kbdEntryIsCompleted(rv) then
-        mg.preSlopPercent = tbuf
-        fun(4, true)
-      end
-      r.ImGui_SameLine(ctx)
-      rv, tbuf = r.ImGui_InputDouble(ctx, '##slopPostInput', mg.postSlopPercent, nil, nil, '%0.2f') -- TODO: regular text input (allow float)
-      if kbdEntryIsCompleted(rv) then
-        mg.postSlopPercent = tbuf
-        fun(5, true)
-      end
-    end
-
-    createPopup('param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
+    createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
         if not isSpecial then
           currentRow.param1Entry = i
           currentRow.param1Val = param1Entries[i]
-          if string.match(conditionEntries[currentRow.conditionEntry].notation, 'metricgrid') then
-            metricLastUnit = i
-          end
+          -- if string.match(conditionEntries[currentRow.conditionEntry].notation, 'metricgrid') then
+          --   metricLastUnit = i
+          -- elseif string.match(conditionEntries[currentRow.conditionEntry].notation, 'eqmusical') then
+          --   musicalLastUnit = i
+          -- end
         end
         tx.processFind()
       end,
-      paramTypes[1] == tx.PARAM_TYPE_METRICGRID and metricParam1Special or nil)
+      paramTypes[1] == tx.PARAM_TYPE_METRICGRID
+          and metricParam1Special
+        or paramTypes[1] == tx.PARAM_TYPE_MUSICAL
+          and musicalParam1Special
+        or nil)
 
-    createPopup('param2Menu', param2Entries, currentRow.param2Entry, function(i)
+    createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
         currentRow.param2Entry = i
         currentRow.param2Val = param2Entries[i]
         tx.processFind()
       end)
 
     if showTimeFormatColumn then
-      createPopup('timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
+      createPopup(currentRow, 'timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
           currentRow.timeFormatEntry = i
           tx.processFind()
         end)
@@ -1301,7 +1300,7 @@ local function windowFn()
 
   r.ImGui_SameLine(ctx)
 
-  createPopup('findScopeMenu', tx.findScopeTable, tx.currentFindScope(), function(i)
+  createPopup(nil, 'findScopeMenu', tx.findScopeTable, tx.currentFindScope(), function(i)
       tx.setCurrentFindScope(i)
     end)
 
@@ -1414,7 +1413,7 @@ local function windowFn()
     local param1Entries = {}
     local param2Entries = {}
 
-    operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.prepActionEntries(currentRow)
+    operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)
 
     r.ImGui_TableNextRow(ctx)
 
@@ -1497,11 +1496,11 @@ local function windowFn()
       r.ImGui_EndPopup(ctx)
     end
 
-    createPopup('targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
+    createPopup(currentRow, 'targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
         local oldNotation = currentActionOperation.notation
         currentRow:init()
         currentRow.targetEntry = i
-        operationEntries = tx.prepActionEntries(currentRow)
+        operationEntries = tx.actionTabsFromTarget(currentRow)
         for kk, vv in ipairs(operationEntries) do
           if vv.notation == oldNotation then currentRow.operationEntry = kk break end
         end
@@ -1509,19 +1508,36 @@ local function windowFn()
         tx.processAction()
       end)
 
-    createPopup('operationMenu', operationEntries, currentRow.operationEntry, function(i)
+    createPopup(currentRow, 'operationMenu', operationEntries, currentRow.operationEntry, function(i)
         currentRow.operationEntry = i
         setupRowFormat(currentRow, operationEntries)
+        local isMusical = operationEntries[i].notation == ':quantmusical'
+        if isMusical then
+          currentRow.param1Entry = musicalLastUnit
+          currentRow.mg = {
+            wantsBarRestart = false,
+            preSlopPercent = 0,
+            postSlopPercent = 0,
+            modifiers = 0
+          }
+        end
         tx.processAction()
       end)
 
-    createPopup('param1Menu', param1Entries, currentRow.param1Entry, function(i)
-        currentRow.param1Entry = i
-        currentRow.param1Val = param1Entries[i]
-        tx.processAction()
-      end)
+    createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
+        if not isSpecial then
+          currentRow.param1Entry = i
+          currentRow.param1Val = param1Entries[i]
+          if string.match(operationEntries[currentRow.operationEntry].notation, 'quantmusical') then
+            musicalLastUnit = i
+          end
+        end
+      end,
+      paramTypes[1] == tx.PARAM_TYPE_MUSICAL
+        and musicalActionParam1Special
+        or nil)
 
-    createPopup('param2Menu', param2Entries, currentRow.param2Entry, function(i)
+    createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
         currentRow.param2Entry = i
         currentRow.param2Val = param2Entries[i]
         tx.processAction()
@@ -1570,7 +1586,7 @@ local function windowFn()
   updateCurrentRect()
   generateLabel('Action Scope')
 
-  createPopup('actionScopeMenu', tx.actionScopeTable, tx.currentActionScope(), function(i)
+  createPopup(nil, 'actionScopeMenu', tx.actionScopeTable, tx.currentActionScope(), function(i)
       tx.setCurrentActionScope(i)
     end)
 
@@ -1947,7 +1963,10 @@ local function windowFn()
     end
   end
 
-  if not inTextInput and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace()) then
+  if not inTextInput
+    and not r.ImGui_IsPopupOpen(ctx, '', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel())
+    and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace())
+  then
     if lastSelectedRowType == 0 then removeFindRow()
     elseif lastSelectedRowType == 1 then removeActionRow()
     end

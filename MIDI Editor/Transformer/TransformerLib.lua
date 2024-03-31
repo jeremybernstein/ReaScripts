@@ -43,8 +43,6 @@ local TransformerLib = {}
 
 local INVALID = -0xFFFFFFFF
 
-local disabledAutoOverlap = false
-
 local NOTE_TYPE = 0
 local CC_TYPE = 1
 local SYXTEXT_TYPE = 2
@@ -258,7 +256,8 @@ local OP_GTE = 3
 local OP_LT = 4
 local OP_LTE = 5
 local OP_INRANGE = 6
-local OP_EQ_SLOP = 7
+local OP_INRANGE_EXCL = 7
+local OP_EQ_SLOP = 8
 
 local findConditionEqual = { notation = '==', label = 'Equal', text = 'TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
 local findConditionUnequal = { notation = '!=', label = 'Unequal', text = 'not TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
@@ -268,13 +267,15 @@ local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'Tes
 local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1 }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
 local findConditionOutRange = { notation = '!:inrange', label = 'Outside Range', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
+local findConditionInRangeExcl = { notation = ':inrange', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
+local findConditionOutRangeExcl = { notation = '!:inrange', label = 'Outside Range (Exclusive End)', text = 'not TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
 
 local findGenericConditionEntries = {
   findConditionEqual, findConditionUnequal,
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
   { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange, findConditionOutRange
+  findConditionInRange, findConditionOutRange, findConditionInRangeExcl, findConditionOutRangeExcl
 }
 
 local findPositionConditionEntries = {
@@ -282,14 +283,16 @@ local findPositionConditionEntries = {
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
   { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange, findConditionOutRange,
+  findConditionInRange, findConditionOutRange, findConditionInRangeExcl, findConditionOutRangeExcl,
+  { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0 },
+  { notation = '!:ongrid', label = 'Not On Grid', text = 'not OnGrid(event, {tgt}, take, PPQ)', terms = 0 },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
   { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
   { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true },
-  { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
-  { notation = '!:intimesel', label = 'Outside Time Selection', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
+  { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
+  { notation = '!:intimesel', label = 'Outside Time Selection', text = 'not TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -300,7 +303,7 @@ local findLengthConditionEntries = {
   { notation = ':eqmusical', label = 'Equal (Musical)', text = 'EqualsMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   { notation = '!:eqmusical', label = 'Unequal (Musical)', text = 'not EqualsMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange, findConditionOutRange
+  findConditionInRange, findConditionOutRange, findConditionInRangeExcl, findConditionOutRangeExcl
 }
 
 local findTypeConditionEntries = {
@@ -497,6 +500,8 @@ local actionTargetEntries = {
   { notation = '$value2', label = 'Value 2', text = '_value2', inteditor = true, range = {0, 127} },
   { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
+  -- { notation = '$newevent', label = 'New Event', text = '', menu = true },
+
   -- { label = 'Last Event' },
   -- { label = 'Context Variable' }
 }
@@ -680,6 +685,8 @@ function TestEvent2(event, property, op, param1, param2)
 
   if op == OP_INRANGE then
     retval = (val >= param1 and val <= param2)
+  elseif op == OP_INRANGE_EXCL then
+    retval = (val >= param1 and val < param2)
   elseif op == OP_EQ_SLOP then
     retval = (val >= (param1 - param2) and val <= (param1 + param2))
   end
@@ -829,6 +836,23 @@ function GetTimeOffset(correctMeasures)
     end
   end
   return offset
+end
+
+function OnGrid(event, property, take, PPQ)
+  if not take then return false end
+
+  local grid, swing = r.MIDI_GetGrid(take) -- 1.0 is QN, 1.5 dotted, etc.
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
+  local measppq = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
+  local gridUnit = grid * PPQ
+  local subMeas = math.floor((gridUnit * 2) + 0.5)
+  local swingUnit = swing and math.floor((gridUnit + (swing * gridUnit * 0.5)) + 0.5) or nil
+
+  local testppq = (ppqpos - measppq) % subMeas
+  if (testppq == 0) or (swingUnit and testppq % swingUnit == 0) then
+    return true
+  end
+  return false
 end
 
 function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
@@ -1441,29 +1465,6 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
   end
 end
 
-function EnumerateTransformerPresets()
-  if not dirExists(presetPath) then return {} end
-
-  local idx = 0
-  local fnames = {}
-
-  r.EnumerateFiles(presetPath, -1)
-  local fname = r.EnumerateFiles(presetPath, idx)
-  while fname do
-    if fname:match('%' .. presetExt .. '$') then
-      fname = { label = fname:gsub('%' .. presetExt .. '$', '') }
-      table.insert(fnames, fname)
-    end
-    idx = idx + 1
-    fname = r.EnumerateFiles(presetPath, idx)
-  end
-  local sorted = {}
-  for _, v in spairs(fnames, function (t, a, b) return string.lower(t[a].label) < string.lower(t[b].label) end) do
-    table.insert(sorted, v)
-  end
-  return sorted
-end
-
 local function deserialize(str)
   local f, err = load('return ' .. str)
   if not f then mu.post(err) end
@@ -1883,6 +1884,7 @@ context.OP_GTE = OP_GTE
 context.OP_LT = OP_LT
 context.OP_LTE = OP_LTE
 context.OP_INRANGE = OP_INRANGE
+context.OP_INRANGE_EXCL = OP_INRANGE_EXCL
 context.OP_EQ_SLOP = OP_EQ_SLOP
 
 context.CURSOR_LT = CURSOR_LT
@@ -1903,6 +1905,7 @@ context.GetMainValue = GetMainValue
 context.QuantizeTo = QuantizeTo
 context.Mirror = Mirror
 context.OnMetricGrid = OnMetricGrid
+context.OnGrid = OnGrid
 context.InBarRange = InBarRange
 context.LinearChangeOverSelection = LinearChangeOverSelection
 context.AddDuration = AddDuration
@@ -2884,20 +2887,20 @@ function ProcessAction(select)
         elseif notation == '$extracttrack' then
           local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            DeleteEventsInTake(take, found)
             local newtake = NewTakeInNewTrack(take)
             if newtake then
               InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
+            DeleteEventsInTake(take, found)
           end
         elseif notation == '$extractlane' then
           local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
-            DeleteEventsInTake(take, found)
             local newtake = NewTakeInNewLane(take)
             if newtake then
               InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
+            DeleteEventsInTake(take, found)
           end
         elseif notation == '$delete' then
           local found = RunFind(findFn, defParams)
@@ -2912,8 +2915,8 @@ function ProcessAction(select)
   r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
 end
 
-function SavePreset(presetPath, notes, wantsScript)
-  local f = io.open(presetPath, 'wb')
+function SavePreset(pPath, notes, wantsScript)
+  local f = io.open(pPath, 'wb')
   local saved = false
   if f then
     local presetTab = {
@@ -2931,7 +2934,7 @@ function SavePreset(presetPath, notes, wantsScript)
   if (saved and wantsScript) then
     saved = false
 
-    local fPath, fName = presetPath:match('^(.*[/\\])(.*)$')
+    local fPath, fName = pPath:match('^(.*[/\\])(.*)$')
     if fPath and fName then
       local fRoot = fName:match('(.*)%.')
       if fRoot then

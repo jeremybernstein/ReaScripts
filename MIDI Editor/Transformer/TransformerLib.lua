@@ -18,7 +18,16 @@ local DEBUGPOST = false
 
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-  mu = require 'MIDIUtils'
+  local ok
+  ok, mu = pcall(require, 'MIDIUtils')
+  if not ok then
+    mu = nil
+    package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72/MIDI/?.lua'
+    ok, mu = pcall(require, 'MIDIUtils')
+    if not ok then
+      r.ShowConsoleMsg(mu .. '\n')
+    end
+  end
 else
   package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
   mu = require 'MIDIUtils'
@@ -215,6 +224,7 @@ function FindRow:init()
   self.param2EditorType = nil
   self.param1PercentVal = nil
   self.param2PercentVal = nil
+  self.isNot = false
 end
 
 local findRowTable = {}
@@ -247,6 +257,7 @@ local findTargetEntries = {
   { notation = '$value2', label = 'Value 2', text = '_value2', inteditor = true, range = {0, 127} },
   { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
+  { notation = '$lastevent', label = 'Last Event', text = '\'\'', inteditor = true },
 }
 findTargetEntries.targetTable = true
 
@@ -260,66 +271,58 @@ local OP_INRANGE_EXCL = 7
 local OP_EQ_SLOP = 8
 
 local findConditionEqual = { notation = '==', label = 'Equal', text = 'TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
-local findConditionUnequal = { notation = '!=', label = 'Unequal', text = 'not TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
-local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = 'TestEvent1(event, {tgt}, OP_GT, {param1})', terms = 1 }
-local findConditionGreaterThanEqual = { notation = '>=', label = 'Greater Than or Equal', text = 'TestEvent1(event, {tgt}, OP_GTE, {param1})', terms = 1 }
-local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'TestEvent1(event, {tgt}, OP_LT, {param1})', terms = 1 }
-local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1 }
+local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = 'TestEvent1(event, {tgt}, OP_GT, {param1})', terms = 1, notnot = true }
+local findConditionGreaterThanEqual = { notation = '>=', label = 'Greater Than or Equal', text = 'TestEvent1(event, {tgt}, OP_GTE, {param1})', terms = 1, notnot = true }
+local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'TestEvent1(event, {tgt}, OP_LT, {param1})', terms = 1, notnot = true }
+local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1, notnot = true }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
-local findConditionOutRange = { notation = '!:inrange', label = 'Outside Range', text = 'not TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
-local findConditionInRangeExcl = { notation = ':inrange', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
-local findConditionOutRangeExcl = { notation = '!:inrange', label = 'Outside Range (Exclusive End)', text = 'not TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
+local findConditionInRangeExcl = { notation = ':inrangeexcl', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
 
 local findGenericConditionEntries = {
-  findConditionEqual, findConditionUnequal,
+  findConditionEqual,
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
-  { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange, findConditionOutRange, findConditionInRangeExcl, findConditionOutRangeExcl
+  findConditionInRange,
+  findConditionInRangeExcl,
+}
+
+local findLastEventConditionEntries = {
+  { notation = ':everyN', label = 'Every N event', text = 'FindEveryN(event, {param1})', terms = 1, inteditor = true, range = { 1, nil }, nooverride = true, literal = true },
 }
 
 local findPositionConditionEntries = {
-  findConditionEqual, findConditionUnequal,
+  findConditionEqual,
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
-  { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange, findConditionOutRange, findConditionInRangeExcl, findConditionOutRangeExcl,
+  findConditionInRange,
+  findConditionInRangeExcl,
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0 },
-  { notation = '!:ongrid', label = 'Not On Grid', text = 'not OnGrid(event, {tgt}, take, PPQ)', terms = 0 },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:inbarrange', label = 'Outside Bar Range %', text = 'not InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
-  { notation = '!:onmetricgrid', label = 'Off Metric Grid', text = 'not OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true },
-  { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true },
+  { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
-  { notation = '!:intimesel', label = 'Outside Time Selection', text = 'not TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
 local findLengthConditionEntries = {
-  findConditionEqual, findConditionUnequal,
+  findConditionEqual,
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, timedur = true, freeterm = true },
-  { notation = '!:eqslop', label = 'Unequal (Slop)', text = 'not TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, timedur = true, freeterm = true },
   { notation = ':eqmusical', label = 'Equal (Musical)', text = 'EqualsMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
-  { notation = '!:eqmusical', label = 'Unequal (Musical)', text = 'not EqualsMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange, findConditionOutRange, findConditionInRangeExcl, findConditionOutRangeExcl
+  findConditionInRange,
+  findConditionInRangeExcl,
 }
 
 local findTypeConditionEntries = {
-  findConditionEqual, findConditionUnequal,
-  { notation = ':all', label = 'All', text = 'event.chanmsg ~= nil', terms = 0 }
+  findConditionEqual,
+  { notation = ':all', label = 'All', text = 'event.chanmsg ~= nil', terms = 0, notnot = true }
 }
 
 local findPropertyConditionEntries = {
   { notation = ':isselected', label = 'Selected', text = '(event.flags & 0x01) ~= 0', terms = 0 },
-  { notation = '!:isselected', label = 'Not Selected', text = '(event.flags & 0x01) == 0', terms = 0 },
   { notation = ':ismuted', label = 'Muted', text = '(event.flags & 0x02) ~= 0', terms = 0 },
-  { notation = '!:ismuted', label = 'Not Muted', text = '(event.flags & 0x02) == 0', terms = 0 },
   { notation = ':inchord', label = 'In Chord', text = '(event.flags & 0x04) ~= 0', terms = 0 },
-  { notation = '!:inchord', label = 'Not In Chord', text = '(event.flags & 0x04) == 0', terms = 0 },
   { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true },
-  { notation = '!:inscale', label = 'Not In Scale', text = 'not InScale(event, {param1}, {param2})', terms = 2, menu = true },
 }
 
 local findTypeParam1Entries = {
@@ -454,13 +457,6 @@ local scaleRoots = {
 
 local findPropertyParam1Entries = nornsScales
 local findPropertyParam2Entries = scaleRoots
-
--- local findPropertyParam1Entries = {
---   { notation = '$selected', label = 'Selected', text = '0x01' },
---   { notation = '$muted', label = 'Muted', text = '0x02' },
---   { notation = '$inchord', label = 'In Chord', text = '0x04' }, -- does this need an overlap term?
--- --   { notation = '$inscale', label = 'In Scale', text = } -- this actually needs 3 params, in scale + scale + root note
--- }
 
 -----------------------------------------------------------------------------
 ----------------------------- ACTION DEFS -----------------------------------
@@ -691,6 +687,15 @@ function TestEvent2(event, property, op, param1, param2)
     retval = (val >= (param1 - param2) and val <= (param1 + param2))
   end
   return retval
+end
+
+function FindEveryN(event, param1)
+  -- if GetEventType(event) ~= NOTE_TYPE then return false end
+
+  if param1 <= 0 then return false end
+
+  local count = event.count - 1
+  return count % param1 == 0
 end
 
 function EqualsMusicalLength(event, take, PPQ, mgParams)
@@ -1521,7 +1526,7 @@ function FindTabsFromTarget(row)
   local notation = target.notation
   if notation == '$position' then
     condTab = findPositionConditionEntries
-    local condition = condTab[row.conditionEntry]
+    condition = condTab[row.conditionEntry]
     if condition then
       if condition.metricgrid then
         param1Tab = findMusicalParam1Entries
@@ -1531,7 +1536,7 @@ function FindTabsFromTarget(row)
     end
   elseif notation == '$length' then
     condTab = findLengthConditionEntries
-    local condition = condTab[row.conditionEntry]
+    condition = condTab[row.conditionEntry]
     if condition then
       if string.match(condition.notation, ':eqmusical') then
         param1Tab = findMusicalParam1Entries
@@ -1552,6 +1557,8 @@ function FindTabsFromTarget(row)
   -- elseif notation == '$value2' then
   -- elseif notation == '$velocity' then
   -- elseif notation == '$relvel' then
+  elseif notation == '$lastevent' then
+    condTab = findLastEventConditionEntries
   else
     condTab = findGenericConditionEntries
   end
@@ -1714,11 +1721,12 @@ function ProcessFindMacroRow(buf, boolstr)
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(condTab) do
     -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
-    local param1, param2
+    local param1, param2, hasNot
 
-    findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
+    findstart, findend, hasNot = string.find(buf, '^%s-(!*)' .. v.notation .. '%s+', bufstart)
     if findstart and findend then
       row.conditionEntry = k
+      row.isNot = hasNot == '!' and true or false
       bufstart = findend + 1
       condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
@@ -1729,12 +1737,13 @@ function ProcessFindMacroRow(buf, boolstr)
       row.param1Val = param1
       break
     else
-      findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
+      findstart, findend, hasNot, param1, param2 = string.find(buf, '^%s-(!*)' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
       if not (findstart and findend) then
         findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%(%s-%)', bufstart)
       end
       if findstart and findend then
         row.conditionEntry = k
+        row.isNot = hasNot == '!' and true or false
         bufstart = findend + 1
 
         condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
@@ -1875,6 +1884,7 @@ context.math = math
 
 context.TestEvent1 = TestEvent1
 context.TestEvent2 = TestEvent2
+context.FindEveryN = FindEveryN
 context.EqualsMusicalLength = EqualsMusicalLength
 context.CursorPosition = CursorPosition
 
@@ -1990,7 +2000,7 @@ function FindRowToNotation(row, index)
   local rowText = ''
 
   local _, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(row)
-  rowText = curTarget.notation .. ' ' .. curCondition.notation
+  rowText = curTarget.notation .. ' ' .. (row.isNot and '!' or '') .. curCondition.notation
   local param1Val, param2Val
   local paramTypes = GetParamTypesForRow(row, curTarget, curCondition)
 
@@ -2057,31 +2067,78 @@ function RunFind(findFn, params, runFn)
   local lastTime = -0xFFFFFFFF
 
   if wantsInChord then
-    local firstNoteTime
-    local lastNoteTime
-    local prevEvent
+    local firstNotePpq
+    local firstNoteCount = 0
+    local prevEvents = {}
+    local noteCount = 0
+    local ACount = 0
+    local BCount = 0
+    local CCount = 0
+    local DCount = 0
+    local ECount = 0
+    local FCount = 0
+    local take = params.take
 
     for _, event in ipairs(allEvents) do
-      if GetEventType(event) == NOTE_TYPE then -- note event
-        local ns, ne = event.projtime, event.projtime + event.projlen
-        if firstNoteTime and lastNoteTime then
-          local us = firstNoteTime < ns and ns or firstNoteTime
-          local ue = lastNoteTime > ne and ne or lastNoteTime
-          local overlap = (ue - us) / (ne - ns)
-          -- mu.post(ns, ne, overlap)
-          if overlap > 0.7 then
-            if ns < firstNoteTime then firstNoteTime = ns end
-            if ne > lastNoteTime then lastNoteTime = ne end
-            event.flags = event.flags | 4
-            if prevEvent then prevEvent.flags = prevEvent.flags | 4 end
-          else
-            firstNoteTime = ns
-            lastNoteTime = ne
+      if GetEventType(event) == SYXTEXT_TYPE then
+        event.count = FCount + 1
+        FCount = event.count
+      elseif GetEventType(event) == CC_TYPE then
+        if event.chanmsg == 0xA0 then
+          event.count = ACount + 1
+          ACount = event.count
+        elseif event.chanmsg == 0xB0 then
+          event.count = BCount + 1
+          BCount = event.count
+        elseif event.chanmsg == 0xC0 then
+          event.count = CCount + 1
+          CCount = event.count
+        elseif event.chanmsg == 0xD0 then
+          event.count = DCount + 1
+          DCount = event.count
+        elseif event.chanmsg == 0xE0 then
+          event.count = ECount + 1
+          ECount = event.count
+        end
+      elseif GetEventType(event) == NOTE_TYPE then -- note event
+        if take then
+          local noteOnset = event.projtime
+          local notePpq = r.MIDI_GetPPQPosFromProjTime(take, noteOnset)
+          local matched = false
+          local updateFirstNote = true
+          if firstNotePpq then
+            if notePpq >= firstNotePpq - (params.PPQ * 0.05) and notePpq <= firstNotePpq + (params.PPQ * 0.05) then
+              if prevEvents[1] and prevEvents[2] then
+                event.flags = event.flags | 4
+                noteCount = firstNoteCount
+                event.count = noteCount
+                if prevEvents[1] then
+                  prevEvents[1].flags = prevEvents[1].flags | 4
+                  prevEvents[1].count = noteCount
+                end
+                if prevEvents[2] then
+                  prevEvents[2].flags = prevEvents[2].flags | 4
+                  prevEvents[1].count = noteCount
+                end
+                matched = true
+              end
+
+              prevEvents[2] = prevEvents[1]
+              prevEvents[1] = event
+              updateFirstNote = false
+              firstNotePpq = (firstNotePpq + notePpq) / 2 -- running avg
+            end
           end
-          prevEvent = event
-        else
-          firstNoteTime = ns
-          lastNoteTime = ne
+          if not matched then
+            if updateFirstNote then
+              firstNotePpq = notePpq
+              firstNoteCount = noteCount + 1
+              prevEvents[1] = event
+              prevEvents[2] = nil
+            end
+            noteCount = noteCount + 1
+            event.count = noteCount
+          end
         end
       end
     end
@@ -2117,10 +2174,12 @@ function ProcessFind(take)
     local targetTerm = curTarget.text
     local condition = curCondition
     local conditionVal = condition.text
+    if v.isNot then conditionVal = 'not ( ' .. conditionVal .. ' )' end
     local findTerm = ''
 
     -- this involves extra processing and is therefore only done if necessary
-    if string.match(condition.notation, ':inchord') then wantsInChord = true end
+    if curTarget.notation == '$lastevent' then wantsInChord = true
+    elseif string.match(condition.notation, ':inchord') then wantsInChord = true end
 
     v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab)
 
@@ -2811,7 +2870,7 @@ function ProcessAction(select)
         -- mu.tprint(event, 2)
       else
         local notation = actionScopeTable[currentActionScope].notation
-        local defParams = { wantsInChord = wantsInChord, take = take }
+        local defParams = { wantsInChord = wantsInChord, take = take, PPQ = context.PPQ }
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
           RunFind(findFn, defParams,
@@ -3103,8 +3162,8 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
-      local findFn = ProcessFind(v.take)
-      local _, contextTab = RunFind(findFn)
+      local findFn, wantsInChord = ProcessFind(v.take)
+      local _, contextTab = RunFind(findFn, { wantsInChord = wantsInChord, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
         if vv == true then hasTable[kk] = true end

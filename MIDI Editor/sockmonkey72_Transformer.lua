@@ -26,7 +26,16 @@ local mu
 
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-  mu = require 'MIDIUtils' -- for post/tprint/whatever
+  local ok
+  ok, mu = pcall(require, 'MIDIUtils')
+  if not ok then
+    mu = nil
+    package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72/MIDI/?.lua'
+    ok, mu = pcall(require, 'MIDIUtils')
+    if not ok then
+      r.ShowConsoleMsg(mu .. '\n')
+    end
+  end
 end
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
@@ -223,7 +232,7 @@ end
 local function setupRowFormat(row, condOpTab)
   local isFind = row:is_a(tx.FindRow)
 
-  local target = tx.actionTargetEntries[row.targetEntry]
+  local target = isFind and tx.findTargetEntries[row.targetEntry] or tx.actionTargetEntries[row.targetEntry]
   local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
   local paramTypes = tx.GetParamTypesForRow(row, target, condOp)
   local p1 = DEFAULT_TIMEFORMAT_STRING
@@ -379,7 +388,7 @@ end
 local function overrideEditorType(row, target, condOp, paramTypes, idx)
   local has14bit, hasOther = check14Bit(paramTypes[idx])
   if not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
-      or condOp.norange
+      or condOp.norange or condOp.nooverride
       or condOp.split and condOp.split[idx].norange
     then
       tx.setEditorTypeForRow(row, idx, nil)
@@ -807,11 +816,12 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
-  if selectedFindRow == 0 then
+  local findButDisabled = (optDown and #tx.findRowTable() == 0) or (not optDown and selectedFindRow == 0)
+  if findButDisabled then
     r.ImGui_BeginDisabled(ctx)
   end
   r.ImGui_Button(ctx, optDown and 'Clear All Criteria' or 'Remove Criteria', DEFAULT_ITEM_WIDTH * 2)
-  if selectedFindRow == 0 then
+  if findButDisabled then
     r.ImGui_EndDisabled(ctx)
   end
 
@@ -854,11 +864,12 @@ local function windowFn()
         or editorType == tx.EDITOR_TYPE_PITCHBEND
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
+        -- TODO: cleanup these attributes & combinations
         local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, terms)
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
           local strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR)
-          if range and row[paramName .. 'PercentVal'] then
+          if range and range[1] and range[2] and row[paramName .. 'PercentVal'] then
             local percentVal = row[paramName .. 'PercentVal'] / 100
             local scaledVal
             if editorType == tx.EDITOR_TYPE_PITCHBEND and condOp.literal then
@@ -1034,6 +1045,7 @@ local function windowFn()
   local findColumns = {
     '(',
     'Target',
+    'Not',
     'Condition',
     'Parameter 1',
     'Parameter 2',
@@ -1051,7 +1063,7 @@ local function windowFn()
   r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
   for _, label in ipairs(findColumns) do
     if showTimeFormatColumn or label ~= timeFormatColumnName then
-      local narrow = (label == '(' or label == ')' or label == 'Boolean')
+      local narrow = (label == '(' or label == ')' or label == 'Not' or label == 'Boolean')
       local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_WidthStretch()
       local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(PAREN_COLUMN_WIDTH)) or nil
       r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
@@ -1080,7 +1092,9 @@ local function windowFn()
       r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0x77FFFF1F)
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 0) -- '('
+    local colIdx = 0
+
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- '('
     if currentRow.startParenEntry < 2 then
       r.ImGui_InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
     else
@@ -1092,7 +1106,8 @@ local function windowFn()
       lastSelectedRowType = 0 -- Find
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Target'
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Target'
     local targetText = currentRow.targetEntry > 0 and currentFindTarget.label or '---'
     r.ImGui_Button(ctx, decorateTargetLabel(targetText))
     if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1101,7 +1116,17 @@ local function windowFn()
       r.ImGui_OpenPopup(ctx, 'targetMenu')
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Condition'
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Not'
+    if not currentFindCondition.notnot then
+      local rv, selected = r.ImGui_Checkbox(ctx, '##notBox', currentRow.isNot)
+      if rv then
+        currentRow.isNot = selected
+      end
+    end
+
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Condition'
     r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
     if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       selectedFindRow = k
@@ -1112,19 +1137,22 @@ local function windowFn()
     local paramTypes = tx.GetParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
     local selected
 
-    r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 1'
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
     overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
     selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, paramTypes[1], 1, k, tx.processFind)
     if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
 
-    r.ImGui_TableSetColumnIndex(ctx, 4) -- 'Parameter 2'
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
     overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
     selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramTypes[2], 2, k, tx.processFind)
     if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
 
     -- unused currently
     if showTimeFormatColumn then
-      r.ImGui_TableSetColumnIndex(ctx, 5) -- Time format
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Time format
       if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
         r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
         if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1135,7 +1163,8 @@ local function windowFn()
       end
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 6 - (showTimeFormatColumn == false and 1 or 0)) -- End Paren
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- End Paren
     if currentRow.endParenEntry < 2 then
       r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
     else
@@ -1147,7 +1176,8 @@ local function windowFn()
       lastSelectedRowType = 0
     end
 
-    r.ImGui_TableSetColumnIndex(ctx, 7 - (showTimeFormatColumn == false and 1 or 0)) -- Boolean
+    colIdx = colIdx + 1
+    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Boolean
     if k ~= #tx.findRowTable() then
       r.ImGui_Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
       if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1345,11 +1375,12 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
-  if selectedActionRow == 0 then
+  local actButDisabled = (optDown and #tx.actionRowTable() == 0) or (not optDown and selectedActionRow == 0)
+  if actButDisabled then
     r.ImGui_BeginDisabled(ctx)
   end
   r.ImGui_Button(ctx, optDown and 'Clear All Actions' or 'Remove Action', DEFAULT_ITEM_WIDTH * 2)
-  if selectedActionRow == 0 then
+  if actButDisabled then
     r.ImGui_EndDisabled(ctx)
   end
 

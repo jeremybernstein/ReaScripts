@@ -100,6 +100,7 @@ local presetExt = '.tfmrPreset'
 local CANONICAL_FONTSIZE_LARGE = 13
 local FONTSIZE_LARGE = 13
 local FONTSIZE_SMALL = 11
+local FONTSIZE_SMALLER = 9
 local DEFAULT_WIDTH = 68 * FONTSIZE_LARGE
 local DEFAULT_HEIGHT = 40 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 70
@@ -338,8 +339,10 @@ local function processBaseFontUpdate(baseFontSize)
 
   FONTSIZE_LARGE = baseFontSize
   FONTSIZE_SMALL = math.floor(baseFontSize * (11/13))
+  FONTSIZE_SMALLER = math.floor(baseFontSize * (9/13))
   fontInfo.largeDefaultSize = FONTSIZE_LARGE
   fontInfo.smallDefaultSize = FONTSIZE_SMALL
+  fontInfo.smallerDefaultSize = FONTSIZE_SMALLER
 
   windowInfo.defaultWidth = 68 * fontInfo.largeDefaultSize
   windowInfo.defaultHeight = 40 * fontInfo.smallDefaultSize
@@ -365,10 +368,12 @@ local function prepWindowAndFont()
 
   fontInfo = {
     large = r.ImGui_CreateFont(fontStyle, FONTSIZE_LARGE), largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
-    small = r.ImGui_CreateFont(fontStyle, FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL
+    small = r.ImGui_CreateFont(fontStyle, FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL,
+    smaller = r.ImGui_CreateFont(fontStyle, FONTSIZE_SMALLER), smallerSize = FONTSIZE_SMALLER, smallerDefaultSize = FONTSIZE_SMALLER
   }
   r.ImGui_Attach(ctx, fontInfo.large)
   r.ImGui_Attach(ctx, fontInfo.small)
+  r.ImGui_Attach(ctx, fontInfo.smaller)
 
   processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
 end
@@ -1119,10 +1124,16 @@ local function windowFn()
     colIdx = colIdx + 1
     r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Not'
     if not currentFindCondition.notnot then
+      r.ImGui_PushFont(ctx, fontInfo.smaller)
+      local yCache = r.ImGui_GetCursorPosY(ctx)
+      local _, smallerHeight = r.ImGui_CalcTextSize(ctx, '0') -- could make this global if it is expensive
+      r.ImGui_SetCursorPosY(ctx, yCache + ((r.ImGui_GetFrameHeight(ctx) - smallerHeight) / 2))
       local rv, selected = r.ImGui_Checkbox(ctx, '##notBox', currentRow.isNot)
       if rv then
         currentRow.isNot = selected
       end
+      r.ImGui_SetCursorPosY(ctx, yCache)
+      r.ImGui_PopFont(ctx)
     end
 
     colIdx = colIdx + 1
@@ -2029,6 +2040,7 @@ end
 local function doClose()
   r.ImGui_Detach(ctx, fontInfo.large)
   r.ImGui_Detach(ctx, fontInfo.small)
+  r.ImGui_Detach(ctx, fontInfo.smaller)
   r.ImGui_Detach(ctx, canonicalFont)
   r.ImGui_DestroyContext(ctx)
   ctx = nil
@@ -2123,6 +2135,7 @@ end
 local function updateFonts()
   updateOneFont('large')
   updateOneFont('small')
+  updateOneFont('smaller')
 end
 
 local function openWindow()

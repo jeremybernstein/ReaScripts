@@ -175,6 +175,7 @@ local actionScopeTable = {
   { notation = '$invertselect', label = 'Inverted Select' },
   { notation = '$deselect', label = 'Deselect' },
   { notation = '$transform', label = 'Transform' },
+  { notation = '$replace', label = 'Transform & Replace' },
   { notation = '$copy', label = 'Transform to Track' },
   { notation = '$copylane', label = 'Transform to Lane' },
   { notation = '$insert', label = 'Insert' },
@@ -246,6 +247,13 @@ local endParenEntries = {
   { notation = '))', label = '))', text = '))' },
   { notation = ')))', label = ')))', text = ')))'}
 }
+
+-- fullrange is just for velocity, allowing 0
+-- norange can be used to turn off editor type range hints (and disable the range)
+-- nooverride means no editor override possible
+-- literal means save what was typed, not a percent
+
+-- notnot means no not checkbox
 
 local findTargetEntries = {
   { notation = '$position', label = 'Position', text = '\'projtime\'', time = true },
@@ -509,9 +517,6 @@ local OP_MULT = 3
 local OP_DIV = 4
 local OP_FIXED = 5
 local OP_SCALEOFF = 6
-
--- fullrange is just for velocity, allowing 0
--- norange can be used to turn off editor type range hints (and disable the range)
 
 local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
 local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
@@ -2046,9 +2051,18 @@ function FindRowsToNotation()
   return notationString
 end
 
+function UpdateEventCount(event, counts)
+  local char
+  if GetEventType(event) == NOTE_TYPE then char = 'note'
+  else char = string.format('%X', event.chanmsg >> 4)
+  end
+  event.count = counts[char .. 'Count'] + 1
+  counts[char .. 'Count'] = event.count
+end
+
 function RunFind(findFn, params, runFn)
 
-  local wantsInChord = params and params.wantsInChord or false
+  local wantsEventPreprocessing = params and params.wantsEventPreprocessing or false
   local getUnfound = params and params.wantsUnfound or false
   local hasTable = {}
   hasTable[0x90] = false
@@ -2066,40 +2080,24 @@ function RunFind(findFn, params, runFn)
   local firstTime = 0xFFFFFFFF
   local lastTime = -0xFFFFFFFF
 
-  if wantsInChord then
+  if wantsEventPreprocessing then
     local firstNotePpq
     local firstNoteCount = 0
     local prevEvents = {}
-    local noteCount = 0
-    local ACount = 0
-    local BCount = 0
-    local CCount = 0
-    local DCount = 0
-    local ECount = 0
-    local FCount = 0
+    local counts = {
+      noteCount = 0,
+      ACount = 0,
+      BCount = 0,
+      CCount = 0,
+      DCount = 0,
+      ECount = 0,
+      FCount = 0
+    }
     local take = params.take
 
     for _, event in ipairs(allEvents) do
-      if GetEventType(event) == SYXTEXT_TYPE then
-        event.count = FCount + 1
-        FCount = event.count
-      elseif GetEventType(event) == CC_TYPE then
-        if event.chanmsg == 0xA0 then
-          event.count = ACount + 1
-          ACount = event.count
-        elseif event.chanmsg == 0xB0 then
-          event.count = BCount + 1
-          BCount = event.count
-        elseif event.chanmsg == 0xC0 then
-          event.count = CCount + 1
-          CCount = event.count
-        elseif event.chanmsg == 0xD0 then
-          event.count = DCount + 1
-          DCount = event.count
-        elseif event.chanmsg == 0xE0 then
-          event.count = ECount + 1
-          ECount = event.count
-        end
+      if GetEventType(event) == CC_TYPE or GetEventType(event) == SYXTEXT_TYPE then
+        UpdateEventCount(event, counts)
       elseif GetEventType(event) == NOTE_TYPE then -- note event
         if take then
           local noteOnset = event.projtime
@@ -2110,15 +2108,15 @@ function RunFind(findFn, params, runFn)
             if notePpq >= firstNotePpq - (params.PPQ * 0.05) and notePpq <= firstNotePpq + (params.PPQ * 0.05) then
               if prevEvents[1] and prevEvents[2] then
                 event.flags = event.flags | 4
-                noteCount = firstNoteCount
-                event.count = noteCount
+                counts.noteCount = firstNoteCount
+                event.count = counts.noteCount
                 if prevEvents[1] then
                   prevEvents[1].flags = prevEvents[1].flags | 4
-                  prevEvents[1].count = noteCount
+                  prevEvents[1].count = counts.noteCount
                 end
                 if prevEvents[2] then
                   prevEvents[2].flags = prevEvents[2].flags | 4
-                  prevEvents[1].count = noteCount
+                  prevEvents[1].count = counts.noteCount
                 end
                 matched = true
               end
@@ -2132,12 +2130,11 @@ function RunFind(findFn, params, runFn)
           if not matched then
             if updateFirstNote then
               firstNotePpq = notePpq
-              firstNoteCount = noteCount + 1
+              firstNoteCount = counts.noteCount + 1
               prevEvents[1] = event
               prevEvents[2] = nil
             end
-            noteCount = noteCount + 1
-            event.count = noteCount
+            UpdateEventCount(event, counts)
           end
         end
       end
@@ -2164,7 +2161,7 @@ end
 function ProcessFind(take)
 
   local fnString = ''
-  local wantsInChord = false
+  local wantsEventPreprocessing = false
 
   for k, v in ipairs(findRowTable) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
@@ -2178,8 +2175,8 @@ function ProcessFind(take)
     local findTerm = ''
 
     -- this involves extra processing and is therefore only done if necessary
-    if curTarget.notation == '$lastevent' then wantsInChord = true
-    elseif string.match(condition.notation, ':inchord') then wantsInChord = true end
+    if curTarget.notation == '$lastevent' then wantsEventPreprocessing = true
+    elseif string.match(condition.notation, ':inchord') then wantsEventPreprocessing = true end
 
     v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab)
 
@@ -2268,7 +2265,7 @@ function ProcessFind(take)
       end
     end
   end
-  return findFn, wantsInChord
+  return findFn, wantsEventPreprocessing
 end
 
 function ActionTabsFromTarget(row)
@@ -2624,18 +2621,75 @@ function SetEntrySelectionInTake(take, event)
   end
 end
 
-function TransformEntryInTake(take, eventTab, actionFn, contextTab)
-  mu.MIDI_OpenWriteTransaction(take)
+-- if replace,
+---- run the transform, but not the insert
+---- iterate the transformed notes and make a table of status + databyte1, begin and end extents
+---- iterate allEvents (unfound?) and delete anything in the way
+---- insert
+
+function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
+  local replaceTab = replace and {} or nil
   for _, event in ipairs(eventTab) do
+    local eventType = GetEventType(event)
     local timeAdjust = GetTimeOffset()
     actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
     event.muted = (event.flags & 2) ~= 0
-    if GetEventType(event) == NOTE_TYPE then
+    if eventType == NOTE_TYPE then
       if (not event.projlen or event.projlen <= 0) then event.projlen = 1 / context.PPQ end
       event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
+    end
+
+    if replace then
+      local eventIdx = event.chanmsg + event.chan
+
+      local replaceData = replaceTab[eventIdx]
+      if not replaceData then
+        replaceTab[eventIdx] = {}
+        replaceData = replaceTab[eventIdx]
+      end
+
+      local eventData = replaceData[event.msg2]
+      if not eventData then
+        replaceData[event.msg2] = {}
+        eventData = replaceData[event.msg2]
+        eventData.startPpq = event.ppqpos
+        eventData.endPpq = event.ppqpos
+      else
+        -- or should each event have a start/end so that only active sections get erased in the end?
+        if event.ppqpos < eventData.startPpq then eventData.startPpq = event.ppqpos end
+        if event.ppqpos > eventData.endPpq then eventData.endPpq = event.ppqpos end
+      end
+    end
+  end
+
+  mu.MIDI_OpenWriteTransaction(take)
+  if replace then
+    for _, event in ipairs(replace) do
+      local eventType = GetEventType(event)
+      local eventIdx = event.chanmsg + event.chan
+      local eventData
+      local replaceData = replaceTab[eventIdx]
+      if replaceData then
+        eventData = replaceData[event.msg2]
+      end
+      if eventData then
+        if event.ppqpos >= eventData.startPpq and event.ppqpos <= eventData.endPpq then
+          if eventType == NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
+          elseif eventType == CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
+          elseif eventType == SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+          end
+        end
+      end
+    end
+  end
+
+  for _, event in ipairs(eventTab) do
+    local eventType = GetEventType(event)
+    -- handle insert, also type changes
+    if eventType == NOTE_TYPE then
       if not event.orig_type or event.orig_type == NOTE_TYPE then
         mu.MIDI_SetNote(take, event.idx, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
       else
@@ -2646,7 +2700,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab)
           mu.MIDI_DeleteTextSysexEvt(take, event.idx)
         end
       end
-    elseif GetEventType(event) == CC_TYPE then
+    elseif eventType == CC_TYPE then
       if not event.orig_type or event.orig_type == CC_TYPE then
         mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
       else
@@ -2657,7 +2711,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab)
           mu.MIDI_DeleteTextSysexEvt(take, event.idx)
         end
       end
-    elseif GetEventType(event) == SYXTEXT_TYPE then
+    elseif eventType == SYXTEXT_TYPE then
       if not event.orig_type or event.orig_type == SYXTEXT_TYPE then
         mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
       else
@@ -2850,7 +2904,7 @@ function ProcessAction(select)
     addLengthFirstEventOffset_Take = nil
 
     local actionFn
-    local findFn, wantsInChord = ProcessFind(take)
+    local findFn, wantsEventPreprocessing = ProcessFind(take)
     if findFn then
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
@@ -2870,7 +2924,7 @@ function ProcessAction(select)
         -- mu.tprint(event, 2)
       else
         local notation = actionScopeTable[currentActionScope].notation
-        local defParams = { wantsInChord = wantsInChord, take = take, PPQ = context.PPQ }
+        local defParams = { wantsEventPreprocessing = wantsEventPreprocessing, take = take, PPQ = context.PPQ }
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
           RunFind(findFn, defParams,
@@ -2912,6 +2966,13 @@ function ProcessAction(select)
           if #found ~=0 then
             TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
           end
+        elseif notation == '$replace' then
+          local repParams = tableCopy(defParams)
+          repParams.wantsUnfound = true
+          local found, contextTab, unfound = RunFind(findFn, repParams)
+          if #found ~=0 then
+            TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
+          end
         elseif notation == '$copy' then
           local found, contextTab = RunFind(findFn, defParams)
           if #found ~=0 then
@@ -2934,7 +2995,9 @@ function ProcessAction(select)
             InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
           end
         elseif notation == '$insertexclusive' then
-          local found, contextTab, unfound = RunFind(findFn, { wantsInChord = wantsInChord, wantsUnfound = true, take = take })
+          local ieParams = tableCopy(defParams)
+          ieParams.wantsUnfound = true
+          local found, contextTab, unfound = RunFind(findFn, ieParams)
           mu.MIDI_OpenWriteTransaction(take)
           if #found ~=0 then
             InsertEventsIntoTake(take, found, actionFn, contextTab, false)
@@ -3162,8 +3225,8 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
-      local findFn, wantsInChord = ProcessFind(v.take)
-      local _, contextTab = RunFind(findFn, { wantsInChord = wantsInChord, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
+      local findFn, wantsEventPreprocessing = ProcessFind(v.take)
+      local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
         if vv == true then hasTable[kk] = true end

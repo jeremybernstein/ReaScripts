@@ -57,6 +57,12 @@ local CC_TYPE = 1
 local SYXTEXT_TYPE = 2
 local OTHER_TYPE = 7
 
+local SELECT_TIME_SHEBANG = 0
+local SELECT_TIME_MINRANGE = 1
+local SELECT_TIME_MAXRANGE = 2
+local SELECT_TIME_RANGE = 3
+local SELECT_TIME_INDIVIDUAL = 4
+
 local findParserError = ''
 local dirtyFind = false
 
@@ -298,17 +304,26 @@ local findLastEventConditionEntries = {
   { notation = ':everyN', label = 'Every N event', text = 'FindEveryN(event, {param1})', terms = 1, inteditor = true, range = { 1, nil }, nooverride = true, literal = true },
 }
 
+function FindConditionAddSelectRange(t, r)
+  local tt = tableCopy(t)
+  tt.timeselect = r
+  return tt
+end
+
 local findPositionConditionEntries = {
-  findConditionEqual,
-  { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true },
-  findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
-  findConditionInRange,
-  findConditionInRangeExcl,
-  { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0 },
-  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 } }, -- intra-bar position, cubase handles this as percent
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true }, -- intra-bar position, cubase handles this as percent
+  FindConditionAddSelectRange(findConditionEqual, SELECT_TIME_INDIVIDUAL),
+  { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true, timeselect = SELECT_TIME_RANGE },
+  FindConditionAddSelectRange(findConditionGreaterThan, SELECT_TIME_MINRANGE),
+  FindConditionAddSelectRange(findConditionGreaterThanEqual, SELECT_TIME_MINRANGE),
+  FindConditionAddSelectRange(findConditionLessThan, SELECT_TIME_MAXRANGE),
+  FindConditionAddSelectRange(findConditionLessThanEqual, SELECT_TIME_MAXRANGE),
+  FindConditionAddSelectRange(findConditionInRange, SELECT_TIME_RANGE),
+  FindConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
+  { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 }, timeselect = SELECT_TIME_RANGE }, -- intra-bar position, cubase handles this as percent
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, timeselect = SELECT_TIME_INDIVIDUAL }, -- intra-bar position, cubase handles this as percent
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
-  { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0 },
+  { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -379,11 +394,11 @@ local CURSOR_LTE = 4
 local CURSOR_GTE = 5
 
 local findCursorParam1Entries = {
-  { notation = '$before', label = "Before Cursor", text = 'CURSOR_LT' }, -- todo search for notation
-  { notation = '$after', label = "After Cursor", text = 'CURSOR_GT' },
-  { notation = '$at', label = "At Cursor", text = 'CURSOR_AT' },
-  { notation = '$before_at', label = "Before or At Cursor", text = 'CURSOR_LTE' },
-  { notation = '$after_at', label = "After or At Cursor", text = 'CURSOR_GTE' },
+  { notation = '$before', label = "Before Cursor", text = 'CURSOR_LT', timeselect = SELECT_TIME_MAXRANGE }, -- todo search for notation
+  { notation = '$after', label = "After Cursor", text = 'CURSOR_GT', timeselect = SELECT_TIME_MINRANGE },
+  { notation = '$at', label = "At Cursor", text = 'CURSOR_AT', timeselect = SELECT_TIME_INDIVIDUAL },
+  { notation = '$before_at', label = "Before or At Cursor", text = 'CURSOR_LTE', timeselect = SELECT_TIME_MAXRANGE },
+  { notation = '$after_at', label = "After or At Cursor", text = 'CURSOR_GTE', timeselect = SELECT_TIME_MINRANGE },
 }
 
 local findMusicalParam1Entries = {
@@ -560,7 +575,7 @@ local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '*', label = 'Multiply (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1}, _context)', terms = 1, floateditor = true, norange = true, literal = true },
-  { notation = '/', label = 'Divide (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1 ~= 0 and (1 / {param1}) or 0, _context)', terms = 1, floateditor = true, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, _context)', terms = 1, floateditor = true, norange = true, literal = true },
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -1005,6 +1020,8 @@ end
 
 function RandomValue(event, property, min, max)
   local oldval = GetValue(event, property)
+  if event.lastevent then return oldval end
+
   local newval = oldval
 
   if math.type(min) == 'integer' and math.type(max) == 'integer' then
@@ -2154,7 +2171,34 @@ function RunFind(findFn, params, runFn)
     end
     if runFn then runFn(event, matches) end
   end
-  local contextTab = { firstTime = firstTime, lastTime = lastTime, hasTable = hasTable, take = params and params.take }
+
+  -- it was a time selection, add a final event to make behavior predictable
+  if params.findRange.frEnd then
+    local frEnd = params.findRange.frEnd
+    local lastEventsByType = {}
+    for _, event in ipairs(found) do
+      local eventIdx = event.chanmsg + event.chan
+      if not lastEventsByType[eventIdx] then lastEventsByType[eventIdx] = {} end
+      lastEventsByType[eventIdx][event.msg2] = event
+    end
+    for _, rData in pairs(lastEventsByType) do
+      for _, rEvent in pairs(rData) do
+        local newEvent = tableCopy(rEvent)
+        newEvent.projtime = frEnd
+        newEvent.lastevent = true
+        newEvent.orig_type = OTHER_TYPE
+        table.insert(found, newEvent)
+      end
+    end
+  end
+
+  local contextTab = {
+    firstTime = firstTime,
+    lastTime = lastTime,
+    hasTable = hasTable,
+    take = params and params.take,
+    findRange = params and params.findRange
+  }
   return found, contextTab, getUnfound and unfound or nil
 end
 
@@ -2162,6 +2206,8 @@ function ProcessFind(take)
 
   local fnString = ''
   local wantsEventPreprocessing = false
+  local rangeType = SELECT_TIME_SHEBANG
+  local findRangeStart, findRangeEnd
 
   for k, v in ipairs(findRowTable) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
@@ -2203,7 +2249,36 @@ function ProcessFind(take)
       param2Term = GetParamPercentTerm(param2Num, curCondition.bipolar)
     end
 
-    -- always sub
+    -- range processing
+
+    if condition.timeselect then
+      rangeType = rangeType | condition.timeselect
+    end
+
+    if curTarget.notation == '$position' and condition.notation == ':cursorpos' then
+      local param1 = param1Tab[v.param1Entry]
+      if param1 and param1.timeselect then
+        rangeType = rangeType | param1.timeselect
+      end
+    end
+
+    if curTarget.notation == '$position' and condition.timeselect == SELECT_TIME_RANGE then
+      if condition.notation == ':intimesel' then
+        local ts1 = GetTimeSelectionStart()
+        local ts2 = GetTimeSelectionEnd()
+        if not findRangeStart or ts1 < findRangeStart then findRangeStart = ts1 end
+        if not findRangeEnd or ts2 > findRangeEnd then findRangeEnd = ts2 end
+      else
+        -- ONLY TIME SELECTION
+        -- if param1Num and param2Num then
+        --   if not findRangeStart or param1Num < findRangeStart then findRangeStart = param1Num end
+        --   if not findRangeEnd or param2Num > findRangeEnd then findRangeEnd = param2Num end
+        -- end
+      end
+    end
+
+    -- substitutions
+
     findTerm = conditionVal
     findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
     findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
@@ -2265,7 +2340,8 @@ function ProcessFind(take)
       end
     end
   end
-  return findFn, wantsEventPreprocessing
+
+  return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }
 end
 
 function ActionTabsFromTarget(row)
@@ -2621,17 +2697,12 @@ function SetEntrySelectionInTake(take, event)
   end
 end
 
--- if replace,
----- run the transform, but not the insert
----- iterate the transformed notes and make a table of status + databyte1, begin and end extents
----- iterate allEvents (unfound?) and delete anything in the way
----- insert
-
 function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
   local replaceTab = replace and {} or nil
+  local timeAdjust = GetTimeOffset()
+
   for _, event in ipairs(eventTab) do
     local eventType = GetEventType(event)
-    local timeAdjust = GetTimeOffset()
     actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     event.selected = (event.flags & 1) ~= 0
@@ -2658,6 +2729,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
         eventData.startPpq = event.ppqpos
         eventData.endPpq = event.ppqpos
       else
+        table.insert(eventData, event.ppqpos)
         -- or should each event have a start/end so that only active sections get erased in the end?
         if event.ppqpos < eventData.startPpq then eventData.startPpq = event.ppqpos end
         if event.ppqpos > eventData.endPpq then eventData.endPpq = event.ppqpos end
@@ -2667,6 +2739,11 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
 
   mu.MIDI_OpenWriteTransaction(take)
   if replace then
+    local grid = r.MIDI_GetGrid(take) -- 1.0 is QN, 1.5 dotted, etc.
+    local PPQ = mu.MIDI_GetPPQ(take)
+    local gridSlop = math.floor(((PPQ * grid) * 0.5) + 0.5)
+    local rangeType = contextTab.findRange.type
+
     for _, event in ipairs(replace) do
       local eventType = GetEventType(event)
       local eventIdx = event.chanmsg + event.chan
@@ -2675,11 +2752,27 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
       if replaceData then
         eventData = replaceData[event.msg2]
       end
-      if eventData then
-        if event.ppqpos >= eventData.startPpq and event.ppqpos <= eventData.endPpq then
-          if eventType == NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
-          elseif eventType == CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
-          elseif eventType == SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+      if eventData and rangeType then
+        if (rangeType == SELECT_TIME_SHEBANG)
+          or (rangeType & SELECT_TIME_RANGE ~= 0)
+        then
+          if (not (rangeType & SELECT_TIME_MINRANGE ~= 0) or event.ppqpos >= (eventData.startPpq - gridSlop))
+            and (not (rangeType & SELECT_TIME_MAXRANGE ~= 0) or event.ppqpos <= (eventData.endPpq + gridSlop))
+          then
+            if eventType == NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
+            elseif eventType == CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
+            elseif eventType == SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+            end
+          end
+        elseif rangeType == SELECT_TIME_INDIVIDUAL then
+          for _, v in ipairs(eventData) do
+            if event.ppqpos >= (v - gridSlop) and event.ppqpos <= (v + gridSlop) then
+              if eventType == NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
+              elseif eventType == CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
+              elseif eventType == SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+              end
+              break
+            end
           end
         end
       end
@@ -2904,7 +2997,7 @@ function ProcessAction(select)
     addLengthFirstEventOffset_Take = nil
 
     local actionFn
-    local findFn, wantsEventPreprocessing = ProcessFind(take)
+    local findFn, wantsEventPreprocessing, findRange = ProcessFind(take)
     if findFn then
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
@@ -2924,7 +3017,12 @@ function ProcessAction(select)
         -- mu.tprint(event, 2)
       else
         local notation = actionScopeTable[currentActionScope].notation
-        local defParams = { wantsEventPreprocessing = wantsEventPreprocessing, take = take, PPQ = context.PPQ }
+        local defParams = {
+          wantsEventPreprocessing = wantsEventPreprocessing,
+          findRange = findRange,
+          take = take,
+          PPQ = context.PPQ
+        }
         if notation == '$select' then
           mu.MIDI_OpenWriteTransaction(take)
           RunFind(findFn, defParams,
@@ -3225,8 +3323,8 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
-      local findFn, wantsEventPreprocessing = ProcessFind(v.take)
-      local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
+      local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take)
+      local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
         if vv == true then hasTable[kk] = true end

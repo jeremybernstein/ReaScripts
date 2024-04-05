@@ -1020,7 +1020,7 @@ end
 
 function RandomValue(event, property, min, max)
   local oldval = GetValue(event, property)
-  if event.lastevent then return oldval end
+  if event.firstlastevent then return oldval end
 
   local newval = oldval
 
@@ -2173,19 +2173,30 @@ function RunFind(findFn, params, runFn)
   end
 
   -- it was a time selection, add a final event to make behavior predictable
-  if params.findRange.frEnd then
+  if params.addRangeEvents and params.findRange.frStart and params.findRange.frEnd then
+    local frStart = params.findRange.frStart
     local frEnd = params.findRange.frEnd
-    local lastEventsByType = {}
+    local firstLastEventsByType = {}
     for _, event in ipairs(found) do
       local eventIdx = event.chanmsg + event.chan
-      if not lastEventsByType[eventIdx] then lastEventsByType[eventIdx] = {} end
-      lastEventsByType[eventIdx][event.msg2] = event
+      if not firstLastEventsByType[eventIdx] then firstLastEventsByType[eventIdx] = {} end
+      if not firstLastEventsByType[eventIdx][event.msg2] then firstLastEventsByType[eventIdx][event.msg2] = {} end
+      if not firstLastEventsByType[eventIdx][event.msg2].firstEvent then
+        firstLastEventsByType[eventIdx][event.msg2].firstEvent = event
+      end
+      firstLastEventsByType[eventIdx][event.msg2].lastEvent = event
     end
-    for _, rData in pairs(lastEventsByType) do
+    for _, rData in pairs(firstLastEventsByType) do
       for _, rEvent in pairs(rData) do
-        local newEvent = tableCopy(rEvent)
+        local newEvent
+        newEvent = tableCopy(rEvent.firstEvent)
+        newEvent.projtime = frStart
+        newEvent.firstlastevent = true
+        newEvent.orig_type = OTHER_TYPE
+        table.insert(found, newEvent)
+        newEvent = tableCopy(rEvent.lastEvent)
         newEvent.projtime = frEnd
-        newEvent.lastevent = true
+        newEvent.firstlastevent = true
         newEvent.orig_type = OTHER_TYPE
         table.insert(found, newEvent)
       end
@@ -3067,6 +3078,7 @@ function ProcessAction(select)
         elseif notation == '$replace' then
           local repParams = tableCopy(defParams)
           repParams.wantsUnfound = true
+          repParams.addRangeEvents = true
           local found, contextTab, unfound = RunFind(findFn, repParams)
           if #found ~=0 then
             TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn

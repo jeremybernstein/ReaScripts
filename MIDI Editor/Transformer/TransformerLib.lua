@@ -1468,9 +1468,6 @@ function TimeFormatRebuf(buf)
   return DEFAULT_TIMEFORMAT_STRING
 end
 
-local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets/'
-local presetExt = '.tfmrPreset'
-
 local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
   -- collect the keys
   local keys = {}

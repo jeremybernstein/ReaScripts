@@ -144,6 +144,7 @@ local presetInputDoesScript = false
 local presetNotesBuffer = ''
 local presetNotesViewEditor = false
 local justChanged = false
+local filterPresetsBuffer = ''
 
 local scriptWritesMainContext = true
 local scriptWritesMIDIContexts = true
@@ -1900,7 +1901,22 @@ local function windowFn()
   r.ImGui_Dummy(ctx, DEFAULT_ITEM_WIDTH * 1.5, 1)
   handleStatus(2)
 
-  local function generatePresetMenu(source, path, lab)
+  local function presetSubMenuMatches(source, filter)
+    for i = 1, #source do
+      local selectText = source[i].label
+      if (source[i].sub and presetSubMenuMatches(source[i].sub, filter))
+        or not source[i].sub and
+          (not filter
+          or filter == ''
+          or string.match(selectText, filter))
+      then
+        return true
+      end
+    end
+    return false
+  end
+
+  local function generatePresetMenu(source, path, lab, filter)
     local mousePos = {}
     mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
     local windowRect = {}
@@ -1911,41 +1927,52 @@ local function windowFn()
 
     for i = 1, #source do
       local selectText = source[i].label
-      local saveX = r.ImGui_GetCursorPosX(ctx)
-      r.ImGui_BeginGroup(ctx)
 
-      local rv, selected
+      if (source[i].sub and presetSubMenuMatches(source[i].sub, filter))
+        or not source[i].sub and
+          (not filter
+          or filter == ''
+          or string.match(selectText, filter))
+      then
+        local saveX = r.ImGui_GetCursorPosX(ctx)
+        r.ImGui_BeginGroup(ctx)
 
-      if source[i].sub then
-        if r.ImGui_BeginMenu(ctx, selectText) then
-          generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText)
-          r.ImGui_EndMenu(ctx)
-        end
-      else
-        rv, selected = r.ImGui_Selectable(ctx, selectText, false)
-      end
+        local rv, selected
 
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
-
-      local _, itemTop = r.ImGui_GetItemRectMin(ctx)
-      local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
-      local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-      local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
-      r.ImGui_EndGroup(ctx)
-
-      if rv or srv then
-        if selected or srv then
-          local filename = source[i].label .. presetExt
-          local success, notes = tx.loadPreset(path .. '/' .. filename)
-          if success then
-            presetLabel = source[i].label
-            lastInputTextBuffer = presetLabel
-            presetNotesBuffer = notes and notes or ''
-            tx.processAction()
+        if source[i].sub then
+          if r.ImGui_BeginMenu(ctx, selectText) then
+            generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter)
+            r.ImGui_EndMenu(ctx)
+          end
+        else
+          if not filter or filter == '' or string.match(selectText, filter) then
+            rv, selected = r.ImGui_Selectable(ctx, selectText, false)
           end
         end
-        r.ImGui_CloseCurrentPopup(ctx)
+
+        r.ImGui_SameLine(ctx)
+        r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
+
+        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
+        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
+        local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+
+        r.ImGui_EndGroup(ctx)
+
+        if rv or srv then
+          if selected or srv then
+            local filename = source[i].label .. presetExt
+            local success, notes = tx.loadPreset(path .. '/' .. filename)
+            if success then
+              presetLabel = source[i].label
+              lastInputTextBuffer = presetLabel
+              presetNotesBuffer = notes and notes or ''
+              tx.processAction()
+            end
+          end
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
       end
     end
   end
@@ -1958,13 +1985,22 @@ local function windowFn()
       end
     end
 
+    local rv, buf = r.ImGui_InputTextWithHint(ctx, '##filterPresets', 'Filter...', filterPresetsBuffer)
+    if rv then
+      filterPresetsBuffer = buf
+    end
+
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_Spacing(ctx)
+
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
 
-    generatePresetMenu(presetTable, presetPath)
+    generatePresetMenu(presetTable, presetPath, nil, filterPresetsBuffer)
 
     if canReveal then
       r.ImGui_Spacing(ctx)

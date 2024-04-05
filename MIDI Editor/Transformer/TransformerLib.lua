@@ -2178,13 +2178,15 @@ function RunFind(findFn, params, runFn)
     local frEnd = params.findRange.frEnd
     local firstLastEventsByType = {}
     for _, event in ipairs(found) do
-      local eventIdx = event.chanmsg + event.chan
-      if not firstLastEventsByType[eventIdx] then firstLastEventsByType[eventIdx] = {} end
-      if not firstLastEventsByType[eventIdx][event.msg2] then firstLastEventsByType[eventIdx][event.msg2] = {} end
-      if not firstLastEventsByType[eventIdx][event.msg2].firstEvent then
-        firstLastEventsByType[eventIdx][event.msg2].firstEvent = event
+      if GetEventType(event) == CC_TYPE then
+        local eventIdx = event.chanmsg + event.chan
+        if not firstLastEventsByType[eventIdx] then firstLastEventsByType[eventIdx] = {} end
+        if not firstLastEventsByType[eventIdx][event.msg2] then firstLastEventsByType[eventIdx][event.msg2] = {} end
+        if not firstLastEventsByType[eventIdx][event.msg2].firstEvent then
+          firstLastEventsByType[eventIdx][event.msg2].firstEvent = event
+        end
+        firstLastEventsByType[eventIdx][event.msg2].lastEvent = event
       end
-      firstLastEventsByType[eventIdx][event.msg2].lastEvent = event
     end
     for _, rData in pairs(firstLastEventsByType) do
       for _, rEvent in pairs(rData) do

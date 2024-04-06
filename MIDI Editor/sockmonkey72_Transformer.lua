@@ -96,6 +96,7 @@ local viewPort
 
 local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
 local presetExt = '.tfmrPreset'
+local presetSubPath
 
 local CANONICAL_FONTSIZE_LARGE = 13
 local FONTSIZE_LARGE = 13
@@ -117,6 +118,7 @@ local canonicalFontWidth
 
 local currentFontWidth
 local currentFrameHeight
+local framePaddingY
 
 local updateItemBoundsOnEdit = true
 
@@ -138,6 +140,7 @@ local findConsoleText = ''
 local actionConsoleText = ''
 
 local presetTable = {}
+local presetFolders = {}
 local presetLabel = ''
 local presetInputVisible = false
 local presetInputDoesScript = false
@@ -191,6 +194,65 @@ local inTextInput = false
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
+
+local function generatePresetMenu(source, path, lab, filter, onlyFolders)
+  local mousePos = {}
+  mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
+  local windowRect = {}
+  windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
+  windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+  windowRect.right = windowRect.right + windowRect.left
+  windowRect.bottom = windowRect.bottom + windowRect.top
+
+  for i = 1, #source do
+    local selectText = source[i].label
+    if PresetMatches(source[i], filter, onlyFolders) then
+      local saveX = r.ImGui_GetCursorPosX(ctx)
+      r.ImGui_BeginGroup(ctx)
+
+      local rv, selected
+
+      if source[i].sub then
+        if r.ImGui_BeginMenu(ctx, selectText) then
+          generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter, onlyFolders)
+          r.ImGui_EndMenu(ctx)
+        end
+      else
+        rv, selected = r.ImGui_Selectable(ctx, selectText, false)
+      end
+
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
+
+      local _, itemTop = r.ImGui_GetItemRectMin(ctx)
+      local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+      local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
+      local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+
+      r.ImGui_EndGroup(ctx)
+
+      if rv or srv then
+        if selected or srv then
+          local filename = source[i].label .. presetExt
+          local success, notes = tx.loadPreset(path .. '/' .. filename)
+          if success then
+            presetLabel = source[i].label
+            lastInputTextBuffer = presetLabel
+            presetNotesBuffer = notes and notes or ''
+            tx.processAction()
+          end
+        end
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+  end
+  if onlyFolders then
+    local rv, selected = r.ImGui_Selectable(ctx, 'Save presets here...', false)
+    if rv and selected then
+      presetSubPath = path ~= presetPath and path or nil
+    end
+  end
+end
 
 local function addFindRow(idx, row)
   local findRowTable = tx.findRowTable()
@@ -498,7 +560,8 @@ local function windowFn()
   local hoverAlphaCol = (hoverCol &~ 0xFF) | 0x3F
   local activeCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderActive())
   local activeAlphaCol = (activeCol &~ 0xFF) | 0x7F
-  local _, framePaddingY = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
+
+  _, framePaddingY = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
 
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE FUNS -----------------------------
@@ -604,10 +667,26 @@ local function windowFn()
   end
 
   local function kbdEntryIsCompleted(retval)
-    return (retval and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
-              or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
-              or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())))
-            or (not refocusField and r.ImGui_IsItemDeactivated(ctx))
+    local complete = false
+    local withKey = false
+    if retval then -- does this ever get hit?
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
+        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
+        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
+      then
+        complete = true
+        withKey = true
+      end
+    elseif not refocusField and r.ImGui_IsItemDeactivated(ctx) then
+      complete = true
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
+        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
+        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
+      then
+        withKey = true
+      end
+    end
+    return complete, withKey
   end
 
   ---------------------------------------------------------------------------
@@ -669,7 +748,7 @@ local function windowFn()
     end
   end
 
-  local function enumerateTransformerPresets(pPath)
+  local function enumerateTransformerPresets(pPath, onlyFolders)
     if not dirExists(pPath) then return {} end
 
     local idx = 0
@@ -687,19 +766,21 @@ local function windowFn()
 
     for _, v in ipairs(fnames) do
       local newPath = pPath .. '/' .. v.label
-      v.sub = enumerateTransformerPresets(newPath)
+      v.sub = enumerateTransformerPresets(newPath, onlyFolders)
     end
 
-    idx = 0
-    r.EnumerateFiles(pPath, -1)
-    fname = r.EnumerateFiles(pPath, idx)
-    while fname do
-      if fname:match('%' .. presetExt .. '$') then
-        local entry = { label = fname:gsub('%' .. presetExt .. '$', '') }
-        table.insert(fnames, entry)
-      end
-      idx = idx + 1
+    if not onlyFolders then
+      idx = 0
+      r.EnumerateFiles(pPath, -1)
       fname = r.EnumerateFiles(pPath, idx)
+      while fname do
+        if fname:match('%' .. presetExt .. '$') then
+          local entry = { label = fname:gsub('%' .. presetExt .. '$', '') }
+          table.insert(fnames, entry)
+        end
+        idx = idx + 1
+        fname = r.EnumerateFiles(pPath, idx)
+      end
     end
 
     local sorted = {}
@@ -1625,8 +1706,6 @@ local function windowFn()
 
   r.ImGui_SameLine(ctx)
 
-  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
-
   updateCurrentRect()
   generateLabel('Action Scope')
 
@@ -1645,14 +1724,56 @@ local function windowFn()
   local _, presetButtonHeight = r.ImGui_GetItemRectSize(ctx)
   presetButtonBottom = presetButtonBottom + presetButtonHeight
 
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) or refocusInput then
-    presetInputVisible = true
-    presetInputDoesScript = optDown
-    refocusInput = false
-    r.ImGui_SetKeyboardFocusHere(ctx)
+  r.ImGui_SameLine(ctx)
+  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+
+  if r.ImGui_IsItemHovered(ctx) then
+    if r.ImGui_IsMouseClicked(ctx, 1) then
+      presetFolders = enumerateTransformerPresets(presetPath, true)
+      r.ImGui_OpenPopup(ctx, '##presetfolderselect')
+    elseif r.ImGui_IsMouseClicked(ctx, 0) or refocusInput then
+      presetInputVisible = true
+      presetInputDoesScript = optDown
+      refocusInput = false
+      r.ImGui_SetKeyboardFocusHere(ctx)
+    end
+  end
+  if presetSubPath then
+    r.ImGui_NewLine(ctx)
+    local str = string.gsub(presetSubPath, presetPath, '')
+    r.ImGui_TextColored(ctx, 0x00AAFFFF, '-> ' .. str)
   end
 
-  local handleStatusPosX, handStatusPosY = r.ImGui_GetCursorPos(ctx)
+  if r.ImGui_BeginPopup(ctx, '##presetfolderselect') then
+    r.ImGui_TextDisabled(ctx, 'Select destination folder...')
+
+    r.ImGui_Spacing(ctx)
+    r.ImGui_Separator(ctx)
+    r.ImGui_Spacing(ctx)
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    generatePresetMenu(presetFolders, presetPath, nil, nil, true)
+
+    if canReveal then
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+      r.ImGui_Spacing(ctx)
+      local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
+      if rv then
+        r.CF_ShellExecute(presetPath) -- try this until it breaks
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 5)
+
+    r.ImGui_EndPopup(ctx)
+  end
 
   local function positionModalWindow(yOff)
     local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
@@ -1726,7 +1847,7 @@ local function windowFn()
 
     if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
 
-    path = presetPath .. '/' .. buf
+    path = (presetSubPath and presetSubPath or presetPath) .. '/' .. buf
     return path, buf
   end
 
@@ -1791,6 +1912,8 @@ local function windowFn()
     presetInputDoesScript = false
   end
 
+  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+
   if presetInputVisible then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
       presetInputVisible = false
@@ -1798,11 +1921,13 @@ local function windowFn()
       handledEscape = true
     end
 
-    r.ImGui_SameLine(ctx)
     r.ImGui_SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', lastInputTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
-    if kbdEntryIsCompleted(retval) then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+    local complete, withKey = kbdEntryIsCompleted(retval)
+    if complete then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape())
+        or not withKey
+      then
         presetInputVisible = false
         presetInputDoesScript = false
         handledEscape = true
@@ -1887,24 +2012,21 @@ local function windowFn()
 
   generateLabel('Preset Notes')
 
-  local function handleStatus(ctext)
-    if statusMsg ~= '' and statusTime and statusContext == ctext then
+  local function handleStatus()
+    if statusMsg ~= '' and statusTime then
       if r.time_precise() - statusTime > 3 then statusTime = nil statusMsg = '' statusContext = 0
       else
-        r.ImGui_SameLine(ctx)
         r.ImGui_AlignTextToFramePadding(ctx)
         r.ImGui_Text(ctx, statusMsg)
       end
     end
   end
 
-  r.ImGui_SetCursorPos(ctx, handleStatusPosX, handStatusPosY - r.ImGui_GetFrameHeightWithSpacing(ctx))
-  r.ImGui_Dummy(ctx, DEFAULT_ITEM_WIDTH * 1.5, 1)
-  handleStatus(2)
+  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+  handleStatus()
 
-
-  function PresetMatches(sourceEntry, filter)
-    if (sourceEntry.sub and PresetSubMenuMatches(sourceEntry.sub, filter))
+  function PresetMatches(sourceEntry, filter, onlyFolders)
+    if (sourceEntry.sub and (onlyFolders or PresetSubMenuMatches(sourceEntry.sub, filter)))
       or not sourceEntry.sub and
         (not filter
         or filter == ''
@@ -1922,59 +2044,6 @@ local function windowFn()
       end
     end
     return false
-  end
-
-  local function generatePresetMenu(source, path, lab, filter)
-    local mousePos = {}
-    mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
-    local windowRect = {}
-    windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
-    windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
-    windowRect.right = windowRect.right + windowRect.left
-    windowRect.bottom = windowRect.bottom + windowRect.top
-
-    for i = 1, #source do
-      local selectText = source[i].label
-      if PresetMatches(source[i], filter) then
-        local saveX = r.ImGui_GetCursorPosX(ctx)
-        r.ImGui_BeginGroup(ctx)
-
-        local rv, selected
-
-        if source[i].sub then
-          if r.ImGui_BeginMenu(ctx, selectText) then
-            generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter)
-            r.ImGui_EndMenu(ctx)
-          end
-        else
-          rv, selected = r.ImGui_Selectable(ctx, selectText, false)
-        end
-
-        r.ImGui_SameLine(ctx)
-        r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
-
-        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
-        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
-        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-        local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
-
-        r.ImGui_EndGroup(ctx)
-
-        if rv or srv then
-          if selected or srv then
-            local filename = source[i].label .. presetExt
-            local success, notes = tx.loadPreset(path .. '/' .. filename)
-            if success then
-              presetLabel = source[i].label
-              lastInputTextBuffer = presetLabel
-              presetNotesBuffer = notes and notes or ''
-              tx.processAction()
-            end
-          end
-          r.ImGui_CloseCurrentPopup(ctx)
-        end
-      end
-    end
   end
 
   if r.ImGui_BeginPopup(ctx, 'openPresetMenu') then

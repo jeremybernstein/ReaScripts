@@ -1892,7 +1892,9 @@ function MultiplyPosition(event, property, param, context)
 
   local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
   local distanceFromStart = event.projtime - itemStartPos
-  local scaledPosition = distanceFromStart * param
+  local scaledPosition = itemStartPos + (distanceFromStart * param)
+
+  mu.post(itemStartPos, distanceFromStart, scaledPosition)
 
   event[property] = scaledPosition
   return scaledPosition

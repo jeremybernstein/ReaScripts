@@ -1894,8 +1894,6 @@ function MultiplyPosition(event, property, param, context)
   local distanceFromStart = event.projtime - itemStartPos
   local scaledPosition = itemStartPos + (distanceFromStart * param)
 
-  mu.post(itemStartPos, distanceFromStart, scaledPosition)
-
   event[property] = scaledPosition
   return scaledPosition
 end

@@ -874,7 +874,8 @@ local function windowFn()
         local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, terms)
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
-          local strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR)
+          local strVal = row[paramName .. 'TextEditorStr']
+          if not isMetricOrMusical then ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR) end
           if range and range[1] and range[2] and row[paramName .. 'PercentVal'] then
             local percentVal = row[paramName .. 'PercentVal'] / 100
             local scaledVal
@@ -1901,15 +1902,22 @@ local function windowFn()
   r.ImGui_Dummy(ctx, DEFAULT_ITEM_WIDTH * 1.5, 1)
   handleStatus(2)
 
-  local function presetSubMenuMatches(source, filter)
+
+  function PresetMatches(sourceEntry, filter)
+    if (sourceEntry.sub and PresetSubMenuMatches(sourceEntry.sub, filter))
+      or not sourceEntry.sub and
+        (not filter
+        or filter == ''
+        or string.match(string.lower(sourceEntry.label), filter))
+    then
+      return true
+    end
+    return false
+  end
+
+  function PresetSubMenuMatches(source, filter)
     for i = 1, #source do
-      local selectText = source[i].label
-      if (source[i].sub and presetSubMenuMatches(source[i].sub, filter))
-        or not source[i].sub and
-          (not filter
-          or filter == ''
-          or string.match(selectText, filter))
-      then
+      if PresetMatches(source[i], filter) then
         return true
       end
     end
@@ -1927,13 +1935,7 @@ local function windowFn()
 
     for i = 1, #source do
       local selectText = source[i].label
-
-      if (source[i].sub and presetSubMenuMatches(source[i].sub, filter))
-        or not source[i].sub and
-          (not filter
-          or filter == ''
-          or string.match(selectText, filter))
-      then
+      if PresetMatches(source[i], filter) then
         local saveX = r.ImGui_GetCursorPosX(ctx)
         r.ImGui_BeginGroup(ctx)
 
@@ -1945,9 +1947,7 @@ local function windowFn()
             r.ImGui_EndMenu(ctx)
           end
         else
-          if not filter or filter == '' or string.match(selectText, filter) then
-            rv, selected = r.ImGui_Selectable(ctx, selectText, false)
-          end
+          rv, selected = r.ImGui_Selectable(ctx, selectText, false)
         end
 
         r.ImGui_SameLine(ctx)
@@ -1985,7 +1985,10 @@ local function windowFn()
       end
     end
 
-    local rv, buf = r.ImGui_InputTextWithHint(ctx, '##filterPresets', 'Filter...', filterPresetsBuffer)
+    if r.ImGui_IsWindowAppearing(ctx) then
+      r.ImGui_SetKeyboardFocusHere(ctx)
+    end
+    local rv, buf = r.ImGui_InputTextWithHint(ctx, '##presetFilter', 'Filter...', filterPresetsBuffer)
     if rv then
       filterPresetsBuffer = buf
     end
@@ -2000,7 +2003,7 @@ local function windowFn()
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
 
-    generatePresetMenu(presetTable, presetPath, nil, filterPresetsBuffer)
+    generatePresetMenu(presetTable, presetPath, nil, string.lower(filterPresetsBuffer))
 
     if canReveal then
       r.ImGui_Spacing(ctx)

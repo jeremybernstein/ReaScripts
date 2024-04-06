@@ -65,6 +65,7 @@ local SELECT_TIME_INDIVIDUAL = 4
 
 local findParserError = ''
 local dirtyFind = false
+local wantsType = {}
 
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
@@ -2219,6 +2220,8 @@ function ProcessFind(take)
   local rangeType = SELECT_TIME_SHEBANG
   local findRangeStart, findRangeEnd
 
+  wantsType = {}
+
   for k, v in ipairs(findRowTable) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
 
@@ -2257,6 +2260,19 @@ function ProcessFind(take)
     end
     if param2Num and (paramTypes[2] == PARAM_TYPE_INTEDITOR or paramTypes[2] == PARAM_TYPE_FLOATEDITOR) and v.param2PercentVal then
       param2Term = GetParamPercentTerm(param2Num, curCondition.bipolar)
+    end
+
+    -- wants
+    if curTarget.notation == '$type' and condition.notation == '==' and not v.isNot then
+      local typeType = param1Tab[v.param1Entry].notation
+      if typeType == '$note' then wantsType[0x90] = true
+      elseif typeType == '$polyat' then wantsType[0xA0] = true
+      elseif typeType == '$cc' then wantsType[0xB0] = true
+      elseif typeType == '$pc' then wantsType[0xC0] = true
+      elseif typeType == '$at' then wantsType[0xD0] = true
+      elseif typeType == '$pb' then wantsType[0xE0] = true
+      elseif typeType == '$syx' then wantsType[0xF0] = true
+      end
     end
 
     -- range processing
@@ -2339,9 +2355,7 @@ function ProcessFind(take)
   if success and pret then
     findFn = pret()
     findParserError = ''
-    if not take then
-      dirtyFind = true
-    end
+    dirtyFind = true
   else
     findParserError = 'Fatal error: could not load selection criteria'
     if err then
@@ -3332,15 +3346,29 @@ TransformerLib.getHasTable = function()
     CACHED_WRAPPED = nil
     SOM = nil
 
+    local gotSomething = false
+
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
       local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take)
       local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
-        if vv == true then hasTable[kk] = true end
+        if vv == true then
+          hasTable[kk] = true
+          gotSomething = true
+        end
       end
     end
+
+    if not gotSomething then
+      for kk, vv in pairs(wantsType) do
+        if vv == true then
+          hasTable[kk] = true
+        end
+      end
+    end
+
     dirtyFind = false
     lastHasTable = hasTable
     fresh = true

@@ -1,0 +1,10 @@
+{
+ actionMacro = "$position - 0.0.10",
+ actionScope = "$transform",
+ findMacro = "$type == $cc && $property :isselected()",
+ findScope = "$midieditor",
+ notes = "Operates on selected CC Events.\
+\
+To operate on all CC Events add [ Property > Selected ] as Selection Criteria.\
+NOTE: operates also events with no visible CC lanes, so be careful.",
+}

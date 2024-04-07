@@ -1,0 +1,9 @@
+{
+ actionMacro = "$position :round(0.1.00)",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $property :isselected()",
+ findScope = "$midieditor",
+ notes = "Operates on selected Notes.\
+\
+To operate on all Notes remove [ Property > Selected ] in Selection Criteria.",
+}

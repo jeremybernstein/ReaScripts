@@ -1,0 +1,10 @@
+{
+ actionMacro = "$value2 * 1.1",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $position !:onmetricgrid($1/4|-b|6.00|6.00, 1010)",
+ findScope = "$midieditor",
+ notes = "TIP:\
+Add Selection Criteria Databyte 1 to target the Note of a snare drum to control velocity of backbeat\
+\
+Slap dat snare hard",
+}

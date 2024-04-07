@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value1 = percent<5.5118>",
+ actionScope = "$insert",
+ findMacro = "$type == $cc && $value1 == percent<1.5748>",
+ findScope = "$midieditor",
+ notes = "Author: Stevie\n\nBig Thanks!!",
+}

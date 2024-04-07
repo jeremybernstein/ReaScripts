@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$type == $cc && $value1 >= percent<0.0000>",
+ findScope = "$everywhere",
+ notes = "Author: Stevie\n\nBig Thanks!!",
+}

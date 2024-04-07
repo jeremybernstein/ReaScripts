@@ -1,0 +1,7 @@
+{
+ actionMacro = "$channel = 2",
+ actionScope = "$insert",
+ findMacro = "$type == $cc && $value1 == percent<0.7874> && $channel == 1",
+ findScope = "$midieditor",
+ notes = "Operates on all CC1 events, add Property > Selected to operate only on selected ones.",
+}

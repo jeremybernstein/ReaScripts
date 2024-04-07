@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$position !:intimesel()",
+ findScope = "$midieditor",
+ notes = "TODO: TS End is deleting noteONs",
+}

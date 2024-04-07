@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$type == $cc && $value1 == percent<50.3937> && $position :cursorpos($before)",
+ findScope = "$midieditor",
+ notes = "Author: Stevie\n\nBig Thanks!!",
+}

@@ -606,9 +606,18 @@ local actionLengthOperationEntries = {
   actionOperationTimeScaleOff
 }
 
+local function channelMod(op)
+  local newop = tableCopy(op)
+  newop.literal = true
+  newop.range = newop.bipolar and { -15, 15 } or { 0, 15 }
+  return newop
+end
+
 local actionChannelOperationEntries = {
-  actionOperationPlus, actionOperationMinus, actionOperationFixed, actionOperationRandom,
-  actionOperationRelRandom, actionOperationLine, actionOperationRelLine
+  channelMod(actionOperationPlus), channelMod(actionOperationMinus),
+  actionOperationFixed,
+  channelMod(actionOperationRandom), channelMod(actionOperationRelRandom),
+  channelMod(actionOperationLine), channelMod(actionOperationRelLine)
 }
 
 local actionTypeOperationEntries = {

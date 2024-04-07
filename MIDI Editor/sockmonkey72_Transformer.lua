@@ -435,7 +435,10 @@ local function overrideEditorType(row, target, condOp, paramTypes, idx)
     else
       tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
     end
-  elseif target.notation ~= '$position' and target.notation ~= '$length' then
+  elseif target.notation ~= '$position'
+    and target.notation ~= '$length'
+    and target.notation ~= '$channel'
+  then
     if condOp.bipolar then
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
     else

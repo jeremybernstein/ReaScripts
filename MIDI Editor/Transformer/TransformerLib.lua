@@ -581,7 +581,7 @@ local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
-  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -2426,7 +2426,7 @@ function ActionTabsFromTarget(row)
       param1Tab = actionMoveToCursorParam1Entries
     elseif operation.notation == ':addlength' then
       param1Tab = actionAddLengthParam1Entries
-    elseif operation.notation == '*' then
+    elseif operation.notation == '*' or operation.notation == '/' then
       param2Tab = actionPositionMultParam2Menu
     end
   elseif notation == '$length' then

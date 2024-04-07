@@ -106,6 +106,8 @@ local DEFAULT_WIDTH = 68 * FONTSIZE_LARGE
 local DEFAULT_HEIGHT = 40 * FONTSIZE_LARGE
 local DEFAULT_ITEM_WIDTH = 70
 
+local winHeight
+
 local canonicalFont = r.ImGui_CreateFont(fontStyle, CANONICAL_FONTSIZE_LARGE)
 r.ImGui_Attach(ctx, canonicalFont)
 
@@ -148,12 +150,15 @@ local presetNotesBuffer = ''
 local presetNotesViewEditor = false
 local justChanged = false
 local filterPresetsBuffer = ''
+local folderNameTextBuffer = ''
+local inNewFolderDialog = false
+local newFolderParentPath = ''
 
 local scriptWritesMainContext = true
 local scriptWritesMIDIContexts = true
 local refocusField = false
 
-local lastInputTextBuffer = ''
+local presetNameTextBuffer = ''
 local inOKDialog = false
 local statusMsg = ''
 local statusTime = nil
@@ -195,63 +200,19 @@ local inTextInput = false
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
-local function generatePresetMenu(source, path, lab, filter, onlyFolders)
-  local mousePos = {}
-  mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
-  local windowRect = {}
-  windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
-  windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
-  windowRect.right = windowRect.right + windowRect.left
-  windowRect.bottom = windowRect.bottom + windowRect.top
-
-  for i = 1, #source do
-    local selectText = source[i].label
-    if PresetMatches(source[i], filter, onlyFolders) then
-      local saveX = r.ImGui_GetCursorPosX(ctx)
-      r.ImGui_BeginGroup(ctx)
-
-      local rv, selected
-
-      if source[i].sub then
-        if r.ImGui_BeginMenu(ctx, selectText) then
-          generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter, onlyFolders)
-          r.ImGui_EndMenu(ctx)
-        end
-      else
-        rv, selected = r.ImGui_Selectable(ctx, selectText, false)
-      end
-
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
-
-      local _, itemTop = r.ImGui_GetItemRectMin(ctx)
-      local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
-      local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-      local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
-
-      r.ImGui_EndGroup(ctx)
-
-      if rv or srv then
-        if selected or srv then
-          local filename = source[i].label .. presetExt
-          local success, notes = tx.loadPreset(path .. '/' .. filename)
-          if success then
-            presetLabel = source[i].label
-            lastInputTextBuffer = presetLabel
-            presetNotesBuffer = notes and notes or ''
-            tx.processAction()
-          end
-        end
-        r.ImGui_CloseCurrentPopup(ctx)
-      end
-    end
+local function positionModalWindow(yOff, yScale)
+  local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
+  local winHgt = currentFrameHeight * (5 * (yScale and yScale or 1))
+  r.ImGui_SetNextWindowSize(ctx, winWid, winHgt)
+  local winPosX, winPosY = r.ImGui_Viewport_GetPos(viewPort)
+  local winSizeX, winSizeY = r.ImGui_Viewport_GetSize(viewPort)
+  local okPosX = winPosX + (winSizeX / 2.) - (winWid / 2.)
+  local okPosY = winPosY + (winSizeY / 2.) - (winHgt / 2.) + (yOff and yOff or 0)
+  if okPosY + winHgt > windowInfo.top + windowInfo.height then
+    okPosY = okPosY - ((windowInfo.top + windowInfo.height) - (okPosY + winHgt))
   end
-  if onlyFolders then
-    local rv, selected = r.ImGui_Selectable(ctx, 'Save presets here...', false)
-    if rv and selected then
-      presetSubPath = path ~= presetPath and path or nil
-    end
-  end
+  r.ImGui_SetNextWindowPos(ctx, okPosX, okPosY)
+  --r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
 end
 
 local function addFindRow(idx, row)
@@ -745,6 +706,134 @@ local function windowFn()
       if keys[i] then
         return keys[i], t[keys[i]]
       end
+    end
+  end
+
+  local function handleNewFolderCreationDialog(title, text)
+    local rv = false
+    local doOK = false
+
+    r.ImGui_PushFont(ctx, fontInfo.large)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+
+    if inNewFolderDialog then
+      positionModalWindow(r.ImGui_GetFrameHeight(ctx) / 2, 1.2)
+      r.ImGui_OpenPopup(ctx, title)
+    elseif folderNameTextBuffer:len() ~= 0
+      and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
+        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()))
+    then
+      rv = true
+      doOK = true
+    end
+
+    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost()) then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+        handledEscape = true
+        refocusInput = true
+      end
+      if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Text(ctx, text)
+      r.ImGui_Spacing(ctx)
+
+      local retval, buf = r.ImGui_InputText(ctx, '##newfoldername', folderNameTextBuffer)
+      folderNameTextBuffer = buf
+      local complete, withKeys = kbdEntryIsCompleted(retval)
+      if complete and withKeys then
+        if folderNameTextBuffer:len() ~= 0 then
+          doOK = true
+        end
+      end
+
+      r.ImGui_Spacing(ctx)
+      if r.ImGui_Button(ctx, 'Cancel') then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      r.ImGui_SameLine(ctx)
+      if r.ImGui_Button(ctx, 'OK') or doOK then
+        rv = true
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+      r.ImGui_SetItemDefaultFocus(ctx)
+
+      r.ImGui_EndPopup(ctx)
+    end
+    r.ImGui_PopFont(ctx)
+    r.ImGui_PopStyleColor(ctx)
+
+    inNewFolderDialog = false
+
+    return rv, folderNameTextBuffer
+  end
+
+  local function generatePresetMenu(source, path, lab, filter, onlyFolders)
+    local mousePos = {}
+    mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
+    local windowRect = {}
+    windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
+    windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+    windowRect.right = windowRect.right + windowRect.left
+    windowRect.bottom = windowRect.bottom + windowRect.top
+
+    for i = 1, #source do
+      local selectText = source[i].label
+      if PresetMatches(source[i], filter, onlyFolders) then
+        local saveX = r.ImGui_GetCursorPosX(ctx)
+        r.ImGui_BeginGroup(ctx)
+
+        local rv, selected
+
+        if source[i].sub then
+          if r.ImGui_BeginMenu(ctx, selectText) then
+            generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter, onlyFolders)
+            r.ImGui_EndMenu(ctx)
+          end
+        else
+          rv, selected = r.ImGui_Selectable(ctx, selectText, false)
+        end
+
+        r.ImGui_SameLine(ctx)
+        r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
+
+        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
+        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
+        local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+
+        r.ImGui_EndGroup(ctx)
+
+        if rv or srv then
+          if selected or srv then
+            local filename = source[i].label .. presetExt
+            local success, notes = tx.loadPreset(path .. '/' .. filename)
+            if success then
+              presetLabel = source[i].label
+              presetNameTextBuffer = presetLabel
+              presetNotesBuffer = notes and notes or ''
+              tx.processAction()
+            end
+          end
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+      end
+    end
+    if onlyFolders then
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xCCCCFFCC)
+      local rv, selected = r.ImGui_Selectable(ctx, 'Save presets here...', false)
+      if rv and selected then
+        presetSubPath = path ~= presetPath and path or nil
+      end
+
+      rv, selected = r.ImGui_Selectable(ctx, 'New folder here...', false)
+      if rv and selected then
+        inNewFolderDialog = true
+        newFolderParentPath = path
+      end
+
+      r.ImGui_PopStyleColor(ctx)
     end
   end
 
@@ -1734,6 +1823,9 @@ local function windowFn()
     r.ImGui_OpenPopup(ctx, '##presetfolderselect')
   end
 
+  r.ImGui_SameLine(ctx)
+  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+
   if presetSubPath then
     r.ImGui_NewLine(ctx)
     r.ImGui_Indent(ctx)
@@ -1772,28 +1864,23 @@ local function windowFn()
     r.ImGui_EndPopup(ctx)
   end
 
-  r.ImGui_SameLine(ctx)
+  local createNewFolder, folderName = handleNewFolderCreationDialog('Create New Folder', 'New Folder Name')
+  if createNewFolder then
+    local newPath = newFolderParentPath .. '/' .. folderName
+    if r.RecursiveCreateDirectory(newPath, 0) ~= 0 then
+      presetSubPath = newPath ~= presetPath and newPath or nil
+    else
+      -- some kind of status message
+    end
+  end
+
+  r.ImGui_SetCursorPos(ctx, saveX, saveY)
   r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', DEFAULT_ITEM_WIDTH * 1.5)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) or refocusInput then
     presetInputVisible = true
     presetInputDoesScript = optDown
     refocusInput = false
     r.ImGui_SetKeyboardFocusHere(ctx)
-  end
-
-  local function positionModalWindow(yOff)
-    local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
-    local winHgt = FONTSIZE_LARGE * 7
-    r.ImGui_SetNextWindowSize(ctx, winWid, winHgt)
-    local winPosX, winPosY = r.ImGui_Viewport_GetPos(viewPort)
-    local winSizeX, winSizeY = r.ImGui_Viewport_GetSize(viewPort)
-    local okPosX = winPosX + (winSizeX / 2.) - (winWid / 2.)
-    local okPosY = winPosY + (winSizeY / 2.) - (winHgt / 2.) + (yOff and yOff or 0)
-    if okPosY + winHgt > windowInfo.top + windowInfo.height then
-      okPosY = okPosY - ((windowInfo.top + windowInfo.height) - (okPosY + winHgt))
-    end
-    r.ImGui_SetNextWindowPos(ctx, okPosX, okPosY)
-    --r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
   end
 
   local function handleOKDialog(title, text)
@@ -1848,7 +1935,7 @@ local function windowFn()
 
   local function presetPathAndFilenameFromLastInput()
     local path
-    local buf = lastInputTextBuffer
+    local buf = presetNameTextBuffer
     if not buf:match('%' .. presetExt .. '$') then buf = buf .. presetExt end
 
     if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
@@ -1883,7 +1970,7 @@ local function windowFn()
 
   local function manageSaveAndOverwrite(pathFn, saveFn, statusCtx, suppressOverwrite)
     if inOKDialog then
-      if not lastInputTextBuffer or lastInputTextBuffer == '' then
+      if not presetNameTextBuffer or presetNameTextBuffer == '' then
         statusMsg = 'Name must contain at least 1 character'
         statusTime = r.time_precise()
         statusContext = statusCtx
@@ -1901,8 +1988,8 @@ local function windowFn()
       end
     end
 
-    if lastInputTextBuffer and lastInputTextBuffer ~= '' then
-      local okrv, okval = handleOKDialog('Overwrite File?', 'Overwrite file '..lastInputTextBuffer..'?')
+    if presetNameTextBuffer and presetNameTextBuffer ~= '' then
+      local okrv, okval = handleOKDialog('Overwrite File?', 'Overwrite file '..presetNameTextBuffer..'?')
       if okrv then
         if okval == 1 then
           local path, fname = pathFn()
@@ -1919,7 +2006,7 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
-  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+  saveX, saveY = r.ImGui_GetCursorPos(ctx)
 
   if presetInputVisible then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -1929,7 +2016,7 @@ local function windowFn()
     end
 
     r.ImGui_SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', lastInputTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
     local complete, withKey = kbdEntryIsCompleted(retval)
     if complete then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape())
@@ -1939,12 +2026,12 @@ local function windowFn()
         presetInputDoesScript = false
         handledEscape = true
       else
-        lastInputTextBuffer = buf
+        presetNameTextBuffer = buf
         inOKDialog = true
       end
       inTextInput = false
     else
-      lastInputTextBuffer = buf
+      presetNameTextBuffer = buf
       inOKDialog = false
       if retval then inTextInput = true end
     end
@@ -2244,6 +2331,7 @@ local function updateOneFont(name)
     fontInfo[name] = r.ImGui_CreateFont(fontStyle, newFontSize)
     r.ImGui_Attach(ctx, fontInfo[name])
     fontInfo[name..'Size'] = newFontSize
+    winHeight = nil
   end
 end
 
@@ -2269,10 +2357,17 @@ local function openWindow()
 
   r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
 
-  r.ImGui_PushFont(ctx, fontInfo.large)
-  local winheight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 27
-  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winheight, windowInfo.defaultWidth * 3, winheight)
-  r.ImGui_PopFont(ctx)
+  if not winHeight then
+    r.ImGui_PushFont(ctx, fontInfo.large)
+    winHeight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 19
+    r.ImGui_PushFont(ctx, fontInfo.small)
+    winHeight = winHeight + (r.ImGui_GetFrameHeightWithSpacing(ctx) * 9)
+    r.ImGui_PopFont(ctx)
+    winHeight = winHeight + ((fontInfo.largeSize - CANONICAL_FONTSIZE_LARGE) * 5)
+    r.ImGui_PopFont(ctx)
+  end
+
+  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winHeight, windowInfo.defaultWidth * 3, winHeight)
 
   r.ImGui_PushFont(ctx, fontInfo.small)
   r.ImGui_SetNextWindowDockID(ctx, ~0, r.ImGui_Cond_Appearing()) --, r.ImGui_Cond_Appearing()) -- TODO docking
@@ -2378,7 +2473,7 @@ local function loop()
           local success, notes = tx.loadPreset(filedrag)
           if success then
             presetLabel = string.match(filedrag, '.*[/\\](.*)' .. presetExt)
-            lastInputTextBuffer = presetLabel
+            presetNameTextBuffer = presetLabel
             presetNotesBuffer = notes and notes or ''
             tx.processAction()
           end

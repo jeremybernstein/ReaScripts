@@ -1339,8 +1339,6 @@ local function windowFn()
         tx.processFind()
       end)
 
-    -- could try sth where when this row's target entry is open that its disappears
-    --  from the find term so that the value 1/2 labels are correct
     createPopup(currentRow, 'targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
         local oldNotation = currentFindCondition.notation
         currentRow:init()
@@ -1728,26 +1726,17 @@ local function windowFn()
   Spacing(true)
 
   local presetButtonBottom = r.ImGui_GetCursorPosY(ctx)
-  r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', DEFAULT_ITEM_WIDTH * 1.5)
+  r.ImGui_Button(ctx, '...', (currentFontWidth and currentFontWidth or canonicalFontWidth) + scaled(10))
   local _, presetButtonHeight = r.ImGui_GetItemRectSize(ctx)
   presetButtonBottom = presetButtonBottom + presetButtonHeight
-
-  r.ImGui_SameLine(ctx)
-  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
-
-  if r.ImGui_IsItemHovered(ctx) then
-    if r.ImGui_IsMouseClicked(ctx, 1) then
-      presetFolders = enumerateTransformerPresets(presetPath, true)
-      r.ImGui_OpenPopup(ctx, '##presetfolderselect')
-    elseif r.ImGui_IsMouseClicked(ctx, 0) or refocusInput then
-      presetInputVisible = true
-      presetInputDoesScript = optDown
-      refocusInput = false
-      r.ImGui_SetKeyboardFocusHere(ctx)
-    end
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+    presetFolders = enumerateTransformerPresets(presetPath, true)
+    r.ImGui_OpenPopup(ctx, '##presetfolderselect')
   end
+
   if presetSubPath then
     r.ImGui_NewLine(ctx)
+    r.ImGui_Indent(ctx)
     local str = string.gsub(presetSubPath, presetPath, '')
     r.ImGui_TextColored(ctx, 0x00AAFFFF, '-> ' .. str)
   end
@@ -1781,6 +1770,15 @@ local function windowFn()
     r.ImGui_PopStyleColor(ctx, 5)
 
     r.ImGui_EndPopup(ctx)
+  end
+
+  r.ImGui_SameLine(ctx)
+  r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', DEFAULT_ITEM_WIDTH * 1.5)
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) or refocusInput then
+    presetInputVisible = true
+    presetInputDoesScript = optDown
+    refocusInput = false
+    r.ImGui_SetKeyboardFocusHere(ctx)
   end
 
   local function positionModalWindow(yOff)
@@ -1920,7 +1918,8 @@ local function windowFn()
     presetInputDoesScript = false
   end
 
-  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+  r.ImGui_SameLine(ctx)
+  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
 
   if presetInputVisible then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -1985,10 +1984,10 @@ local function windowFn()
 
   if not presetNotesViewEditor then
     r.ImGui_BeginGroup(ctx)
-    r.ImGui_SetCursorPos(ctx, restoreX + 2, restoreY + 3)
     local noBuf = false
     if presetNotesBuffer == '' then noBuf = true end
     if noBuf then r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFF7F) end
+    r.ImGui_AlignTextToFramePadding(ctx)
     r.ImGui_TextWrapped(ctx, presetNotesBuffer == '' and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
     if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, 0) then
       presetNotesViewEditor = true

@@ -627,13 +627,17 @@ local function windowFn()
     r.ImGui_SetCursorPosY(ctx, restoreY)
   end
 
+  local function completionKeyPress()
+    return r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
+      or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
+      or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
+  end
+
   local function kbdEntryIsCompleted(retval)
     local complete = false
     local withKey = false
     if retval then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
+      if completionKeyPress()
       then
         complete = true
         withKey = true
@@ -641,10 +645,7 @@ local function windowFn()
     end
     if not complete and refocusField and r.ImGui_IsItemDeactivated(ctx) then
       complete = true
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
-      then
+      if completionKeyPress() then
         withKey = true
       end
     end
@@ -2018,10 +2019,11 @@ local function windowFn()
 
     r.ImGui_SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
-    local complete, withKey = kbdEntryIsCompleted(retval)
-    if complete then
+    local deactivated = r.ImGui_IsItemDeactivated(ctx)
+    if deactivated then
+      local complete = completionKeyPress()
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape())
-        or not withKey
+        or not complete
       then
         presetInputVisible = false
         presetInputDoesScript = false

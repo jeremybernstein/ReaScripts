@@ -580,14 +580,19 @@ end
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
-  { notation = '*', label = 'Multiply (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1}, _context)', terms = 1, floateditor = true, norange = true, literal = true },
-  { notation = '/', label = 'Divide (rel. item start)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, _context)', terms = 1, floateditor = true, norange = true, literal = true },
+  { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound), positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1})', terms = 1, menu = true },
   actionOperationTimeScaleOff
+}
+
+local actionPositionMultParam2Menu = {
+  { notation = '$itemrel', label = 'Item-Relative', text = 'nil'},
+  { notation = '$firstrel', label = 'First-Event-Relative', text = '1'},
 }
 
 local actionLengthOperationEntries = {
@@ -1885,16 +1890,23 @@ function SubtractDuration(event, property, duration, baseTime)
   return event[property]
 end
 
-function MultiplyPosition(event, property, param, context)
+function MultiplyPosition(event, property, param, relative, context)
   local take = context.take
   if not take then return event[property] end
 
   local item = r.GetMediaItemTake_Item(take)
   if not item then return event[property] end
 
-  local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
-  local distanceFromStart = event.projtime - itemStartPos
-  local scaledPosition = itemStartPos + (distanceFromStart * param)
+  local scaledPosition
+  if relative == 1 then
+    local firstTime = context.firstTime
+    local distanceFromStart = event.projtime - firstTime
+    scaledPosition = firstTime + (distanceFromStart * param)
+  else
+    local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
+    local distanceFromStart = event.projtime - itemStartPos
+    scaledPosition = itemStartPos + (distanceFromStart * param)
+  end
 
   event[property] = scaledPosition
   return scaledPosition
@@ -2414,6 +2426,8 @@ function ActionTabsFromTarget(row)
       param1Tab = actionMoveToCursorParam1Entries
     elseif operation.notation == ':addlength' then
       param1Tab = actionAddLengthParam1Entries
+    elseif operation.notation == '*' then
+      param2Tab = actionPositionMultParam2Menu
     end
   elseif notation == '$length' then
     if operation.notation == ':quantmusical' then

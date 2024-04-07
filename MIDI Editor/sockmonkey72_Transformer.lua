@@ -630,7 +630,7 @@ local function windowFn()
   local function kbdEntryIsCompleted(retval)
     local complete = false
     local withKey = false
-    if retval then -- does this ever get hit?
+    if retval then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
         or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
         or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())
@@ -638,7 +638,8 @@ local function windowFn()
         complete = true
         withKey = true
       end
-    elseif not refocusField and r.ImGui_IsItemDeactivated(ctx) then
+    end
+    if not complete and refocusField and r.ImGui_IsItemDeactivated(ctx) then
       complete = true
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
         or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())

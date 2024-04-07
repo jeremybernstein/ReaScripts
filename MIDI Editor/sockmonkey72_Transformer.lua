@@ -845,7 +845,7 @@ local function windowFn()
         r.ImGui_EndGroup(ctx)
 
         if rv or srv then
-          if selected or srv then fun(i) end
+          fun(i)
           r.ImGui_CloseCurrentPopup(ctx)
         end
       end
@@ -1201,7 +1201,13 @@ local function windowFn()
     if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
       selectedFindRow = k
       lastSelectedRowType = 0 -- Find
+      currentRow.except = true
+      tx.processFind()
       r.ImGui_OpenPopup(ctx, 'targetMenu')
+    end
+    if not r.ImGui_IsPopupOpen(ctx, 'targetMenu') and currentRow.except then
+      currentRow.except = nil
+      tx.processFind()
     end
 
     colIdx = colIdx + 1
@@ -1333,6 +1339,8 @@ local function windowFn()
         tx.processFind()
       end)
 
+    -- could try sth where when this row's target entry is open that its disappears
+    --  from the find term so that the value 1/2 labels are correct
     createPopup(currentRow, 'targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
         local oldNotation = currentFindCondition.notation
         currentRow:init()

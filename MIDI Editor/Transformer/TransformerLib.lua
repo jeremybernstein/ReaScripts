@@ -40,6 +40,10 @@ mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true -- any downsides to having it on all 
 mu.CORRECT_OVERLAPS_FAVOR_NOTEON = true
 mu.CORRECT_EXTENTS = true
 
+function P(...)
+  mu.post(...)
+end
+
 local function startup(scriptName)
   if mu then return mu.CheckDependencies() end
   return false
@@ -233,6 +237,7 @@ function FindRow:init()
   self.param1PercentVal = nil
   self.param2PercentVal = nil
   self.isNot = false
+  self.except = nil
 end
 
 local findRowTable = {}
@@ -924,9 +929,6 @@ function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   end
 
   local wrapped = math.floor(ppqpos / cycleLength)
-
-  -- mu.post('metric: ' .. (CACHED_METRIC and CACHED_METRIC or 'nil'), 'wrapped: ' .. (CACHED_WRAPPED and CACHED_WRAPPED or 'nil'), 'curwrap; '.. wrapped)
-
   if wrapped ~= CACHED_WRAPPED then
     CACHED_WRAPPED = wrapped
     CACHED_METRIC = nil
@@ -2068,11 +2070,16 @@ end
 
 function UpdateEventCount(event, counts)
   local char
-  if GetEventType(event) == NOTE_TYPE then char = 'note'
-  else char = string.format('%X', event.chanmsg >> 4)
+  if GetEventType(event) == NOTE_TYPE then
+    event.count = counts.noteCount + 1
+    counts.noteCount = event.count
+  else
+    local eventIdx = event.chanmsg + event.chan
+    if not counts[eventIdx] then counts[eventIdx] = {} end
+    if not counts[eventIdx][event.msg2] then counts[eventIdx][event.msg2] = 0 end
+    event.count = counts[eventIdx][event.msg2] + 1
+    counts[eventIdx][event.msg2] = event.count
   end
-  event.count = counts[char .. 'Count'] + 1
-  counts[char .. 'Count'] = event.count
 end
 
 function RunFind(findFn, params, runFn)
@@ -2100,13 +2107,7 @@ function RunFind(findFn, params, runFn)
     local firstNoteCount = 0
     local prevEvents = {}
     local counts = {
-      noteCount = 0,
-      ACount = 0,
-      BCount = 0,
-      CCount = 0,
-      DCount = 0,
-      ECount = 0,
-      FCount = 0
+      noteCount = 0
     }
     local take = params.take
 
@@ -2158,7 +2159,7 @@ function RunFind(findFn, params, runFn)
 
   for _, event in ipairs(allEvents) do
     local matches = false
-    if findFn(event, GetSubtypeValueName(event), GetMainValueName(event)) then
+    if findFn and findFn(event, GetSubtypeValueName(event), GetMainValueName(event)) then
       hasTable[event.chanmsg] = true
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
@@ -2213,7 +2214,7 @@ function RunFind(findFn, params, runFn)
   return found, contextTab, getUnfound and unfound or nil
 end
 
-function ProcessFind(take)
+function ProcessFind(take, fromHasTable)
 
   local fnString = ''
   local wantsEventPreprocessing = false
@@ -2223,6 +2224,7 @@ function ProcessFind(take)
   wantsType = {}
 
   for k, v in ipairs(findRowTable) do
+    if v.except then goto continue end
     local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
 
     if (#condTab == 0) then return end -- continue?
@@ -2336,6 +2338,7 @@ function ProcessFind(take)
     -- mu.post(k .. ': ' .. rowStr)
 
     fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr -- TODO Boolean
+    ::continue::
   end
 
   fnString = 'return function(event, _value1, _value2)\nreturn ' .. fnString .. '\nend'
@@ -2355,7 +2358,6 @@ function ProcessFind(take)
   if success and pret then
     findFn = pret()
     findParserError = ''
-    dirtyFind = true
   else
     findParserError = 'Fatal error: could not load selection criteria'
     if err then
@@ -2365,6 +2367,7 @@ function ProcessFind(take)
     end
   end
 
+  if not fromHasTable then dirtyFind = true end
   return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }
 end
 
@@ -2739,25 +2742,22 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
 
     if replace then
       local eventIdx = event.chanmsg + event.chan
-
       local replaceData = replaceTab[eventIdx]
       if not replaceData then
         replaceTab[eventIdx] = {}
         replaceData = replaceTab[eventIdx]
       end
-
-      local eventData = replaceData[event.msg2]
-      if not eventData then
-        replaceData[event.msg2] = {}
+      local eventData = replaceData
+      if eventType == CC_TYPE then
         eventData = replaceData[event.msg2]
-        eventData.startPpq = event.ppqpos
-        eventData.endPpq = event.ppqpos
-      else
-        table.insert(eventData, event.ppqpos)
-        -- or should each event have a start/end so that only active sections get erased in the end?
-        if event.ppqpos < eventData.startPpq then eventData.startPpq = event.ppqpos end
-        if event.ppqpos > eventData.endPpq then eventData.endPpq = event.ppqpos end
+        if not eventData then
+          replaceData[event.msg2] = {}
+          eventData = replaceData[event.msg2]
+        end
       end
+      table.insert(eventData, event.ppqpos)
+      if not eventData.startPpq or event.ppqpos < eventData.startPpq then eventData.startPpq = event.ppqpos end
+      if not eventData.endPpq or event.ppqpos > eventData.endPpq then eventData.endPpq = event.ppqpos end
     end
   end
 
@@ -2774,7 +2774,9 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
       local eventData
       local replaceData = replaceTab[eventIdx]
       if replaceData then
-        eventData = replaceData[event.msg2]
+        if eventType == CC_TYPE then eventData = replaceData[event.msg2]
+        else eventData = replaceData
+        end
       end
       if eventData and rangeType then
         if (rangeType == SELECT_TIME_SHEBANG)
@@ -3332,6 +3334,7 @@ TransformerLib.getRowParamRange = GetRowParamRange
 
 local lastHasTable = {}
 
+TransformerLib.setDirtyFind = function() dirtyFind = true end
 TransformerLib.getHasTable = function()
   local fresh = false
   if dirtyFind then
@@ -3350,7 +3353,7 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
-      local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take)
+      local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take, true)
       local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do

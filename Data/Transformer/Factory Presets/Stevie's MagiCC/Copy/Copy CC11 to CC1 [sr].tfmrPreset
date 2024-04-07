@@ -3,5 +3,5 @@
  actionScope = "$insert",
  findMacro = "$type == $cc && $value1 == percent<8.6614>",
  findScope = "$midieditor",
- notes = "Author: Stevie\n\nBig Thanks!!",
+ notes = "Authors: David Floyd & Stevie\n\nIn loving memory to David Floyd\n\nBig Thanks!!",
 }

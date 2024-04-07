@@ -1,19 +1,20 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.1
+-- @version 1.0-alpha.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
 --   - initial
 -- @provides
+--   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
---   Transformer/TransformerLib.lua
 --   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Transformer.lua
+--   ../../Transformer Presets/*
 
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.1'
+local versionStr = '1.0-alpha.2'
 
 local r = reaper
 

@@ -2483,14 +2483,14 @@ function ProcessActionMacroRow(buf)
   for k, v in ipairs(opTab) do
     -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
     local tryagain = true
-    findstart, findend = string.find(buf, '^%s-' .. v.notation .. '%s-[^%(]', bufstart)
+    findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
     if findstart and findend then
       local cachestart = bufstart
       row.operationEntry = k
       local _, param1Tab, _, _, operation = ActionTabsFromTarget(row)
-      bufstart = findend + (buf[findend] == '(' and 0 or 1)
+      bufstart = findend + (buf[findend] ~= '(' and 1 or 0)
 
-      local _, _, param1 = string.find(buf, '^%s-([^%s%(]-)%s-', bufstart)
+      local _, _, param1 = string.find(buf, '^%s*([^%s%()]*)%s*', bufstart)
       if param1 and param1 ~= '' then
         param1 = HandleParam(row, target, operation, 'param1', param1Tab, param1, 1)
         tryagain = false
@@ -2505,7 +2505,7 @@ function ProcessActionMacroRow(buf)
     end
     if tryagain then
       local param1, param2
-      findstart, findend, param1, param2 = string.find(buf, '^%s-' .. v.notation .. '%s-%(([^,]-)[,%s]*([^,]-)%)', bufstart)
+      findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%s*%(([^,]*)[,%s]*([^,]*)%)', bufstart)
       if findstart and findend then
         row.operationEntry = k
         local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)

@@ -120,7 +120,7 @@ local canonicalFontWidth
 
 local currentFontWidth
 local currentFrameHeight
-local framePaddingY
+local framePaddingX, framePaddingY
 
 local updateItemBoundsOnEdit = true
 
@@ -522,7 +522,7 @@ local function windowFn()
   local activeCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderActive())
   local activeAlphaCol = (activeCol &~ 0xFF) | 0x7F
 
-  _, framePaddingY = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
+  framePaddingX, framePaddingY = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
 
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE FUNS -----------------------------
@@ -637,13 +637,12 @@ local function windowFn()
     local complete = false
     local withKey = false
     if retval then
-      if completionKeyPress()
-      then
+      if completionKeyPress() then
         complete = true
         withKey = true
       end
     end
-    if not complete and refocusField and r.ImGui_IsItemDeactivated(ctx) then
+    if not complete and not refocusField and r.ImGui_IsItemDeactivated(ctx) then
       complete = true
       if completionKeyPress() then
         withKey = true
@@ -2077,6 +2076,7 @@ local function windowFn()
     local noBuf = false
     if presetNotesBuffer == '' then noBuf = true end
     if noBuf then r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFF7F) end
+    r.ImGui_SetCursorPos(ctx, restoreX + (framePaddingX / 2), restoreY + (framePaddingY / 2))
     r.ImGui_AlignTextToFramePadding(ctx)
     r.ImGui_TextWrapped(ctx, presetNotesBuffer == '' and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
     if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, 0) then
@@ -2088,9 +2088,13 @@ local function windowFn()
     r.ImGui_EndGroup(ctx)
     updateCurrentRect()
   else
-    if justChanged then r.ImGui_SetKeyboardFocusHere(ctx) justChanged = false end
+    if justChanged then r.ImGui_SetKeyboardFocusHere(ctx) end
     local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, r.ImGui_InputTextFlags_AutoSelectAll())
-    if kbdEntryIsCompleted(retval) and not r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+    if justChanged and r.ImGui_IsItemActivated(ctx) then
+      justChanged = false
+    end
+    local deactivated = r.ImGui_IsItemDeactivated(ctx)
+    if deactivated and not completionKeyPress() then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
       else

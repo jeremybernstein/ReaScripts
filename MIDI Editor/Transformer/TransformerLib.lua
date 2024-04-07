@@ -2473,7 +2473,7 @@ function ProcessActionMacroRow(buf)
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(opTab) do
     -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
-    findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
+    findstart, findend = string.find(buf, '^%s-' .. v.notation .. '%s-[^%(]', bufstart)
     if findstart and findend then
       row.operationEntry = k
       local _, param1Tab, _, _, operation = ActionTabsFromTarget(row)
@@ -2487,7 +2487,7 @@ function ProcessActionMacroRow(buf)
       break
     else
       local param1, param2
-      findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
+      findstart, findend, param1, param2 = string.find(buf, '^%s-' .. v.notation .. '%s-%(([^,]-)[,%s]*([^,]-)%)', bufstart)
       if findstart and findend then
         row.operationEntry = k
         local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)

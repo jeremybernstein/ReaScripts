@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value2 * 0.9",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $property :inscale($major, c)",
+ findScope = "$midieditorselected",
+ notes = "",
+}

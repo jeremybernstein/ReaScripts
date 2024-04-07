@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value2 * 0.9",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $position :onmetricgrid($1/4|-b|6.00|6.00, 1)",
+ findScope = "$midieditorselected",
+ notes = "",
+}

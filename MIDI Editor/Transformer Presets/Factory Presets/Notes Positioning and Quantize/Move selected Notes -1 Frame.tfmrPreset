@@ -1,0 +1,7 @@
+{
+ actionMacro = "$position - 0:00:00:01",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $property :isselected()",
+ findScope = "$midieditorselected",
+notes = "",
+}

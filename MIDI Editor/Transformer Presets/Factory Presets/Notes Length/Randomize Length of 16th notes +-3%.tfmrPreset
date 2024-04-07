@@ -1,0 +1,13 @@
+{
+ actionMacro = "$length :random(0.0.22, 0.0.28)",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $property :isselected() && $length :inrange(0.0.21, 0.0.29)",
+ findScope = "$midieditorselected",
+ notes = "HOW TO EDIT:\
+REAPER represents beat subdivisions as percentages (E.G: 1/8 = 50%)\
+\
+To make this preset target 1/8 notes you must set:\
+\
+[Selection Criteria] Parameter 1 = 46%, Paratmeter 2 = 54% (ensure only 1/8 notes are affected)\
+[Actions] Parameter 1 = 47%, Parameter 2 = 53%",
+}

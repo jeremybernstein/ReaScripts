@@ -1,0 +1,7 @@
+{
+ actionMacro = "$position * 2 && $length * 2",
+ actionScope = "$transform",
+ findMacro = "$type :all()",
+ findScope = "$midieditorselected",
+ notes = "",
+}

@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$type == $cc && $position :cursorpos($after_at)",
+ findScope = "$midieditorselected",
+ notes = "Authors: David Floyd & Stevie\n\nIn loving memory to David Floyd\n\nBig Thanks!!",
+}

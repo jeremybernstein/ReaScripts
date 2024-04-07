@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$type == $note && $length <= 0.0.05",
+ findScope = "$midieditorselected",
+ notes = "",
+}

@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$property !:inscale($major, c)",
+ findScope = "$midieditorselected",
+ notes = "",
+}

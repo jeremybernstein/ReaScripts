@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$type == $note && $position :inbarrange(0, 2)",
+ findScope = "$midieditorselected",
+ notes = "",
+}

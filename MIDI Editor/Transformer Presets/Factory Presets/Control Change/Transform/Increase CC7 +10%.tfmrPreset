@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value2 * 1.1",
+ actionScope = "$transform",
+ findMacro = "$type == $cc && $value1 == percent<5.5118>",
+ findScope = "$everywhere",
+ notes = "Authors: David Floyd & Stevie\n\nIn loving memory to David Floyd\n\nBig Thanks!!",
+}

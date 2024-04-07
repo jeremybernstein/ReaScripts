@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value2 * 1.1",
+ actionScope = "$transform",
+ findMacro = "$type == $note && $property :inchord()",
+ findScope = "$midieditorselected",
+ notes = "Chord counts as 3+ notes starting at same position. This is WIP",
+}

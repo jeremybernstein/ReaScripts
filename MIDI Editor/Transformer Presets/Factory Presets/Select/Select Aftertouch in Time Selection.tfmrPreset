@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$type == $at && $position :intimesel()",
+ findScope = "$midieditorselected",
+ notes = "",
+}

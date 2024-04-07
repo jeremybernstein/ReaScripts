@@ -1,0 +1,10 @@
+{
+ actionMacro = "$value2 :line(percent<0.0000>, percent<100.0000>)",
+ actionScope = "$transform",
+ findMacro = "$type == $cc && $value1 == percent<0.7874> && $property :isselected()",
+ findScope = "$midieditorselected",
+ notes = "TIP: export as action to generate instant filter sweeps\
+\
+Operates on selected CC Events.\
+",
+}

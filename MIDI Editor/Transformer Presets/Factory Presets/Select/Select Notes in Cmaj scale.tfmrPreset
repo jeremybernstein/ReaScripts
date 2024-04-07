@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$type == $note && $property :inscale($major, c)",
+ findScope = "$midieditorselected",
+ notes = "",
+}

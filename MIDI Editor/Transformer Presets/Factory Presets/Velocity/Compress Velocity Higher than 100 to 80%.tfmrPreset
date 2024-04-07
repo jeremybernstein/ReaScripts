@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value2 * 0.8",
+ actionScope = "$delete",
+ findMacro = "$type == $note && $value2 > percent<78.7402>",
+ findScope = "$midieditorselected",
+ notes = "",
+}

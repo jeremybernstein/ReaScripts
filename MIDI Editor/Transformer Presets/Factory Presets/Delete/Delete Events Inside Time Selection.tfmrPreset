@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$position :intimesel()",
+ findScope = "$midieditorselected",
+ notes = "",
+}

@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$type == $note && $lastevent :everyN(2) && $value1 == percent<33.0709>",
+ findScope = "$midieditorselected",
+ notes = "",
+}

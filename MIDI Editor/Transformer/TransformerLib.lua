@@ -13,7 +13,7 @@
 local r = reaper
 local mu
 
-local DEBUG = true
+local DEBUG = false
 local DEBUGPOST = false
 
 if DEBUG then

@@ -8,8 +8,8 @@
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
+--   ../Data/Transformer/* > ../../Transformer Presets/
 --   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Transformer.lua
---   ../../Transformer Presets/*
 
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
@@ -21,7 +21,7 @@ local r = reaper
 -- local fontStyle = 'monospace'
 local fontStyle = 'sans-serif'
 
-local DEBUG = true
+local DEBUG = false
 
 local mu
 

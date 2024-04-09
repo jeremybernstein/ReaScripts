@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.21
+-- @version 1.0-alpha.22
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - initial
+--   - minor fixes to field initialization/clearing and percent hints
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.21'
+local versionStr = '1.0-alpha.22'
 
 local r = reaper
 
@@ -1064,7 +1064,7 @@ local function windowFn()
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
           local strVal = row[paramName .. 'TextEditorStr']
-          if not isMetricOrMusical then ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR) end
+          if not isMetricOrMusical then strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR) end
           if range and range[1] and range[2] and row[paramName .. 'PercentVal'] then
             local percentVal = row[paramName .. 'PercentVal'] / 100
             local scaledVal
@@ -1094,7 +1094,7 @@ local function windowFn()
           r.ImGui_AlignTextToFramePadding(ctx)
           r.ImGui_PushFont(ctx, fontInfo.small)
           if editorType == tx.EDITOR_TYPE_PERCENT
-            or (target.notation == '$position' and condOp.notation == ':roundmusical' and terms == 2) -- hack
+            or condOp.percent or (condOp.split and condOp.split[terms].percent) -- hack
           then
             r.ImGui_TextColored(ctx, 0xFFFFFF7F, '%')
           elseif range and range[1] and range[2] then
@@ -1468,6 +1468,7 @@ local function windowFn()
         local isMusical = string.match(conditionEntries[i].notation, 'eqmusical')
         if isMetric or isMusical then
           currentRow.param1Entry = isMetric and metricLastUnit or musicalLastUnit
+          currentRow.param2TextEditorStr = '0'
           currentRow.mg = {
             wantsBarRestart = metricLastBarRestart,
             preSlopPercent = 0,

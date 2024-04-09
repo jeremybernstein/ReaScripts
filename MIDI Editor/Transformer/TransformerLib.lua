@@ -329,8 +329,8 @@ local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionInRange, SELECT_TIME_RANGE),
   FindConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
-  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, floateditor = true, range = { 0, 100 }, timeselect = SELECT_TIME_RANGE }, -- intra-bar position, cubase handles this as percent
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, timeselect = SELECT_TIME_INDIVIDUAL }, -- intra-bar position, cubase handles this as percent
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
@@ -586,7 +586,7 @@ local actionPositionOperationEntries = {
   { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound),
-  { notation = ':roundmusical', label = 'Round to Musical Value (Quantize)', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, range = { 0, 100} }}, musical = true },
+  { notation = ':roundmusical', label = 'Round to Musical Value (Quantize)', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
   positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -3394,7 +3394,8 @@ function GetRowParamRange(row, target, condOp, paramType, editorType, idx)
                   or target.range
   local bipolar = false
 
-  if editorType == EDITOR_TYPE_PITCHBEND then range = TransformerLib.EDITOR_PITCHBEND_RANGE
+  if condOp.percent or (condOp.split and condOp.split[idx].percent) then range = TransformerLib.EDITOR_PERCENT_RANGE
+  elseif editorType == EDITOR_TYPE_PITCHBEND then range = TransformerLib.EDITOR_PITCHBEND_RANGE
   elseif editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then range = TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE bipolar = true
   elseif editorType == EDITOR_TYPE_PERCENT then range = TransformerLib.EDITOR_PERCENT_RANGE
   elseif editorType == EDITOR_TYPE_PERCENT_BIPOLAR then range = TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE bipolar = true

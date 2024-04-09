@@ -1,12 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.23
+-- @version 1.0-alpha.24
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - Fix Backbeat presets
---   - Add select by rhythm presets (more to come)
---   - Add Extract Presets
+--   - improve popup menu style appearance
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -20,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.23'
+local versionStr = '1.0-alpha.24'
 
 local r = reaper
 
@@ -915,14 +913,10 @@ local function windowFn()
         end
       end
 
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
       r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
       r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+      local numStyleCol = 2
 
-      local mousePos = {}
-      mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
       local windowRect = {}
       windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
       windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
@@ -935,26 +929,22 @@ local function windowFn()
           selectText = decorateTargetLabel(selectText)
         end
         if not selEntry then selEntry = 1 end
-        local factoryFn = selEntry == -1 and r.ImGui_Selectable or r.ImGui_Checkbox
-        local oldX = r.ImGui_GetCursorPosX(ctx)
-        r.ImGui_BeginGroup(ctx)
-        local rv, selected = factoryFn(ctx, selectText, selEntry == i and true or false)
-        r.ImGui_SameLine(ctx)
-        r.ImGui_SetCursorPosX(ctx, oldX) -- ugly, but the selectable needs info from the checkbox
-        local rect = {}
-        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
-        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
-        local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-        local srv = r.ImGui_Selectable(ctx, '##popup' .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
-        r.ImGui_EndGroup(ctx)
+        local selectable = selEntry == -1
+        local rv
+        if selectable then
+          rv = r.ImGui_Selectable(ctx, selectText, selEntry == i and true or false)
+        else
+          rv = r.ImGui_MenuItem(ctx, selectText, nil, selEntry == i)
+        end
+        r.ImGui_Spacing(ctx)
 
-        if rv or srv then
+        if rv then
           fun(i)
           r.ImGui_CloseCurrentPopup(ctx)
         end
       end
 
-      r.ImGui_PopStyleColor(ctx, 5)
+      r.ImGui_PopStyleColor(ctx, numStyleCol)
 
       if special then special(fun, row) end
       r.ImGui_EndPopup(ctx)
@@ -1531,7 +1521,7 @@ local function windowFn()
 
   r.ImGui_AlignTextToFramePadding(ctx)
 
-  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 4)
+  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 3)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'findScopeMenu')
   end

@@ -1,0 +1,13 @@
+{
+ actionMacro = "",
+ actionScope = "$extracttrack",
+ findMacro = "$type == $note && $value1 :inrange(percent<29.1339>, percent<31.4961>)",
+ findScope = "$midieditor",
+ notes = "Respects General Midi Standard Drum Map:\
+- C#1 = Side Stick\
+- D1 = Acoustic Snare\
+- D#1 = Hand Clap\
+- E1 = Electric Snare\
+\
+Most Drum VSTi replace those with different Snare Hit Types (Center, Rimshot, etc.)",
+}

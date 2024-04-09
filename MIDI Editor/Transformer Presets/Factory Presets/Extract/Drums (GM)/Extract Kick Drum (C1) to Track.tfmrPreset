@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$extracttrack",
+ findMacro = "$type == $note && $value1 == percent<28.3465>",
+ findScope = "$midieditor",
+ notes = "",
+}

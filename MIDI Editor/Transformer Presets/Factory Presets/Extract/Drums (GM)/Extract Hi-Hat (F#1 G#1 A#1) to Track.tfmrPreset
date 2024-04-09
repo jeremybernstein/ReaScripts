@@ -1,0 +1,10 @@
+{
+ actionMacro = "",
+ actionScope = "$extracttrack",
+ findMacro = "$type == $note && ( $value1 == percent<33.0709> || $value1 == percent<34.6457> || $value1 == percent<36.2205> )",
+ findScope = "$midieditor",
+ notes = "Respects General Midi Standard Drum Map:\
+- F#1 = Closed Hi-Hat\
+- G#1 = Pedal Hi-Hat\
+- A#1 = Open Hi-Hat",
+}

@@ -1,10 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.22
+-- @version 1.0-alpha.23
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - minor fixes to field initialization/clearing and percent hints
+--   - Fix Backbeat presets
+--   - Add select by rhythm presets (more to come)
+--   - Add Extract Presets
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.22'
+local versionStr = '1.0-alpha.23'
 
 local r = reaper
 

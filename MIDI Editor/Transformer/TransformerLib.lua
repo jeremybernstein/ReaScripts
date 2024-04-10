@@ -226,6 +226,8 @@ TransformerLib.DEFAULT_TIMEFORMAT_STRING = DEFAULT_TIMEFORMAT_STRING
 local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
 TransformerLib.DEFAULT_LENGTHFORMAT_STRING = DEFAULT_LENGTHFORMAT_STRING
 
+local scriptIgnoreSelectionInArrangeView = false
+
 -----------------------------------------------------------------------------
 ------------------------------ FIND DEFS ------------------------------------
 
@@ -3084,9 +3086,17 @@ function GrabAllTakes()
   return takes
 end
 
-function ProcessAction(select)
+function ProcessAction(execute, fromScript)
   mediaItemCount = nil
   mediaItemIndex = nil
+
+  if fromScript
+    and scriptIgnoreSelectionInArrangeView
+    and findScopeTable[currentFindScope].notation == '$midieditorselected'
+  then
+    local _, _, sectionID = r.get_action_context()
+    if sectionID == 0 then currentFindScope = FindScopeFromNotation('$midieditor')     mu.post('spoofing sel ctx')    end
+  end
 
   local takes = GrabAllTakes()
   if #takes == 0 then return end
@@ -3189,7 +3199,7 @@ function ProcessAction(select)
     end
 
     if findFn and actionFn then
-      if not select then -- not select then -- DEBUG
+      if not execute then
         dirtyFind = true
         -- local event = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
         -- -- mu.tprint(event, 2)
@@ -3316,9 +3326,12 @@ function ProcessAction(select)
   r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
 end
 
-function SavePreset(pPath, notes, wantsScript)
+function SavePreset(pPath, notes, scriptTab)
   local f = io.open(pPath, 'wb')
   local saved = false
+  local wantsScript = scriptTab.script
+  local ignoreSelectionInArrangeView = wantsScript and scriptTab.ignoreSelectionInArrangeView
+
   if f then
     local presetTab = {
       findScope = findScopeTable[currentFindScope].notation,
@@ -3326,7 +3339,8 @@ function SavePreset(pPath, notes, wantsScript)
       actionScope = actionScopeTable[currentActionScope].notation,
       actionMacro = ActionRowsToNotation(),
       actionScopeFlags = actionScopeFlagsTable[currentActionScopeFlags].notation,
-      notes = notes
+      notes = notes,
+      scriptIgnoreSelectionInArrangeView = ignoreSelectionInArrangeView
     }
     f:write(serialize(presetTab) .. '\n')
     f:close()
@@ -3346,7 +3360,7 @@ function SavePreset(pPath, notes, wantsScript)
           f:write('local tx = require("TransformerLib")\n')
           f:write('local thisPath = debug.getinfo(1, "S").source:match [[^@?(.*[\\/])[^\\/]-$]]\n')
           f:write('tx.loadPreset(thisPath .. "' .. fName .. '")\n')
-          f:write('tx.processAction(true)\n')
+          f:write('tx.processAction(true, true)\n')
           f:close()
           saved = true
         end
@@ -3364,6 +3378,7 @@ function LoadPresetFromTable(presetTab)
   ProcessFindMacro(presetTab.findMacro)
   actionRowTable = {}
   ProcessActionMacro(presetTab.actionMacro)
+  scriptIgnoreSelectionInArrangeView = presetTab.scriptIgnoreSelectionInArrangeView
   return presetTab.notes
 end
 
@@ -3386,7 +3401,7 @@ function LoadPreset(pPath)
         local presetTab = deserialize(tabStr)
         if presetTab then
           local notes = LoadPresetFromTable(presetTab)
-          return true, notes
+          return true, notes, presetTab.scriptIgnoreSelectionInArrangeView
         end
       end
     end

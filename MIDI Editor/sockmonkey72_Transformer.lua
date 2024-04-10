@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.25
+-- @version 1.0-alpha.26
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add selection post-processing option
+--   - add ignore selection from Main context option on script export
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.25'
+local versionStr = '1.0-alpha.26'
 
 local r = reaper
 
@@ -155,7 +155,9 @@ local newFolderParentPath = ''
 
 local scriptWritesMainContext = true
 local scriptWritesMIDIContexts = true
+local scriptIgnoreSelectionInArrangeView = true
 local refocusField = false
+local refocusOnNextIteration = false
 
 local presetNameTextBuffer = ''
 local inOKDialog = false
@@ -497,9 +499,10 @@ local function moveActionRowDown()
   end
 end
 
-local function endPresetLoad(pLabel, notes)
+local function endPresetLoad(pLabel, notes, ignoreSelectInArrange)
   presetNameTextBuffer = pLabel
   presetNotesBuffer = notes and notes or ''
+  scriptIgnoreSelectionInArrangeView = ignoreSelectInArrange
   tx.processFind()
   tx.processAction()
 end
@@ -823,10 +826,10 @@ local function windowFn()
         if rv or srv then
           if selected or srv then
             local filename = source[i].label .. presetExt
-            local success, notes = tx.loadPreset(path .. '/' .. filename)
+            local success, notes, ignoreSelectInArrange = tx.loadPreset(path .. '/' .. filename)
             if success then
               presetLabel = source[i].label
-              endPresetLoad(presetLabel, notes)
+              endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
             end
           end
           r.ImGui_CloseCurrentPopup(ctx)
@@ -1989,7 +1992,7 @@ local function windowFn()
   end
 
   local function doSavePreset(path, fname)
-    local saved = tx.savePreset(path, presetNotesBuffer, presetInputDoesScript)
+    local saved = tx.savePreset(path, presetNotesBuffer, { script = presetInputDoesScript, ignoreSelectionInArrangeView = scriptIgnoreSelectionInArrangeView })
     statusMsg = (saved and 'Saved' or 'Failed to save') .. (presetInputDoesScript and ' + export' or '') .. ' ' .. fname
     statusTime = r.time_precise()
     statusContext = 2
@@ -2060,9 +2063,13 @@ local function windowFn()
     end
 
     r.ImGui_SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
+    if refocusOnNextIteration then
+      r.ImGui_SetKeyboardFocusHere(ctx)
+      refocusOnNextIteration = false
+    end
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
     local deactivated = r.ImGui_IsItemDeactivated(ctx)
-    if deactivated then
+    if deactivated and not refocusField then
       local complete = buttonClickSave or completionKeyPress()
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape())
         or not complete
@@ -2081,15 +2088,24 @@ local function windowFn()
       if retval then inTextInput = true end
     end
 
-    if refocusField then refocusField = false end
+    if refocusField then
+      refocusField = false
+    end
 
     if presetInputDoesScript then
       r.ImGui_SameLine(ctx)
+      local saveXPos = r.ImGui_GetCursorPosX(ctx)
       local rv, sel = r.ImGui_Checkbox(ctx, 'Main', scriptWritesMainContext)
       if rv then
         scriptWritesMainContext = sel
         r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
+        refocusOnNextIteration = true
       end
+      if r.ImGui_IsItemClicked(ctx) then
+        refocusField = true
+        inOKDialog = false
+      end
+
       if r.ImGui_IsItemHovered(ctx) then
         refocusField = true
         inOKDialog = false
@@ -2100,6 +2116,18 @@ local function windowFn()
       if rv then
         scriptWritesMIDIContexts = sel
         r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
+        refocusOnNextIteration = true
+      end
+      if r.ImGui_IsItemHovered(ctx) then
+        refocusField = true
+        inOKDialog = false
+      end
+
+      r.ImGui_SetCursorPosX(ctx, saveXPos)
+      rv, sel = r.ImGui_Checkbox(ctx, 'Ignore Selection in Arrange View', scriptIgnoreSelectionInArrangeView)
+      if rv then
+        scriptIgnoreSelectionInArrangeView = sel-- not persistent
+        refocusOnNextIteration = true
       end
       if r.ImGui_IsItemHovered(ctx) then
         refocusField = true
@@ -2522,10 +2550,10 @@ local function loop()
       if r.ImGui_AcceptDragDropPayloadFiles(ctx) then
         local retdrag, filedrag = r.ImGui_GetDragDropPayloadFile(ctx, 0)
         if retdrag and string.match(filedrag, presetExt .. '$') then
-          local success, notes = tx.loadPreset(filedrag)
+          local success, notes, ignoreSelectInArrange = tx.loadPreset(filedrag)
           if success then
             presetLabel = string.match(filedrag, '.*[/\\](.*)' .. presetExt)
-            endPresetLoad(presetLabel, notes)
+            endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
           end
         end
       end

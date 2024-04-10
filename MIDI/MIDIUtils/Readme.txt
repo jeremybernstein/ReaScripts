@@ -769,6 +769,20 @@ MIDIUtils.MIDI_GetPPQ(take)
     Return value: PPQ value (parts (ticks) per quarter note) of the provided take
 --]]
 
+number ppq =
+MIDIUtils.MIDI_SelectAll(take, wantsSelect)
+--[[
+    MIDI_SelectAll: Select or deselect all MIDI content in the provided take.
+
+    Arguments:
+      MediaItem_Take take: the MediaItem_Take provided by REAPER
+      boolean wantsSelect: select (true) or deselect (false)
+
+    Return value: none
+--]]
+
+-----------------------------------------------------------------------------
+
 MIDIUtils.post(...)
 --[[
     post: Convenience method to post a message (or comma-delimited messages) to the REAPER console.
@@ -777,6 +791,11 @@ MIDIUtils.post(...)
 MIDIUtils.p(...)
 --[[
     p: Convenience method to post a message (or comma-delimited messages) to the REAPER console.
+--]]
+
+MIDIUtils.tprint(...)
+--[[
+    tprint: Convenience method to print the contents of a Lua table to the REAPER console.
 --]]
 
 -----------------------------------------------------------------------------
@@ -800,9 +819,28 @@ MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
   precedence over an unselected note-on when performing the overlap correction. Off by default.
 --]]
 
+MIDIUtils.CORRECT_OVERLAPS_FAVOR_NOTEON = false
+--[[
+  If CORRECT_OVERLAPS and CORRECT_OVERLAPS_FAVOR_SELECTION are enabled, CORRECT_OVERLAPS_FAVOR_NOTEON determines
+  whether a note collision of selected events favors the note-on or note-off when performing the overlap correction.
+  Off by default.
+--]]
+
 MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END = true
 --[[
   If ALLNOTESOFF_SNAPS_TO_ITEM_END is enabled, the "All Notes Off" event (CC#123, at the end of every item) will be snapped
   to the end of the item, rather than floating around near the end of the item, or being stuck at the end of the
   last note, or whatever REAPER decides to do with it. On by default.
+--]]
+
+MIDIUtils.CLAMP_MIDI_BYTES = false
+--[[
+  REAPER's default behavior is to AND incoming data byte values with 0x7F, causing values above 127 to wrap around,
+  where 128 = 0, 129 = 1, and so on. When this option is enabled, incoming data bytes will be clipped, such that values
+  below 0 = 0, and values above 127 = 127. Off by default.
+--]]
+
+MIDIUtils.CORRECT_EXTENTS = false
+--[[
+  Modify the item extents to accommodate changes to the contents. Off by default.
 --]]

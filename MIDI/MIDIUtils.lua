@@ -1,12 +1,12 @@
 -- @description MIDI Utils API
--- @version 0.1.22
+-- @version 0.1.23
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - add option (CLAMP_MIDI_BYTES) to clamp MIDI bytes, rather than modulo
---   - add option (CORRECT_EXTENTS) to auto-adjust item extents if modified events exceed the item extents
+--   - add MIDI_SelectAll
+--   - Update docs
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -2089,6 +2089,20 @@ local function MIDI_GetPPQ(take)
   return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
 end
 
+local function MIDI_SelectAll(take, wantsSelect)
+  if not EnsureTransaction(take) then return false end
+  for _, event in ipairs(MIDIEvents) do
+    if event:IsAllEvt() then
+      local isSelected = event.flags & 1
+      if isSelected ~= wantsSelect then
+        if wantsSelect then event.flags = event.flags | 1
+        else event.flags = event.flags & ~1
+        end
+        event.recalcMIDI = true
+      end
+    end
+  end
+end
 
 MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
   EnforceArgs(
@@ -2110,6 +2124,14 @@ MIDIUtils.MIDI_GetPPQ = function(take)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
   return select(2, xpcall(MIDI_GetPPQ, OnError, take))
+end
+
+MIDIUtils.MIDI_SelectAll = function(take, wantsSelect)
+  EnforceArgs(
+    MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
+    MakeTypedArg(wantsSelect, 'boolean')
+  )
+  return select(2, xpcall(MIDI_SelectAll, OnError, take, wantsSelect))
 end
 
 MIDIUtils.tprint = tprint

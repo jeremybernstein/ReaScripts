@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.28
+-- @version 1.0-alpha.29
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - small fix to save preset button press
+--   - preset fix-up for Windows
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.28'
+local versionStr = '1.0-alpha.29'
 
 local r = reaper
 
@@ -2101,11 +2101,6 @@ local function windowFn()
         r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
         refocusOnNextIteration = true
       end
-      if r.ImGui_IsItemClicked(ctx) then
-        refocusField = true
-        inOKDialog = false
-      end
-
       if r.ImGui_IsItemHovered(ctx) then
         refocusField = true
         inOKDialog = false
@@ -2126,7 +2121,7 @@ local function windowFn()
       r.ImGui_SetCursorPosX(ctx, saveXPos)
       rv, sel = r.ImGui_Checkbox(ctx, 'Ignore Selection in Arrange View', scriptIgnoreSelectionInArrangeView)
       if rv then
-        scriptIgnoreSelectionInArrangeView = sel-- not persistent
+        scriptIgnoreSelectionInArrangeView = sel -- not persistent
         refocusOnNextIteration = true
       end
       if r.ImGui_IsItemHovered(ctx) then

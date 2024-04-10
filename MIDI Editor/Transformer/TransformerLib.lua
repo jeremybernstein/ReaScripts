@@ -18,16 +18,7 @@ local DEBUGPOST = false
 
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-  local ok
-  ok, mu = pcall(require, 'MIDIUtils')
-  if not ok then
-    mu = nil
-    package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72/MIDI/?.lua'
-    ok, mu = pcall(require, 'MIDIUtils')
-    if not ok then
-      r.ShowConsoleMsg(mu .. '\n')
-    end
-  end
+  mu = require 'MIDIUtils'
 else
   package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
   mu = require 'MIDIUtils'
@@ -198,7 +189,7 @@ local actionScopeTable = {
 }
 
 function ActionScopeFromNotation(notation)
-  if notation then
+  if notation and notation ~= '' then
     for k, v in ipairs(actionScopeTable) do
       if v.notation == notation then
         return k
@@ -208,7 +199,27 @@ function ActionScopeFromNotation(notation)
   return ActionScopeFromNotation('$select') -- default
 end
 
+local actionScopeFlagsTable = {
+  { notation = '$none', label = 'Do Nothing' },
+  { notation = '$addselect', label = 'Add To Existing Selection' },
+  { notation = '$exclusiveselect', label = 'Exclusive Select' },
+  -- { notation = '$invertselect', label = 'Deselect Transformed Events (Selecting Others)' }, -- not so useful
+}
+
+function ActionScopeFlagsFromNotation(notation)
+  if notation and notation ~= '' then
+    for k, v in ipairs(actionScopeFlagsTable) do
+      if v.notation == notation then
+        return k
+      end
+    end
+  end
+  return ActionScopeFlagsFromNotation('$none') -- default
+end
+
+
 local currentActionScope = ActionScopeFromNotation()
+local currentActionScopeFlags = ActionScopeFlagsFromNotation()
 
 local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
 TransformerLib.DEFAULT_TIMEFORMAT_STRING = DEFAULT_TIMEFORMAT_STRING
@@ -528,10 +539,6 @@ local actionTargetEntries = {
   { notation = '$value2', label = 'Value 2', text = '_value2', inteditor = true, range = {0, 127} },
   { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
-  -- { notation = '$newevent', label = 'New Event', text = '', menu = true },
-
-  -- { label = 'Last Event' },
-  -- { label = 'Context Variable' }
 }
 actionTargetEntries.targetTable = true
 
@@ -2815,11 +2822,12 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
+  PreProcessSelection(take)
   for _, event in ipairs(eventTab) do
     local timeAdjust = GetTimeOffset()
     actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-    event.selected = (event.flags & 1) ~= 0
+    PostProcessSelection(event)
     event.muted = (event.flags & 2) ~= 0
     if GetEventType(event) == NOTE_TYPE then
       if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
@@ -2847,6 +2855,28 @@ function SetEntrySelectionInTake(take, event)
   end
 end
 
+function PreProcessSelection(take)
+  local notation = actionScopeFlagsTable[currentActionScopeFlags].notation
+  if notation == '$invertselect' then
+    mu.MIDI_SelectAll(take, true) -- select all
+  elseif notation == '$exclusiveselect' then
+    mu.MIDI_SelectAll(take, false) -- deselect all
+  end
+end
+
+function PostProcessSelection(event)
+  local notation = actionScopeFlagsTable[currentActionScopeFlags].notation
+  if notation == '$addselect'
+    or notation == '$exclusiveselect'
+  then
+    event.selected = true
+  elseif notation == '$invertselect' then
+    event.selected = false
+  else
+    event.selected = (event.flags & 1) ~= 0
+  end
+end
+
 function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
   local replaceTab = replace and {} or nil
   local timeAdjust = GetTimeOffset()
@@ -2855,7 +2885,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     local eventType = GetEventType(event)
     actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-    event.selected = (event.flags & 1) ~= 0
+    PostProcessSelection(event)
     event.muted = (event.flags & 2) ~= 0
     if eventType == NOTE_TYPE then
       if (not event.projlen or event.projlen <= 0) then event.projlen = 1 / context.PPQ end
@@ -2928,6 +2958,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     end
   end
 
+  PreProcessSelection(take)
   for _, event in ipairs(eventTab) do
     local eventType = GetEventType(event)
     -- handle insert, also type changes
@@ -3294,6 +3325,7 @@ function SavePreset(pPath, notes, wantsScript)
       findMacro = FindRowsToNotation(),
       actionScope = actionScopeTable[currentActionScope].notation,
       actionMacro = ActionRowsToNotation(),
+      actionScopeFlags = actionScopeFlagsTable[currentActionScopeFlags].notation,
       notes = notes
     }
     f:write(serialize(presetTab) .. '\n')
@@ -3327,6 +3359,7 @@ end
 function LoadPresetFromTable(presetTab)
   currentActionScope = ActionScopeFromNotation(presetTab.actionScope)
   currentFindScope = FindScopeFromNotation(presetTab.findScope)
+  currentActionScopeFlags = ActionScopeFlagsFromNotation(presetTab.actionScopeFlags)
   findRowTable = {}
   ProcessFindMacro(presetTab.findMacro)
   actionRowTable = {}
@@ -3416,6 +3449,9 @@ TransformerLib.setCurrentFindScope = function(val) currentFindScope = val < 1 an
 TransformerLib.actionScopeTable = actionScopeTable
 TransformerLib.currentActionScope = function() return currentActionScope end
 TransformerLib.setCurrentActionScope = function(val) currentActionScope = val < 1 and 1 or val > #actionScopeTable and #actionScopeTable or val end
+TransformerLib.actionScopeFlagsTable = actionScopeFlagsTable
+TransformerLib.currentActionScopeFlags = function() return currentActionScopeFlags end
+TransformerLib.setCurrentActionScopeFlags = function(val) currentActionScopeFlags = val < 1 and 1 or val > #actionScopeFlagsTable and #actionScopeFlagsTable or val end
 
 TransformerLib.FindRow = FindRow
 TransformerLib.findRowTable = function() return findRowTable end

@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.24
+-- @version 1.0-alpha.25
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - improve popup menu style appearance
+--   - add selection post-processing option
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.24'
+local versionStr = '1.0-alpha.25'
 
 local r = reaper
 
@@ -1799,14 +1799,14 @@ local function windowFn()
   local restoreX
   restoreX, restoreY = r.ImGui_GetCursorPos(ctx)
 
-  r.ImGui_Button(ctx, 'Apply')
+  r.ImGui_Button(ctx, 'Apply', DEFAULT_ITEM_WIDTH / 1.25)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     tx.processAction(true)
   end
 
   r.ImGui_SameLine(ctx)
 
-  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(20))
+  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(15))
 
   r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1820,6 +1820,32 @@ local function windowFn()
 
   createPopup(nil, 'actionScopeMenu', tx.actionScopeTable, tx.currentActionScope(), function(i)
       tx.setCurrentActionScope(i)
+    end)
+
+  r.ImGui_SameLine(ctx)
+
+  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(77))
+
+  local scopeNotation = tx.actionScopeTable[tx.currentActionScope()].notation
+  local isSelectScope = scopeNotation:match('select') or scopeNotation:match('delete')
+
+  if isSelectScope then r.ImGui_BeginDisabled(ctx) end
+
+  r.ImGui_Button(ctx, tx.actionScopeFlagsTable[tx.currentActionScopeFlags()].label, DEFAULT_ITEM_WIDTH * 2.5)
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    r.ImGui_OpenPopup(ctx, 'actionScopeFlagsMenu')
+  end
+
+  r.ImGui_SameLine(ctx)
+
+  updateCurrentRect()
+
+  generateLabel('Post-Action')
+
+  if isSelectScope then r.ImGui_EndDisabled(ctx) end
+
+  createPopup(nil, 'actionScopeFlagsMenu', tx.actionScopeFlagsTable, tx.currentActionScopeFlags(), function(i)
+      tx.setCurrentActionScopeFlags(i)
     end)
 
   r.ImGui_PopStyleColor(ctx, 4)
@@ -2083,7 +2109,7 @@ local function windowFn()
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)
   end
 
-  restoreX = restoreX + 57 * (currentFontWidth and currentFontWidth or canonicalFontWidth)
+  restoreX = restoreX + 60 * (currentFontWidth and currentFontWidth or canonicalFontWidth)
   r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
 
   local windowSizeX = r.ImGui_GetWindowSize(ctx)
@@ -2115,12 +2141,14 @@ local function windowFn()
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
       else
+        if buf:gsub('%s+', '') == '' then buf = '' end
         presetNotesBuffer = buf
       end
       presetNotesViewEditor = false
       inTextInput = false
     else
       if retval then inTextInput = true end
+      if buf:gsub('%s+', '') == '' then buf = '' end
       presetNotesBuffer = buf
     end
     updateCurrentRect()

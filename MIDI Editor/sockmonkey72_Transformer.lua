@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.27
+-- @version 1.0-alpha.28
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - update factory presets
+--   - small fix to save preset button press
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.27'
+local versionStr = '1.0-alpha.28'
 
 local r = reaper
 
@@ -2069,7 +2069,7 @@ local function windowFn()
     end
     local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
     local deactivated = r.ImGui_IsItemDeactivated(ctx)
-    if deactivated and not refocusField then
+    if deactivated and (not refocusField or buttonClickSave) then
       local complete = buttonClickSave or completionKeyPress()
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape())
         or not complete

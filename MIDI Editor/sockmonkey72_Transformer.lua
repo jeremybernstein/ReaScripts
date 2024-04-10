@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.26
+-- @version 1.0-alpha.27
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add ignore selection from Main context option on script export
+--   - update factory presets
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.26'
+local versionStr = '1.0-alpha.27'
 
 local r = reaper
 

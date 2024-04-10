@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ findMacro = "$position :onmetricgrid($1/16|-b|5.00|5.00, 01)",
+ findScope = "$midieditorselected",
+ notes = "",
+}

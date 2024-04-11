@@ -1,12 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.23
+-- @version 0.1.24
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - add MIDI_SelectAll
---   - Update docs
+--   - fix event sorting regression
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -830,19 +829,21 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   local lastPPQPos = 0
 
   -- iterate sorted to avoid (REAPER Inline MIDI Editor) problems with offset calculation
-  local comparator = function(a, b) -- thanks Talagan (Ben Babut) for this improvement
-    if (a.ppqpos == b.ppqpos) then
-      local aprio = (a:type() == NOTEOFF_TYPE) and 0 or 1
-      local bprio = (b:type() == NOTEOFF_TYPE) and 0 or 1
+  local comparator = function(t, i, j) -- thanks Talagan (Ben Babut) for this improvement
+    if (t[i].ppqpos == t[j].ppqpos) then
+      local aprio = (t[i]:type() == NOTEOFF_TYPE) and 0 or 1
+      local bprio = (t[j]:type() == NOTEOFF_TYPE) and 0 or 1
 
       return aprio < bprio
     else
-      return (a.ppqpos < b.ppqpos)
+      return (t[i].ppqpos < t[j].ppqpos)
     end
   end
 
   local correct = 0
-  table.sort(MIDIEvents, comparator)
+  for k in spairs(MIDIEvents, comparator) do
+    -- nothing
+  end
 
   if MIDIUtils.CORRECT_EXTENTS then
     local item = r.GetMediaItemTake_Item(take)
@@ -899,8 +900,7 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     end
   end
 
-  for _, event in ipairs(MIDIEvents) do
-  -- for _, event in spairs(MIDIEvents, comparator) do
+  for _, event in pairs(MIDIEvents) do
     event.offset = math.floor(event.ppqpos - lastPPQPos + correct)
     lastPPQPos = event.ppqpos + correct
     local MIDIStr = event:GetMIDIString()

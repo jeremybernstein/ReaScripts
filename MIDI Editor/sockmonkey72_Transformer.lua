@@ -503,8 +503,7 @@ local function endPresetLoad(pLabel, notes, ignoreSelectInArrange)
   presetNameTextBuffer = pLabel
   presetNotesBuffer = notes and notes or ''
   scriptIgnoreSelectionInArrangeView = ignoreSelectInArrange
-  tx.processFind()
-  tx.processAction()
+  tx.processAction() -- also calls processFind()
 end
 
 -----------------------------------------------------------------------------

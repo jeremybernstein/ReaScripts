@@ -3112,7 +3112,7 @@ function GrabAllTakes()
   return takes
 end
 
-function ProcessActionRows(take)
+function ProcessActionForTake(take)
   local fnString = ''
 
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
@@ -3208,6 +3208,26 @@ function ProcessAction(execute, fromScript)
   moveCursorFirstEventPosition = nil
   addLengthFirstEventOffset = nil
 
+  -- fast early return after sanity check
+  if not execute then
+    local findFn = ProcessFind()
+    if findFn then
+      local fnString = ProcessActionForTake()
+      if fnString then
+        local success, _, err = pcall(load, fnString, nil, nil, context)
+        if success then
+          dirtyFind = true
+        elseif err then
+          mu.post(err)
+          findParserError = 'Fatal error: could not load action description'
+        end
+      else
+        findParserError = 'Fatal error: could not load action description'
+      end
+    end
+    return
+  end
+
   r.Undo_BeginBlock2(0)
 
   for _, v in ipairs(takes) do
@@ -3220,7 +3240,7 @@ function ProcessAction(execute, fromScript)
     local actionFn
     local findFn, wantsEventPreprocessing, findRange = ProcessFind(take, nil)
     if findFn then
-      local fnString = ProcessActionRows(v.take) -- when !execute, we really don't need to run this multiple times
+      local fnString = ProcessActionForTake(take)
       if fnString then
         local success, pret, err = pcall(load, fnString, nil, nil, context)
         if success and pret then
@@ -3235,125 +3255,117 @@ function ProcessAction(execute, fromScript)
     end
 
     if findFn and actionFn then
-      if not execute then
-        dirtyFind = true
-        -- local event = { chanmsg = 0xA0, chan = 2, flags = 2, ppqpos = 2.25, msg2 = 64, msg3 = 64 }
-        -- -- mu.tprint(event, 2)
-        -- actionFn(event, GetSubtypeValueName(event), GetMainValueName(event)) -- always returns true
-        -- mu.tprint(event, 2)
-      else
-        local notation = actionScopeTable[currentActionScope].notation
-        local defParams = {
-          wantsEventPreprocessing = wantsEventPreprocessing,
-          findRange = findRange,
-          take = take,
-          PPQ = context.PPQ
-        }
-        if notation == '$select' then
-          mu.MIDI_OpenWriteTransaction(take)
-          RunFind(findFn, defParams,
-            function(event, matches)
-              event.selected = matches
+      local notation = actionScopeTable[currentActionScope].notation
+      local defParams = {
+        wantsEventPreprocessing = wantsEventPreprocessing,
+        findRange = findRange,
+        take = take,
+        PPQ = context.PPQ
+      }
+      if notation == '$select' then
+        mu.MIDI_OpenWriteTransaction(take)
+        RunFind(findFn, defParams,
+          function(event, matches)
+            event.selected = matches
+            SetEntrySelectionInTake(take, event)
+          end)
+        mu.MIDI_CommitWriteTransaction(take, false, true)
+      elseif notation == '$selectadd' then
+        mu.MIDI_OpenWriteTransaction(take)
+        RunFind(findFn, defParams,
+          function(event, matches)
+            if matches then
+              event.selected = true
               SetEntrySelectionInTake(take, event)
-            end)
-          mu.MIDI_CommitWriteTransaction(take, false, true)
-        elseif notation == '$selectadd' then
-          mu.MIDI_OpenWriteTransaction(take)
-          RunFind(findFn, defParams,
-            function(event, matches)
-              if matches then
-                event.selected = true
-                SetEntrySelectionInTake(take, event)
-              end
-            end)
-          mu.MIDI_CommitWriteTransaction(take, false, true)
-        elseif notation == '$invertselect' then
-          mu.MIDI_OpenWriteTransaction(take)
-          RunFind(findFn, defParams,
-            function(event, matches)
-              event.selected = not matches
+            end
+          end)
+        mu.MIDI_CommitWriteTransaction(take, false, true)
+      elseif notation == '$invertselect' then
+        mu.MIDI_OpenWriteTransaction(take)
+        RunFind(findFn, defParams,
+          function(event, matches)
+            event.selected = not matches
+            SetEntrySelectionInTake(take, event)
+          end)
+        mu.MIDI_CommitWriteTransaction(take, false, true)
+      elseif notation == '$deselect' then
+        mu.MIDI_OpenWriteTransaction(take)
+        RunFind(findFn, defParams,
+          function(event, matches)
+            if matches then
+              event.selected = false
               SetEntrySelectionInTake(take, event)
-            end)
-          mu.MIDI_CommitWriteTransaction(take, false, true)
-        elseif notation == '$deselect' then
-          mu.MIDI_OpenWriteTransaction(take)
-          RunFind(findFn, defParams,
-            function(event, matches)
-              if matches then
-                event.selected = false
-                SetEntrySelectionInTake(take, event)
-              end
-            end)
-          mu.MIDI_CommitWriteTransaction(take, false, true)
-        elseif notation == '$transform' then
-          local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 then
-            TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
-          end
-        elseif notation == '$replace' then
-          local repParams = tableCopy(defParams)
-          repParams.wantsUnfound = true
-          repParams.addRangeEvents = true
-          local found, contextTab, unfound = RunFind(findFn, repParams)
-          if #found ~=0 then
-            TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
-          end
-        elseif notation == '$copy' then
-          local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 then
-            local newtake = NewTakeInNewTrack(take)
-            if newtake then
-              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
+          end)
+        mu.MIDI_CommitWriteTransaction(take, false, true)
+      elseif notation == '$transform' then
+        local found, contextTab = RunFind(findFn, defParams)
+        if #found ~=0 then
+          TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
+        end
+      elseif notation == '$replace' then
+        local repParams = tableCopy(defParams)
+        repParams.wantsUnfound = true
+        repParams.addRangeEvents = true
+        local found, contextTab, unfound = RunFind(findFn, repParams)
+        if #found ~=0 then
+          TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
+        end
+      elseif notation == '$copy' then
+        local found, contextTab = RunFind(findFn, defParams)
+        if #found ~=0 then
+          local newtake = NewTakeInNewTrack(take)
+          if newtake then
+            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
-        elseif notation == '$copylane' then
-          local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 then
-            local newtake = NewTakeInNewLane(take)
-            if newtake then
-              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
-            end
+        end
+      elseif notation == '$copylane' then
+        local found, contextTab = RunFind(findFn, defParams)
+        if #found ~=0 then
+          local newtake = NewTakeInNewLane(take)
+          if newtake then
+            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
-        elseif notation == '$insert' then
-          local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 then
-            InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
+        end
+      elseif notation == '$insert' then
+        local found, contextTab = RunFind(findFn, defParams)
+        if #found ~=0 then
+          InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
+        end
+      elseif notation == '$insertexclusive' then
+        local ieParams = tableCopy(defParams)
+        ieParams.wantsUnfound = true
+        local found, contextTab, unfound = RunFind(findFn, ieParams)
+        mu.MIDI_OpenWriteTransaction(take)
+        if #found ~=0 then
+          InsertEventsIntoTake(take, found, actionFn, contextTab, false)
+          if unfound and #unfound ~=0 then
+            DeleteEventsInTake(take, unfound, false)
           end
-        elseif notation == '$insertexclusive' then
-          local ieParams = tableCopy(defParams)
-          ieParams.wantsUnfound = true
-          local found, contextTab, unfound = RunFind(findFn, ieParams)
-          mu.MIDI_OpenWriteTransaction(take)
-          if #found ~=0 then
-            InsertEventsIntoTake(take, found, actionFn, contextTab, false)
-            if unfound and #unfound ~=0 then
-              DeleteEventsInTake(take, unfound, false)
-            end
+        end
+        mu.MIDI_CommitWriteTransaction(take, false, true)
+      elseif notation == '$extracttrack' then
+        local found, contextTab = RunFind(findFn, defParams)
+        if #found ~=0 then
+          local newtake = NewTakeInNewTrack(take)
+          if newtake then
+            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
-          mu.MIDI_CommitWriteTransaction(take, false, true)
-        elseif notation == '$extracttrack' then
-          local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 then
-            local newtake = NewTakeInNewTrack(take)
-            if newtake then
-              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
-            end
-            DeleteEventsInTake(take, found)
+          DeleteEventsInTake(take, found)
+        end
+      elseif notation == '$extractlane' then
+        local found, contextTab = RunFind(findFn, defParams)
+        if #found ~=0 then
+          local newtake = NewTakeInNewLane(take)
+          if newtake then
+            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
-        elseif notation == '$extractlane' then
-          local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 then
-            local newtake = NewTakeInNewLane(take)
-            if newtake then
-              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
-            end
-            DeleteEventsInTake(take, found)
-          end
-        elseif notation == '$delete' then
-          local found = RunFind(findFn, defParams)
-          if #found ~= 0 then
-            DeleteEventsInTake(take, found) -- could use runFn
-          end
+          DeleteEventsInTake(take, found)
+        end
+      elseif notation == '$delete' then
+        local found = RunFind(findFn, defParams)
+        if #found ~= 0 then
+          DeleteEventsInTake(take, found) -- could use runFn
         end
       end
     end

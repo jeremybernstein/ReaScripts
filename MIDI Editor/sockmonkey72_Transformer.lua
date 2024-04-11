@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.28
+-- @version 1.0-alpha.30
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - small fix to save preset button press
+--   - add a time format allowing absolute ticks (m.b.tt with a t at the end)
+--   - update ticks presets to use ticks instead of fractional term
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.28'
+local versionStr = '1.0-alpha.30'
 
 local r = reaper
 

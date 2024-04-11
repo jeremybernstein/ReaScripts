@@ -1,7 +1,9 @@
 {
- actionMacro = "$position + 0.0.10",
+ actionMacro = "$position + 0.0.10t",
  actionScope = "$transform",
- findMacro = "$type == $note && $property :isselected()",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
  findScope = "$midieditorselected",
-notes = "",
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
 }

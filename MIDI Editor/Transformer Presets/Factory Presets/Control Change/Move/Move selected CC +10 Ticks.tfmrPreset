@@ -1,8 +1,8 @@
 {
- actionMacro = "$position :relrandom(-0.0.10t, 0.0.10t)",
+ actionMacro = "$position + 0.0.10t",
  actionScope = "$transform",
  actionScopeFlags = "$none",
- findMacro = "$type == $note",
+ findMacro = "$type == $cc",
  findScope = "$midieditorselected",
  notes = "",
  scriptIgnoreSelectionInArrangeView = false,

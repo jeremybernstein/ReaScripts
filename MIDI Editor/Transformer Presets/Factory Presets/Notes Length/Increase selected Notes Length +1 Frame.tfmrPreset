@@ -1,7 +1,9 @@
 {
  actionMacro = "$length + 0:00:00:01",
  actionScope = "$transform",
- findMacro = "$type == $note && $property :isselected()",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
  findScope = "$midieditorselected",
  notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
 }

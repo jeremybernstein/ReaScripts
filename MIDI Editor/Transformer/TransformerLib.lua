@@ -2328,6 +2328,7 @@ function RunFind(findFn, params, runFn)
     lastTime = lastTime,
     hasTable = hasTable,
     take = params and params.take,
+    PPQ = (params and params.take) and mu.MIDI_GetPPQ(params.take) or 960,
     findRange = params and params.findRange
   }
   return found, contextTab, getUnfound and unfound or nil
@@ -2341,6 +2342,7 @@ function ProcessFind(take, fromHasTable)
   local findRangeStart, findRangeEnd
 
   wantsType = {}
+  context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
 
   for k, v in ipairs(findRowTable) do
     if v.except then goto continue end
@@ -2472,7 +2474,6 @@ function ProcessFind(take, fromHasTable)
   local findFn
 
   context.take = take
-  context.PPQ = take and mu.MIDI_GetPPQ(take) or 960 -- REAPER default, we could look this up from the prefs
   local success, pret, err = pcall(load, fnString, nil, nil, context)
   if success and pret then
     findFn = pret()
@@ -3111,27 +3112,10 @@ function GrabAllTakes()
   return takes
 end
 
-function ProcessAction(execute, fromScript)
-  mediaItemCount = nil
-  mediaItemIndex = nil
-
-  if fromScript
-    and scriptIgnoreSelectionInArrangeView
-    and findScopeTable[currentFindScope].notation == '$midieditorselected'
-  then
-    local _, _, sectionID = r.get_action_context()
-    if sectionID == 0 then currentFindScope = FindScopeFromNotation('$midieditor')     mu.post('spoofing sel ctx')    end
-  end
-
-  local takes = GrabAllTakes()
-  if #takes == 0 then return end
-
-  CACHED_METRIC = nil
-  CACHED_WRAPPED = nil
-  SOM = nil
-
+function ProcessActionRows(take)
   local fnString = ''
 
+  context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
   for k, v in ipairs(actionRowTable) do
     local opTab, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(v)
 
@@ -3199,6 +3183,28 @@ function ProcessAction(execute, fromScript)
     mu.post('============================')
   end
 
+  return fnString
+end
+
+function ProcessAction(execute, fromScript)
+  mediaItemCount = nil
+  mediaItemIndex = nil
+
+  if fromScript
+    and scriptIgnoreSelectionInArrangeView
+    and findScopeTable[currentFindScope].notation == '$midieditorselected'
+  then
+    local _, _, sectionID = r.get_action_context()
+    if sectionID == 0 then currentFindScope = FindScopeFromNotation('$midieditor')     mu.post('spoofing sel ctx')    end
+  end
+
+  local takes = GrabAllTakes()
+  if #takes == 0 then return end
+
+  CACHED_METRIC = nil
+  CACHED_WRAPPED = nil
+  SOM = nil
+
   moveCursorFirstEventPosition = nil
   addLengthFirstEventOffset = nil
 
@@ -3214,11 +3220,16 @@ function ProcessAction(execute, fromScript)
     local actionFn
     local findFn, wantsEventPreprocessing, findRange = ProcessFind(take, nil)
     if findFn then
-      local success, pret, err = pcall(load, fnString, nil, nil, context)
-      if success and pret then
-        actionFn = pret()
-      elseif err then
-        mu.post(err)
+      local fnString = ProcessActionRows(v.take) -- when !execute, we really don't need to run this multiple times
+      if fnString then
+        local success, pret, err = pcall(load, fnString, nil, nil, context)
+        if success and pret then
+          actionFn = pret()
+        elseif err then
+          mu.post(err)
+          findParserError = 'Fatal error: could not load action description'
+        end
+      else
         findParserError = 'Fatal error: could not load action description'
       end
     end
@@ -3554,7 +3565,6 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
-      context.PPQ = mu.MIDI_GetPPQ(v.take)
       local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take, true)
       local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable

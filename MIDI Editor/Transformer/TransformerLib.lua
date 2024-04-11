@@ -351,6 +351,7 @@ local findPositionConditionEntries = {
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
+  { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -961,6 +962,57 @@ function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
   local barpos = (ppqpos - som) / measurePPQ
 
   return barpos >= (rangeStart / 100) and barpos <= (rangeEnd / 100)
+end
+
+function InRazorArea(event, take)
+  if not take then return false end
+
+  local track = r.GetMediaItemTake_Track(take)
+  if not track then return false end
+
+  local item = r.GetMediaItemTake_Item(take)
+  if not item then return false end
+
+  local freemode = r.GetMediaTrackInfo_Value(track, 'I_FREEMODE')
+  local itemTop = freemode ~= 0 and r.GetMediaItemInfo_Value(item, 'F_FREEMODE_Y') or nil
+  local itemBottom = freemode ~= 0 and (itemTop + r.GetMediaItemInfo_Value(item, 'F_FREEMODE_H')) or nil
+
+  local timeAdjust = GetTimeOffset()
+
+  local ret, area = r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS_EXT', '', false)
+  if area ~= '' then
+    local razors = {}
+    for word in string.gmatch(area, '([^,]+)') do
+      local terms = {}
+      table.insert(razors, terms)
+      for str in string.gmatch(word, '%S+') do
+        table.insert(terms, str)
+      end
+    end
+
+    for _, v in ipairs(razors) do
+      local ct = #v
+      local areaStart, areaEnd, areaTop, areaBottom
+      if ct >= 3 then
+        areaStart = tonumber(v[1]) + timeAdjust
+        areaEnd = tonumber(v[2]) + timeAdjust
+        if ct >= 5 and freemode ~= 0 then
+          areaTop = tonumber(v[4])
+          areaBottom = tonumber(v[5])
+        end
+        if event.projtime >= areaStart and event.projtime < areaEnd then
+          if freemode ~= 0 and areaTop and areaBottom then
+            if itemTop >= areaTop and itemBottom <= areaBottom then
+              return true
+            end
+          else
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
 end
 
 function OnMetricGrid(take, PPQ, ppqpos, mgParams)
@@ -2057,6 +2109,7 @@ context.Mirror = Mirror
 context.OnMetricGrid = OnMetricGrid
 context.OnGrid = OnGrid
 context.InBarRange = InBarRange
+context.InRazorArea = InRazorArea
 context.LinearChangeOverSelection = LinearChangeOverSelection
 context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration

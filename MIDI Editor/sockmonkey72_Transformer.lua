@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.29
+-- @version 1.0-alpha.28
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - preset fix-up for Windows
+--   - small fix to save preset button press
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.29'
+local versionStr = '1.0-alpha.28'
 
 local r = reaper
 
@@ -1023,7 +1023,12 @@ local function windowFn()
   ]])
 
   local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
-    (EventChar < '0' || EventChar > '9') && EventChar != '-' && EventChar != ':' && EventChar != '.' ? EventChar = 0;
+    (EventChar < '0' || EventChar > '9')
+      && EventChar != '-'
+      && EventChar != ':'
+      && EventChar != '.'
+      && EventChar != 't'
+    ? EventChar = 0;
   ]])
 
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, terms, rowIdx, procFn)

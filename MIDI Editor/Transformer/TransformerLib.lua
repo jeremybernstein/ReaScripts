@@ -10,6 +10,11 @@
 
 -- function in this file mostly global due to Lua's 200 global variable limitation... not ideal.
 
+-- TODO: metric grid editor
+-- TODO: function generator (N sliders, lin interpolate between?)
+-- TODO: split at intervals
+-- TODO: new event at position
+
 local r = reaper
 local mu
 
@@ -565,7 +570,7 @@ local actionOperationRelLine = { notation = ':relline', label = 'Relative Change
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 
-local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, true))', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
+local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, _context, true))', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
 
 local function positionMod(op)
   local newop = tableCopy(op)
@@ -590,8 +595,8 @@ local function lengthMod(op)
 end
 
 local actionPositionOperationEntries = {
-  { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime)', terms = 1, timedur = true, timearg = true },
+  { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
   { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound),
@@ -610,8 +615,8 @@ local actionPositionMultParam2Menu = {
 }
 
 local actionLengthOperationEntries = {
-  { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projlen)', terms = 1, timedur = true, timearg = true },
-  { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projlen)', terms = 1, timedur = true, timearg = true },
+  { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projlen, _context)', terms = 1, timedur = true, timearg = true },
+  { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projlen, _context)', terms = 1, timedur = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
   { notation = ':quantmusical', label = 'Set to Musical Length', text = 'SetMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
@@ -1394,6 +1399,7 @@ function LengthFormatRebuf(buf)
   local isneg = string.match(buf, '^%s*%-')
 
   if format == TIME_FORMAT_MEASURES then
+    local absTicks = false
     local bars, beats, fraction, subfrac = string.match(buf, '(%d-)%.(%d+)%.(%d+)%.(%d+)')
     if not bars then
       bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
@@ -1404,22 +1410,25 @@ function LengthFormatRebuf(buf)
     if not bars then
       bars = string.match(buf, '(%d+)')
     end
+    absTicks = string.match(buf, 't%s*$')
+
     if not bars or bars == '' then bars = 0 end
     bars = TimeFormatClampPad(bars, 0, nil, '%d')
     if not beats or beats == '' then beats = 0 end
     beats = TimeFormatClampPad(beats, 0, nil, '%d')
-    -- if fraction and fraction ~= '' then
-    --   if fraction:len() == 2 then fraction = fraction .. '0' end
-    -- elseif not fraction or fraction == '' then fraction = 0
-    -- end
-    if not fraction or fraction == '' then fraction = 0 end
-    fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
 
-    if not subfrac or subfrac == '' then subfrac = nil end
-    if subfrac then
-      subfrac = TimeFormatClampPad(subfrac, 0, 9, '%d')
+    if absTicks and not subfrac then -- no range check on ticks
+      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
+    else
+      if not fraction or fraction == '' then fraction = 0 end
+      fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
+
+      if not subfrac or subfrac == '' then subfrac = nil end
+      if subfrac then
+        subfrac = TimeFormatClampPad(subfrac, 0, 9, '%d')
+      end
+      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
     end
-    return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
   elseif format == TIME_FORMAT_MINUTES then
     local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
     local minutesVal, secondsVal
@@ -1477,6 +1486,7 @@ function TimeFormatRebuf(buf)
   local isneg = string.match(buf, '^%s*%-')
 
   if format == TIME_FORMAT_MEASURES then
+    local absTicks = false
     local bars, beats, fraction, subfrac = string.match(buf, '(%d-)%.(%d+)%.(%d+)%.(%d+)')
     if not bars then
       bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
@@ -1487,22 +1497,25 @@ function TimeFormatRebuf(buf)
     if not bars then
       bars = string.match(buf, '(%d+)')
     end
+    absTicks = string.match(buf, 't%s*$')
+
     if not bars or bars == '' then bars = 0 end
     bars = TimeFormatClampPad(bars, nil, nil, '%d')
     if not beats or beats == '' then beats = 1 end
     beats = TimeFormatClampPad(beats, 1, nil, '%d')
-    -- if fraction and fraction ~= '' then
-    --   if fraction:len() == 2 then fraction = fraction .. '0' end
-    -- elseif not fraction or fraction == '' then fraction = 0
-    -- end
-    if not fraction or fraction == '' then fraction = 0 end
-    fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
 
-    if not subfrac or subfrac == '' then subfrac = nil end
-    if subfrac then
-      subfrac = TimeFormatClampPad(subfrac, 0, 9, '%d')
+    if absTicks and not subfrac then -- no range check on ticks
+      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
+    else
+      if not fraction or fraction == '' then fraction = 0 end
+      fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
+
+      if not subfrac or subfrac == '' then subfrac = nil end
+      if subfrac then
+        subfrac = TimeFormatClampPad(subfrac, 0, 9, '%d')
+      end
+      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
     end
-    return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
   elseif format == TIME_FORMAT_MINUTES then
     local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
     local minutesVal, secondsVal, fractionVal
@@ -1910,20 +1923,32 @@ function ProcessFindMacro(buf)
   ProcessFindMacroRow(string.sub(buf, bufstart))
 end
 
-function TimeFormatToSeconds(buf, baseTime, isLength)
+function TimeFormatToSeconds(buf, baseTime, context, isLength)
   local format = DetermineTimeFormatStringType(buf)
 
   local isneg = string.match(buf, '^%s*%-')
 
   if format == TIME_FORMAT_MEASURES then
+    local absTicks = false
     local tbars, tbeats, tfraction, tsubfrac = string.match(buf, '(%d+)%.(%d+)%.(%d+)%.(%d+)')
     if not tbars then
       tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
     end
+    absTicks = string.match(buf, 't%s*$')
+
     local bars = tonumber(tbars)
     local beats = tonumber(tbeats)
-    if not tsubfrac or tsubfrac == '' then tsubfrac = '0' end
-    local fraction = tonumber(tfraction .. tsubfrac)
+    local fraction
+
+    if absTicks then
+      local ticks = tonumber(tfraction)
+      if not ticks then ticks = 0 end
+      ticks = ticks < 0 and 0 or ticks >= context.PPQ and context.PPQ - 1 or ticks
+      fraction = math.floor(((ticks / context.PPQ) * 1000) + 0.5)
+    else
+      if not tsubfrac or tsubfrac == '' then tsubfrac = '0' end
+      fraction = tonumber(tfraction .. tsubfrac)
+    end
     local adjust = baseTime and baseTime or 0
     if not isLength then adjust = adjust - GetTimeOffset(true) end
     fraction = not fraction and 0 or fraction > 999 and 999 or fraction < 0 and 0 or fraction
@@ -1955,18 +1980,18 @@ function TimeFormatToSeconds(buf, baseTime, isLength)
   return 0
 end
 
-function LengthFormatToSeconds(buf, baseTime)
-  return TimeFormatToSeconds(buf, baseTime, true)
+function LengthFormatToSeconds(buf, baseTime, context)
+  return TimeFormatToSeconds(buf, baseTime, context, true)
 end
 
-function AddDuration(event, property, duration, baseTime)
-  local adjustedTime = LengthFormatToSeconds(duration, baseTime)
+function AddDuration(event, property, duration, baseTime, context)
+  local adjustedTime = LengthFormatToSeconds(duration, baseTime, context)
   event[property] = baseTime + adjustedTime
   return event[property]
 end
 
-function SubtractDuration(event, property, duration, baseTime)
-  local adjustedTime = LengthFormatToSeconds(duration, baseTime)
+function SubtractDuration(event, property, duration, baseTime, context)
+  local adjustedTime = LengthFormatToSeconds(duration, baseTime, context)
   event[property] = baseTime - adjustedTime
   return event[property]
 end
@@ -2052,7 +2077,7 @@ context.OP_DIV = OP_DIV
 context.OP_FIXED = OP_FIXED
 context.OP_SCALEOFF = OP_SCALEOFF
 
-function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation)
+function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation, takectx)
   local addMetricGridNotation = false
   if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
     if terms == 1 then
@@ -2085,9 +2110,9 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
     paramVal = percentVal and string.format('%g', percentVal) or row[paramName .. 'TextEditorStr']
   elseif paramType == PARAM_TYPE_TIME then
-    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr']))
+    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
   elseif paramType == PARAM_TYPE_TIMEDUR then
-    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr']))
+    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
   elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
     paramVal = row[paramName .. 'TextEditorStr']
   elseif #paramTab ~= 0 then
@@ -2100,11 +2125,11 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   return paramVal
 end
 
-function ProcessParams(row, target, condOp, param1Tab, param2Tab, notation)
+function ProcessParams(row, target, condOp, param1Tab, param2Tab, notation, takectx)
   local paramTypes = GetParamTypesForRow(row, target, condOp)
 
-  local param1Val = DoProcessParams(row, target, condOp, 'param1', paramTypes[1], param1Tab, 1, notation)
-  local param2Val = DoProcessParams(row, target, condOp, 'param2', paramTypes[2], param2Tab, 2, notation)
+  local param1Val = DoProcessParams(row, target, condOp, 'param1', paramTypes[1], param1Tab, 1, notation, takectx)
+  local param2Val = DoProcessParams(row, target, condOp, 'param2', paramTypes[2], param2Tab, 2, notation, takectx)
 
   return param1Val, param2Val
 end
@@ -2120,7 +2145,7 @@ function FindRowToNotation(row, index)
   local param1Val, param2Val
   local paramTypes = GetParamTypesForRow(row, curTarget, curCondition)
 
-  param1Val, param2Val = ProcessParams(row, curTarget, curCondition, param1Tab, param2Tab, true)
+  param1Val, param2Val = ProcessParams(row, curTarget, curCondition, param1Tab, param2Tab, true, { PPQ = 960 } )
   if paramTypes[1] == PARAM_TYPE_MENU then
     param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
   end
@@ -2333,7 +2358,7 @@ function ProcessFind(take, fromHasTable)
     if curTarget.notation == '$lastevent' then wantsEventPreprocessing = true
     elseif string.match(condition.notation, ':inchord') then wantsEventPreprocessing = true end
 
-    v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab)
+    v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab, false, context)
 
     local param1Term = v.param1Val
     local param2Term = v.param2Val
@@ -2763,7 +2788,7 @@ function ActionRowToNotation(row, index)
   local param1Val, param2Val
   local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
 
-  param1Val, param2Val = ProcessParams(row, curTarget, curOperation, param1Tab, param2Tab, true)
+  param1Val, param2Val = ProcessParams(row, curTarget, curOperation, param1Tab, param2Tab, true, { PPQ = 960 } )
   if paramTypes[1] == PARAM_TYPE_MENU then
     param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
   end
@@ -3117,7 +3142,7 @@ function ProcessAction(execute, fromScript)
     local operationVal = operation.text
     local actionTerm = ''
 
-    v.param1Val, v.param2Val = ProcessParams(v, curTarget, curOperation, param1Tab, param2Tab)
+    v.param1Val, v.param2Val = ProcessParams(v, curTarget, curOperation, param1Tab, param2Tab, false, context)
 
     local param1Term = v.param1Val
     local param2Term = v.param2Val
@@ -3187,7 +3212,7 @@ function ProcessAction(execute, fromScript)
     addLengthFirstEventOffset_Take = nil
 
     local actionFn
-    local findFn, wantsEventPreprocessing, findRange = ProcessFind(take)
+    local findFn, wantsEventPreprocessing, findRange = ProcessFind(take, nil)
     if findFn then
       local success, pret, err = pcall(load, fnString, nil, nil, context)
       if success and pret then
@@ -3529,6 +3554,7 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
+      context.PPQ = mu.MIDI_GetPPQ(v.take)
       local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take, true)
       local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable

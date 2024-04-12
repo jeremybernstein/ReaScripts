@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.31
+-- @version 1.0-alpha.32
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add a razor edits selection criteria
+--   - fix 'every N' for 2-byte, pitch bend and sysex events
+--   - fix 'mixed data' entry for 7- + 14-bit unified entry
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.31'
+local versionStr = '1.0-alpha.32'
 
 local r = reaper
 
@@ -32,6 +33,10 @@ local mu
 if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI Editor/Transformer/?.lua'
   mu = require 'MIDIUtils'
+
+  function P(...)
+    mu.post(...)
+  end
 end
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'

@@ -2248,9 +2248,11 @@ function UpdateEventCount(event, counts)
   else
     local eventIdx = event.chanmsg + event.chan
     if not counts[eventIdx] then counts[eventIdx] = {} end
-    if not counts[eventIdx][event.msg2] then counts[eventIdx][event.msg2] = 0 end
-    event.count = counts[eventIdx][event.msg2] + 1
-    counts[eventIdx][event.msg2] = event.count
+    local subIdx = event.msg2
+    if event.chanmsg >= 0xC0 then subIdx = 0 end
+    if not counts[eventIdx][subIdx] then counts[eventIdx][subIdx] = 0 end
+    event.count = counts[eventIdx][subIdx] + 1
+    counts[eventIdx][subIdx] = event.count
   end
 end
 
@@ -2449,6 +2451,14 @@ function ProcessFind(take, fromHasTable)
       elseif typeType == '$pb' then wantsType[0xE0] = true
       elseif typeType == '$syx' then wantsType[0xF0] = true
       end
+    elseif curTarget.notation == '$type' and condition.notation == ':all' then
+      wantsType[0x90] = true
+      wantsType[0xA0] = true
+      wantsType[0xB0] = true
+      wantsType[0xC0] = true
+      wantsType[0xD0] = true
+      wantsType[0xE0] = true
+      wantsType[0xF0] = true
     end
 
     -- range processing
@@ -3630,8 +3640,8 @@ TransformerLib.getHasTable = function()
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
-      local findFn, wantsEventPreprocessing, findRange = ProcessFind(v.take, true)
-      local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = wantsEventPreprocessing, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
+      local findFn, _, findRange = ProcessFind(v.take, true)
+      local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = true, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
         if vv == true then

@@ -359,9 +359,9 @@ local findLastEventConditionEntries = {
   { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {everyNparams})', terms = 1, range = { 1, nil }, nooverride = true, literal = true, freeterm = true, everyn = true },
   { notation = ':everyNnote', label = 'Every N Event (note)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { menu = true }}, nooverride = true, literal = true, freeterm = true, everyn = true },
   { notation = ':everyNnotenum', label = 'Every N Event (note#)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { inteditor = true, range = { 0, 127 } }}, nooverride = true, literal = true, freeterm = true, everyn = true },
---   { notation = ':chordhigh', label = 'Highest Note in Chord'},
---   { notation = ':chordlow', label = 'Lowest Note in Chord'},
---   { notation = ':chordpos', label = 'Position in Chord'},
+  { notation = ':chordhigh', label = 'Highest Note in Chord', text = 'SelectChordNote(event, -1)', terms = 0 },
+  { notation = ':chordlow', label = 'Lowest Note in Chord', text = 'SelectChordNote(event, -2)', terms = 0 },
+  { notation = ':chordpos', label = 'Position in Chord', text = 'SelectChordNote(event, {param1})', terms = 1, inteditor = true, range = { 0, nil }, literal = true, nooverride = true},
 }
 
 function FindConditionAddSelectRange(t, r)
@@ -871,6 +871,14 @@ function EqualsMusicalLength(event, take, PPQ, mgParams)
 
   local ppqlen = event.endppqpos - event.ppqpos
   return ppqlen >= gridUnit - preSlop and ppqlen <= gridUnit + postSlop
+end
+
+function SelectChordNote(event, chordNote)
+  if chordNote == -1 and event.chordTop then return true
+  elseif chordNote == -2 and event.chordBottom then return true
+  elseif event.chordIdx and event.chordIdx - 1 == chordNote then return true
+  end
+  return false
 end
 
 function SetMusicalLength(event, take, PPQ, mgParams)
@@ -2219,6 +2227,7 @@ context.FindEveryNPattern = FindEveryNPattern
 context.FindEveryNNote = FindEveryNNote
 context.EqualsMusicalLength = EqualsMusicalLength
 context.CursorPosition = CursorPosition
+context.SelectChordNote = SelectChordNote
 
 context.OP_EQ = OP_EQ
 context.OP_GT = OP_GT
@@ -2409,6 +2418,24 @@ function UpdateEventCount(event, counts, onlyNoteRow)
   counts[eventIdx][subIdx] = event[cname]
 end
 
+function CalcChordPos(first, last)
+  local chordPos = {}
+  for i = first, last do
+    if GetEventType(allEvents[i]) == NOTE_TYPE then
+      table.insert(chordPos, allEvents[i])
+    end
+  end
+  table.sort(chordPos, function(a, b) return a.msg2 < b.msg2 end)
+  for ek, ev in ipairs(chordPos) do
+    ev.chordIdx = ek
+    if ek == 1 then
+      ev.chordBottom = true
+    elseif ek == #chordPos then
+      ev.chordTop = true
+    end
+  end
+end
+
 function RunFind(findFn, params, runFn)
 
   local wantsEventPreprocessing = params and params.wantsEventPreprocessing or false
@@ -2422,6 +2449,7 @@ function RunFind(findFn, params, runFn)
 
   if wantsEventPreprocessing then
     local firstNotePpq
+    local firstNoteIndex
     local firstNoteCount = 0
     local prevEvents = {}
     local counts = {
@@ -2429,7 +2457,7 @@ function RunFind(findFn, params, runFn)
     }
     local take = params.take
 
-    for _, event in ipairs(allEvents) do
+    for k, event in ipairs(allEvents) do
       if GetEventType(event) == CC_TYPE or GetEventType(event) == SYXTEXT_TYPE then
         UpdateEventCount(event, counts)
       elseif GetEventType(event) == NOTE_TYPE then -- note event
@@ -2450,7 +2478,7 @@ function RunFind(findFn, params, runFn)
                 end
                 if prevEvents[2] then
                   prevEvents[2].flags = prevEvents[2].flags | 4
-                  prevEvents[1].count = counts.noteCount
+                  prevEvents[2].count = counts.noteCount
                 end
                 matched = true
               end
@@ -2463,7 +2491,12 @@ function RunFind(findFn, params, runFn)
           end
           if not matched then
             if updateFirstNote then
+              if k > 1 and (allEvents[k - 1].flags & 0x04 ~= 0) then
+                CalcChordPos(firstNoteIndex, k - 1)
+              end
+
               firstNotePpq = notePpq
+              firstNoteIndex = k
               firstNoteCount = counts.noteCount + 1
               prevEvents[1] = event
               prevEvents[2] = nil
@@ -2472,6 +2505,9 @@ function RunFind(findFn, params, runFn)
           UpdateEventCount(event, counts, matched)
         end
       end
+    end
+    if firstNoteIndex and (allEvents[firstNoteIndex].flags & 0x04 ~= 0) then
+      CalcChordPos(firstNoteIndex, #allEvents)
     end
   end
 

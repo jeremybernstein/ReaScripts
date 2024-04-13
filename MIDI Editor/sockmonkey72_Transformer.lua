@@ -8,6 +8,7 @@
 --   - add 'every N (note)'
 --   - add 'every N (note#)'
 --   - add Selection Scope flags for Active MIDI Editor (selected events / active note row)
+--   - add chord position selectors
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

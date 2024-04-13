@@ -329,8 +329,8 @@ local findGenericConditionEntries = {
 }
 
 local findLastEventConditionEntries = {
-  { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {param1}, {param2})', terms = 2, inteditor = true, split = {{ range = { 1, nil } }, { range = { 0, nil } }}, nooverride = true, literal = true, freeterm = true },
-  { notation = ':everyNpat', label = 'Every N Event (pattern)', text = 'FindEveryNPattern(event, \'{param1}\', {param2})', terms = 2, inteditor = true, split = {{ bitfield = true, default = '0' }, { range = { 0, nil }, nooverride = true }}, literal = true, freeterm = true },
+  { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {param1}, {param2})', terms = 1, inteditor = true, split = {{ range = { 1, nil } }, { range = { 0, nil } }}, nooverride = true, literal = true, freeterm = true },
+  -- { notation = ':everyNpat', label = 'Every N Event (pattern)', text = 'FindEveryNPattern(event, \'{param1}\', {param2})', terms = 2, inteditor = true, split = {{ bitfield = true, default = '0' }, { range = { 0, nil }, nooverride = true }}, literal = true, freeterm = true },
 --   { notation = ':chordhigh', label = 'Highest Note in Chord'},
 --   { notation = ':chordlow', label = 'Lowest Note in Chord'},
 --   { notation = ':chordpos', label = 'Position in Chord'},

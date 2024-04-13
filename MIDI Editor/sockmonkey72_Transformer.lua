@@ -1,11 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.33
+-- @version 1.0-alpha.34
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'every N' offset param (change phase of pattern start)
---   - add 'every N (pattern)' with binary bitfield
+--   - remove 'every N' offset param (change phase of pattern start) [sth better coming]
+--   - remove 'every N (pattern)' with binary bitfield [sth better coming]
 --   - update ReaImGui compatibility version
 --   - move EEL functions into global scope for efficiency
 -- @provides
@@ -21,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.33'
+local versionStr = '1.0-alpha.34'
 
 local r = reaper
 

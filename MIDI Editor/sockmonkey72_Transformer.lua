@@ -1301,14 +1301,6 @@ local function windowFn()
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
 
-    local rv, selected = r.ImGui_Checkbox(ctx, 'Use Bitfield', evn.isBitField)
-    if rv then
-      evn.isBitField = selected
-      fun(1, true)
-    end
-
-    r.ImGui_Separator(ctx)
-
     r.ImGui_AlignTextToFramePadding(ctx)
 
     r.ImGui_Text(ctx, evn.isBitField and 'Pattern' or 'Interval')
@@ -1316,11 +1308,11 @@ local function windowFn()
 
     local saveX = r.ImGui_GetCursorPosX(ctx)
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local buf
     if evn.isBitField then evn.textEditorStr = evn.textEditorStr:gsub('[2-9]', '1')
     else evn.textEditorStr = tostring(tonumber(evn.textEditorStr))
     end
-    rv, buf = r.ImGui_InputText(ctx, '##everyNentry', evn.textEditorStr,
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
+    local rv, buf = r.ImGui_InputText(ctx, '##everyNentry', evn.textEditorStr,
       r.ImGui_InputTextFlags_AutoSelectAll() + r.ImGui_InputTextFlags_CallbackCharFilter(),
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
@@ -1334,12 +1326,27 @@ local function windowFn()
       fun(2, true)
     end
 
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_PushFont(ctx, fontInfo.smaller)
+    local yCache = r.ImGui_GetCursorPosY(ctx)
+    local _, smallerHeight = r.ImGui_CalcTextSize(ctx, '0') -- could make this global if it is expensive
+    r.ImGui_SetCursorPosY(ctx, yCache + ((r.ImGui_GetFrameHeight(ctx) - smallerHeight) / 2))
+    local selected
+    rv, selected = r.ImGui_Checkbox(ctx, 'Bitfield', evn.isBitField)
+    if rv then
+      evn.isBitField = selected
+      fun(1, true)
+    end
+    r.ImGui_PopFont(ctx)
+
     r.ImGui_Separator(ctx)
 
     r.ImGui_Text(ctx, 'Offset')
     r.ImGui_SameLine(ctx)
 
     r.ImGui_SetCursorPosX(ctx, saveX)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
     rv, buf = r.ImGui_InputText(ctx, '##everyNoffset', evn.offsetEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
@@ -1599,8 +1606,7 @@ local function windowFn()
         if isMetric or isMusical then
           makeDefaultMetricGrid(currentRow, isMetric)
         elseif isEveryN then
-          local evn = makeDefaultEveryN(currentRow)
-          evn.isBitField = string.match(condNotation, 'pattern') and true or false
+          makeDefaultEveryN(currentRow)
         end
         tx.processFind()
       end)

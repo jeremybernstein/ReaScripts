@@ -991,7 +991,7 @@ function GetMainValue(event)
 end
 
 function GetMainValueName(event)
-  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'devnull'
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'msg2'
   elseif GetEventType(event) == SYXTEXT_TYPE then return 'devnull'
   else return 'msg3'
   end
@@ -1001,9 +1001,9 @@ function GetMainValueLabel(typeIndex)
   if typeIndex == 1 then return 'Velocity'
   elseif typeIndex == 2 then return 'Pressure Amount'
   elseif typeIndex == 3 then return 'CC Value'
-  elseif typeIndex == 4 then return 'unused'
-  elseif typeIndex == 5 then return 'unused'
-  elseif typeIndex == 6 then return 'unused'
+  elseif typeIndex == 4 then return 'Pgm # (aliased Value 1)'
+  elseif typeIndex == 5 then return 'Channel Pressure Amount (aliased Value 1)'
+  elseif typeIndex == 6 then return 'PBnd (aliased Value 1)'
   else return ''
   end
 end
@@ -2477,7 +2477,7 @@ function RunFind(findFn, params, runFn)
 
   for _, event in ipairs(allEvents) do
     local matches = false
-    if findFn and findFn(event, GetSubtypeValueName(event), GetMainValueName(event)) then
+    if findFn and findFn(event, GetSubtypeValueName(event), GetMainValueName(event)) then -- event, _value1, _value2
       hasTable[event.chanmsg] = true
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
@@ -3078,7 +3078,7 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   PreProcessSelection(take)
   for _, event in ipairs(eventTab) do
     local timeAdjust = GetTimeOffset()
-    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
+    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab) -- event, _value1, _value2, _context
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     PostProcessSelection(event)
     event.muted = (event.flags & 2) ~= 0

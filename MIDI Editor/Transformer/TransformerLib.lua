@@ -25,7 +25,7 @@ if DEBUG then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
   mu = require 'MIDIUtils'
 else
-  package.path = debug.getinfo(1, "S").source:match [[^@?(.*[\/])[^\/]-$]] .. "?.lua;" -- GET DIRECTORY FOR REQUIRE
+  package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
   mu = require 'MIDIUtils'
 end
 
@@ -103,7 +103,7 @@ local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaCl
         end
       end
       if not found then
-        error("unknown property: "..key, 3)
+        error('unknown property: '..key, 3)
       else rawset(table, key, value)
       end
     end
@@ -161,11 +161,22 @@ local findScopeTable = {
   { notation = '$everywhere', label = 'Everywhere' },
   { notation = '$selected', label = 'Selected Items' },
   { notation = '$midieditor', label = 'Active MIDI Editor' },
-  { notation = '$midieditorselected', label = 'Active MIDI Editor / Selected Events' }
+  -- { notation = '$midieditorselected', label = 'Active MIDI Editor / Selected Events' }
 }
+
+local FIND_SCOPE_FLAG_NONE = 0x00
+local FIND_SCOPE_FLAG_SELECTED_ONLY = 0x01
+local FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW = 0x02
+
+local currentFindScopeFlags = FIND_SCOPE_FLAG_NONE
 
 function FindScopeFromNotation(notation)
   if notation then
+    if notation == '$midieditorselected' then
+      local scope = FindScopeFromNotation('$midieditor')
+      currentFindScopeFlags = FIND_SCOPE_FLAG_SELECTED_ONLY
+      return scope
+    end
     for k, v in ipairs(findScopeTable) do
       if v.notation == notation then
         return k
@@ -176,6 +187,22 @@ function FindScopeFromNotation(notation)
 end
 
 local currentFindScope = FindScopeFromNotation()
+
+local findScopeFlagsTable = {
+  { notation = '$selectedevents', label = 'Selected Events', flag = FIND_SCOPE_FLAG_SELECTED_ONLY },
+  { notation = '$activenoterow', label = 'Active Note Row (notes only)', flag = FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW },
+}
+
+function FindScopeFlagFromNotation(notation)
+  if notation then
+    for k, v in ipairs(findScopeFlagsTable) do
+      if v.notation == notation then
+        return v.flag
+      end
+    end
+  end
+  return 0x00 -- default
+end
 
 local actionScopeTable = {
   { notation = '$select', label = 'Select' },
@@ -329,8 +356,9 @@ local findGenericConditionEntries = {
 }
 
 local findLastEventConditionEntries = {
-  { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {param1}, {param2})', terms = 1, inteditor = true, split = {{ range = { 1, nil } }, { range = { 0, nil } }}, nooverride = true, literal = true, freeterm = true },
-  -- { notation = ':everyNpat', label = 'Every N Event (pattern)', text = 'FindEveryNPattern(event, \'{param1}\', {param2})', terms = 2, inteditor = true, split = {{ bitfield = true, default = '0' }, { range = { 0, nil }, nooverride = true }}, literal = true, freeterm = true },
+  { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {everyNparams})', terms = 1, range = { 1, nil }, nooverride = true, literal = true, freeterm = true, everyn = true },
+  { notation = ':everyNnote', label = 'Every N Event (note)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { menu = true }}, nooverride = true, literal = true, freeterm = true, everyn = true },
+  { notation = ':everyNnotenum', label = 'Every N Event (note#)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { inteditor = true, range = { 0, 127 } }}, nooverride = true, literal = true, freeterm = true, everyn = true },
 --   { notation = ':chordhigh', label = 'Highest Note in Chord'},
 --   { notation = ':chordlow', label = 'Lowest Note in Chord'},
 --   { notation = ':chordpos', label = 'Position in Chord'},
@@ -427,11 +455,11 @@ local CURSOR_LTE = 4
 local CURSOR_GTE = 5
 
 local findCursorParam1Entries = {
-  { notation = '$before', label = "Before Cursor", text = 'CURSOR_LT', timeselect = SELECT_TIME_MAXRANGE }, -- todo search for notation
-  { notation = '$after', label = "After Cursor", text = 'CURSOR_GT', timeselect = SELECT_TIME_MINRANGE },
-  { notation = '$at', label = "At Cursor", text = 'CURSOR_AT', timeselect = SELECT_TIME_INDIVIDUAL },
-  { notation = '$before_at', label = "Before or At Cursor", text = 'CURSOR_LTE', timeselect = SELECT_TIME_MAXRANGE },
-  { notation = '$after_at', label = "After or At Cursor", text = 'CURSOR_GTE', timeselect = SELECT_TIME_MINRANGE },
+  { notation = '$before', label = 'Before Cursor', text = 'CURSOR_LT', timeselect = SELECT_TIME_MAXRANGE }, -- todo search for notation
+  { notation = '$after', label = 'After Cursor', text = 'CURSOR_GT', timeselect = SELECT_TIME_MINRANGE },
+  { notation = '$at', label = 'At Cursor', text = 'CURSOR_AT', timeselect = SELECT_TIME_INDIVIDUAL },
+  { notation = '$before_at', label = 'Before or At Cursor', text = 'CURSOR_LTE', timeselect = SELECT_TIME_MAXRANGE },
+  { notation = '$after_at', label = 'After or At Cursor', text = 'CURSOR_GTE', timeselect = SELECT_TIME_MINRANGE },
 }
 
 local findMusicalParam1Entries = {
@@ -453,47 +481,47 @@ local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a 
 }
 
 local nornsScales = { -- https://github.com/monome/norns/blob/main/lua/lib/musicutil.lua
-  { notation = '$major', text = '{0, 2, 4, 5, 7, 9, 11, 12}', label = "Major", alt_names = {"Ionian"}, intervals = {0, 2, 4, 5, 7, 9, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}} },
-  { notation = '$minor', text = '{0, 2, 3, 5, 7, 8, 10, 12}', label = "Natural Minor", alt_names = {"Minor", "Aeolian"}, intervals = {0, 2, 3, 5, 7, 8, 10, 12}, chords = {{14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}} },
-  { notation = '$harmonicmminor', text = '{0, 2, 3, 5, 7, 8, 11, 12}', label = "Harmonic Minor", intervals = {0, 2, 3, 5, 7, 8, 11, 12}, chords = {{14, 16, 17}, {24, 25, 26}, {12, 27}, {17, 18, 19, 20, 21, 24, 25, 26}, {1, 8, 12, 13, 14, 15}, {1, 2, 3, 16, 17, 18, 24, 25}, {12, 24, 25}, {14, 16, 17}} },
-  { notation = '$melodicminor', text = '{0, 2, 3, 5, 7, 9, 11, 12}', label = "Melodic Minor", intervals = {0, 2, 3, 5, 7, 9, 11, 12}, chords = {{14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}, {14, 16, 17, 18, 20}} },
-  { notation = '$dorian', text = '{0, 2, 3, 5, 7, 9, 10, 12}', label = "Dorian", intervals = {0, 2, 3, 5, 7, 9, 10, 12}, chords = {{14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}} },
-  { notation = '$phrygian', text = '{0, 1, 3, 5, 7, 8, 10, 12}', label = "Phrygian", intervals = {0, 1, 3, 5, 7, 8, 10, 12}, chords = {{14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}} },
-  { notation = '$lydian', text = '{0, 2, 4, 6, 7, 9, 11, 12}', label = "Lydian", intervals = {0, 2, 4, 6, 7, 9, 11, 12}, chords = {{1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}} },
-  { notation = '#mixolydian', text = '{0, 2, 4, 5, 7, 9, 10, 12}', label = "Mixolydian", intervals = {0, 2, 4, 5, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}} },
-  { notation = '$locrian', text = '{0, 1, 3, 5, 6, 8, 10, 12}', label = "Locrian", intervals = {0, 1, 3, 5, 6, 8, 10, 12}, chords = {{24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}} },
-  { notation = '$wholetone', text = '{0, 2, 4, 6, 8, 10, 12}', label = "Whole Tone", intervals = {0, 2, 4, 6, 8, 10, 12}, chords = {{12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}} },
-  { notation = '$majorpentatonic', text = '{0, 2, 4, 7, 9, 12}', label = "Major Pentatonic", alt_names = {"Gagaku Ryo Sen Pou"}, intervals = {0, 2, 4, 7, 9, 12}, chords = {{1, 2, 4}, {14, 15}, {}, {14}, {14, 15, 17, 19}, {1, 2, 4}} },
-  { notation = '$minorpentatonic', text = '{0, 3, 5, 7, 10, 12}', label = "Minor Pentatonic", alt_names = {"Zokugaku Yo Sen Pou"}, intervals = {0, 3, 5, 7, 10, 12}, chords = {{14, 15, 17, 19}, {1, 2, 4}, {14, 15}, {}, {14}, {14, 15, 17, 19}} },
-  { notation = '$majorbebop', text = '{0, 2, 4, 5, 7, 8, 9, 11, 12}', label = "Major Bebop", intervals = {0, 2, 4, 5, 7, 8, 9, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 12, 14, 27}, {14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, {1, 8, 12, 13, 14, 15, 17, 19}, {1, 2, 3, 4, 5, 16, 17, 18, 20, 24, 25}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {12, 24, 25, 27}, {14, 15, 16, 17, 19, 21, 22}, {24, 25, 26}, {1, 2, 3, 4, 5, 6, 7, 12, 14, 27}} },
-  { notation = '$alteredscale', text = '{0, 1, 3, 4, 6, 8, 10, 12}', label = "Altered Scale", intervals = {0, 1, 3, 4, 6, 8, 10, 12}, chords = {{12, 13, 24, 26}, {14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}} },
-  { notation = '$dorianbebop', text = '{0, 2, 3, 4, 5, 7, 9, 10, 12}', label = "Dorian Bebop", intervals = {0, 2, 3, 4, 5, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 21, 22}, {1, 2, 3, 4, 5}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}} },
-  { notation = '$mixolydianbebop', text = '{0, 2, 4, 5, 7, 9, 10, 11, 12}', label = "Mixolydian Bebop", intervals = {0, 2, 4, 5, 7, 9, 10, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 21, 22}, {1, 2, 3, 4, 5}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}} },
-  { notation = '$blues', text = '{0, 3, 5, 6, 7, 10, 12}', label = "Blues Scale", alt_names = {"Blues"}, intervals = {0, 3, 5, 6, 7, 10, 12}, chords = {{14, 15, 17, 19, 24, 26}, {1, 2, 4, 17, 18, 20}, {14, 15}, {}, {}, {14}, {14, 15, 17, 19, 24, 26}} },
-  { notation = '$dimwholehalf', text = '{0, 2, 3, 5, 6, 8, 9, 11, 12}', label = "Diminished Whole Half", intervals = {0, 2, 3, 5, 6, 8, 9, 11, 12}, chords = {{24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}} },
-  { notation = '$dimhalfwhole', text = '{0, 1, 3, 4, 6, 7, 9, 10, 12}', label = "Diminished Half Whole", intervals = {0, 1, 3, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}} },
-  { notation = '$neapolitanmajor', text = '{0, 1, 3, 5, 7, 9, 11, 12}', label = "Neapolitan Major", intervals = {0, 1, 3, 5, 7, 9, 11, 12}, chords = {{14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}} },
-  { notation = '$hungarianmajor', text = '{0, 3, 4, 6, 7, 9, 10, 12}', label = "Hungarian Major", intervals = {0, 3, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 8, 17, 18, 19, 24, 25, 26}, {1, 2, 17, 18, 24, 25}, {24}, {24, 25, 26}, {}, {17, 18, 19, 24, 25, 26}, {}, {1, 2, 8, 17, 18, 19, 24, 25, 26}} },
-  { notation = '$harmonicmajor', text = '{0, 2, 4, 5, 7, 8, 11, 12}', label = "Harmonic Major", intervals = {0, 2, 4, 5, 7, 8, 11, 12}, chords = {{1, 3, 5, 6, 12, 14, 27}, {24, 25, 26}, {1, 8, 12, 13, 17, 19}, {16, 17, 18, 20, 24, 25}, {1, 2, 8, 14, 15}, {12, 24, 25, 27}, {24, 25}, {1, 3, 5, 6, 12, 14, 27}} },
-  { notation = '$hungarianminor', text = '{0, 2, 3, 6, 7, 8, 11, 12}', label = "Hungarian Minor", intervals = {0, 2, 3, 6, 7, 8, 11, 12}, chords = {{16, 17, 24}, {}, {12, 27}, {}, {1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}} },
-  { notation = '$lydianminor', text = '{0, 2, 4, 6, 7, 8, 10, 12}', label = "Lydian Minor", intervals = {0, 2, 4, 6, 7, 8, 10, 12}, chords = {{1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}} },
-  { notation = '$neapolitanminor', text = '{0, 1, 3, 5, 7, 8, 11, 12}', label = "Neapolitan Minor", alt_names = {"Byzantine"}, intervals = {0, 1, 3, 5, 7, 8, 11, 12}, chords = {{14, 16, 17}, {1, 3, 5, 8, 9}, {12, 13}, {17, 19, 21, 24, 26}, {12, 13}, {1, 2, 3, 14, 16, 17, 18}, {12}, {14, 16, 17}} },
-  { notation = '$majorlocrian', text = '{0, 2, 4, 5, 6, 8, 10, 12}', label = "Major Locrian", intervals = {0, 2, 4, 5, 6, 8, 10, 12}, chords = {{12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}} },
-  { notation = '$leadingwholetone', text = '{0, 2, 4, 6, 8, 10, 11, 12}', label = "Leading Whole Tone", intervals = {0, 2, 4, 6, 8, 10, 11, 12}, chords = {{12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}} },
-  { notation = '$sixtone', text = '{0, 1, 4, 5, 8, 9, 11, 12}', label = "Six Tone Symmetrical", intervals = {0, 1, 4, 5, 8, 9, 11, 12}, chords = {{12, 27}, {1, 3, 8, 12, 13, 16, 17, 19, 27}, {1, 2, 12, 14}, {1, 3, 12, 16, 17, 24, 27}, {12}, {1, 3, 5, 12, 16, 17, 27}, {}, {12, 27}} },
-  { notation = '$balinese', text = '{0, 1, 3, 7, 8, 12}', label = "Balinese", intervals = {0, 1, 3, 7, 8, 12}, chords = {{17}, {}, {}, {}, {1, 3, 14}, {17}} },
-  { notation = '$persian', text = '{0, 1, 4, 5, 6, 8, 11, 12}', label = "Persian", intervals = {0, 1, 4, 5, 6, 8, 11, 12}, chords = {{12, 27}, {1, 3, 8, 14, 15, 16, 17, 19}, {1, 2, 4, 12}, {16, 17, 24}, {14, 15}, {12, 13}, {14}, {12, 27}} },
-  { notation = '$eastindianpurvi', text = '{0, 1, 4, 6, 7, 8, 11, 12}', label = "East Indian Purvi", intervals = {0, 1, 4, 6, 7, 8, 11, 12}, chords = {{1, 3, 12, 27}, {14, 15, 16, 17, 19, 24, 26}, {1, 2, 4, 12, 17, 18, 20}, {14, 15}, {}, {12, 13, 27}, {14}, {1, 3, 12, 27}} },
-  { notation = '$oriental', text = '{0, 1, 4, 5, 6, 9, 10, 12}', label = "Oriental", intervals = {0, 1, 4, 5, 6, 9, 10, 12}, chords = {{}, {12, 27}, {}, {1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}, {}} },
-  { notation = '$doubleharmonic', text = '{0, 1, 4, 5, 7, 8, 11, 12}', label = "Double Harmonic", intervals = {0, 1, 4, 5, 7, 8, 11, 12}, chords = {{1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}, {}, {12, 27}, {}, {1, 3, 12, 14, 27}} },
-  { notation = '$enigmatic', text = '{0, 1, 4, 6, 8, 10, 11, 12}', label = "Enigmatic", intervals = {0, 1, 4, 6, 8, 10, 11, 12}, chords = {{12, 13, 27}, {14, 15, 16, 17, 18, 19}, {1, 2, 4, 12}, {1, 8, 9, 10, 14, 15}, {12, 13}, {24, 26}, {14}, {12, 13, 27}} },
-  { notation = '$overtone', text = '{0, 2, 4, 6, 7, 9, 10, 12}', label = "Overtone", intervals = {0, 2, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}, {14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}} },
-  { notation = '$eighttonespanish', text = '{0, 1, 3, 4, 5, 6, 8, 10, 12}', label = "Eight Tone Spanish", intervals = {0, 1, 3, 4, 5, 6, 8, 10, 12}, chords = {{12, 13, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14, 16, 17, 18, 20}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {12, 27}, {14, 15, 16, 17, 19}, {1, 2, 3, 4, 5, 8, 9}, {1, 2, 4, 8, 9, 10, 11, 12, 13, 14, 15}, {14, 15, 17, 19, 21, 22, 24, 26}, {12, 13, 24, 26}} },
-  { notation = '$prometheus', text = '{0, 2, 4, 6, 9, 10, 12}', label = "Prometheus", intervals = {0, 2, 4, 6, 9, 10, 12}, chords = {{}, {1, 8, 9, 12, 13}, {}, {12, 13, 24, 26}, {14, 17, 18}, {12, 27}, {}} },
-  { notation = '$gagaku', text = '{0, 2, 5, 7, 9, 10, 12}', label = "Gagaku Rittsu Sen Pou", intervals = {0, 2, 5, 7, 9, 10, 12}, chords = {{14, 15}, {14, 15, 17, 19}, {1, 2, 4, 14}, {14, 15, 17, 19, 21, 22}, {}, {1, 2, 3, 4, 5}, {14, 15}} },
-  { notation = '$insenpou', text = '{0, 1, 5, 2, 8, 12}', label = "In Sen Pou", intervals = {0, 1, 5, 2, 8, 12}, chords = {{}, {1, 3}, {17, 18}, {24, 26}, {}, {}} },
-  { notation = '$okinawa', text = '{0, 4, 5, 7, 11, 12}', label = "Okinawa", intervals = {0, 4, 5, 7, 11, 12}, chords = {{1, 3, 14}, {17}, {}, {}, {}, {1, 3, 14}} },
-  { notation = '$chromatic', text = '{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}', label = "Chromatic", intervals = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}} }
+  { notation = '$major', text = '{0, 2, 4, 5, 7, 9, 11, 12}', label = 'Major', alt_names = {'Ionian'}, intervals = {0, 2, 4, 5, 7, 9, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}} },
+  { notation = '$minor', text = '{0, 2, 3, 5, 7, 8, 10, 12}', label = 'Natural Minor', alt_names = {'Minor', 'Aeolian'}, intervals = {0, 2, 3, 5, 7, 8, 10, 12}, chords = {{14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}} },
+  { notation = '$harmonicmminor', text = '{0, 2, 3, 5, 7, 8, 11, 12}', label = 'Harmonic Minor', intervals = {0, 2, 3, 5, 7, 8, 11, 12}, chords = {{14, 16, 17}, {24, 25, 26}, {12, 27}, {17, 18, 19, 20, 21, 24, 25, 26}, {1, 8, 12, 13, 14, 15}, {1, 2, 3, 16, 17, 18, 24, 25}, {12, 24, 25}, {14, 16, 17}} },
+  { notation = '$melodicminor', text = '{0, 2, 3, 5, 7, 9, 11, 12}', label = 'Melodic Minor', intervals = {0, 2, 3, 5, 7, 9, 11, 12}, chords = {{14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}, {14, 16, 17, 18, 20}} },
+  { notation = '$dorian', text = '{0, 2, 3, 5, 7, 9, 10, 12}', label = 'Dorian', intervals = {0, 2, 3, 5, 7, 9, 10, 12}, chords = {{14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}} },
+  { notation = '$phrygian', text = '{0, 1, 3, 5, 7, 8, 10, 12}', label = 'Phrygian', intervals = {0, 1, 3, 5, 7, 8, 10, 12}, chords = {{14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}} },
+  { notation = '$lydian', text = '{0, 2, 4, 6, 7, 9, 11, 12}', label = 'Lydian', intervals = {0, 2, 4, 6, 7, 9, 11, 12}, chords = {{1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}} },
+  { notation = '#mixolydian', text = '{0, 2, 4, 5, 7, 9, 10, 12}', label = 'Mixolydian', intervals = {0, 2, 4, 5, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}} },
+  { notation = '$locrian', text = '{0, 1, 3, 5, 6, 8, 10, 12}', label = 'Locrian', intervals = {0, 1, 3, 5, 6, 8, 10, 12}, chords = {{24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19}, {1, 2, 3, 4, 5}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 19, 21, 22}, {24, 26}} },
+  { notation = '$wholetone', text = '{0, 2, 4, 6, 8, 10, 12}', label = 'Whole Tone', intervals = {0, 2, 4, 6, 8, 10, 12}, chords = {{12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}, {12, 13}} },
+  { notation = '$majorpentatonic', text = '{0, 2, 4, 7, 9, 12}', label = 'Major Pentatonic', alt_names = {'Gagaku Ryo Sen Pou'}, intervals = {0, 2, 4, 7, 9, 12}, chords = {{1, 2, 4}, {14, 15}, {}, {14}, {14, 15, 17, 19}, {1, 2, 4}} },
+  { notation = '$minorpentatonic', text = '{0, 3, 5, 7, 10, 12}', label = 'Minor Pentatonic', alt_names = {'Zokugaku Yo Sen Pou'}, intervals = {0, 3, 5, 7, 10, 12}, chords = {{14, 15, 17, 19}, {1, 2, 4}, {14, 15}, {}, {14}, {14, 15, 17, 19}} },
+  { notation = '$majorbebop', text = '{0, 2, 4, 5, 7, 8, 9, 11, 12}', label = 'Major Bebop', intervals = {0, 2, 4, 5, 7, 8, 9, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 12, 14, 27}, {14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, {1, 8, 12, 13, 14, 15, 17, 19}, {1, 2, 3, 4, 5, 16, 17, 18, 20, 24, 25}, {1, 2, 4, 8, 9, 10, 11, 14, 15}, {12, 24, 25, 27}, {14, 15, 16, 17, 19, 21, 22}, {24, 25, 26}, {1, 2, 3, 4, 5, 6, 7, 12, 14, 27}} },
+  { notation = '$alteredscale', text = '{0, 1, 3, 4, 6, 8, 10, 12}', label = 'Altered Scale', intervals = {0, 1, 3, 4, 6, 8, 10, 12}, chords = {{12, 13, 24, 26}, {14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}} },
+  { notation = '$dorianbebop', text = '{0, 2, 3, 4, 5, 7, 9, 10, 12}', label = 'Dorian Bebop', intervals = {0, 2, 3, 4, 5, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 21, 22}, {1, 2, 3, 4, 5}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}} },
+  { notation = '$mixolydianbebop', text = '{0, 2, 4, 5, 7, 9, 10, 11, 12}', label = 'Mixolydian Bebop', intervals = {0, 2, 4, 5, 7, 9, 10, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14}, {1, 2, 4, 8, 9, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23}, {14, 15, 17, 19, 21, 22}, {1, 2, 3, 4, 5}, {24, 26}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15}} },
+  { notation = '$blues', text = '{0, 3, 5, 6, 7, 10, 12}', label = 'Blues Scale', alt_names = {'Blues'}, intervals = {0, 3, 5, 6, 7, 10, 12}, chords = {{14, 15, 17, 19, 24, 26}, {1, 2, 4, 17, 18, 20}, {14, 15}, {}, {}, {14}, {14, 15, 17, 19, 24, 26}} },
+  { notation = '$dimwholehalf', text = '{0, 2, 3, 5, 6, 8, 9, 11, 12}', label = 'Diminished Whole Half', intervals = {0, 2, 3, 5, 6, 8, 9, 11, 12}, chords = {{24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}} },
+  { notation = '$dimhalfwhole', text = '{0, 1, 3, 4, 6, 7, 9, 10, 12}', label = 'Diminished Half Whole', intervals = {0, 1, 3, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}, {24, 25}, {1, 2, 8, 17, 18, 19, 24, 25, 26}} },
+  { notation = '$neapolitanmajor', text = '{0, 1, 3, 5, 7, 9, 11, 12}', label = 'Neapolitan Major', intervals = {0, 1, 3, 5, 7, 9, 11, 12}, chords = {{14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}} },
+  { notation = '$hungarianmajor', text = '{0, 3, 4, 6, 7, 9, 10, 12}', label = 'Hungarian Major', intervals = {0, 3, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 8, 17, 18, 19, 24, 25, 26}, {1, 2, 17, 18, 24, 25}, {24}, {24, 25, 26}, {}, {17, 18, 19, 24, 25, 26}, {}, {1, 2, 8, 17, 18, 19, 24, 25, 26}} },
+  { notation = '$harmonicmajor', text = '{0, 2, 4, 5, 7, 8, 11, 12}', label = 'Harmonic Major', intervals = {0, 2, 4, 5, 7, 8, 11, 12}, chords = {{1, 3, 5, 6, 12, 14, 27}, {24, 25, 26}, {1, 8, 12, 13, 17, 19}, {16, 17, 18, 20, 24, 25}, {1, 2, 8, 14, 15}, {12, 24, 25, 27}, {24, 25}, {1, 3, 5, 6, 12, 14, 27}} },
+  { notation = '$hungarianminor', text = '{0, 2, 3, 6, 7, 8, 11, 12}', label = 'Hungarian Minor', intervals = {0, 2, 3, 6, 7, 8, 11, 12}, chords = {{16, 17, 24}, {}, {12, 27}, {}, {1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}} },
+  { notation = '$lydianminor', text = '{0, 2, 4, 6, 7, 8, 10, 12}', label = 'Lydian Minor', intervals = {0, 2, 4, 6, 7, 8, 10, 12}, chords = {{1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}} },
+  { notation = '$neapolitanminor', text = '{0, 1, 3, 5, 7, 8, 11, 12}', label = 'Neapolitan Minor', alt_names = {'Byzantine'}, intervals = {0, 1, 3, 5, 7, 8, 11, 12}, chords = {{14, 16, 17}, {1, 3, 5, 8, 9}, {12, 13}, {17, 19, 21, 24, 26}, {12, 13}, {1, 2, 3, 14, 16, 17, 18}, {12}, {14, 16, 17}} },
+  { notation = '$majorlocrian', text = '{0, 2, 4, 5, 6, 8, 10, 12}', label = 'Major Locrian', intervals = {0, 2, 4, 5, 6, 8, 10, 12}, chords = {{12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}} },
+  { notation = '$leadingwholetone', text = '{0, 2, 4, 6, 8, 10, 11, 12}', label = 'Leading Whole Tone', intervals = {0, 2, 4, 6, 8, 10, 11, 12}, chords = {{12, 13, 27}, {12, 13}, {1, 8, 9, 12, 13}, {12, 13}, {12, 13, 24, 26}, {12, 13}, {14, 16, 17, 18}, {12, 13, 27}} },
+  { notation = '$sixtone', text = '{0, 1, 4, 5, 8, 9, 11, 12}', label = 'Six Tone Symmetrical', intervals = {0, 1, 4, 5, 8, 9, 11, 12}, chords = {{12, 27}, {1, 3, 8, 12, 13, 16, 17, 19, 27}, {1, 2, 12, 14}, {1, 3, 12, 16, 17, 24, 27}, {12}, {1, 3, 5, 12, 16, 17, 27}, {}, {12, 27}} },
+  { notation = '$balinese', text = '{0, 1, 3, 7, 8, 12}', label = 'Balinese', intervals = {0, 1, 3, 7, 8, 12}, chords = {{17}, {}, {}, {}, {1, 3, 14}, {17}} },
+  { notation = '$persian', text = '{0, 1, 4, 5, 6, 8, 11, 12}', label = 'Persian', intervals = {0, 1, 4, 5, 6, 8, 11, 12}, chords = {{12, 27}, {1, 3, 8, 14, 15, 16, 17, 19}, {1, 2, 4, 12}, {16, 17, 24}, {14, 15}, {12, 13}, {14}, {12, 27}} },
+  { notation = '$eastindianpurvi', text = '{0, 1, 4, 6, 7, 8, 11, 12}', label = 'East Indian Purvi', intervals = {0, 1, 4, 6, 7, 8, 11, 12}, chords = {{1, 3, 12, 27}, {14, 15, 16, 17, 19, 24, 26}, {1, 2, 4, 12, 17, 18, 20}, {14, 15}, {}, {12, 13, 27}, {14}, {1, 3, 12, 27}} },
+  { notation = '$oriental', text = '{0, 1, 4, 5, 6, 9, 10, 12}', label = 'Oriental', intervals = {0, 1, 4, 5, 6, 9, 10, 12}, chords = {{}, {12, 27}, {}, {1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}, {}} },
+  { notation = '$doubleharmonic', text = '{0, 1, 4, 5, 7, 8, 11, 12}', label = 'Double Harmonic', intervals = {0, 1, 4, 5, 7, 8, 11, 12}, chords = {{1, 3, 12, 14, 27}, {1, 3, 8, 16, 17, 19, 24, 26}, {1, 2, 12, 17, 18}, {16, 17, 24}, {}, {12, 27}, {}, {1, 3, 12, 14, 27}} },
+  { notation = '$enigmatic', text = '{0, 1, 4, 6, 8, 10, 11, 12}', label = 'Enigmatic', intervals = {0, 1, 4, 6, 8, 10, 11, 12}, chords = {{12, 13, 27}, {14, 15, 16, 17, 18, 19}, {1, 2, 4, 12}, {1, 8, 9, 10, 14, 15}, {12, 13}, {24, 26}, {14}, {12, 13, 27}} },
+  { notation = '$overtone', text = '{0, 2, 4, 6, 7, 9, 10, 12}', label = 'Overtone', intervals = {0, 2, 4, 6, 7, 9, 10, 12}, chords = {{1, 2, 4, 8, 9}, {1, 8, 9, 10, 12, 13, 14, 15}, {24, 26}, {12, 13, 24, 26}, {14, 16, 17, 18, 20}, {14, 15, 17, 18, 19}, {12, 27}, {1, 2, 4, 8, 9}} },
+  { notation = '$eighttonespanish', text = '{0, 1, 3, 4, 5, 6, 8, 10, 12}', label = 'Eight Tone Spanish', intervals = {0, 1, 3, 4, 5, 6, 8, 10, 12}, chords = {{12, 13, 24, 26}, {1, 2, 3, 4, 5, 6, 7, 14, 16, 17, 18, 20}, {14, 15, 17, 18, 19, 20, 21, 22, 23}, {12, 27}, {14, 15, 16, 17, 19}, {1, 2, 3, 4, 5, 8, 9}, {1, 2, 4, 8, 9, 10, 11, 12, 13, 14, 15}, {14, 15, 17, 19, 21, 22, 24, 26}, {12, 13, 24, 26}} },
+  { notation = '$prometheus', text = '{0, 2, 4, 6, 9, 10, 12}', label = 'Prometheus', intervals = {0, 2, 4, 6, 9, 10, 12}, chords = {{}, {1, 8, 9, 12, 13}, {}, {12, 13, 24, 26}, {14, 17, 18}, {12, 27}, {}} },
+  { notation = '$gagaku', text = '{0, 2, 5, 7, 9, 10, 12}', label = 'Gagaku Rittsu Sen Pou', intervals = {0, 2, 5, 7, 9, 10, 12}, chords = {{14, 15}, {14, 15, 17, 19}, {1, 2, 4, 14}, {14, 15, 17, 19, 21, 22}, {}, {1, 2, 3, 4, 5}, {14, 15}} },
+  { notation = '$insenpou', text = '{0, 1, 5, 2, 8, 12}', label = 'In Sen Pou', intervals = {0, 1, 5, 2, 8, 12}, chords = {{}, {1, 3}, {17, 18}, {24, 26}, {}, {}} },
+  { notation = '$okinawa', text = '{0, 4, 5, 7, 11, 12}', label = 'Okinawa', intervals = {0, 4, 5, 7, 11, 12}, chords = {{1, 3, 14}, {17}, {}, {}, {}, {1, 3, 14}} },
+  { notation = '$chromatic', text = '{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}', label = 'Chromatic', intervals = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, chords = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}} }
 }
 
 local scaleRoots = {
@@ -699,6 +727,7 @@ local PARAM_TYPE_TIME = 4
 local PARAM_TYPE_TIMEDUR = 5
 local PARAM_TYPE_METRICGRID = 6
 local PARAM_TYPE_MUSICAL = 7
+local PARAM_TYPE_EVERYN = 8
 
 local EDITOR_TYPE_PITCHBEND = 100
 local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
@@ -755,24 +784,73 @@ function TestEvent2(event, property, op, param1, param2)
   return retval
 end
 
-function FindEveryN(event, param1, offset)
-  if param1 <= 0 then return false end
+function FindEveryN(event, evnParams)
+  if not evnParams then return false end
+
+  if evnParams.isBitField then return FindEveryNPattern(event, evnParams) end
+
+  local param1 = evnParams.interval
+  if not param1 or param1 <= 0 then return false end
 
   local count = event.count - 1
-  count = count - offset
+  count = count - (evnParams.offset and evnParams.offset or 0)
   return count % param1 == 0
 end
 
-function FindEveryNPattern(event, pattern, offset)
-  local patLen = #pattern
+function FindEveryNPattern(event, evnParams)
+  if not (evnParams and evnParams.isBitField and evnParams.pattern) then return false end
+
+  local patLen = #evnParams.pattern
   if patLen <= 0 then return false end
 
   local count = event.count - 1
-  count = count - offset
+  count = count - (evnParams.offset and evnParams.offset or 0)
   local index = (count % patLen) + 1
 
-  if pattern:sub(index, index) == '1' then
+  if evnParams.pattern:sub(index, index) == '1' then
     return true
+  end
+  return false
+end
+
+function FindEveryNNote(event, evnParams, notenum)
+  if GetEventType(event) ~= NOTE_TYPE then return false end
+  if not evnParams then return false end
+
+  if evnParams.isBitField then return FindEveryNNotePattern(event, evnParams, notenum) end
+
+  local param1 = evnParams.interval
+  if not param1 or param1 <= 0 then return false end
+
+  local count = event.ncount - 1
+  count = count - (evnParams.offset and evnParams.offset or 0)
+
+  if count % param1 == 0 then
+    if notenum > 11 and event.msg2 == notenum then return true
+    elseif notenum < 11 and event.msg2 % 12 == notenum then return true
+    end
+  end
+  return false
+end
+
+function FindEveryNNotePattern(event, evnParams, notenum)
+  if GetEventType(event) ~= NOTE_TYPE then return false end
+  if not (evnParams and evnParams.isBitField and evnParams.pattern) then return false end
+
+  local patLen = #evnParams.pattern
+  if patLen <= 0 then return false end
+
+  local param1 = evnParams.interval
+  if not param1 or param1 <= 0 then return false end
+
+  local count = event.ncount - 1
+  count = count - (evnParams.offset and evnParams.offset or 0)
+  local index = (count % patLen) + 1
+
+  if evnParams.pattern:sub(index, index) == '1' then
+    if notenum > 11 and event.msg2 == notenum then return true
+    elseif notenum < 11 and event.msg2 % 12 == notenum then return true
+    end
   end
   return false
 end
@@ -1266,8 +1344,8 @@ end
 --   local nibbleCount = 0
 --   local count = 0
 
---   for hex in input:gmatch("%x+") do
---     for nibble in hex:gmatch("%x") do
+--   for hex in input:gmatch('%x+') do
+--     for nibble in hex:gmatch('%x') do
 --       currentByte = currentByte * 16 + tonumber(nibble, 16)
 --       nibbleCount = nibbleCount + 1
 
@@ -1421,7 +1499,7 @@ end
 
   --- Check if a directory exists in this path
 local function dirExists(path)
-  -- "/" works on both Unix and Windows
+  -- '/' works on both Unix and Windows
   return filePathExists(path:match('/$') and path or path..'/')
 end
 
@@ -1748,6 +1826,15 @@ function FindTabsFromTarget(row)
   -- elseif notation == '$relvel' then
   elseif notation == '$lastevent' then
     condTab = findLastEventConditionEntries
+    condition = condTab[row.conditionEntry]
+    if condition then -- this could fail if we're called too easily (before param tabs are needed)
+      if string.match(condition.notation, 'everyN') then
+        param1Tab = { }
+      end
+      if string.match(condition.notation, 'everyNnote') then
+        param2Tab = scaleRoots
+      end
+    end
   else
     condTab = findGenericConditionEntries
   end
@@ -1767,15 +1854,38 @@ function GenerateMetricGridNotation(row)
 end
 
 function ParseMetricGridNotation(str)
+  local mg = {}
   local fs, fe, mod, rst, pre, post = string.find(str, '|([td%-])([b-])|(.-)|(.-)$')
   if fs and fe then
-    local modval = mod == 't' and 2 or mod == 'd' and 1 or 0
-    local rstval = rst == 'b' and true or false
-    local preval = tonumber(pre)
-    local postval = tonumber(post)
-    return modval, rstval, preval, postval
+    mg.modifiers = mod == 't' and 2 or mod == 'd' and 1 or 0
+    mg.wantsBarRestart = rst == 'b' and true or false
+    mg.preSlopPercent = tonumber(pre)
+    mg.postSlopPercent = tonumber(post)
   end
-  return 0, false, 0, 0
+  return mg
+end
+
+function GenerateEveryNNotation(row)
+  if not row.evn then return '' end
+  local evn = row.evn
+  local evnStr = (evn.isBitField and evn.pattern or tostring(evn.interval)) .. '|'
+  evnStr = evnStr .. (evn.isBitField and 'b' or '-') .. '|'
+  evnStr = evnStr .. evn.offset
+  return evnStr
+end
+
+function ParseEveryNNotation(str)
+  local evn = {}
+  local fs, fe, patInt, flag, offset = string.find(str, '([01]+)|([b-])|(%d+)$')
+  if fs and fe then
+    evn.isBitField = flag == 'b'
+    evn.textEditorStr = patInt
+    evn.pattern = evn.isBitField and evn.textEditorStr or '1'
+    evn.interval = evn.isBitField and 1 or tonumber(evn.textEditorStr)
+    evn.offsetEditorStr = offset
+    evn.offset = tonumber(evn.offsetEditorStr)
+  end
+  return evn
 end
 
 function GetParamType(src)
@@ -1786,6 +1896,7 @@ function GetParamType(src)
     or src.timedur and PARAM_TYPE_TIMEDUR
     or src.metricgrid and PARAM_TYPE_METRICGRID
     or src.musical and PARAM_TYPE_MUSICAL
+    or src.everyn and PARAM_TYPE_EVERYN
     or PARAM_TYPE_UNKNOWN
 end
 
@@ -1836,18 +1947,21 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
   end
 
   paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
+
+  local isEveryN = paramType == PARAM_TYPE_EVERYN
   if #paramTab ~= 0 then
     for kk, vv in ipairs(paramTab) do
       local pa, pb = string.find(paramStr, vv.notation)
       if pa and pb then
         row[paramName .. 'Entry'] = kk
         if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
-          row.mg = {}
-          row.mg.modifiers, row.mg.wantsBarRestart, row.mg.preSlopPercent, row.mg.postSlopPercent = ParseMetricGridNotation(paramStr:sub(pb + 1))
+          row.mg = ParseMetricGridNotation(paramStr:sub(pb + 1))
         end
         break
       end
     end
+  elseif isEveryN then
+    row.evn = ParseEveryNNotation(paramStr)
   elseif condOp.bitfield or (condOp.split and condOp.split[index].bitfield) then
     row[paramName .. 'TextEditorStr'] = paramStr
   elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
@@ -1863,7 +1977,7 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
     row[paramName .. 'TimeFormatStr'] = TimeFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_TIMEDUR then
     row[paramName .. 'TimeFormatStr'] = LengthFormatRebuf(paramStr)
-  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
+  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or paramType == PARAM_TYPE_EVERYN then
     row[paramName .. 'TextEditorStr'] = paramStr
   end
   return paramStr
@@ -1951,7 +2065,7 @@ function ProcessFindMacroRow(buf, boolstr)
         row.param2Val = param2
         break
       -- else -- still not found, maybe an old thing (can be removed post-release)
-      --   findstart, findend = string.find(buf, '^%s*:beforecursor%s+', bufstart) -- :aftercursor
+      --   P(string.sub(buf, bufstart))
       end
     end
   end
@@ -2102,6 +2216,7 @@ context.TestEvent1 = TestEvent1
 context.TestEvent2 = TestEvent2
 context.FindEveryN = FindEveryN
 context.FindEveryNPattern = FindEveryNPattern
+context.FindEveryNNote = FindEveryNNote
 context.EqualsMusicalLength = EqualsMusicalLength
 context.CursorPosition = CursorPosition
 
@@ -2157,9 +2272,16 @@ context.OP_SCALEOFF = OP_SCALEOFF
 
 function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation, takectx)
   local addMetricGridNotation = false
-  if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
+  local addEveryNNotation = false
+  if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or paramType == PARAM_TYPE_EVERYN then
     if terms == 1 then
-      if notation then addMetricGridNotation = true end
+      if notation then
+        if paramType == PARAM_TYPE_EVERYN then
+          addEveryNNotation = true
+        else
+          addMetricGridNotation = true
+        end
+      end
       paramType = PARAM_TYPE_MENU
     end
   end
@@ -2193,7 +2315,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
   elseif paramType == PARAM_TYPE_TIMEDUR then
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
-  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or override == EDITOR_TYPE_BITFIELD then
+  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or paramType == PARAM_TYPE_EVERYN or override == EDITOR_TYPE_BITFIELD then
     paramVal = row[paramName .. 'TextEditorStr']
   elseif #paramTab ~= 0 then
     paramVal = notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text
@@ -2201,7 +2323,10 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
 
   if addMetricGridNotation then
     paramVal = paramVal .. GenerateMetricGridNotation(row)
+  elseif addEveryNNotation then
+    paramVal = GenerateEveryNNotation(row)
   end
+
   return paramVal
 end
 
@@ -2267,20 +2392,21 @@ function FindRowsToNotation()
   return notationString
 end
 
-function UpdateEventCount(event, counts)
+function UpdateEventCount(event, counts, onlyNoteRow)
   local char
-  if GetEventType(event) == NOTE_TYPE then
+  if GetEventType(event) == NOTE_TYPE and not onlyNoteRow then
     event.count = counts.noteCount + 1
     counts.noteCount = event.count
-  else
-    local eventIdx = event.chanmsg + event.chan
-    if not counts[eventIdx] then counts[eventIdx] = {} end
-    local subIdx = event.msg2
-    if event.chanmsg >= 0xC0 then subIdx = 0 end
-    if not counts[eventIdx][subIdx] then counts[eventIdx][subIdx] = 0 end
-    event.count = counts[eventIdx][subIdx] + 1
-    counts[eventIdx][subIdx] = event.count
   end
+  -- also get counts for specific notes so that we can do rows as an option
+  local eventIdx = event.chanmsg + event.chan
+  if not counts[eventIdx] then counts[eventIdx] = {} end
+  local subIdx = event.msg2
+  if event.chanmsg >= 0xC0 then subIdx = 0 end
+  if not counts[eventIdx][subIdx] then counts[eventIdx][subIdx] = 0 end
+  local cname = GetEventType(event) == NOTE_TYPE and 'ncount' or 'count'
+  event[cname] = counts[eventIdx][subIdx] + 1
+  counts[eventIdx][subIdx] = event[cname]
 end
 
 function RunFind(findFn, params, runFn)
@@ -2288,15 +2414,6 @@ function RunFind(findFn, params, runFn)
   local wantsEventPreprocessing = params and params.wantsEventPreprocessing or false
   local getUnfound = params and params.wantsUnfound or false
   local hasTable = {}
-  hasTable[0x90] = false
-  hasTable[0xA0] = false
-  hasTable[0xB0] = false
-  hasTable[0xC0] = false
-  hasTable[0xD0] = false
-  hasTable[0xE0] = false
-  hasTable[0xF0] = false
-  hasTable['NRPN'] = false
-
   local found = {}
   local unfound = {}
 
@@ -2351,8 +2468,8 @@ function RunFind(findFn, params, runFn)
               prevEvents[1] = event
               prevEvents[2] = nil
             end
-            UpdateEventCount(event, counts)
           end
+          UpdateEventCount(event, counts, matched)
         end
       end
     end
@@ -2525,12 +2642,16 @@ function ProcessFind(take, fromHasTable)
 
     local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
+    local isEveryN = paramTypes[1] == PARAM_TYPE_EVERYN and true or false
 
     if isMetricGrid or isMusical then
       local mgParams = tableCopy(v.mg)
       mgParams.param1 = param1Num
       mgParams.param2 = param2Term
       findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', serialize(mgParams))
+    elseif isEveryN then
+      local evnParams = tableCopy(v.evn)
+      findTerm = string.gsub(findTerm, '{everyNparams}', serialize(evnParams))
     end
 
     if curTarget.cond then
@@ -2765,7 +2886,7 @@ local mediaItemIndex
 function GetNextTake()
   local take
   local notation = findScopeTable[currentFindScope].notation
-  if (notation == '$midieditor' or notation == '$midieditorselected') and not mediaItemCount then
+  if notation == '$midieditor' and not mediaItemCount then
     mediaItemCount = 1
     take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
     return take
@@ -2811,33 +2932,47 @@ end
 
 function InitializeTake(take)
   local onlySelected = false
+  local onlyNotes = false
+  local activeNoteRow = false
   allEvents = {}
   mu.MIDI_InitializeTake(take) -- reset this each cycle
-  if findScopeTable[currentFindScope].notation == '$midieditorselected' then
-    if mu.MIDI_EnumSelEvts(take, -1) ~= -1 then
-      onlySelected = true
+  if findScopeTable[currentFindScope].notation == '$midieditor' then
+    if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then
+      if mu.MIDI_EnumSelEvts(take, -1) ~= -1 then
+        onlySelected = true
+      end
+    end
+    if currentFindScopeFlags & FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0 then
+      onlyNotes = true
+      activeNoteRow = true
     end
   end
 
   local enumNotesFn = onlySelected and mu.MIDI_EnumSelNotes or mu.MIDI_EnumNotes
   local enumCCFn = onlySelected and mu.MIDI_EnumSelCC or mu.MIDI_EnumCC
   local enumTextSysexFn = onlySelected and mu.MIDI_EnumSelTextSysexEvts or mu.MIDI_EnumTextSysexEvts
+  local activeRow = activeNoteRow and r.MIDIEditor_GetSetting_int(r.MIDIEditor_GetActive(), 'active_note_row') or nil
 
   local noteidx = enumNotesFn(take, -1)
   while noteidx ~= -1 do
     local e = { type = NOTE_TYPE, idx = noteidx }
     _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel, e.relvel = mu.MIDI_GetNote(take, noteidx)
-    e.msg2 = e.pitch
-    e.msg3 = e.vel
-    e.notedur = e.endppqpos - e.ppqpos
-    e.chanmsg = 0x90
-    e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-    CalcMIDITime(take, e)
-    table.insert(allEvents, e)
+
+    local doIt = not activeRow or e.pitch == activeRow
+
+    if doIt then
+      e.msg2 = e.pitch
+      e.msg3 = e.vel
+      e.notedur = e.endppqpos - e.ppqpos
+      e.chanmsg = 0x90
+      e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
+      CalcMIDITime(take, e)
+      table.insert(allEvents, e)
+    end
     noteidx = enumNotesFn(take, noteidx)
   end
 
-  local ccidx = enumCCFn(take, -1)
+  local ccidx = onlyNotes and -1 or enumCCFn(take, -1)
   while ccidx ~= -1 do
     local e = { type = CC_TYPE, idx = ccidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = mu.MIDI_GetCC(take, ccidx)
@@ -2858,7 +2993,7 @@ function InitializeTake(take)
     ccidx = enumCCFn(take, ccidx)
   end
 
-  local syxidx = enumTextSysexFn(take, -1)
+  local syxidx = onlyNotes and -1 or enumTextSysexFn(take, -1)
   while syxidx ~= -1 do
     local e = { type = SYXTEXT_TYPE, idx = syxidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.textmsg = mu.MIDI_GetTextSysexEvt(take, syxidx)
@@ -2960,6 +3095,13 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   end
   if doTx == true or doTx == nil then
     mu.MIDI_CommitWriteTransaction(take, false, true)
+  end
+end
+
+function SelectEntriesInTake(take, eventTab, wantsSelect)
+  for _, event in ipairs(eventTab) do
+    event.selected = wantsSelect
+    SetEntrySelectionInTake(take, event)
   end
 end
 
@@ -3282,10 +3424,11 @@ function ProcessAction(execute, fromScript)
 
   if fromScript
     and scriptIgnoreSelectionInArrangeView
-    and findScopeTable[currentFindScope].notation == '$midieditorselected'
+    and findScopeTable[currentFindScope].notation == '$midieditor'
+    and currentFindScopeFlags ~= 0
   then
     local _, _, sectionID = r.get_action_context()
-    if sectionID == 0 then currentFindScope = FindScopeFromNotation('$midieditor')     mu.post('spoofing sel ctx')    end
+    if sectionID == 0 then currentFindScopeFlags = FIND_SCOPE_FLAG_NONE end -- eliminate all find scope flags
   end
 
   local takes = GrabAllTakes()
@@ -3354,11 +3497,9 @@ function ProcessAction(execute, fromScript)
       }
       if notation == '$select' then
         mu.MIDI_OpenWriteTransaction(take)
-        RunFind(findFn, defParams,
-          function(event, matches)
-            event.selected = matches
-            SetEntrySelectionInTake(take, event)
-          end)
+        local found = RunFind(findFn, defParams)
+        mu.MIDI_SelectAll(take, false)
+        SelectEntriesInTake(take, found, true)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$selectadd' then
         mu.MIDI_OpenWriteTransaction(take)
@@ -3372,11 +3513,9 @@ function ProcessAction(execute, fromScript)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$invertselect' then
         mu.MIDI_OpenWriteTransaction(take)
-        RunFind(findFn, defParams,
-          function(event, matches)
-            event.selected = not matches
-            SetEntrySelectionInTake(take, event)
-          end)
+        local found = RunFind(findFn, defParams)
+        mu.MIDI_SelectAll(take, true)
+        SelectEntriesInTake(take, found, false)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$deselect' then
         mu.MIDI_OpenWriteTransaction(take)
@@ -3471,8 +3610,16 @@ function SavePreset(pPath, notes, scriptTab)
   local ignoreSelectionInArrangeView = wantsScript and scriptTab.ignoreSelectionInArrangeView
 
   if f then
+    local fsFlags
+    if findScopeTable[currentFindScope].notation == '$midieditor' then
+       fsFlags = {} -- not pretty
+      if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then table.insert(fsFlags, '$selectedonly') end
+      if currentFindScopeFlags & FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0 then table.insert(fsFlags, '$activenoterow') end
+    end
+
     local presetTab = {
       findScope = findScopeTable[currentFindScope].notation,
+      findScopeFlags = fsFlags,
       findMacro = FindRowsToNotation(),
       actionScope = actionScopeTable[currentActionScope].notation,
       actionMacro = ActionRowsToNotation(),
@@ -3509,8 +3656,15 @@ function SavePreset(pPath, notes, scriptTab)
 end
 
 function LoadPresetFromTable(presetTab)
-  currentActionScope = ActionScopeFromNotation(presetTab.actionScope)
+  currentFindScopeFlags = FIND_SCOPE_FLAG_NONE -- do this first (FindScopeFromNotation() may populate it)
   currentFindScope = FindScopeFromNotation(presetTab.findScope)
+  local fsFlags = presetTab.findScopeFlags -- not pretty
+  if fsFlags then
+    for _, v in ipairs(fsFlags) do
+      currentFindScopeFlags = currentFindScopeFlags | FindScopeFlagFromNotation(v)
+    end
+  end
+  currentActionScope = ActionScopeFromNotation(presetTab.actionScope)
   currentActionScopeFlags = ActionScopeFlagsFromNotation(presetTab.actionScopeFlags)
   findRowTable = {}
   ProcessFindMacro(presetTab.findMacro)
@@ -3698,6 +3852,24 @@ TransformerLib.setEditorTypeForRow = function(row, idx, type)
   row['param' .. idx .. 'EditorType'] = type
 end
 
+TransformerLib.getFindScopeFlagLabel = function()
+  local label = ''
+  if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then
+    label = label .. (label ~= '' and ' + ' or '') .. 'Selected'
+  end
+  if currentFindScopeFlags & FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0 then
+    label = label .. (label ~= '' and ' + ' or '') .. 'NoteRow'
+  end
+  if label == '' then label = 'None' end
+  return label
+end
+
+TransformerLib.getFindScopeFlags = function() return currentFindScopeFlags end
+TransformerLib.setFindScopeFlags = function(flags) currentFindScopeFlags = flags end
+TransformerLib.FIND_SCOPE_FLAG_NONE = FIND_SCOPE_FLAG_NONE
+TransformerLib.FIND_SCOPE_FLAG_SELECTED_ONLY = FIND_SCOPE_FLAG_SELECTED_ONLY
+TransformerLib.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW = FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW
+
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
 TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU
 TransformerLib.PARAM_TYPE_INTEDITOR = PARAM_TYPE_INTEDITOR
@@ -3706,6 +3878,7 @@ TransformerLib.PARAM_TYPE_TIME = PARAM_TYPE_TIME
 TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
 TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
 TransformerLib.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
+TransformerLib.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }

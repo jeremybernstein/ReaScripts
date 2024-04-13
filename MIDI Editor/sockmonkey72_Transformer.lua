@@ -1,13 +1,13 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.34
+-- @version 1.0-alpha.35
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - remove 'every N' offset param (change phase of pattern start) [sth better coming]
---   - remove 'every N (pattern)' with binary bitfield [sth better coming]
---   - update ReaImGui compatibility version
---   - move EEL functions into global scope for efficiency
+--   - improve 'every N' input (bitfield toggle + dual menu field on param1 for interval/pattern + offset/phase)
+--   - add 'every N (note)'
+--   - add 'every N (note#)'
+--   - add Selection Scope flags for Active MIDI Editor (selected events / active note row)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -21,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.34'
+local versionStr = '1.0-alpha.35'
 
 local r = reaper
 
@@ -281,18 +281,49 @@ local function removeFindRow()
   end
 end
 
+local function makeDefaultMetricGrid(row, isMetric)
+  row.param1Entry = isMetric and metricLastUnit or musicalLastUnit
+  row.param2TextEditorStr = '0'
+  row.mg = {
+    wantsBarRestart = metricLastBarRestart,
+    preSlopPercent = 0,
+    postSlopPercent = 0,
+    modifiers = 0
+  }
+  return row.mg
+end
+
+local function makeDefaultEveryN(row)
+  row.param1Entry = '1'
+  row.param2TextEditorStr = '0'
+  row.evn = {
+    pattern = '1',
+    interval = 1,
+    offset = 0,
+    textEditorStr = '1',
+    offsetEditorStr = '0',
+    isBitField = false
+  }
+  return row.evn
+end
+
 local function setupRowFormat(row, condOpTab)
   local isFind = row:is_a(tx.FindRow)
 
   local target = isFind and tx.findTargetEntries[row.targetEntry] or tx.actionTargetEntries[row.targetEntry]
   local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
   local paramTypes = tx.GetParamTypesForRow(row, target, condOp)
+  local isEveryN = string.match(condOp.notation, 'everyN')
 
   if condOp.split and condOp.split[1].default then
     row.param1TextEditorStr = tostring(condOp.split[1].default) -- hack
   end
   if condOp.split and condOp.split[2].default then
     row.param2TextEditorStr = tostring(condOp.split[2].default) -- hack
+  end
+
+  if isEveryN then
+    makeDefaultEveryN(row)
   end
 
   local p1 = tx.DEFAULT_TIMEFORMAT_STRING
@@ -723,7 +754,7 @@ local function windowFn()
 
     --- Check if a directory exists in this path
   local function dirExists(path)
-    -- "/" works on both Unix and Windows
+    -- '/' works on both Unix and Windows
     return filePathExists(path:match('/$') and path or path..'/')
   end
 
@@ -1054,22 +1085,31 @@ local function windowFn()
     local rv = 0
     local editorType = row[paramName .. 'EditorType']
     local isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
+    local isEveryN = paramType == tx.PARAM_TYPE_EVERYN and row.evn
     local isBitField = editorType == tx.EDITOR_TYPE_BITFIELD
-    if isMetricOrMusical and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
     local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
+
+    if isMetricOrMusical and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
+    if isEveryN and terms == 1 then paramType = tx.PARAM_TYPE_MENU end
+
     if condOp.terms >= terms then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
       local target = targetTab[row.targetEntry]
+
       if paramType == tx.PARAM_TYPE_MENU then
-        local label = #paramTab ~= 0 and paramTab[row[paramName .. 'Entry']].label or '---'
+        local canOpen = isEveryN and true or #paramTab ~= 0
+        local label =  #paramTab ~= 0 and paramTab[row[paramName .. 'Entry']].label or '---'
+        if isEveryN then
+          label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
+        end
         if isMetricOrMusical then
           if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
           elseif row.mg.modifiers & 1 ~= 0 then label = label .. '.'
           end
         end
         r.ImGui_Button(ctx, label)
-        if (#paramTab ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        if (canOpen and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
           rv = rowIdx
           r.ImGui_OpenPopup(ctx, paramName .. 'Menu')
         end
@@ -1251,8 +1291,76 @@ local function windowFn()
   end
 
   local function metricParam1Special(fun, row)
-    musicalParam1Special(fun, row, true)
+    musicalParam1Special(fun, row)
   end
+
+  local function everyNActionParam1Special(fun, row)
+    local evn = row.evn
+    local deactivated = false
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    local rv, selected = r.ImGui_Checkbox(ctx, 'Use Bitfield', evn.isBitField)
+    if rv then
+      evn.isBitField = selected
+      fun(1, true)
+    end
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_AlignTextToFramePadding(ctx)
+
+    r.ImGui_Text(ctx, evn.isBitField and 'Pattern' or 'Interval')
+    r.ImGui_SameLine(ctx)
+
+    local saveX = r.ImGui_GetCursorPosX(ctx)
+    if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
+    local buf
+    if evn.isBitField then evn.textEditorStr = evn.textEditorStr:gsub('[2-9]', '1')
+    else evn.textEditorStr = tostring(tonumber(evn.textEditorStr))
+    end
+    rv, buf = r.ImGui_InputText(ctx, '##everyNentry', evn.textEditorStr,
+      r.ImGui_InputTextFlags_AutoSelectAll() + r.ImGui_InputTextFlags_CallbackCharFilter(),
+      evn.isBitField and bitFieldCallback or numbersOnlyCallback)
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if kbdEntryIsCompleted(rv) then
+      evn.textEditorStr = buf
+      if evn.isBitField then
+        evn.pattern = evn.textEditorStr
+      else
+        evn.interval = tonumber(evn.textEditorStr)
+      end
+      fun(2, true)
+    end
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_Text(ctx, 'Offset')
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_SetCursorPosX(ctx, saveX)
+    rv, buf = r.ImGui_InputText(ctx, '##everyNoffset', evn.offsetEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if kbdEntryIsCompleted(rv) then
+      evn.offsetEditorStr = buf
+      evn.offset = tonumber(evn.offsetEditorStr)
+      fun(3, true)
+    end
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 2)
+  end
+
+  local function everyNParam1Special(fun, row)
+    everyNActionParam1Special(fun, row)
+  end
+
 
   ----------------------------------------------
   ---------- SELECTION CRITERIA TABLE ----------
@@ -1484,17 +1592,15 @@ local function windowFn()
     createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
         currentRow.conditionEntry = i
         setupRowFormat(currentRow, conditionEntries)
-        local isMetric = string.match(conditionEntries[i].notation, 'metricgrid')
-        local isMusical = string.match(conditionEntries[i].notation, 'eqmusical')
+        local condNotation = conditionEntries[i].notation
+        local isMetric = string.match(condNotation, 'metricgrid')
+        local isMusical = string.match(condNotation, 'eqmusical')
+        local isEveryN = string.match(condNotation, 'everyN')
         if isMetric or isMusical then
-          currentRow.param1Entry = isMetric and metricLastUnit or musicalLastUnit
-          currentRow.param2TextEditorStr = '0'
-          currentRow.mg = {
-            wantsBarRestart = metricLastBarRestart,
-            preSlopPercent = 0,
-            postSlopPercent = 0,
-            modifiers = 0
-          }
+          makeDefaultMetricGrid(currentRow, isMetric)
+        elseif isEveryN then
+          local evn = makeDefaultEveryN(currentRow)
+          evn.isBitField = string.match(condNotation, 'pattern') and true or false
         end
         tx.processFind()
       end)
@@ -1515,6 +1621,8 @@ local function windowFn()
           and metricParam1Special
         or paramTypes[1] == tx.PARAM_TYPE_MUSICAL
           and musicalParam1Special
+        or paramTypes[1] == tx.PARAM_TYPE_EVERYN
+          and everyNParam1Special
         or nil)
 
     createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
@@ -1549,26 +1657,63 @@ local function windowFn()
 
   r.ImGui_AlignTextToFramePadding(ctx)
 
-  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 3)
+  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
     r.ImGui_OpenPopup(ctx, 'findScopeMenu')
   end
 
+  r.ImGui_SameLine(ctx)
+
+  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+
   generateLabelOnLine('Selection Scope', true)
+
+  createPopup(nil, 'findScopeMenu', tx.findScopeTable, tx.currentFindScope(), function(i)
+    tx.setCurrentFindScope(i)
+  end)
+
+  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+
+  local findScopeNotation = tx.findScopeTable[tx.currentFindScope()].notation
+  local isActiveEditorScope = findScopeNotation == '$midieditor'
+
+  if not isActiveEditorScope then r.ImGui_BeginDisabled(ctx) end
+
+  r.ImGui_Button(ctx, tx.getFindScopeFlagLabel(), DEFAULT_ITEM_WIDTH * 1.7)
+  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    r.ImGui_OpenPopup(ctx, 'findScopeFlagMenu')
+  end
+
+  if r.ImGui_BeginPopup(ctx, 'findScopeFlagMenu') then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      r.ImGui_CloseCurrentPopup(ctx)
+      handledEscape = true
+    end
+    local rv, sel = r.ImGui_Checkbox(ctx, 'Selected Events', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0)
+    if rv then
+      local oldflags = tx.getFindScopeFlags()
+      local newflags = sel and (oldflags | tx.FIND_SCOPE_FLAG_SELECTED_ONLY) or (oldflags & ~tx.FIND_SCOPE_FLAG_SELECTED_ONLY)
+      tx.setFindScopeFlags(newflags)
+    end
+
+    rv, sel = r.ImGui_Checkbox(ctx, 'Active Note Row (+ notes only)', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0)
+    if rv then
+      local oldflags = tx.getFindScopeFlags()
+      local newflags = sel and (oldflags | tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW) or (oldflags & ~tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW)
+      tx.setFindScopeFlags(newflags)
+    end
+    r.ImGui_EndPopup(ctx)
+  end
+
+  generateLabelOnLine('Scope Mods', true)
+
+  if not isActiveEditorScope then r.ImGui_EndDisabled(ctx) end
 
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, findParserError)
-
   r.ImGui_SameLine(ctx)
 
-  createPopup(nil, 'findScopeMenu', tx.findScopeTable, tx.currentFindScope(), function(i)
-      tx.setCurrentFindScope(i)
-    end)
-
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
+  r.ImGui_PopStyleColor(ctx, 4)
 
   Spacing(true)
   r.ImGui_Separator(ctx)
@@ -1775,13 +1920,7 @@ local function windowFn()
         setupRowFormat(currentRow, operationEntries)
         local isMusical = operationEntries[i].musical
         if isMusical then
-          currentRow.param1Entry = musicalLastUnit
-          currentRow.mg = {
-            wantsBarRestart = false,
-            preSlopPercent = 0,
-            postSlopPercent = 0,
-            modifiers = 0
-          }
+          makeDefaultMetricGrid(currentRow, false)
         end
         tx.processAction()
       end)
@@ -1834,7 +1973,7 @@ local function windowFn()
 
   r.ImGui_SameLine(ctx)
 
-  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(15))
+  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(5))
 
   r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
@@ -1842,6 +1981,8 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
+
+  saveX = r.ImGui_GetCursorPosX(ctx)
 
   updateCurrentRect()
   generateLabel('Action Scope')
@@ -1852,7 +1993,7 @@ local function windowFn()
 
   r.ImGui_SameLine(ctx)
 
-  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(77))
+  r.ImGui_SetCursorPosX(ctx, saveX + scaled(5))
 
   local scopeNotation = tx.actionScopeTable[tx.currentActionScope()].notation
   local isSelectScope = scopeNotation:match('select') or scopeNotation:match('delete')
@@ -1892,7 +2033,7 @@ local function windowFn()
   end
 
   r.ImGui_SameLine(ctx)
-  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+  saveX, saveY = r.ImGui_GetCursorPos(ctx)
 
   if presetSubPath then
     r.ImGui_NewLine(ctx)

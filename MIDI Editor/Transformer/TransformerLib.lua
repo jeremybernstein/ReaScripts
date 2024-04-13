@@ -285,6 +285,7 @@ local endParenEntries = {
 -- norange can be used to turn off editor type range hints (and disable the range)
 -- nooverride means no editor override possible
 -- literal means save what was typed, not a percent
+-- freeterm means don't flip the param fields if p1 > p2
 
 -- notnot means no not checkbox
 
@@ -328,7 +329,11 @@ local findGenericConditionEntries = {
 }
 
 local findLastEventConditionEntries = {
-  { notation = ':everyN', label = 'Every N event', text = 'FindEveryN(event, {param1})', terms = 1, inteditor = true, range = { 1, nil }, nooverride = true, literal = true },
+  { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {param1}, {param2})', terms = 2, inteditor = true, split = {{ range = { 1, nil } }, { range = { 0, nil } }}, nooverride = true, literal = true, freeterm = true },
+  { notation = ':everyNpat', label = 'Every N Event (pattern)', text = 'FindEveryNPattern(event, \'{param1}\', {param2})', terms = 2, inteditor = true, split = {{ bitfield = true, default = '0' }, { range = { 0, nil }, nooverride = true }}, literal = true, freeterm = true },
+--   { notation = ':chordhigh', label = 'Highest Note in Chord'},
+--   { notation = ':chordlow', label = 'Lowest Note in Chord'},
+--   { notation = ':chordpos', label = 'Position in Chord'},
 }
 
 function FindConditionAddSelectRange(t, r)
@@ -348,7 +353,7 @@ local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, timeselect = SELECT_TIME_INDIVIDUAL },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0' }}, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
@@ -704,6 +709,7 @@ local EDITOR_TYPE_7BIT_NOZERO = 105
 local EDITOR_TYPE_7BIT_BIPOLAR = 106
 local EDITOR_TYPE_14BIT = 107
 local EDITOR_TYPE_14BIT_BIPOLAR = 108
+local EDITOR_TYPE_BITFIELD = 109
 
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
@@ -749,13 +755,26 @@ function TestEvent2(event, property, op, param1, param2)
   return retval
 end
 
-function FindEveryN(event, param1)
-  -- if GetEventType(event) ~= NOTE_TYPE then return false end
-
+function FindEveryN(event, param1, offset)
   if param1 <= 0 then return false end
 
   local count = event.count - 1
+  count = count - offset
   return count % param1 == 0
+end
+
+function FindEveryNPattern(event, pattern, offset)
+  local patLen = #pattern
+  if patLen <= 0 then return false end
+
+  local count = event.count - 1
+  count = count - offset
+  local index = (count % patLen) + 1
+
+  if pattern:sub(index, index) == '1' then
+    return true
+  end
+  return false
 end
 
 function EqualsMusicalLength(event, take, PPQ, mgParams)
@@ -1051,6 +1070,7 @@ function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   local modPos = math.fmod(ppqpos, cycleLength)
 
   -- CACHED_METRIC is used to avoid iterating from the beginning each time
+  -- although it assumes a single metric grid -- how to solve?
   for i = CACHED_METRIC and CACHED_METRIC or 1, gridLen do
     local c = gridStr:sub(i, i)
     local trueStartRange = (gridUnit * (i - 1))
@@ -1779,8 +1799,10 @@ function GetParamTypesForRow(row, target, condOp)
   end
   local split = { paramType, paramType }
   if condOp.split then
-    split = {}
-    split[1], split[2] = GetParamType(condOp.split[1]), GetParamType(condOp.split[2])
+    local split1 = GetParamType(condOp.split[1])
+    local split2 = GetParamType(condOp.split[2])
+    if split1 ~= PARAM_TYPE_UNKNOWN then split[1] = split1 end
+    if split2 ~= PARAM_TYPE_UNKNOWN then split[2] = split2 end
   end
   return split
 end
@@ -1826,6 +1848,8 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
         break
       end
     end
+  elseif condOp.bitfield or (condOp.split and condOp.split[index].bitfield) then
+    row[paramName .. 'TextEditorStr'] = paramStr
   elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
     local range = condOp.range and condOp.range or target.range
     local has14bit, hasOther = Check14Bit(paramType)
@@ -2077,6 +2101,7 @@ context.math = math
 context.TestEvent1 = TestEvent1
 context.TestEvent2 = TestEvent2
 context.FindEveryN = FindEveryN
+context.FindEveryNPattern = FindEveryNPattern
 context.EqualsMusicalLength = EqualsMusicalLength
 context.CursorPosition = CursorPosition
 
@@ -2146,7 +2171,9 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   if condOp.terms < terms then
     paramVal = ''
   elseif notation and override then
-    if (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
+    if override == EDITOR_TYPE_BITFIELD then
+      paramVal = row[paramName .. 'TextEditorStr']
+    elseif (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
       paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
     elseif (override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
       paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) + (1 << 13)) / ((1 << 14) - 1) * 100)
@@ -2166,7 +2193,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
   elseif paramType == PARAM_TYPE_TIMEDUR then
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
-  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
+  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or override == EDITOR_TYPE_BITFIELD then
     paramVal = row[paramName .. 'TextEditorStr']
   elseif #paramTab ~= 0 then
     paramVal = notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text
@@ -3530,8 +3557,9 @@ end
 
 function SetRowParam(row, paramName, paramType, editorType, strVal, range, literal)
   local isMetricOrMusical = (paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL)
-  row[paramName .. 'TextEditorStr'] = isMetricOrMusical and strVal or EnsureNumString(strVal, range)
-  if isMetricOrMusical or not editorType then
+  local isBitField = editorType == EDITOR_TYPE_BITFIELD
+  row[paramName .. 'TextEditorStr'] = (isMetricOrMusical or isBitField) and strVal or EnsureNumString(strVal, range)
+  if (isMetricOrMusical or isBitField) or not editorType then
     row[paramName .. 'PercentVal'] = nil
     -- nothing
   else
@@ -3697,6 +3725,7 @@ TransformerLib.EDITOR_TYPE_7BIT_NOZERO = EDITOR_TYPE_7BIT_NOZERO
 TransformerLib.EDITOR_7BIT_NOZERO_RANGE = { 1, (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT_BIPOLAR = EDITOR_TYPE_7BIT_BIPOLAR
 TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -((1 << 7) - 1), (1 << 7) - 1 }
+TransformerLib.EDITOR_TYPE_BITFIELD = EDITOR_TYPE_BITFIELD
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 

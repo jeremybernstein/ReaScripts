@@ -1,11 +1,13 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.32
+-- @version 1.0-alpha.33
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix 'every N' for 2-byte, pitch bend and sysex events
---   - fix 'mixed data' entry for 7- + 14-bit unified entry
+--   - add 'every N' offset param (change phase of pattern start)
+--   - add 'every N (pattern)' with binary bitfield
+--   - update ReaImGui compatibility version
+--   - move EEL functions into global scope for efficiency
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.32'
+local versionStr = '1.0-alpha.33'
 
 local r = reaper
 
@@ -79,7 +81,7 @@ end
 
 if not canStart then return end
 
-dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
+dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8.5')
 
 local scriptID = 'sockmonkey72_Transformer'
 
@@ -202,6 +204,28 @@ local inTextInput = false
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
+
+local bitFieldCallback = r.ImGui_CreateFunctionFromEEL([[
+  (EventChar < '0' || EventChar > '9') ? EventChar = 0 :
+  EventChar != '0' ? EventChar = '1' : EventChar = '0';
+]])
+
+local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+  (EventChar < '0' || EventChar > '9') && EventChar != '-' ? EventChar = 0;
+]])
+
+local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+  (EventChar < '0' || EventChar > '9')
+    && EventChar != '-'
+    && EventChar != ':'
+    && EventChar != '.'
+    && EventChar != 't'
+  ? EventChar = 0;
+]])
+
+r.ImGui_Attach(ctx, bitFieldCallback)
+r.ImGui_Attach(ctx, numbersOnlyCallback)
+r.ImGui_Attach(ctx, timeFormatOnlyCallback)
 
 local function positionModalWindow(yOff, yScale)
   local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
@@ -427,9 +451,13 @@ end
 
 local function overrideEditorType(row, target, condOp, paramTypes, idx)
   local has14bit, hasOther = check14Bit(paramTypes[idx])
-  if not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
-      or condOp.norange or condOp.nooverride
-      or condOp.split and condOp.split[idx].norange
+  if condOp.bitfield
+    or (condOp.split and condOp.split[idx].bitfield)
+  then
+    tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_BITFIELD)
+  elseif not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
+      or (condOp.norange or (condOp.split and condOp.split[idx].norange))
+      or (condOp.nooverride or (condOp.split and condOp.split[idx].nooverride))
     then
       tx.setEditorTypeForRow(row, idx, nil)
   elseif target.notation == '$velocity' or  target.notation == '$relvel' then
@@ -1022,23 +1050,11 @@ local function windowFn()
     end
   end
 
-  local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
-    (EventChar < '0' || EventChar > '9') && EventChar != '-' ? EventChar = 0;
-  ]])
-
-  local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
-    (EventChar < '0' || EventChar > '9')
-      && EventChar != '-'
-      && EventChar != ':'
-      && EventChar != '.'
-      && EventChar != 't'
-    ? EventChar = 0;
-  ]])
-
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, terms, rowIdx, procFn)
     local rv = 0
     local editorType = row[paramName .. 'EditorType']
     local isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
+    local isBitField = editorType == tx.EDITOR_TYPE_BITFIELD
     if isMetricOrMusical and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
     local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
@@ -1059,7 +1075,7 @@ local function windowFn()
         end
       elseif paramType == tx.PARAM_TYPE_INTEDITOR
         or isFloat
-        or isMetricOrMusical
+        or isMetricOrMusical or isBitField
         or editorType == tx.EDITOR_TYPE_PITCHBEND
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
@@ -1068,7 +1084,7 @@ local function windowFn()
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
           local strVal = row[paramName .. 'TextEditorStr']
-          if not isMetricOrMusical then strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR) end
+          if not (isMetricOrMusical or isBitField) then strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR) end
           if range and range[1] and range[2] and row[paramName .. 'PercentVal'] then
             local percentVal = row[paramName .. 'PercentVal'] / 100
             local scaledVal
@@ -1086,7 +1102,7 @@ local function windowFn()
           end
           row[paramName .. 'TextEditorStr'] = strVal
         end
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or numbersOnlyCallback)
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or isBitField and bitFieldCallback or numbersOnlyCallback)
         if kbdEntryIsCompleted(retval) then
           tx.setRowParam(row, paramName, paramType, editorType, buf, range, condOp.literal and true or false)
           procFn()

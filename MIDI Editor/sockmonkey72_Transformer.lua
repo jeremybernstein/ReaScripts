@@ -8,7 +8,8 @@
 --   - add 'every N (note)'
 --   - add 'every N (note#)'
 --   - add Selection Scope flags for Active MIDI Editor (selected events / active note row)
---   - add chord position selectors
+--   - add chord position selectors (chord note selector can be negative to select from top of chord)
+--   - new quantize to musical value for length and note-off position
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -1599,7 +1600,6 @@ local function windowFn()
 
     createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
         currentRow.conditionEntry = i
-        setupRowFormat(currentRow, conditionEntries)
         local condNotation = conditionEntries[i].notation
         local isMetric = string.match(condNotation, 'metricgrid')
         local isMusical = string.match(condNotation, 'eqmusical')
@@ -1609,6 +1609,7 @@ local function windowFn()
         elseif isEveryN then
           makeDefaultEveryN(currentRow)
         end
+        setupRowFormat(currentRow, conditionEntries)
         tx.processFind()
       end)
 
@@ -1924,11 +1925,11 @@ local function windowFn()
 
     createPopup(currentRow, 'operationMenu', operationEntries, currentRow.operationEntry, function(i)
         currentRow.operationEntry = i
-        setupRowFormat(currentRow, operationEntries)
         local isMusical = operationEntries[i].musical
         if isMusical then
           makeDefaultMetricGrid(currentRow, false)
         end
+        setupRowFormat(currentRow, operationEntries)
         tx.processAction()
       end)
 

@@ -359,9 +359,9 @@ local findLastEventConditionEntries = {
   { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {everyNparams})', terms = 1, range = { 1, nil }, nooverride = true, literal = true, freeterm = true, everyn = true },
   { notation = ':everyNnote', label = 'Every N Event (note)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { menu = true }}, nooverride = true, literal = true, freeterm = true, everyn = true },
   { notation = ':everyNnotenum', label = 'Every N Event (note#)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { inteditor = true, range = { 0, 127 } }}, nooverride = true, literal = true, freeterm = true, everyn = true },
-  { notation = ':chordhigh', label = 'Highest Note in Chord', text = 'SelectChordNote(event, -1)', terms = 0 },
-  { notation = ':chordlow', label = 'Lowest Note in Chord', text = 'SelectChordNote(event, -2)', terms = 0 },
-  { notation = ':chordpos', label = 'Position in Chord', text = 'SelectChordNote(event, {param1})', terms = 1, inteditor = true, range = { 0, nil }, literal = true, nooverride = true},
+  { notation = ':chordhigh', label = 'Highest Note in Chord', text = 'SelectChordNote(event, \'$high\')', terms = 0 },
+  { notation = ':chordlow', label = 'Lowest Note in Chord', text = 'SelectChordNote(event, \'$low\')', terms = 0 },
+  { notation = ':chordpos', label = 'Position in Chord', text = 'SelectChordNote(event, {param1})', terms = 1, inteditor = true, literal = true, nooverride = true},
 }
 
 function FindConditionAddSelectRange(t, r)
@@ -472,7 +472,7 @@ local findMusicalParam1Entries = {
   { notation = '$1/1', label = '1/1', text = '1' },
   { notation = '$2/1', label = '2/1', text = '2' },
   { notation = '$4/1', label = '4/1', text = '4' },
-  -- we need some way to enable triplets and dotted notes, I guess as selections at the bottom of the menu?
+  -- { notation = '$grid', label = 'Current Grid', text = '-1' },
 }
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
@@ -634,7 +634,7 @@ local actionPositionOperationEntries = {
   { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound),
-  { notation = ':roundmusical', label = 'Round to Musical Value (Quantize)', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
+  { notation = ':roundmusical', label = 'Quantize to Musical Value', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
   positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -652,7 +652,10 @@ local actionLengthOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projlen, _context)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projlen, _context)', terms = 1, timedur = true, timearg = true },
   actionOperationMult, actionOperationDivide,
-  lengthMod(actionOperationRound), lengthMod(actionOperationFixed),
+  lengthMod(actionOperationRound),
+  { notation = ':roundlenmusical', label = 'Quantize Length to Musical Value', text = 'QuantizeMusicalLength(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
+  { notation = ':roundendmusical', label = 'Quantize Note-Off to Musical Value', text = 'QuantizeMusicalEndPos(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
+  lengthMod(actionOperationFixed),
   { notation = ':quantmusical', label = 'Set to Musical Length', text = 'SetMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
@@ -874,9 +877,19 @@ function EqualsMusicalLength(event, take, PPQ, mgParams)
 end
 
 function SelectChordNote(event, chordNote)
-  if chordNote == -1 and event.chordTop then return true
-  elseif chordNote == -2 and event.chordBottom then return true
-  elseif event.chordIdx and event.chordIdx - 1 == chordNote then return true
+  local wantsHigh, wantsLow, isString
+  if type(chordNote) == 'string' then
+    wantsHigh = chordNote == '$high'
+    wantsLow = chordNote == '$low'
+    isString = true
+  end
+  if wantsHigh then if event.chordTop then return true else return false end
+  elseif wantsLow then if event.chordBottom then return true else return false end
+  elseif isString then return false -- safety
+  elseif event.chordIdx then
+    if chordNote < 0 and event.chordIdx == event.chordCount + (chordNote + 1) then return true
+    elseif event.chordIdx - 1 == chordNote then return true
+    end
   end
   return false
 end
@@ -901,7 +914,7 @@ function SetMusicalLength(event, take, PPQ, mgParams)
 end
 
 function QuantizeMusicalPosition(event, take, PPQ, mgParams)
-  if not take then return event.projlen end
+  if not take then return event.projtime end
 
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
@@ -927,6 +940,77 @@ function QuantizeMusicalPosition(event, take, PPQ, mgParams)
 
   event.projtime = newprojpos
   return newprojpos
+end
+
+function QuantizeMusicalLength(event, take, PPQ, mgParams)
+  if not take then return event.projlen end
+
+  local subdiv = mgParams.param1
+  local strength = tonumber(mgParams.param2)
+
+  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
+  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
+  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+
+  if gridUnit == 0 then return event.projtime end
+
+  local timeAdjust = GetTimeOffset()
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+  local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
+  local ppqlen = endppqpos - ppqpos
+
+  local newppqlen = (gridUnit * math.floor((ppqlen / gridUnit) + 0.5))
+  if newppqlen == 0 then newppqlen = gridUnit end
+
+  if strength and strength ~= 100 then
+    local distance = newppqlen - ppqlen
+    local scaledDistance = distance * (strength / 100)
+    newppqlen = ppqlen + scaledDistance
+  end
+  local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
+
+  event.projlen = newprojlen
+  return newprojlen
+end
+
+function QuantizeMusicalEndPos(event, take, PPQ, mgParams)
+  if not take then return event.projlen end
+
+  local subdiv = mgParams.param1
+  local strength = tonumber(mgParams.param2)
+
+  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
+  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
+  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+
+  if gridUnit == 0 then return event.projtime end
+
+  local timeAdjust = GetTimeOffset()
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+  local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
+  local ppqlen = endppqpos - ppqpos
+
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, endppqpos)
+
+  local ppqinmeasure = endppqpos - som -- get the position from the start of the measure
+
+  local quant = (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
+  local newendppqpos = som + quant
+  local newppqlen = newendppqpos - ppqpos
+  if newppqlen < ppqlen * 0.5 then
+    newendppqpos = som + quant + gridUnit
+    newppqlen = newendppqpos - ppqpos
+  end
+
+  if strength and strength ~= 100 then
+    local distance = newppqlen - ppqlen
+    local scaledDistance = distance * (strength / 100)
+    newppqlen = ppqlen + scaledDistance
+  end
+  local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
+
+  event.projlen = newprojlen
+  return newprojlen
 end
 
 function CursorPosition(event, property, cursorPosProj, which)
@@ -2271,6 +2355,8 @@ context.MoveToCursor = MoveToCursor
 context.MoveLengthToCursor = MoveLengthToCursor
 context.SetMusicalLength = SetMusicalLength
 context.QuantizeMusicalPosition = QuantizeMusicalPosition
+context.QuantizeMusicalLength = QuantizeMusicalLength
+context.QuantizeMusicalEndPos = QuantizeMusicalEndPos
 
 context.OP_ADD = OP_ADD
 context.OP_SUB = OP_SUB
@@ -2428,6 +2514,7 @@ function CalcChordPos(first, last)
   table.sort(chordPos, function(a, b) return a.msg2 < b.msg2 end)
   for ek, ev in ipairs(chordPos) do
     ev.chordIdx = ek
+    ev.chordCount = #chordPos
     if ek == 1 then
       ev.chordBottom = true
     elseif ek == #chordPos then
@@ -2787,7 +2874,10 @@ function ActionTabsFromTarget(row)
       param1Tab = findMusicalParam1Entries
     end
   elseif notation == '$length' then
-    if operation.notation == ':quantmusical' then
+    if operation.notation == ':quantmusical'
+    or operation.notation == ':roundlenmusical'
+    or operation.notation == ':roundendmusical'
+    then
       param1Tab = findMusicalParam1Entries
     end
   elseif notation == '$channel' then

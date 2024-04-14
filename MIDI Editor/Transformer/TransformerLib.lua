@@ -472,7 +472,7 @@ local findMusicalParam1Entries = {
   { notation = '$1/1', label = '1/1', text = '1' },
   { notation = '$2/1', label = '2/1', text = '2' },
   { notation = '$4/1', label = '4/1', text = '4' },
-  -- { notation = '$grid', label = 'Current Grid', text = '-1' },
+  { notation = '$grid', label = 'Current Grid', text = '-1' },
 }
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
@@ -858,15 +858,28 @@ function FindEveryNNotePattern(event, evnParams, notenum)
   return false
 end
 
+local currentGrid = 0
+local currentSwing = 0
+
+function GetGridUnitFromSubdiv(subdiv, PPQ, modifiers)
+  local gridUnit
+  if subdiv > 0 then
+    gridUnit = PPQ * (subdiv * 4)
+    if ((modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
+    elseif ((modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  else
+    gridUnit = PPQ * currentGrid
+  end
+  return gridUnit
+end
+
 function EqualsMusicalLength(event, take, PPQ, mgParams)
   if not take then return false end
 
   if GetEventType(event) ~= NOTE_TYPE then return false end
 
   local subdiv = mgParams.param1
-  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
-  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
 
   local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
   local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
@@ -900,9 +913,7 @@ function SetMusicalLength(event, take, PPQ, mgParams)
   if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
 
   local subdiv = mgParams.param1
-  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
-  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
 
   local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
   local newppqpos = oldppqpos + gridUnit
@@ -919,9 +930,7 @@ function QuantizeMusicalPosition(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
-  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
 
   if gridUnit == 0 then return event.projtime end
 
@@ -948,9 +957,7 @@ function QuantizeMusicalLength(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
-  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
 
   if gridUnit == 0 then return event.projtime end
 
@@ -979,9 +986,7 @@ function QuantizeMusicalEndPos(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
-  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
 
   if gridUnit == 0 then return event.projtime end
 
@@ -1124,7 +1129,7 @@ end
 function OnGrid(event, property, take, PPQ)
   if not take then return false end
 
-  local grid, swing = r.MIDI_GetGrid(take) -- 1.0 is QN, 1.5 dotted, etc.
+  local grid, swing = currentGrid, currentSwing -- 1.0 is QN, 1.5 dotted, etc.
   local timeAdjust = GetTimeOffset()
   local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
   local measppq = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
@@ -1211,9 +1216,7 @@ function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   local gridStr = mgParams.param2
 
   local gridLen = #gridStr
-  local gridUnit = PPQ * (subdiv * 4) -- subdiv=1 means whole note
-  if ((mgParams.modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-  elseif ((mgParams.modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
 
   local cycleLength = gridUnit * gridLen
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
@@ -2808,6 +2811,7 @@ function ProcessFind(take, fromHasTable)
   local findFn
 
   context.take = take
+  if take then currentGrid, currentSwing = r.MIDI_GetGrid(take) end -- 1.0 is QN, 1.5 dotted, etc.
   local success, pret, err = pcall(load, fnString, nil, nil, context)
   if success and pret then
     findFn = pret()
@@ -3302,7 +3306,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
 
   mu.MIDI_OpenWriteTransaction(take)
   if replace then
-    local grid = r.MIDI_GetGrid(take) -- 1.0 is QN, 1.5 dotted, etc.
+    local grid = currentGrid
     local PPQ = mu.MIDI_GetPPQ(take)
     local gridSlop = math.floor(((PPQ * grid) * 0.5) + 0.5)
     local rangeType = contextTab.findRange.type

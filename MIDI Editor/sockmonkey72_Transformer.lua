@@ -1,15 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.36
+-- @version 1.0-alpha.37
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - improve 'every N' input (bitfield toggle + dual menu field on param1 for interval/pattern + offset/phase)
---   - add 'every N (note)'
---   - add 'every N (note#)'
---   - add Selection Scope flags for Active MIDI Editor (selected events / active note row)
---   - add chord position selectors (chord note selector can be negative to select from top of chord)
---   - new quantize to musical value for length and note-off position
+--   - add 'current grid' option to metric/musical grid menus
+--   - preset update: Change Delete CC presets scope to Active Midi editor (thanks smandrap)
+--   - preset update: Change Transform CC presets scope to Active Midi editor (thanks smandrap)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -23,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.36'
+local versionStr = '1.0-alpha.37'
 
 local r = reaper
 
@@ -1014,7 +1011,7 @@ local function windowFn()
 
       r.ImGui_PopStyleColor(ctx, numStyleCol)
 
-      if special then special(fun, row) end
+      if special then special(fun, row, source, selEntry) end
       r.ImGui_EndPopup(ctx)
     end
   end
@@ -1101,11 +1098,12 @@ local function windowFn()
 
       if paramType == tx.PARAM_TYPE_MENU then
         local canOpen = isEveryN and true or #paramTab ~= 0
-        local label =  #paramTab ~= 0 and paramTab[row[paramName .. 'Entry']].label or '---'
+        local paramEntry = paramTab[row[paramName .. 'Entry']]
+        local label =  #paramTab ~= 0 and paramEntry.label or '---'
         if isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
         end
-        if isMetricOrMusical then
+        if isMetricOrMusical and paramEntry.notation ~= '$grid' then
           if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
           elseif row.mg.modifiers & 1 ~= 0 then label = label .. '.'
           end
@@ -1240,35 +1238,40 @@ local function windowFn()
     if fresh then newHasTable = true end
   end
 
-  local function musicalActionParam1Special(fun, row, addMetric, addSlop)
+  local function musicalActionParam1Special(fun, row, addMetric, addSlop, paramEntry)
     r.ImGui_Separator(ctx)
 
     local mg = row.mg
+    local useGrid = paramEntry.notation == '$grid'
+    local dotVal = not useGrid and mg.modifiers & 1 ~= 0 or false
+    local tripVal = not useGrid and mg.modifiers & 2 ~= 0 or false
 
-    local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', mg.modifiers & 1 ~= 0)
+    if useGrid then r.ImGui_BeginDisabled(ctx) end
+    local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', dotVal)
     if rv then
       mg.modifiers = sel and 1 or 0
       fun(1, true)
     end
 
-    rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', mg.modifiers & 2 ~= 0)
+    rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', tripVal)
     if rv then
       mg.modifiers = sel and 2 or 0
       fun(2, true)
     end
-
-    r.ImGui_Separator(ctx)
+    if useGrid then r.ImGui_EndDisabled(ctx) end
 
     if addMetric then
+      r.ImGui_Separator(ctx)
       rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
       if rv then
         mg.wantsBarRestart = sel
         fun(3, true)
       end
-      r.ImGui_Spacing(ctx)
     end
 
     if addSlop then
+      r.ImGui_Separator(ctx)
+      r.ImGui_AlignTextToFramePadding(ctx)
       r.ImGui_Text(ctx, 'Slop (% of unit)')
       r.ImGui_SameLine(ctx)
       local tbuf
@@ -1288,12 +1291,16 @@ local function windowFn()
     end
   end
 
-  local function musicalParam1Special(fun, row, addMetric)
-    musicalActionParam1Special(fun, row, addMetric, true)
+  local function musicalParam1Special(fun, row, source, entry)
+    musicalActionParam1Special(fun, row, false, true, source[entry])
   end
 
-  local function metricParam1Special(fun, row)
-    musicalParam1Special(fun, row)
+  local function musicalParam1SpecialNoSlop(fun, row, source, entry)
+    musicalActionParam1Special(fun, row, false, false, source[entry])
+  end
+
+  local function metricParam1Special(fun, row, source, entry)
+    musicalActionParam1Special(fun, row, true, true, source[entry])
   end
 
   local function everyNActionParam1Special(fun, row)
@@ -1319,13 +1326,15 @@ local function windowFn()
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      evn.textEditorStr = buf
-      if evn.isBitField then
-        evn.pattern = evn.textEditorStr
-      else
-        evn.interval = tonumber(evn.textEditorStr)
+      if buf and buf ~= '' then
+        evn.textEditorStr = buf
+        if evn.isBitField then
+          evn.pattern = evn.textEditorStr
+        else
+          evn.interval = tonumber(evn.textEditorStr)
+        end
+        fun(2, true)
       end
-      fun(2, true)
     end
 
     r.ImGui_SameLine(ctx)
@@ -1352,9 +1361,11 @@ local function windowFn()
     rv, buf = r.ImGui_InputText(ctx, '##everyNoffset', evn.offsetEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      evn.offsetEditorStr = buf
-      evn.offset = tonumber(evn.offsetEditorStr)
-      fun(3, true)
+      if buf and buf ~= '' then
+        evn.offsetEditorStr = buf
+        evn.offset = tonumber(evn.offsetEditorStr)
+        fun(3, true)
+      end
     end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
@@ -1943,7 +1954,7 @@ local function windowFn()
         end
       end,
       paramTypes[1] == tx.PARAM_TYPE_MUSICAL
-        and musicalActionParam1Special
+        and musicalParam1SpecialNoSlop
         or nil)
 
     createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)

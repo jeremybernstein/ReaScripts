@@ -415,18 +415,17 @@ local findPropertyConditionEntries = {
   { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true },
 }
 
-local findTypeParam1Entries = {
+local typeEntries = {
   { notation = '$note', label = 'Note', text = '0x90' },
   { notation = '$polyat', label = 'Poly Pressure', text = '0xA0' },
   { notation = '$cc', label = 'Controller', text = '0xB0' },
   { notation = '$pc', label = 'Program Change', text = '0xC0' },
   { notation = '$at', label = 'Aftertouch', text = '0xD0' },
   { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
-  { notation = '$syx', label = 'System Exclusive', text = '0xF0' }
-  -- { label = 'SMF Event', text = '0x90' },
-  -- { label = 'Notation Event', text = '0x90' },
-  -- { label = '...', text = '0x90' }
 }
+
+local findTypeParam1Entries = tableCopy(typeEntries)
+table.insert(findTypeParam1Entries, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
 
 local findChannelParam1Entries = {
   { notation = '1', label = '1', text = '0' },
@@ -586,6 +585,7 @@ local actionTargetEntries = {
   { notation = '$value2', label = 'Value 2', text = '_value2', inteditor = true, range = {0, 127} },
   { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
+  { notation = '$newevent', label = 'Create Event', text = '\'\'', newevent = true },
 }
 actionTargetEntries.targetTable = true
 
@@ -722,6 +722,14 @@ local actionVelocityOperationEntries = {
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
+local actionNewEventOperationEntries = {
+  { notation = ':newmidievent', label = 'Create New Event', text = 'CreateNewMIDIEvent()', terms = 2, newevent = true }
+}
+
+local newMIDIEventPositionEntries = {
+  { notation = '$atcursor', label = 'At Edit Cursor', text = '0' },
+}
+
 local actionGenericOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
@@ -737,6 +745,7 @@ local PARAM_TYPE_TIMEDUR = 5
 local PARAM_TYPE_METRICGRID = 6
 local PARAM_TYPE_MUSICAL = 7
 local PARAM_TYPE_EVERYN = 8
+local PARAM_TYPE_NEWMIDIEVENT = 9
 
 local EDITOR_TYPE_PITCHBEND = 100
 local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
@@ -1333,6 +1342,11 @@ function OperateEvent2(event, property, op, param1, param2)
     newval = (oldval * param1) + param2
   end
   return SetValue(event, property, newval)
+end
+
+-- TODO there might be multiple lines, each of which can only be processed ONCE
+-- how to do this? could filter these lines out and then run the nme events separately from the rows
+function CreateNewMIDIEvent()
 end
 
 function RandomValue(event, property, min, max)
@@ -2002,6 +2016,63 @@ function ParseEveryNNotation(str)
   return evn
 end
 
+function GenerateNewMIDIEventNotation(row)
+  if not row.nme then return '' end
+  local nme = row.nme
+  local nmeStr = string.format('%02X%02X%02X', nme.chanmsg | nme.channel, nme.msg2, nme.msg3)
+  nmeStr = nmeStr .. '|' .. (nme.selected and 1 or 0) + (nme.muted and 2 or 0)
+  nmeStr = nmeStr .. '|' .. nme.posText
+  nmeStr = nmeStr .. '|' .. (nme.chanmsg == 0x90 and nme.durText or '0')
+  nmeStr = nmeStr .. '|' .. string.format('%02X', (nme.chanmsg == 0x90 and tostring(nme.relvel) or '0'))
+  return nmeStr
+end
+
+function ParseNewMIDIEventNotation(str, row, paramTab, index)
+  if index == 1 then
+    local nme = {}
+    local fs, fe, msg, flags, pos, dur, relvel = string.find(str, '([0-9A-Fa-f]+)|(%d)|([0-9%.:t]+)|([0-9%.:t]+)|([0-9A-Fa-f]+)')
+    if fs and fe then
+      local status = tonumber(msg:sub(1, 2), 16)
+      nme.chanmsg = status & 0xF0
+      nme.channel = status & 0x0F
+      nme.msg2 = tonumber(msg:sub(3, 4), 16)
+      nme.msg3 = tonumber(msg:sub(5, 6), 16)
+      local nflags = tonumber(flags)
+      nme.selected = nflags & 0x01 ~= 0
+      nme.muted = nflags & 0x02 ~= 0
+      nme.posText = pos
+      nme.durText = dur
+      nme.relvel = tonumber(relvel:sub(1, 2), 16)
+      nme.posmode = 0 -- cursorpos
+
+      for k, v in ipairs(paramTab) do
+        if tonumber(v.text) == nme.chanmsg then
+          row.param1Entry = k
+          break
+        end
+      end
+    else
+      nme.chanmsg = 0x90
+      nme.channel = 0
+      nme.selected = true
+      nme.muted = false
+      nme.msg2 = 64
+      nme.msg3 = 64
+      nme.posText = DEFAULT_TIMEFORMAT_STRING
+      nme.durText = '0.1.00'
+      nme.relvel = 0
+    end
+    row.nme = nme
+  elseif index == 2 then
+    for k, v in ipairs(paramTab) do
+      if v.notation == str then
+        row.param2Entry = k
+        break
+      end
+    end
+  end
+end
+
 function GetParamType(src)
   return src.menu and PARAM_TYPE_MENU
     or src.inteditor and PARAM_TYPE_INTEDITOR
@@ -2011,6 +2082,7 @@ function GetParamType(src)
     or src.metricgrid and PARAM_TYPE_METRICGRID
     or src.musical and PARAM_TYPE_MUSICAL
     or src.everyn and PARAM_TYPE_EVERYN
+    or src.newevent and PARAM_TYPE_NEWMIDIEVENT
     or PARAM_TYPE_UNKNOWN
 end
 
@@ -2063,7 +2135,8 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
   paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
 
   local isEveryN = paramType == PARAM_TYPE_EVERYN
-  if #paramTab ~= 0 then
+  local isNewEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
+  if not (isEveryN or isNewEvent) and #paramTab ~= 0 then
     for kk, vv in ipairs(paramTab) do
       local pa, pb = string.find(paramStr, vv.notation)
       if pa and pb then
@@ -2076,6 +2149,8 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
     end
   elseif isEveryN then
     row.evn = ParseEveryNNotation(paramStr)
+  elseif isNewEvent then
+    ParseNewMIDIEventNotation(paramStr, row, paramTab, index)
   elseif condOp.bitfield or (condOp.split and condOp.split[index].bitfield) then
     row[paramName .. 'TextEditorStr'] = paramStr
   elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
@@ -2091,7 +2166,11 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
     row[paramName .. 'TimeFormatStr'] = TimeFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_TIMEDUR then
     row[paramName .. 'TimeFormatStr'] = LengthFormatRebuf(paramStr)
-  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or paramType == PARAM_TYPE_EVERYN then
+  elseif paramType == PARAM_TYPE_METRICGRID
+    or paramType == PARAM_TYPE_MUSICAL
+    or paramType == PARAM_TYPE_EVERYN
+    or paramType == PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
+  then
     row[paramName .. 'TextEditorStr'] = paramStr
   end
   return paramStr
@@ -2356,6 +2435,7 @@ context.GetTimeOffset = GetTimeOffset
 
 context.OperateEvent1 = OperateEvent1
 context.OperateEvent2 = OperateEvent2
+context.CreateNewMIDIEvent = CreateNewMIDIEvent
 context.RandomValue = RandomValue
 context.GetTimeSelectionStart = GetTimeSelectionStart
 context.GetTimeSelectionEnd = GetTimeSelectionEnd
@@ -2389,14 +2469,22 @@ context.OP_DIV = OP_DIV
 context.OP_FIXED = OP_FIXED
 context.OP_SCALEOFF = OP_SCALEOFF
 
-function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, terms, notation, takectx)
+function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, index, notation, takectx)
   local addMetricGridNotation = false
   local addEveryNNotation = false
-  if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or paramType == PARAM_TYPE_EVERYN then
-    if terms == 1 then
+  local addNewMIDIEventNotation = false
+
+  if paramType == PARAM_TYPE_METRICGRID
+    or paramType == PARAM_TYPE_MUSICAL
+    or paramType == PARAM_TYPE_EVERYN
+    or paramType == PARAM_TYPE_NEWMIDIEVENT
+  then
+    if index == 1 then
       if notation then
         if paramType == PARAM_TYPE_EVERYN then
           addEveryNNotation = true
+        elseif paramType == PARAM_TYPE_NEWMIDIEVENT then
+          addNewMIDIEventNotation = true
         else
           addMetricGridNotation = true
         end
@@ -2406,10 +2494,10 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
   end
 
   local percentFormat = 'percent<%0.4f>'
-  local override = row['param' .. terms .. 'EditorType']
+  local override = row['param' .. index .. 'EditorType']
   local percentVal = row[paramName .. 'PercentVal']
   local paramVal
-  if condOp.terms < terms then
+  if condOp.terms < index then
     paramVal = ''
   elseif notation and override then
     if override == EDITOR_TYPE_BITFIELD then
@@ -2434,7 +2522,11 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
   elseif paramType == PARAM_TYPE_TIMEDUR then
     paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
-  elseif paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL or paramType == PARAM_TYPE_EVERYN or override == EDITOR_TYPE_BITFIELD then
+  elseif paramType == PARAM_TYPE_METRICGRID
+    or paramType == PARAM_TYPE_MUSICAL
+    or paramType == PARAM_TYPE_EVERYN
+    or override == EDITOR_TYPE_BITFIELD
+  then
     paramVal = row[paramName .. 'TextEditorStr']
   elseif #paramTab ~= 0 then
     paramVal = notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text
@@ -2444,6 +2536,8 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, te
     paramVal = paramVal .. GenerateMetricGridNotation(row)
   elseif addEveryNNotation then
     paramVal = GenerateEveryNNotation(row)
+  elseif addNewMIDIEventNotation then
+    paramVal = GenerateNewMIDIEventNotation(row)
   end
 
   return paramVal
@@ -2877,6 +2971,8 @@ function ActionTabsFromTarget(row)
     opTab = actionVelocityOperationEntries
   elseif notation == '$relvel' then
     opTab = actionVelocityOperationEntries
+  elseif notation == '$newevent' then
+    opTab = actionNewEventOperationEntries
   else
     opTab = actionGenericOperationEntries
   end
@@ -2907,6 +3003,9 @@ function ActionTabsFromTarget(row)
     param1Tab = findTypeParam1Entries -- same entries as find
   elseif notation == '$property' then
     param1Tab = actionPropertyParam1Entries
+  elseif notation == '$newevent' then
+    param1Tab = typeEntries -- no $syx
+    param2Tab = newMIDIEventPositionEntries
   end
 
   return opTab, param1Tab, param2Tab, target, operation
@@ -3218,6 +3317,27 @@ function DeleteEventsInTake(take, eventTab, doTx)
   end
 end
 
+local CreateNewMIDIEvent_Once
+
+function HandleCreateNewMIDIEvent(take, contextTab)
+  if CreateNewMIDIEvent_Once then
+    for _, row in ipairs(actionRowTable) do
+      if row.nme then
+        local nme = row.nme
+        local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, r.GetCursorPositionEx(0)) -- check for abs pos mode
+        if GetEventType(nme) == NOTE_TYPE then
+          local endppqpos = ppqpos + contextTab.PPQ
+          local relvel = nme.relvel or 0
+          mu.MIDI_InsertNote(take, nme.selected, nme.muted, ppqpos, endppqpos, nme.channel, nme.msg2, nme.msg3, relvel)
+        elseif GetEventType(nme) == CC_TYPE then
+          mu.MIDI_InsertCC(take, nme.selected, nme.muted, ppqpos, nme.chanmsg, nme.channel, nme.msg2, nme.msg3)
+        end
+      end
+    end
+    CreateNewMIDIEvent_Once = nil
+  end
+end
+
 function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
@@ -3240,6 +3360,7 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
       mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
     end
   end
+  HandleCreateNewMIDIEvent(take, contextTab)
   if doTx == true or doTx == nil then
     mu.MIDI_CommitWriteTransaction(take, false, true)
   end
@@ -3403,6 +3524,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
       end
     end
   end
+  HandleCreateNewMIDIEvent(take, contextTab)
   mu.MIDI_CommitWriteTransaction(take, false, true)
 end
 
@@ -3537,12 +3659,18 @@ function ProcessActionForTake(take)
     actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
 
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
-
     if isMusical then
       local mgParams = tableCopy(v.mg)
       mgParams.param1 = param1Num
       mgParams.param2 = param2Term
       actionTerm = string.gsub(actionTerm, '{musicalparams}', serialize(mgParams))
+    end
+
+    local isNewMIDIEvent = paramTypes[1] == PARAM_TYPE_NEWMIDIEVENT and true or false
+    if isNewMIDIEvent then
+      -- local nmeParams = tableCopy(v.nme)
+      CreateNewMIDIEvent_Once = true
+      -- actionTerm = string.gsub(actionTerm, '{neweventparams}', serialize(nmeParams))
     end
 
     actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
@@ -3676,7 +3804,7 @@ function ProcessAction(execute, fromScript)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$transform' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 then
+        if #found ~=0 or CreateNewMIDIEvent_Once then
           TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$replace' then
@@ -3684,28 +3812,30 @@ function ProcessAction(execute, fromScript)
         repParams.wantsUnfound = true
         repParams.addRangeEvents = true
         local found, contextTab, unfound = RunFind(findFn, repParams)
-        if #found ~=0 then
+        if #found ~=0 or CreateNewMIDIEvent_Once then
           TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
         end
       elseif notation == '$copy' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 then
+        if #found ~=0 or CreateNewMIDIEvent_Once then
           local newtake = NewTakeInNewTrack(take)
           if newtake then
             InsertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
         end
       elseif notation == '$copylane' then
-        local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 then
-          local newtake = NewTakeInNewLane(take)
-          if newtake then
-            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+        if isREAPER7() then
+          local found, contextTab = RunFind(findFn, defParams)
+          if #found ~=0 or CreateNewMIDIEvent_Once then
+            local newtake = NewTakeInNewLane(take)
+            if newtake then
+              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+            end
           end
         end
       elseif notation == '$insert' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 then
+        if #found ~=0 or CreateNewMIDIEvent_Once then
           InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$insertexclusive' then
@@ -3713,7 +3843,7 @@ function ProcessAction(execute, fromScript)
         ieParams.wantsUnfound = true
         local found, contextTab, unfound = RunFind(findFn, ieParams)
         mu.MIDI_OpenWriteTransaction(take)
-        if #found ~=0 then
+        if #found ~=0 or CreateNewMIDIEvent_Once then
           InsertEventsIntoTake(take, found, actionFn, contextTab, false)
           if unfound and #unfound ~=0 then
             DeleteEventsInTake(take, unfound, false)
@@ -3722,7 +3852,7 @@ function ProcessAction(execute, fromScript)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$extracttrack' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 then
+        if #found ~=0 or CreateNewMIDIEvent_Once then
           local newtake = NewTakeInNewTrack(take)
           if newtake then
             InsertEventsIntoTake(newtake, found, actionFn, contextTab)
@@ -3730,13 +3860,15 @@ function ProcessAction(execute, fromScript)
           DeleteEventsInTake(take, found)
         end
       elseif notation == '$extractlane' then
-        local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 then
-          local newtake = NewTakeInNewLane(take)
-          if newtake then
-            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+        if isREAPER7() then
+          local found, contextTab = RunFind(findFn, defParams)
+          if #found ~=0 or CreateNewMIDIEvent_Once then
+            local newtake = NewTakeInNewLane(take)
+            if newtake then
+              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+            end
+            DeleteEventsInTake(take, found)
           end
-          DeleteEventsInTake(take, found)
         end
       elseif notation == '$delete' then
         local found = RunFind(findFn, defParams)
@@ -3859,9 +3991,10 @@ end
 
 function SetRowParam(row, paramName, paramType, editorType, strVal, range, literal)
   local isMetricOrMusical = (paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL)
+  local isNewMIDIEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
   local isBitField = editorType == EDITOR_TYPE_BITFIELD
-  row[paramName .. 'TextEditorStr'] = (isMetricOrMusical or isBitField) and strVal or EnsureNumString(strVal, range)
-  if (isMetricOrMusical or isBitField) or not editorType then
+  row[paramName .. 'TextEditorStr'] = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or EnsureNumString(strVal, range)
+  if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
     row[paramName .. 'PercentVal'] = nil
     -- nothing
   else
@@ -4035,6 +4168,7 @@ TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
 TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
 TransformerLib.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
 TransformerLib.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
+TransformerLib.PARAM_TYPE_NEWMIDIEVENT = PARAM_TYPE_NEWMIDIEVENT
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }

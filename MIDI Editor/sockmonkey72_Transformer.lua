@@ -293,7 +293,7 @@ local function makeDefaultMetricGrid(row, isMetric)
 end
 
 local function makeDefaultEveryN(row)
-  row.param1Entry = '1'
+  row.param1Entry = 1
   row.param2TextEditorStr = '0'
   row.evn = {
     pattern = '1',
@@ -306,13 +306,34 @@ local function makeDefaultEveryN(row)
   return row.evn
 end
 
+local function makeDefaultNewMIDIEvent(row)
+  row.param1Entry = 1
+  row.param2Entry = 1
+  row.nme = { -- could just make a mu Event?
+    chanmsg = 0x90,
+    channel = 0,
+    selected = true,
+    muted = false,
+    msg2 = 64,
+    msg3 = 64,
+    posText = tx.DEFAULT_TIMEFORMAT_STRING,
+    projtime = 0,
+    durText = '0.1.00', -- one beat long as a default?
+    projlen = 1,
+    relvel = 0,
+  }
+end
+
 local function setupRowFormat(row, condOpTab)
   local isFind = row:is_a(tx.FindRow)
 
   local target = isFind and tx.findTargetEntries[row.targetEntry] or tx.actionTargetEntries[row.targetEntry]
   local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
   local paramTypes = tx.GetParamTypesForRow(row, target, condOp)
-  local isEveryN = string.match(condOp.notation, 'everyN')
+  local isEveryN = condOp.everyn
+  local isNewMIDIEvent = condOp.newevent
+  local isMetric = condOp.metricgrid
+  local isMusical = condOp.musical
 
   if condOp.split and condOp.split[1].default then
     row.param1TextEditorStr = tostring(condOp.split[1].default) -- hack
@@ -321,8 +342,17 @@ local function setupRowFormat(row, condOpTab)
     row.param2TextEditorStr = tostring(condOp.split[2].default) -- hack
   end
 
-  if isEveryN then
+  -- ensure that there are no lingering tables
+  row.mg = nil
+  row.evn = nil
+  row.nme = nil
+
+  if isMetric or isMusical then
+    makeDefaultMetricGrid(row, isFind and isMetric or false)
+  elseif isEveryN then
     makeDefaultEveryN(row)
+  elseif isNewMIDIEvent then
+    makeDefaultNewMIDIEvent(row)
   end
 
   local p1 = tx.DEFAULT_TIMEFORMAT_STRING
@@ -628,7 +658,7 @@ local function windowFn()
       r.ImGui_OpenPopup(ctx, 'gear menu')
     end
 
-    if r.ImGui_BeginPopup(ctx, 'gear menu') then
+    if r.ImGui_BeginPopup(ctx, 'gear menu', r.ImGui_WindowFlags_NoMove()) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then -- and not IsOKDialogOpen() then
         r.ImGui_CloseCurrentPopup(ctx)
         handledEscape = true
@@ -809,7 +839,7 @@ local function windowFn()
       doOK = true
     end
 
-    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost()) then
+    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost() | r.ImGui_WindowFlags_NoMove()) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         r.ImGui_CloseCurrentPopup(ctx)
         handledEscape = true
@@ -971,8 +1001,8 @@ local function windowFn()
     return label
   end
 
-  local function createPopup(row, name, source, selEntry, fun, special)
-    if r.ImGui_BeginPopup(ctx, name) then
+  local function createPopup(row, name, source, selEntry, fun, special, dontClose)
+    if r.ImGui_BeginPopup(ctx, name, r.ImGui_WindowFlags_NoMove()) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         if r.ImGui_IsPopupOpen(ctx, name, r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
           r.ImGui_CloseCurrentPopup(ctx)
@@ -989,6 +1019,11 @@ local function windowFn()
       windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
       windowRect.right = windowRect.right + windowRect.left
       windowRect.bottom = windowRect.bottom + windowRect.top
+
+      local listed = false
+      if dontClose then
+        listed = r.ImGui_BeginListBox(ctx, '##wrapperBox')
+      end
 
       for i = 1, #source do
         local selectText = source[i].label
@@ -1014,8 +1049,14 @@ local function windowFn()
 
         if rv then
           fun(i)
-          r.ImGui_CloseCurrentPopup(ctx)
+          if not dontClose then
+            r.ImGui_CloseCurrentPopup(ctx)
+          end
         end
+      end
+
+      if listed then
+        r.ImGui_EndListBox(ctx)
       end
 
       r.ImGui_PopStyleColor(ctx, numStyleCol)
@@ -1096,10 +1137,12 @@ local function windowFn()
     local isEveryN = paramType == tx.PARAM_TYPE_EVERYN and row.evn
     local isBitField = editorType == tx.EDITOR_TYPE_BITFIELD
     local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
+    local isNewMIDIEvent = paramType == tx.PARAM_TYPE_NEWMIDIEVENT
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
 
     if isMetricOrMusical and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
     if isEveryN and terms == 1 then paramType = tx.PARAM_TYPE_MENU end
+    if isNewMIDIEvent then paramType = tx.PARAM_TYPE_MENU end
 
     if condOp.terms >= terms then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
@@ -1390,6 +1433,133 @@ local function windowFn()
     everyNActionParam1Special(fun, row)
   end
 
+  local function newMIDIEventActionParam1Special(fun, row) -- type list is main menu
+    local nme = row.nme
+    local deactivated = false
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_AlignTextToFramePadding(ctx)
+
+    r.ImGui_Text(ctx, 'Channel')
+    r.ImGui_SameLine(ctx)
+
+    if r.ImGui_BeginListBox(ctx, '##chanList', (currentFontWidth and currentFontWidth or canonicalFontWidth) * 10, currentFrameHeight * 3) then
+      for i = 1, 16 do
+        local rv, sel = r.ImGui_MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
+        if rv and sel then
+          nme.channel = i - 1
+          fun(0, true)
+        end
+      end
+      r.ImGui_EndListBox(ctx)
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    r.ImGui_SameLine(ctx)
+
+    local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+    saveX = saveX + scaled(20)
+    saveY = saveY + currentFrameHeight * 0.5
+
+    r.ImGui_SetCursorPos(ctx, saveX, saveY)
+
+    local rv, sel = r.ImGui_Checkbox(ctx, 'Sel?', nme.selected)
+    if rv then
+      nme.selected = sel
+      fun(0, true)
+    end
+
+    r.ImGui_SetCursorPos(ctx, saveX, saveY + (currentFrameHeight * 1.1))
+
+    rv, sel = r.ImGui_Checkbox(ctx, 'Mute?', nme.muted)
+    if rv then
+      nme.muted = sel
+      fun(0, true)
+    end
+
+    r.ImGui_SetCursorPosY(ctx, saveY + (currentFrameHeight * 2.7))
+
+    r.ImGui_Separator(ctx)
+
+    local isNote = nme.chanmsg == 0x90
+
+    local twobyte = nme.chanmsg >= 0xC0
+    local is14 = nme.chanmsg == 0xE0
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local byte1Txt = is14 and tostring((nme.msg3 << 7 | nme.msg2) - (1 << 13)) or tostring(nme.msg2)
+    rv, byte1Txt = r.ImGui_InputText(ctx, 'Val1', byte1Txt, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if rv then
+      local nummy = tonumber(byte1Txt) or 0
+      if is14 then
+        if nummy < -8192 then nummy = -8192 elseif nummy > 8191 then nummy = 8191 end
+        nummy = nummy + (1 << 13)
+        nme.msg2 = nummy & 0x7F
+        nme.msg3 = nummy >> 7 & 0x7F
+      else
+        nme.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
+      end
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + DEFAULT_ITEM_WIDTH * 0.25)
+
+    if is14 or twobyte then r.ImGui_BeginDisabled(ctx) end
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local byte2Txt = (is14 or twobyte) and '0' or tostring(nme.msg3)
+    rv, byte2Txt = r.ImGui_InputText(ctx, 'Val2', byte2Txt, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if rv then
+      local nummy = tonumber(byte2Txt) or 0
+      if is14 or twobyte then
+      else
+        local min = isNote and 1 or 0
+        nme.msg3 = nummy < min and min or nummy > 127 and 127 or nummy
+      end
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if is14 then r.ImGui_EndDisabled(ctx) end
+
+    if nme.chanmsg == 0x90 then
+      r.ImGui_Separator(ctx)
+
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+      rv, nme.durText = r.ImGui_InputText(ctx, 'Dur.', nme.durText, r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+      if rv then
+        nme.durText = tx.lengthFormatRebuf(nme.durText)
+        --fun(0, true)
+      end
+      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+      r.ImGui_SameLine(ctx)
+
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      local relVelTxt = tostring(nme.relvel)
+      rv, relVelTxt = r.ImGui_InputText(ctx, 'RelVel', relVelTxt, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      if rv then
+        nme.relvel = tonumber(relVelTxt) or 0
+        nme.relvel = nme.relvel < 0 and 0 or nme.relvel > 127 and 127 or nme.relvel
+        --fun(0, true)
+      end
+      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    end
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 2)
+  end
+
+  local function newMIDIEventParam1Special(fun, row)
+    newMIDIEventActionParam1Special(fun, row)
+  end
 
   ----------------------------------------------
   ---------- SELECTION CRITERIA TABLE ----------
@@ -1571,7 +1741,7 @@ local function windowFn()
         r.ImGui_OpenPopup(ctx, 'defaultFindRow')
       end
 
-      if r.ImGui_BeginPopup(ctx, 'defaultFindRow') then
+      if r.ImGui_BeginPopup(ctx, 'defaultFindRow', r.ImGui_WindowFlags_NoMove()) then
         if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
           if r.ImGui_IsPopupOpen(ctx, 'defaultFindRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
             r.ImGui_CloseCurrentPopup(ctx)
@@ -1620,14 +1790,6 @@ local function windowFn()
       createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
           currentRow.conditionEntry = i
           local condNotation = conditionEntries[i].notation
-          local isMetric = string.match(condNotation, 'metricgrid')
-          local isMusical = string.match(condNotation, 'eqmusical')
-          local isEveryN = string.match(condNotation, 'everyN')
-          if isMetric or isMusical then
-            makeDefaultMetricGrid(currentRow, isMetric)
-          elseif isEveryN then
-            makeDefaultEveryN(currentRow)
-          end
           setupRowFormat(currentRow, conditionEntries)
           tx.processFind()
         end)
@@ -1712,7 +1874,7 @@ local function windowFn()
     r.ImGui_OpenPopup(ctx, 'findScopeFlagMenu')
   end
 
-  if r.ImGui_BeginPopup(ctx, 'findScopeFlagMenu') then
+  if r.ImGui_BeginPopup(ctx, 'findScopeFlagMenu', r.ImGui_WindowFlags_NoMove()) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
       r.ImGui_CloseCurrentPopup(ctx)
       handledEscape = true
@@ -1908,7 +2070,7 @@ local function windowFn()
       --   r.ImGui_EndDragDropSource(ctx)
       -- end
 
-      if r.ImGui_BeginPopup(ctx, 'defaultActionRow') then
+      if r.ImGui_BeginPopup(ctx, 'defaultActionRow', r.ImGui_WindowFlags_NoMove()) then
         if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
           if r.ImGui_IsPopupOpen(ctx, 'defaultActionRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
             r.ImGui_CloseCurrentPopup(ctx)
@@ -1945,10 +2107,6 @@ local function windowFn()
 
       createPopup(currentRow, 'operationMenu', operationEntries, currentRow.operationEntry, function(i)
           currentRow.operationEntry = i
-          local isMusical = operationEntries[i].musical
-          if isMusical then
-            makeDefaultMetricGrid(currentRow, false)
-          end
           setupRowFormat(currentRow, operationEntries)
           tx.processAction()
         end)
@@ -1959,12 +2117,17 @@ local function windowFn()
             currentRow.param1Val = param1Entries[i]
             if operationEntries[currentRow.operationEntry].musical then
               musicalLastUnit = i
+            elseif operationEntries[currentRow.operationEntry].newevent then
+              currentRow.nme.chanmsg = tonumber(currentRow.param1Val.text)
             end
           end
         end,
         paramTypes[1] == tx.PARAM_TYPE_MUSICAL
-          and musicalParam1SpecialNoSlop
-          or nil)
+            and musicalParam1SpecialNoSlop
+          or paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT
+            and newMIDIEventParam1Special
+          or nil,
+        true)
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
           currentRow.param2Entry = i
@@ -2071,7 +2234,7 @@ local function windowFn()
     r.ImGui_TextColored(ctx, 0x00AAFFFF, '-> ' .. str)
   end
 
-  if r.ImGui_BeginPopup(ctx, '##presetfolderselect') then
+  if r.ImGui_BeginPopup(ctx, '##presetfolderselect', r.ImGui_WindowFlags_NoMove()) then
     r.ImGui_TextDisabled(ctx, 'Select destination folder...')
 
     r.ImGui_Spacing(ctx)
@@ -2141,7 +2304,7 @@ local function windowFn()
         doOK = true
     end
 
-    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost()) then
+    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost() | r.ImGui_WindowFlags_NoMove()) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
         r.ImGui_CloseCurrentPopup(ctx)
         handledEscape = true
@@ -2410,7 +2573,7 @@ local function windowFn()
     return false
   end
 
-  if r.ImGui_BeginPopup(ctx, 'openPresetMenu') then
+  if r.ImGui_BeginPopup(ctx, 'openPresetMenu', r.ImGui_WindowFlags_NoMove()) then
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
       if r.ImGui_IsPopupOpen(ctx, 'openPresetMenu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
         r.ImGui_CloseCurrentPopup(ctx)

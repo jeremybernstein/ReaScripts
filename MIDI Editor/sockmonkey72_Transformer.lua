@@ -1,12 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.37
+-- @version 1.0-alpha.38
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'current grid' option to metric/musical grid menus
---   - preset update: Change Delete CC presets scope to Active Midi editor (thanks smandrap)
---   - preset update: Change Transform CC presets scope to Active Midi editor (thanks smandrap)
+--   - fix some preset parsing issues
+--   - more ReaImGui 0.9 conformance tweaks
+--   - disable lanes Actions Scopes for < R7
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -20,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.37'
+local versionStr = '1.0-alpha.38'
 
 local r = reaper
 
@@ -612,9 +612,11 @@ local function windowFn()
     r.ImGui_SameLine(ctx)
 
     local ibSize = FONTSIZE_LARGE * canvasScale
-    local x = r.ImGui_GetWindowSize(ctx)
-    local textWidth = ibSize -- r.ImGui_CalcTextSize(ctx, 'Gear')
-    r.ImGui_SetCursorPosX(ctx, x - textWidth - (15 * canvasScale))
+
+    local x = r.ImGui_GetContentRegionMax(ctx)
+    local frame_padding_x = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
+    r.ImGui_SetCursorPosX(ctx, x - ibSize - (frame_padding_x * 2))
+
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
     local wantsPop = false
@@ -990,6 +992,10 @@ local function windowFn()
 
       for i = 1, #source do
         local selectText = source[i].label
+        local disabled = source[i].disable
+
+        if disabled then r.ImGui_BeginDisabled(ctx) end
+
         if source.targetTable then
           selectText = decorateTargetLabel(selectText)
         end
@@ -1001,6 +1007,9 @@ local function windowFn()
         else
           rv = r.ImGui_MenuItem(ctx, selectText, nil, selEntry == i)
         end
+
+        if disabled then r.ImGui_EndDisabled(ctx) end
+
         r.ImGui_Spacing(ctx)
 
         if rv then
@@ -1402,265 +1411,265 @@ local function windowFn()
 
   local tableHeight = currentFrameHeight * 6.2
   local restoreY = r.ImGui_GetCursorPosY(ctx) + tableHeight
-
-  r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight)
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-  for _, label in ipairs(findColumns) do
-    if showTimeFormatColumn or label ~= timeFormatColumnName then
-      local narrow = (label == '(' or label == ')' or label == 'Not' or label == 'Boolean')
-      local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_WidthStretch()
-      local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(PAREN_COLUMN_WIDTH)) or nil
-      r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
-    end
-  end
-  r.ImGui_TableHeadersRow(ctx)
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
-
-  handleValueLabels()
-
-  for k, v in ipairs(tx.findRowTable()) do
-    r.ImGui_PushID(ctx, tostring(k))
-    local currentRow = v
-    local currentFindTarget = {}
-    local currentFindCondition = {}
-    local conditionEntries = {}
-    local param1Entries = {}
-    local param2Entries = {}
-
-    conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
-
-    r.ImGui_TableNextRow(ctx)
-
-    if k == selectedFindRow then
-      r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0x77FFFF1F)
-    end
-
-    local colIdx = 0
-
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- '('
-    if currentRow.startParenEntry < 2 then
-      r.ImGui_InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
-    else
-      r.ImGui_Button(ctx, tx.startParenEntries[currentRow.startParenEntry].label)
-    end
-    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      r.ImGui_OpenPopup(ctx, 'startParenMenu')
-      selectedFindRow = k
-      lastSelectedRowType = 0 -- Find
-    end
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Target'
-    local targetText = currentRow.targetEntry > 0 and currentFindTarget.label or '---'
-    r.ImGui_Button(ctx, decorateTargetLabel(targetText))
-    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      selectedFindRow = k
-      lastSelectedRowType = 0 -- Find
-      currentRow.except = true
-      tx.processFind()
-      r.ImGui_OpenPopup(ctx, 'targetMenu')
-    end
-    if not r.ImGui_IsPopupOpen(ctx, 'targetMenu') and currentRow.except then
-      currentRow.except = nil
-      tx.processFind()
-    end
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Not'
-    if not currentFindCondition.notnot then
-      r.ImGui_PushFont(ctx, fontInfo.smaller)
-      local yCache = r.ImGui_GetCursorPosY(ctx)
-      local _, smallerHeight = r.ImGui_CalcTextSize(ctx, '0') -- could make this global if it is expensive
-      r.ImGui_SetCursorPosY(ctx, yCache + ((r.ImGui_GetFrameHeight(ctx) - smallerHeight) / 2))
-      local rv, selected = r.ImGui_Checkbox(ctx, '##notBox', currentRow.isNot)
-      if rv then
-        currentRow.isNot = selected
-      end
-      r.ImGui_SetCursorPosY(ctx, yCache)
-      r.ImGui_PopFont(ctx)
-    end
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Condition'
-    r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
-    if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      selectedFindRow = k
-      lastSelectedRowType = 0 -- Find
-      r.ImGui_OpenPopup(ctx, 'conditionMenu')
-    end
-
-    local paramTypes = tx.GetParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
-    local selected
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
-    overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
-    selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, paramTypes[1], 1, k, tx.processFind)
-    if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
-    overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
-    selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramTypes[2], 2, k, tx.processFind)
-    if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
-
-    -- unused currently
-    if showTimeFormatColumn then
-      colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Time format
-      if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
-        r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
-        if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-          selectedFindRow = k
-          lastSelectedRowType = 0
-          r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
-        end
-      end
-    end
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- End Paren
-    if currentRow.endParenEntry < 2 then
-      r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
-    else
-      r.ImGui_Button(ctx, tx.endParenEntries[currentRow.endParenEntry].label)
-    end
-    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      r.ImGui_OpenPopup(ctx, 'endParenMenu')
-      selectedFindRow = k
-      lastSelectedRowType = 0
-    end
-
-    colIdx = colIdx + 1
-    r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Boolean
-    if k ~= #tx.findRowTable() then
-      r.ImGui_Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
-      if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-        currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
-        selectedFindRow = k
-        lastSelectedRowType = 0
-        tx.processFind()
-      end
-    end
-
-    r.ImGui_SameLine(ctx)
+  if r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight) then
 
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-    if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
-      selectedFindRow = k
-      lastSelectedRowType = 0
+    for _, label in ipairs(findColumns) do
+      if showTimeFormatColumn or label ~= timeFormatColumnName then
+        local narrow = (label == '(' or label == ')' or label == 'Not' or label == 'Boolean')
+        local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_WidthStretch()
+        local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(PAREN_COLUMN_WIDTH)) or nil
+        r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
+      end
     end
+    r.ImGui_TableHeadersRow(ctx)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
-      selectedFindRow = k
-      lastSelectedRowType = 0
-      r.ImGui_OpenPopup(ctx, 'defaultFindRow')
-    end
+    handleValueLabels()
 
-    if r.ImGui_BeginPopup(ctx, 'defaultFindRow') then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        if r.ImGui_IsPopupOpen(ctx, 'defaultFindRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+    for k, v in ipairs(tx.findRowTable()) do
+      r.ImGui_PushID(ctx, tostring(k))
+      local currentRow = v
+      local currentFindTarget = {}
+      local currentFindCondition = {}
+      local conditionEntries = {}
+      local param1Entries = {}
+      local param2Entries = {}
+
+      conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
+
+      r.ImGui_TableNextRow(ctx)
+
+      if k == selectedFindRow then
+        r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0x77FFFF1F)
+      end
+
+      local colIdx = 0
+
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- '('
+      if currentRow.startParenEntry < 2 then
+        r.ImGui_InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
+      else
+        r.ImGui_Button(ctx, tx.startParenEntries[currentRow.startParenEntry].label)
+      end
+      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        r.ImGui_OpenPopup(ctx, 'startParenMenu')
+        selectedFindRow = k
+        lastSelectedRowType = 0 -- Find
+      end
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Target'
+      local targetText = currentRow.targetEntry > 0 and currentFindTarget.label or '---'
+      r.ImGui_Button(ctx, decorateTargetLabel(targetText))
+      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        selectedFindRow = k
+        lastSelectedRowType = 0 -- Find
+        currentRow.except = true
+        tx.processFind()
+        r.ImGui_OpenPopup(ctx, 'targetMenu')
+      end
+      if not r.ImGui_IsPopupOpen(ctx, 'targetMenu') and currentRow.except then
+        currentRow.except = nil
+        tx.processFind()
+      end
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Not'
+      if not currentFindCondition.notnot then
+        r.ImGui_PushFont(ctx, fontInfo.smaller)
+        local yCache = r.ImGui_GetCursorPosY(ctx)
+        local _, smallerHeight = r.ImGui_CalcTextSize(ctx, '0') -- could make this global if it is expensive
+        r.ImGui_SetCursorPosY(ctx, yCache + ((r.ImGui_GetFrameHeight(ctx) - smallerHeight) / 2))
+        local rv, selected = r.ImGui_Checkbox(ctx, '##notBox', currentRow.isNot)
+        if rv then
+          currentRow.isNot = selected
+        end
+        r.ImGui_SetCursorPosY(ctx, yCache)
+        r.ImGui_PopFont(ctx)
+      end
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Condition'
+      r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
+      if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        selectedFindRow = k
+        lastSelectedRowType = 0 -- Find
+        r.ImGui_OpenPopup(ctx, 'conditionMenu')
+      end
+
+      local paramTypes = tx.GetParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
+      local selected
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
+      overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
+      selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, paramTypes[1], 1, k, tx.processFind)
+      if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
+      overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
+      selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramTypes[2], 2, k, tx.processFind)
+      if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
+
+      -- unused currently
+      if showTimeFormatColumn then
+        colIdx = colIdx + 1
+        r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Time format
+        if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
+          r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
+          if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+            selectedFindRow = k
+            lastSelectedRowType = 0
+            r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
+          end
+        end
+      end
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- End Paren
+      if currentRow.endParenEntry < 2 then
+        r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
+      else
+        r.ImGui_Button(ctx, tx.endParenEntries[currentRow.endParenEntry].label)
+      end
+      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        r.ImGui_OpenPopup(ctx, 'endParenMenu')
+        selectedFindRow = k
+        lastSelectedRowType = 0
+      end
+
+      colIdx = colIdx + 1
+      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Boolean
+      if k ~= #tx.findRowTable() then
+        r.ImGui_Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
+        if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
+          selectedFindRow = k
+          lastSelectedRowType = 0
+          tx.processFind()
+        end
+      end
+
+      r.ImGui_SameLine(ctx)
+
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+      if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
+        selectedFindRow = k
+        lastSelectedRowType = 0
+      end
+      r.ImGui_PopStyleColor(ctx)
+      r.ImGui_PopStyleColor(ctx)
+
+      if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+        selectedFindRow = k
+        lastSelectedRowType = 0
+        r.ImGui_OpenPopup(ctx, 'defaultFindRow')
+      end
+
+      if r.ImGui_BeginPopup(ctx, 'defaultFindRow') then
+        if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+          if r.ImGui_IsPopupOpen(ctx, 'defaultFindRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+            r.ImGui_CloseCurrentPopup(ctx)
+            handledEscape = true
+          end
+        end
+        r.ImGui_Separator(ctx)
+        if r.ImGui_Selectable(ctx, 'Make This Row Default For New Criteria', false) then
+          defaultFindRow = tx.findRowToNotation(tx.findRowTable()[selectedFindRow])
+          r.SetExtState(scriptID, 'defaultFindRow', defaultFindRow, true)
           r.ImGui_CloseCurrentPopup(ctx)
-          handledEscape = true
         end
+        r.ImGui_Spacing(ctx)
+        r.ImGui_Separator(ctx)
+        r.ImGui_Spacing(ctx)
+        if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
+          r.DeleteExtState(scriptID, 'defaultFindRow', true)
+          defaultFindRow = nil
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+        r.ImGui_EndPopup(ctx)
       end
-      r.ImGui_Separator(ctx)
-      if r.ImGui_Selectable(ctx, 'Make This Row Default For New Criteria', false) then
-        defaultFindRow = tx.findRowToNotation(tx.findRowTable()[selectedFindRow])
-        r.SetExtState(scriptID, 'defaultFindRow', defaultFindRow, true)
-        r.ImGui_CloseCurrentPopup(ctx)
-      end
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_Spacing(ctx)
-      if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
-        r.DeleteExtState(scriptID, 'defaultFindRow', true)
-        defaultFindRow = nil
-        r.ImGui_CloseCurrentPopup(ctx)
-      end
-      r.ImGui_EndPopup(ctx)
-    end
 
-    createPopup(currentRow, 'startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
-        currentRow.startParenEntry = i
-        tx.processFind()
-      end)
-
-    createPopup(currentRow, 'endParenMenu', tx.endParenEntries, currentRow.endParenEntry, function(i)
-        currentRow.endParenEntry = i
-        tx.processFind()
-      end)
-
-    createPopup(currentRow, 'targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
-        local oldNotation = currentFindCondition.notation
-        currentRow:init()
-        currentRow.targetEntry = i
-        conditionEntries = tx.findTabsFromTarget(currentRow)
-        for kk, vv in ipairs(conditionEntries) do
-          if vv.notation == oldNotation then currentRow.conditionEntry = kk break end
-        end
-        setupRowFormat(currentRow, conditionEntries)
-        tx.processFind()
-      end)
-
-    createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
-        currentRow.conditionEntry = i
-        local condNotation = conditionEntries[i].notation
-        local isMetric = string.match(condNotation, 'metricgrid')
-        local isMusical = string.match(condNotation, 'eqmusical')
-        local isEveryN = string.match(condNotation, 'everyN')
-        if isMetric or isMusical then
-          makeDefaultMetricGrid(currentRow, isMetric)
-        elseif isEveryN then
-          makeDefaultEveryN(currentRow)
-        end
-        setupRowFormat(currentRow, conditionEntries)
-        tx.processFind()
-      end)
-
-    createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
-        if not isSpecial then
-          currentRow.param1Entry = i
-          currentRow.param1Val = param1Entries[i]
-          -- if string.match(conditionEntries[currentRow.conditionEntry].notation, 'metricgrid') then
-          --   metricLastUnit = i
-          -- elseif string.match(conditionEntries[currentRow.conditionEntry].notation, 'eqmusical') then
-          --   musicalLastUnit = i
-          -- end
-        end
-        tx.processFind()
-      end,
-      paramTypes[1] == tx.PARAM_TYPE_METRICGRID
-          and metricParam1Special
-        or paramTypes[1] == tx.PARAM_TYPE_MUSICAL
-          and musicalParam1Special
-        or paramTypes[1] == tx.PARAM_TYPE_EVERYN
-          and everyNParam1Special
-        or nil)
-
-    createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
-        currentRow.param2Entry = i
-        currentRow.param2Val = param2Entries[i]
-        tx.processFind()
-      end)
-
-    if showTimeFormatColumn then
-      createPopup(currentRow, 'timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
-          currentRow.timeFormatEntry = i
+      createPopup(currentRow, 'startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
+          currentRow.startParenEntry = i
           tx.processFind()
         end)
+
+      createPopup(currentRow, 'endParenMenu', tx.endParenEntries, currentRow.endParenEntry, function(i)
+          currentRow.endParenEntry = i
+          tx.processFind()
+        end)
+
+      createPopup(currentRow, 'targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
+          local oldNotation = currentFindCondition.notation
+          currentRow:init()
+          currentRow.targetEntry = i
+          conditionEntries = tx.findTabsFromTarget(currentRow)
+          for kk, vv in ipairs(conditionEntries) do
+            if vv.notation == oldNotation then currentRow.conditionEntry = kk break end
+          end
+          setupRowFormat(currentRow, conditionEntries)
+          tx.processFind()
+        end)
+
+      createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
+          currentRow.conditionEntry = i
+          local condNotation = conditionEntries[i].notation
+          local isMetric = string.match(condNotation, 'metricgrid')
+          local isMusical = string.match(condNotation, 'eqmusical')
+          local isEveryN = string.match(condNotation, 'everyN')
+          if isMetric or isMusical then
+            makeDefaultMetricGrid(currentRow, isMetric)
+          elseif isEveryN then
+            makeDefaultEveryN(currentRow)
+          end
+          setupRowFormat(currentRow, conditionEntries)
+          tx.processFind()
+        end)
+
+      createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
+          if not isSpecial then
+            currentRow.param1Entry = i
+            currentRow.param1Val = param1Entries[i]
+            -- if string.match(conditionEntries[currentRow.conditionEntry].notation, 'metricgrid') then
+            --   metricLastUnit = i
+            -- elseif string.match(conditionEntries[currentRow.conditionEntry].notation, 'eqmusical') then
+            --   musicalLastUnit = i
+            -- end
+          end
+          tx.processFind()
+        end,
+        paramTypes[1] == tx.PARAM_TYPE_METRICGRID
+            and metricParam1Special
+          or paramTypes[1] == tx.PARAM_TYPE_MUSICAL
+            and musicalParam1Special
+          or paramTypes[1] == tx.PARAM_TYPE_EVERYN
+            and everyNParam1Special
+          or nil)
+
+      createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
+          currentRow.param2Entry = i
+          currentRow.param2Val = param2Entries[i]
+          tx.processFind()
+        end)
+
+      if showTimeFormatColumn then
+        createPopup(currentRow, 'timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
+            currentRow.timeFormatEntry = i
+            tx.processFind()
+          end)
+      end
+
+      r.ImGui_PopID(ctx)
     end
 
-    r.ImGui_PopID(ctx)
+    r.ImGui_EndTable(ctx)
   end
-
-  r.ImGui_EndTable(ctx)
 
   generateLabelOnLine('Selection Criteria', true)
 
@@ -1818,155 +1827,156 @@ local function windowFn()
 
   restoreY = r.ImGui_GetCursorPosY(ctx) + tableHeight
 
-  r.ImGui_BeginTable(ctx, 'Actions', #actionColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight)
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-  for _, label in ipairs(actionColumns) do
-    local flags = r.ImGui_TableColumnFlags_None()
-    r.ImGui_TableSetupColumn(ctx, label, flags)
-  end
-  r.ImGui_TableHeadersRow(ctx)
-  r.ImGui_PopStyleColor(ctx)
-  r.ImGui_PopStyleColor(ctx)
-
-  for k, v in ipairs(tx.actionRowTable()) do
-    r.ImGui_PushID(ctx, tostring(k))
-    local currentRow = v
-    local currentActionTarget = {}
-    local currentActionOperation = {}
-    local operationEntries = {}
-    local param1Entries = {}
-    local param2Entries = {}
-
-    operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)
-
-    r.ImGui_TableNextRow(ctx)
-
-    if k == selectedActionRow then
-      r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0xFF77FF1F)
-    end
-
-    r.ImGui_TableSetColumnIndex(ctx, 0) -- 'Target'
-    local targetText = currentRow.targetEntry > 0 and currentActionTarget.label or '---'
-    r.ImGui_Button(ctx, decorateTargetLabel(targetText))
-    if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      selectedActionRow = k
-      lastSelectedRowType = 1
-      r.ImGui_OpenPopup(ctx, 'targetMenu')
-    end
-
-    r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Operation'
-    r.ImGui_Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---')
-    if (#operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
-      selectedActionRow = k
-      lastSelectedRowType = 1
-      r.ImGui_OpenPopup(ctx, 'operationMenu')
-    end
-
-    local paramTypes = tx.GetParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
-    local selected
-
-    r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
-    overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
-    selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, paramTypes[1], 1, k, tx.processAction)
-    if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
-
-    r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
-    overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
-    selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, paramTypes[2], 2, k, tx.processAction)
-    if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
-
-    r.ImGui_SameLine(ctx)
+  if r.ImGui_BeginTable(ctx, 'Actions', #actionColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight) then
 
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-    if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
-      selectedActionRow = k
-      lastSelectedRowType = 1
+    for _, label in ipairs(actionColumns) do
+      local flags = r.ImGui_TableColumnFlags_None()
+      r.ImGui_TableSetupColumn(ctx, label, flags)
     end
+    r.ImGui_TableHeadersRow(ctx)
     r.ImGui_PopStyleColor(ctx)
     r.ImGui_PopStyleColor(ctx)
 
-    if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
-      selectedActionRow = k
-      lastSelectedRowType = 1
-      r.ImGui_OpenPopup(ctx, 'defaultActionRow')
-    end
-    -- TODO: row drag/drop
-    -- if r.ImGui_BeginDragDropSource(ctx) then
-    --   r.ImGui_SetDragDropPayload(ctx, 'row', 'somedata')
-    --   r.ImGui_EndDragDropSource(ctx)
-    -- end
+    for k, v in ipairs(tx.actionRowTable()) do
+      r.ImGui_PushID(ctx, tostring(k))
+      local currentRow = v
+      local currentActionTarget = {}
+      local currentActionOperation = {}
+      local operationEntries = {}
+      local param1Entries = {}
+      local param2Entries = {}
 
-    if r.ImGui_BeginPopup(ctx, 'defaultActionRow') then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        if r.ImGui_IsPopupOpen(ctx, 'defaultActionRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-          r.ImGui_CloseCurrentPopup(ctx)
-          handledEscape = true
-        end
+      operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)
+
+      r.ImGui_TableNextRow(ctx)
+
+      if k == selectedActionRow then
+        r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0xFF77FF1F)
       end
-      if r.ImGui_Selectable(ctx, 'Make This Row Default For New Actions', false) then
-        defaultActionRow = tx.actionRowToNotation(tx.actionRowTable()[selectedActionRow])
-        r.SetExtState(scriptID, 'defaultActionRow', defaultActionRow, true)
-        r.ImGui_CloseCurrentPopup(ctx)
+
+      r.ImGui_TableSetColumnIndex(ctx, 0) -- 'Target'
+      local targetText = currentRow.targetEntry > 0 and currentActionTarget.label or '---'
+      r.ImGui_Button(ctx, decorateTargetLabel(targetText))
+      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        selectedActionRow = k
+        lastSelectedRowType = 1
+        r.ImGui_OpenPopup(ctx, 'targetMenu')
       end
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_Spacing(ctx)
-      if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
-        r.DeleteExtState(scriptID, 'defaultActionRow', true)
-        defaultActionRow = nil
-        r.ImGui_CloseCurrentPopup(ctx)
+
+      r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Operation'
+      r.ImGui_Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---')
+      if (#operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        selectedActionRow = k
+        lastSelectedRowType = 1
+        r.ImGui_OpenPopup(ctx, 'operationMenu')
       end
-      r.ImGui_EndPopup(ctx)
-    end
 
-    createPopup(currentRow, 'targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
-        local oldNotation = currentActionOperation.notation
-        currentRow:init()
-        currentRow.targetEntry = i
-        operationEntries = tx.actionTabsFromTarget(currentRow)
-        for kk, vv in ipairs(operationEntries) do
-          if vv.notation == oldNotation then currentRow.operationEntry = kk break end
-        end
-        setupRowFormat(currentRow, operationEntries)
-        tx.processAction()
-      end)
+      local paramTypes = tx.GetParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
+      local selected
 
-    createPopup(currentRow, 'operationMenu', operationEntries, currentRow.operationEntry, function(i)
-        currentRow.operationEntry = i
-        local isMusical = operationEntries[i].musical
-        if isMusical then
-          makeDefaultMetricGrid(currentRow, false)
-        end
-        setupRowFormat(currentRow, operationEntries)
-        tx.processAction()
-      end)
+      r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
+      overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
+      selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, paramTypes[1], 1, k, tx.processAction)
+      if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
 
-    createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
-        if not isSpecial then
-          currentRow.param1Entry = i
-          currentRow.param1Val = param1Entries[i]
-          if operationEntries[currentRow.operationEntry].musical then
-            musicalLastUnit = i
+      r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
+      overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
+      selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, paramTypes[2], 2, k, tx.processAction)
+      if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
+
+      r.ImGui_SameLine(ctx)
+
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
+      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+      if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
+        selectedActionRow = k
+        lastSelectedRowType = 1
+      end
+      r.ImGui_PopStyleColor(ctx)
+      r.ImGui_PopStyleColor(ctx)
+
+      if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+        selectedActionRow = k
+        lastSelectedRowType = 1
+        r.ImGui_OpenPopup(ctx, 'defaultActionRow')
+      end
+      -- TODO: row drag/drop
+      -- if r.ImGui_BeginDragDropSource(ctx) then
+      --   r.ImGui_SetDragDropPayload(ctx, 'row', 'somedata')
+      --   r.ImGui_EndDragDropSource(ctx)
+      -- end
+
+      if r.ImGui_BeginPopup(ctx, 'defaultActionRow') then
+        if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+          if r.ImGui_IsPopupOpen(ctx, 'defaultActionRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
+            r.ImGui_CloseCurrentPopup(ctx)
+            handledEscape = true
           end
         end
-      end,
-      paramTypes[1] == tx.PARAM_TYPE_MUSICAL
-        and musicalParam1SpecialNoSlop
-        or nil)
+        if r.ImGui_Selectable(ctx, 'Make This Row Default For New Actions', false) then
+          defaultActionRow = tx.actionRowToNotation(tx.actionRowTable()[selectedActionRow])
+          r.SetExtState(scriptID, 'defaultActionRow', defaultActionRow, true)
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+        r.ImGui_Spacing(ctx)
+        r.ImGui_Separator(ctx)
+        r.ImGui_Spacing(ctx)
+        if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
+          r.DeleteExtState(scriptID, 'defaultActionRow', true)
+          defaultActionRow = nil
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+        r.ImGui_EndPopup(ctx)
+      end
 
-    createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
-        currentRow.param2Entry = i
-        currentRow.param2Val = param2Entries[i]
-        tx.processAction()
-      end)
+      createPopup(currentRow, 'targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
+          local oldNotation = currentActionOperation.notation
+          currentRow:init()
+          currentRow.targetEntry = i
+          operationEntries = tx.actionTabsFromTarget(currentRow)
+          for kk, vv in ipairs(operationEntries) do
+            if vv.notation == oldNotation then currentRow.operationEntry = kk break end
+          end
+          setupRowFormat(currentRow, operationEntries)
+          tx.processAction()
+        end)
 
-    r.ImGui_PopID(ctx)
+      createPopup(currentRow, 'operationMenu', operationEntries, currentRow.operationEntry, function(i)
+          currentRow.operationEntry = i
+          local isMusical = operationEntries[i].musical
+          if isMusical then
+            makeDefaultMetricGrid(currentRow, false)
+          end
+          setupRowFormat(currentRow, operationEntries)
+          tx.processAction()
+        end)
+
+      createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
+          if not isSpecial then
+            currentRow.param1Entry = i
+            currentRow.param1Val = param1Entries[i]
+            if operationEntries[currentRow.operationEntry].musical then
+              musicalLastUnit = i
+            end
+          end
+        end,
+        paramTypes[1] == tx.PARAM_TYPE_MUSICAL
+          and musicalParam1SpecialNoSlop
+          or nil)
+
+      createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
+          currentRow.param2Entry = i
+          currentRow.param2Val = param2Entries[i]
+          tx.processAction()
+        end)
+
+      r.ImGui_PopID(ctx)
+    end
+
+    r.ImGui_EndTable(ctx)
   end
-
-  r.ImGui_EndTable(ctx)
 
   r.ImGui_SetCursorPosY(ctx, restoreY)
 
@@ -2723,6 +2733,9 @@ local function loop()
 
     r.ImGui_BeginGroup(ctx)
     windowFn()
+    r.ImGui_SetCursorPos(ctx, 0, 0)
+    local ww, wh = r.ImGui_GetContentRegionMax(ctx)
+    r.ImGui_Dummy(ctx, ww, wh)
     r.ImGui_EndGroup(ctx)
 
     -- handle drag and drop of preset files using the entire frame

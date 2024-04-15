@@ -65,7 +65,7 @@ local SELECT_TIME_INDIVIDUAL = 4
 
 local findParserError = ''
 local dirtyFind = false
-local wantsType = {}
+local wantsTab = {}
 
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
@@ -204,6 +204,12 @@ function FindScopeFlagFromNotation(notation)
   return 0x00 -- default
 end
 
+local function isREAPER7()
+  local v = r.GetAppVersion()
+  if v and v:sub(1, 1) == '7' then return true end
+  return false
+end
+
 local actionScopeTable = {
   { notation = '$select', label = 'Select' },
   { notation = '$selectadd', label = 'Add To Selection' },
@@ -212,11 +218,11 @@ local actionScopeTable = {
   { notation = '$transform', label = 'Transform' },
   { notation = '$replace', label = 'Transform & Replace' },
   { notation = '$copy', label = 'Transform to Track' },
-  { notation = '$copylane', label = 'Transform to Lane' },
+  { notation = '$copylane', label = 'Transform to Lane', disable = not isREAPER7() },
   { notation = '$insert', label = 'Insert' },
   { notation = '$insertexclusive', label = 'Insert Exclusive' },
   { notation = '$extracttrack', label = 'Extract to Track' },
-  { notation = '$extractlane', label = 'Extract to Lane' },
+  { notation = '$extractlane', label = 'Extract to Lane', disable = not isREAPER7() },
   { notation = '$delete', label = 'Delete' },
 }
 
@@ -1926,7 +1932,7 @@ function FindTabsFromTarget(row)
       if string.match(condition.notation, 'everyN') then
         param1Tab = { }
       end
-      if string.match(condition.notation, 'everyNnote') then
+      if string.match(condition.notation, 'everyNnote$') then
         param2Tab = scaleRoots
       end
     end
@@ -1971,14 +1977,27 @@ end
 
 function ParseEveryNNotation(str)
   local evn = {}
-  local fs, fe, patInt, flag, offset = string.find(str, '([01]+)|([b-])|(%d+)$')
+  local fs, fe, patInt, flag, offset = string.find(str, '(%d+)|([b-])|(%d+)$')
+  if not (fs and fe) then
+    flag = ''
+    offset = '0'
+    fs, fe, patInt = string.find(str, '(%d+)')
+  end
   if fs and fe then
     evn.isBitField = flag == 'b'
     evn.textEditorStr = patInt
+    if evn.isBitField then evn.textEditorStr = evn.textEditorStr:gsub('[^0]', '1') end
     evn.pattern = evn.isBitField and evn.textEditorStr or '1'
-    evn.interval = evn.isBitField and 1 or tonumber(evn.textEditorStr)
-    evn.offsetEditorStr = offset
-    evn.offset = tonumber(evn.offsetEditorStr)
+    evn.interval = evn.isBitField and 1 or (tonumber(evn.textEditorStr) or 1)
+    evn.offsetEditorStr = offset or '0'
+    evn.offset = tonumber(evn.offsetEditorStr) or 0
+  else
+    evn.isBitField = false
+    evn.textEditorStr = '1'
+    evn.pattern = evn.textEditorStr
+    evn.interval = 1
+    evn.offsetEditorStr = '0'
+    evn.offset = 0
   end
   return evn
 end
@@ -2151,9 +2170,11 @@ function ProcessFindMacroRow(buf, boolstr)
         condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
         if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
         if param1 and param1 ~= '' then
+          -- mu.post('param1', param1)
           param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
         end
         if param2 and param2 ~= '' then
+          -- mu.post('param2', param2)
           param2 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param2', param2Tab, param2, 2)
         end
         row.param1Val = param1
@@ -2666,7 +2687,7 @@ function ProcessFind(take, fromHasTable)
   local rangeType = SELECT_TIME_SHEBANG
   local findRangeStart, findRangeEnd
 
-  wantsType = {}
+  wantsTab = {}
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
 
   for k, v in ipairs(findRowTable) do
@@ -2713,22 +2734,18 @@ function ProcessFind(take, fromHasTable)
     -- wants
     if curTarget.notation == '$type' and condition.notation == '==' and not v.isNot then
       local typeType = param1Tab[v.param1Entry].notation
-      if typeType == '$note' then wantsType[0x90] = true
-      elseif typeType == '$polyat' then wantsType[0xA0] = true
-      elseif typeType == '$cc' then wantsType[0xB0] = true
-      elseif typeType == '$pc' then wantsType[0xC0] = true
-      elseif typeType == '$at' then wantsType[0xD0] = true
-      elseif typeType == '$pb' then wantsType[0xE0] = true
-      elseif typeType == '$syx' then wantsType[0xF0] = true
+      if typeType == '$note' then wantsTab[0x90] = true
+      elseif typeType == '$polyat' then wantsTab[0xA0] = true
+      elseif typeType == '$cc' then wantsTab[0xB0] = true
+      elseif typeType == '$pc' then wantsTab[0xC0] = true
+      elseif typeType == '$at' then wantsTab[0xD0] = true
+      elseif typeType == '$pb' then wantsTab[0xE0] = true
+      elseif typeType == '$syx' then wantsTab[0xF0] = true
       end
     elseif curTarget.notation == '$type' and condition.notation == ':all' then
-      wantsType[0x90] = true
-      wantsType[0xA0] = true
-      wantsType[0xB0] = true
-      wantsType[0xC0] = true
-      wantsType[0xD0] = true
-      wantsType[0xE0] = true
-      wantsType[0xF0] = true
+      for i = 9, 15 do
+        wantsTab[i << 4] = true
+      end
     end
 
     -- range processing
@@ -3823,6 +3840,7 @@ function LoadPreset(pPath)
         local presetTab = deserialize(tabStr)
         if presetTab then
           local notes = LoadPresetFromTable(presetTab)
+          dirtyFind = true
           return true, notes, presetTab.scriptIgnoreSelectionInArrangeView
         end
       end
@@ -3964,11 +3982,19 @@ TransformerLib.getHasTable = function()
     end
 
     if not gotSomething then
-      for kk, vv in pairs(wantsType) do
+      for kk, vv in pairs(wantsTab) do
         if vv == true then
           hasTable[kk] = true
+          gotSomething = true
         end
       end
+    end
+
+    if not gotSomething then
+      hasTable[0x90] = true -- if there's really nothing, just display as if it's notes-only
+      -- for i = 9, 15 do
+      --   hasTable[i << 4] = true
+      -- end
     end
 
     dirtyFind = false

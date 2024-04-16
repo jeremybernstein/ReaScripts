@@ -125,6 +125,7 @@ local canonicalFontWidth
 
 local currentFontWidth
 local currentFrameHeight
+local currentFrameHeightEx
 local framePaddingX, framePaddingY
 
 local updateItemBoundsOnEdit = true
@@ -314,13 +315,13 @@ local function makeDefaultNewMIDIEvent(row)
     channel = 0,
     selected = true,
     muted = false,
-    msg2 = 64,
+    msg2 = 60,
     msg3 = 64,
     posText = tx.DEFAULT_TIMEFORMAT_STRING,
-    projtime = 0,
     durText = '0.1.00', -- one beat long as a default?
-    projlen = 1,
     relvel = 0,
+    projtime = 0,
+    projlen = 1,
   }
 end
 
@@ -1022,7 +1023,7 @@ local function windowFn()
 
       local listed = false
       if dontClose then
-        listed = r.ImGui_BeginListBox(ctx, '##wrapperBox')
+        listed = r.ImGui_BeginListBox(ctx, '##wrapperBox', nil, currentFrameHeightEx * #source)
       end
 
       for i = 1, #source do
@@ -1154,6 +1155,8 @@ local function windowFn()
         local label =  #paramTab ~= 0 and paramEntry.label or '---'
         if isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
+        elseif isNewMIDIEvent then
+          label = (terms == 2 and row.param2Entry == 2) and (label .. ' ' .. row.nme.posText) or terms == 1 and (label .. ': ' .. row.nme.msg2 .. ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0) and '' or ('/' .. row.nme.msg3)) .. (row.nme.chanmsg ~= 0x90 and '' or (' [' .. row.nme.durText .. ']'))) or label
         end
         if isMetricOrMusical and paramEntry.notation ~= '$grid' then
           if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
@@ -1447,7 +1450,7 @@ local function windowFn()
     r.ImGui_Text(ctx, 'Channel')
     r.ImGui_SameLine(ctx)
 
-    if r.ImGui_BeginListBox(ctx, '##chanList', (currentFontWidth and currentFontWidth or canonicalFontWidth) * 10, currentFrameHeight * 3) then
+    if r.ImGui_BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
       for i = 1, 16 do
         local rv, sel = r.ImGui_MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
         if rv and sel then
@@ -1522,7 +1525,7 @@ local function windowFn()
       end
     end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if is14 then r.ImGui_EndDisabled(ctx) end
+    if is14 or twobyte then r.ImGui_EndDisabled(ctx) end
 
     if nme.chanmsg == 0x90 then
       r.ImGui_Separator(ctx)
@@ -1559,6 +1562,40 @@ local function windowFn()
 
   local function newMIDIEventParam1Special(fun, row)
     newMIDIEventActionParam1Special(fun, row)
+  end
+
+  local function newMIDIEventActionParam2Special(fun, row) -- type list is main menu
+    local nme = row.nme
+    local deactivated = false
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_AlignTextToFramePadding(ctx)
+
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+    local rv
+    if nme.posmode ~= 2 then r.ImGui_BeginDisabled(ctx) end
+    rv, nme.posText = r.ImGui_InputText(ctx, 'Pos.', nme.posText, r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    if rv then
+      nme.posText = tx.timeFormatRebuf(nme.posText)
+    end
+    if nme.posmode ~= 2 then r.ImGui_EndDisabled(ctx) end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 2)
+  end
+
+  local function newMIDIEventParam2Special(fun, row)
+    newMIDIEventActionParam2Special(fun, row)
   end
 
   ----------------------------------------------
@@ -2120,6 +2157,7 @@ local function windowFn()
             elseif operationEntries[currentRow.operationEntry].newevent then
               currentRow.nme.chanmsg = tonumber(currentRow.param1Val.text)
             end
+            tx.processAction()
           end
         end,
         paramTypes[1] == tx.PARAM_TYPE_MUSICAL
@@ -2127,13 +2165,22 @@ local function windowFn()
           or paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT
             and newMIDIEventParam1Special
           or nil,
-        true)
+          paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT)
 
-      createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
-          currentRow.param2Entry = i
-          currentRow.param2Val = param2Entries[i]
-          tx.processAction()
-        end)
+      createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i, isSpecial)
+          if not isSpecial then
+            currentRow.param2Entry = i
+            currentRow.param2Val = param2Entries[i]
+            if operationEntries[currentRow.operationEntry].newevent then
+              currentRow.nme.posmode = i
+            end
+            tx.processAction()
+          end
+        end,
+        paramTypes[2] == tx.PARAM_TYPE_NEWMIDIEVENT
+            and newMIDIEventParam2Special
+          or nil,
+          paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT)
 
       r.ImGui_PopID(ctx)
     end
@@ -2216,7 +2263,7 @@ local function windowFn()
   Spacing(true)
 
   local presetButtonBottom = r.ImGui_GetCursorPosY(ctx)
-  r.ImGui_Button(ctx, '...', (currentFontWidth and currentFontWidth or canonicalFontWidth) + scaled(10))
+  r.ImGui_Button(ctx, '...', currentFontWidth + scaled(10))
   local _, presetButtonHeight = r.ImGui_GetItemRectSize(ctx)
   presetButtonBottom = presetButtonBottom + presetButtonHeight
   if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
@@ -2490,7 +2537,7 @@ local function windowFn()
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)
   end
 
-  restoreX = restoreX + 60 * (currentFontWidth and currentFontWidth or canonicalFontWidth)
+  restoreX = restoreX + 60 * currentFontWidth
   r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
 
   local windowSizeX = r.ImGui_GetWindowSize(ctx)
@@ -2884,13 +2931,18 @@ local function loop()
     if not prepped then
       r.ImGui_PushFont(ctx, canonicalFont)
       canonicalFontWidth = r.ImGui_CalcTextSize(ctx, '0', nil, nil)
+      currentFontWidth = canonicalFontWidth
       currentFrameHeight = r.ImGui_GetFrameHeight(ctx)
+      currentFrameHeightEx = r.ImGui_GetFrameHeightWithSpacing(ctx)
+      currentFrameHeightEx = currentFrameHeight + math.ceil(((currentFrameHeightEx - currentFrameHeight) / 2) + 0.5)
       r.ImGui_PopFont(ctx)
       prepped = true
     else
       currentFontWidth = r.ImGui_CalcTextSize(ctx, '0', nil, nil)
       DEFAULT_ITEM_WIDTH = 10 * currentFontWidth -- (currentFontWidth / canonicalFontWidth)
       currentFrameHeight = r.ImGui_GetFrameHeight(ctx)
+      currentFrameHeightEx = r.ImGui_GetFrameHeightWithSpacing(ctx)
+      currentFrameHeightEx = currentFrameHeight + math.ceil(((currentFrameHeightEx - currentFrameHeight) / 2) + 0.5)
       fontWidScale = currentFontWidth / canonicalFontWidth
     end
 

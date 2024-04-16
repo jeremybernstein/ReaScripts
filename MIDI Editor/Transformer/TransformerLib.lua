@@ -63,7 +63,7 @@ local SELECT_TIME_MAXRANGE = 2
 local SELECT_TIME_RANGE = 3
 local SELECT_TIME_INDIVIDUAL = 4
 
-local findParserError = ''
+local parserError = ''
 local dirtyFind = false
 local wantsTab = {}
 
@@ -458,6 +458,7 @@ local CURSOR_GT = 2
 local CURSOR_AT = 3
 local CURSOR_LTE = 4
 local CURSOR_GTE = 5
+local CURSOR_UNDER = 6
 
 local findCursorParam1Entries = {
   { notation = '$before', label = 'Before Cursor', text = 'CURSOR_LT', timeselect = SELECT_TIME_MAXRANGE }, -- todo search for notation
@@ -465,6 +466,7 @@ local findCursorParam1Entries = {
   { notation = '$at', label = 'At Cursor', text = 'CURSOR_AT', timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = '$before_at', label = 'Before or At Cursor', text = 'CURSOR_LTE', timeselect = SELECT_TIME_MAXRANGE },
   { notation = '$after_at', label = 'After or At Cursor', text = 'CURSOR_GTE', timeselect = SELECT_TIME_MINRANGE },
+  { notation = '$undercursor', label = 'Under Cursor (note)', text = 'CURSOR_UNDER', timeselect = SELECT_TIME_INDIVIDUAL },
 }
 
 local findMusicalParam1Entries = {
@@ -728,6 +730,7 @@ local actionNewEventOperationEntries = {
 
 local newMIDIEventPositionEntries = {
   { notation = '$atcursor', label = 'At Edit Cursor', text = '0' },
+  { notation = '$atposition', label = 'At Position:', text = '1' },
 }
 
 local actionGenericOperationEntries = {
@@ -1036,16 +1039,23 @@ end
 function CursorPosition(event, property, cursorPosProj, which)
   local time = event[property]
 
-  if which == 1 then -- before
+  if which == CURSOR_LT then -- before
     return time < cursorPosProj
-  elseif which == 2 then -- after
+  elseif which == CURSOR_GT then -- after
     return time > cursorPosProj
-  elseif which == 3 then -- at
+  elseif which == CURSOR_AT then -- at
     return time == cursorPosProj
-  elseif which == 4 then -- before/at
+  elseif which == CURSOR_LTE then -- before/at
     return time <= cursorPosProj
-  elseif which == 5 then -- after/at
+  elseif which == CURSOR_GTE then -- after/at
     return time >= cursorPosProj
+  elseif which == CURSOR_UNDER then
+    local endtime = time + event.projlen
+    if GetEventType(event) == NOTE_TYPE then
+      return cursorPosProj >= time and cursorPosProj < endtime
+    else
+      return time == cursorPosProj
+    end
   end
   return false
 end
@@ -2067,6 +2077,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
     for k, v in ipairs(paramTab) do
       if v.notation == str then
         row.param2Entry = k
+        row.nme.posmode = k
         break
       end
     end
@@ -2430,6 +2441,7 @@ context.CURSOR_GT = CURSOR_GT
 context.CURSOR_AT = CURSOR_AT
 context.CURSOR_LTE = CURSOR_LTE
 context.CURSOR_GTE = CURSOR_GTE
+context.CURSOR_UNDER = CURSOR_UNDER
 
 context.GetTimeOffset = GetTimeOffset
 
@@ -2769,7 +2781,9 @@ function RunFind(findFn, params, runFn)
     hasTable = hasTable,
     take = params and params.take,
     PPQ = (params and params.take) and mu.MIDI_GetPPQ(params.take) or 960,
-    findRange = params and params.findRange
+    findRange = params and params.findRange,
+    findFnString = params and params.findFnString,
+    actionFnString = params and params.actionFnString,
   }
   return found, contextTab, getUnfound and unfound or nil
 end
@@ -2906,7 +2920,7 @@ function ProcessFind(take, fromHasTable)
     end
     -- mu.post(k .. ': ' .. rowStr)
 
-    fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr -- TODO Boolean
+    fnString = fnString == '' and (' ' .. rowStr .. '\n') or (fnString .. ' ' .. rowStr .. '\n')
     ::continue::
   end
 
@@ -2926,18 +2940,18 @@ function ProcessFind(take, fromHasTable)
   local success, pret, err = pcall(load, fnString, nil, nil, context)
   if success and pret then
     findFn = pret()
-    findParserError = ''
+    parserError = ''
   else
-    findParserError = 'Fatal error: could not load selection criteria'
+    parserError = 'Fatal error: could not load selection criteria'
     if err then
       if string.match(err, '\'%)\' expected') then
-        findParserError = findParserError .. ' (Unmatched Parentheses)'
+        parserError = parserError .. ' (Unmatched Parentheses)'
       end
     end
   end
 
   if not fromHasTable then dirtyFind = true end
-  return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }
+  return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }, fnString
 end
 
 function ActionTabsFromTarget(row)
@@ -3321,16 +3335,62 @@ local CreateNewMIDIEvent_Once
 
 function HandleCreateNewMIDIEvent(take, contextTab)
   if CreateNewMIDIEvent_Once then
-    for _, row in ipairs(actionRowTable) do
+    for i, row in ipairs(actionRowTable) do
       if row.nme then
         local nme = row.nme
-        local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, r.GetCursorPositionEx(0)) -- check for abs pos mode
-        if GetEventType(nme) == NOTE_TYPE then
-          local endppqpos = ppqpos + contextTab.PPQ
-          local relvel = nme.relvel or 0
-          mu.MIDI_InsertNote(take, nme.selected, nme.muted, ppqpos, endppqpos, nme.channel, nme.msg2, nme.msg3, relvel)
-        elseif GetEventType(nme) == CC_TYPE then
-          mu.MIDI_InsertCC(take, nme.selected, nme.muted, ppqpos, nme.chanmsg, nme.channel, nme.msg2, nme.msg3)
+
+        -- magic
+
+        local fnTab = {}
+        for s in contextTab.actionFnString:gmatch("[^\r\n]+") do
+          table.insert(fnTab, s)
+        end
+        for ii = 2, i + 1 do
+          fnTab[ii] = nil
+        end
+        local fnString = ''
+        for _, s in pairs(fnTab) do
+          fnString = fnString .. s .. '\n'
+        end
+
+        local actionFn
+        local success, pret, err = pcall(load, fnString, nil, nil, context)
+        if success and pret then
+          local timeAdjust = GetTimeOffset()
+          local e = tableCopy(nme)
+          local pos = nme.posmode ~= 2 and r.GetCursorPositionEx(0) or 0
+          if nme.posmode == 2 then
+            pos = TimeFormatToSeconds(nme.posText, nil, context) - timeAdjust
+          end
+
+          e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos) -- check for abs pos mode\
+          e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + LengthFormatToSeconds(nme.durText, pos, context))
+          e.chan = e.channel
+          e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
+          CalcMIDITime(take, e)
+
+          actionFn = pret()
+          actionFn(e, GetSubtypeValueName(e), GetMainValueName(e), contextTab)
+
+          local evType = GetEventType(e)
+
+          e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, e.projtime - timeAdjust)
+          if evType == NOTE_TYPE then
+            e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (e.projtime - timeAdjust) + e.projlen)
+            e.msg3 = e.msg3 < 1 and 1 or e.msg3
+          end
+          PostProcessSelection(e)
+          e.muted = (e.flags & 2) ~= 0
+
+          if evType == NOTE_TYPE then
+            mu.MIDI_InsertNote(take, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.msg2, e.msg3, e.relvel)
+          elseif evType == CC_TYPE then
+            mu.MIDI_InsertCC(take, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3)
+          end
+
+        elseif err then
+          mu.post(err)
+          parserError = 'Fatal error: could not load action description (New MIDI Event)'
         end
       end
     end
@@ -3681,9 +3741,9 @@ function ProcessActionForTake(take)
     end
     -- mu.post(k .. ': ' .. rowStr)
 
-    fnString = fnString == '' and rowStr or fnString .. ' ' .. rowStr ..'\n'
+    fnString = fnString == '' and (' ' .. rowStr .. '\n') or (fnString .. ' ' .. rowStr .. '\n')
   end
-  fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\nreturn event' .. '\nend'
+  fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\n return event' .. '\nend'
   if DEBUGPOST then
     mu.post('======== ACTION FUN ========')
     mu.post(fnString)
@@ -3727,10 +3787,10 @@ function ProcessAction(execute, fromScript)
           dirtyFind = true
         elseif err then
           mu.post(err)
-          findParserError = 'Fatal error: could not load action description'
+          parserError = 'Fatal error: could not load action description'
         end
       else
-        findParserError = 'Fatal error: could not load action description'
+        parserError = 'Fatal error: could not load action description'
       end
     end
     return
@@ -3746,29 +3806,36 @@ function ProcessAction(execute, fromScript)
     addLengthFirstEventOffset_Take = nil
 
     local actionFn
-    local findFn, wantsEventPreprocessing, findRange = ProcessFind(take, nil)
+    local actionFnString
+    local findFn, wantsEventPreprocessing, findRange, findFnString = ProcessFind(take, nil)
     if findFn then
-      local fnString = ProcessActionForTake(take)
-      if fnString then
-        local success, pret, err = pcall(load, fnString, nil, nil, context)
+      actionFnString = ProcessActionForTake(take)
+      if actionFnString then
+        local success, pret, err = pcall(load, actionFnString, nil, nil, context)
         if success and pret then
           actionFn = pret()
         elseif err then
           mu.post(err)
-          findParserError = 'Fatal error: could not load action description'
+          parserError = 'Fatal error: could not load action description'
         end
       else
-        findParserError = 'Fatal error: could not load action description'
+        parserError = 'Fatal error: could not load action description'
       end
     end
 
     if findFn and actionFn then
+      local function canProcess(found)
+        return #found ~=0 or CreateNewMIDIEvent_Once
+      end
+
       local notation = actionScopeTable[currentActionScope].notation
       local defParams = {
         wantsEventPreprocessing = wantsEventPreprocessing,
         findRange = findRange,
         take = take,
-        PPQ = context.PPQ
+        PPQ = context.PPQ,
+        findFnString = findFnString,
+        actionFnString = actionFnString,
       }
       if notation == '$select' then
         mu.MIDI_OpenWriteTransaction(take)
@@ -3804,7 +3871,7 @@ function ProcessAction(execute, fromScript)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$transform' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 or CreateNewMIDIEvent_Once then
+        if canProcess(found) then
           TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$replace' then
@@ -3812,12 +3879,12 @@ function ProcessAction(execute, fromScript)
         repParams.wantsUnfound = true
         repParams.addRangeEvents = true
         local found, contextTab, unfound = RunFind(findFn, repParams)
-        if #found ~=0 or CreateNewMIDIEvent_Once then
+        if canProcess(found) then
           TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
         end
       elseif notation == '$copy' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 or CreateNewMIDIEvent_Once then
+        if canProcess(found) then
           local newtake = NewTakeInNewTrack(take)
           if newtake then
             InsertEventsIntoTake(newtake, found, actionFn, contextTab)
@@ -3826,7 +3893,7 @@ function ProcessAction(execute, fromScript)
       elseif notation == '$copylane' then
         if isREAPER7() then
           local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 or CreateNewMIDIEvent_Once then
+          if canProcess(found) then
             local newtake = NewTakeInNewLane(take)
             if newtake then
               InsertEventsIntoTake(newtake, found, actionFn, contextTab)
@@ -3835,7 +3902,7 @@ function ProcessAction(execute, fromScript)
         end
       elseif notation == '$insert' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 or CreateNewMIDIEvent_Once then
+        if canProcess(found) then
           InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$insertexclusive' then
@@ -3843,7 +3910,7 @@ function ProcessAction(execute, fromScript)
         ieParams.wantsUnfound = true
         local found, contextTab, unfound = RunFind(findFn, ieParams)
         mu.MIDI_OpenWriteTransaction(take)
-        if #found ~=0 or CreateNewMIDIEvent_Once then
+        if canProcess(found) then
           InsertEventsIntoTake(take, found, actionFn, contextTab, false)
           if unfound and #unfound ~=0 then
             DeleteEventsInTake(take, unfound, false)
@@ -3852,7 +3919,7 @@ function ProcessAction(execute, fromScript)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$extracttrack' then
         local found, contextTab = RunFind(findFn, defParams)
-        if #found ~=0 or CreateNewMIDIEvent_Once then
+        if canProcess(found) then
           local newtake = NewTakeInNewTrack(take)
           if newtake then
             InsertEventsIntoTake(newtake, found, actionFn, contextTab)
@@ -3862,7 +3929,7 @@ function ProcessAction(execute, fromScript)
       elseif notation == '$extractlane' then
         if isREAPER7() then
           local found, contextTab = RunFind(findFn, defParams)
-          if #found ~=0 or CreateNewMIDIEvent_Once then
+          if canProcess(found) then
             local newtake = NewTakeInNewLane(take)
             if newtake then
               InsertEventsIntoTake(newtake, found, actionFn, contextTab)

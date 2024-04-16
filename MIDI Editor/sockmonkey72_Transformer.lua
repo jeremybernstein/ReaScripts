@@ -1050,7 +1050,7 @@ local function windowFn()
 
         if rv then
           fun(i)
-          if not dontClose then
+          if not dontClose or selEntry == i then
             r.ImGui_CloseCurrentPopup(ctx)
           end
         end
@@ -1452,10 +1452,10 @@ local function windowFn()
 
     if r.ImGui_BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
       for i = 1, 16 do
-        local rv, sel = r.ImGui_MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
-        if rv and sel then
+        local rv = r.ImGui_MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
+        if rv then
+          if nme.channel == i - 1 then r.ImGui_CloseCurrentPopup(ctx) end
           nme.channel = i - 1
-          fun(0, true)
         end
       end
       r.ImGui_EndListBox(ctx)
@@ -1473,7 +1473,6 @@ local function windowFn()
     local rv, sel = r.ImGui_Checkbox(ctx, 'Sel?', nme.selected)
     if rv then
       nme.selected = sel
-      fun(0, true)
     end
 
     r.ImGui_SetCursorPos(ctx, saveX, saveY + (currentFrameHeight * 1.1))
@@ -1481,7 +1480,6 @@ local function windowFn()
     rv, sel = r.ImGui_Checkbox(ctx, 'Mute?', nme.muted)
     if rv then
       nme.muted = sel
-      fun(0, true)
     end
 
     r.ImGui_SetCursorPosY(ctx, saveY + (currentFrameHeight * 2.7))
@@ -1494,7 +1492,7 @@ local function windowFn()
     local is14 = nme.chanmsg == 0xE0
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte1Txt = is14 and tostring((nme.msg3 << 7 | nme.msg2) - (1 << 13)) or tostring(nme.msg2)
-    rv, byte1Txt = r.ImGui_InputText(ctx, 'Val1', byte1Txt, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte1Txt = r.ImGui_InputText(ctx, 'Val1', byte1Txt, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if rv then
       local nummy = tonumber(byte1Txt) or 0
       if is14 then
@@ -1515,7 +1513,7 @@ local function windowFn()
     if is14 or twobyte then r.ImGui_BeginDisabled(ctx) end
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte2Txt = (is14 or twobyte) and '0' or tostring(nme.msg3)
-    rv, byte2Txt = r.ImGui_InputText(ctx, 'Val2', byte2Txt, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte2Txt = r.ImGui_InputText(ctx, 'Val2', byte2Txt, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if rv then
       local nummy = tonumber(byte2Txt) or 0
       if is14 or twobyte then
@@ -1531,10 +1529,9 @@ local function windowFn()
       r.ImGui_Separator(ctx)
 
       r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-      rv, nme.durText = r.ImGui_InputText(ctx, 'Dur.', nme.durText, r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+      rv, nme.durText = r.ImGui_InputText(ctx, 'Dur.', nme.durText, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
       if rv then
         nme.durText = tx.lengthFormatRebuf(nme.durText)
-        --fun(0, true)
       end
       if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
 
@@ -1542,11 +1539,10 @@ local function windowFn()
 
       r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
       local relVelTxt = tostring(nme.relvel)
-      rv, relVelTxt = r.ImGui_InputText(ctx, 'RelVel', relVelTxt, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      rv, relVelTxt = r.ImGui_InputText(ctx, 'RelVel', relVelTxt, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
       if rv then
         nme.relvel = tonumber(relVelTxt) or 0
         nme.relvel = nme.relvel < 0 and 0 or nme.relvel > 127 and 127 or nme.relvel
-        --fun(0, true)
       end
       if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     end
@@ -1578,7 +1574,7 @@ local function windowFn()
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
     local rv
     if nme.posmode ~= 2 then r.ImGui_BeginDisabled(ctx) end
-    rv, nme.posText = r.ImGui_InputText(ctx, 'Pos.', nme.posText, r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    rv, nme.posText = r.ImGui_InputText(ctx, 'Pos.', nme.posText, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
     if rv then
       nme.posText = tx.timeFormatRebuf(nme.posText)
     end

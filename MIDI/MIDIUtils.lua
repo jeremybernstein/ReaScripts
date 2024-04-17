@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.24
+-- @version 0.1.25
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix event sorting regression
+--   - fix edge case where identical events could mutually delete each other during overlap correction
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -758,7 +758,8 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
     if testEvent.ppqpos == selectedEvent.ppqpos and testEvent.endppqpos == selectedEvent.endppqpos then
       local testSel = testEvent:IsSelected()
       local selSel = selectedEvent:IsSelected()
-      if testSel ~= selSel and testSel then selectedEvent.delete = true
+
+      if (testSel ~= selSel and testSel) or selectedEvent.delete then selectedEvent.delete = true
       else testEvent.delete = true
       end
       return true

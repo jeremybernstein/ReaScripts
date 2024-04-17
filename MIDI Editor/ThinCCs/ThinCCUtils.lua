@@ -38,7 +38,7 @@ function GenerateEventListFromAllEvents(take, fun)
       local status = b1 & 0xF0
       if status >= 0xA0 and status <= 0xF0 then
         MIDIEvents[#MIDIEvents].wantsdelete = 1 -- we will delete this point before rewriting
-        AddPointToList({ events = events }, { idx = -1, ppqpos = ppqpos, chanmsg = b1 & 0xF0, chan = b1 & 0x0F, msg2 = msg:byte(2), msg3 = msg:byte(3), selected = (flags & 1 ~= 0) and true or false, muted = (flags & 2 ~= 0) and true or false, shape = (flags & 0xF0) >> 4 }, pbSnap)
+        AddPointToList({ events = events }, { idx = -1, src = #MIDIEvents, ppqpos = ppqpos, chanmsg = b1 & 0xF0, chan = b1 & 0x0F, msg2 = msg:byte(2), msg3 = msg:byte(3), selected = (flags & 1 ~= 0) and true or false, muted = (flags & 2 ~= 0) and true or false, shape = (flags & 0xF0) >> 4 }, pbSnap)
       end
     end
     stringPos = newStringPos
@@ -103,9 +103,9 @@ function AddPointToList(eventlist, event, pbSnap)
 
   if curlist then
     if #curlist > 0 and (isSnapped or curlist[#curlist].shape == 0) then -- previous was square, add a point
-      curlist[#curlist + 1] = { ppqpos = event.ppqpos - 1, value = curlist[#curlist].value, idx = -1, selected = curlist[#curlist].selected, muted = curlist[#curlist].muted, shape = event.shape }
+      curlist[#curlist + 1] = { ppqpos = event.ppqpos - 1, value = curlist[#curlist].value, idx = -1, selected = curlist[#curlist].selected, muted = curlist[#curlist].muted, shape = event.shape, src = event.src }
     end
-    curlist[#curlist + 1] = { ppqpos = event.ppqpos, value = is2byte and event.msg2 or event.msg3, idx = event.idx, selected = event.selected, muted = event.muted, shape = event.shape }
+    curlist[#curlist + 1] = { ppqpos = event.ppqpos, value = is2byte and event.msg2 or event.msg3, idx = event.idx, selected = event.selected, muted = event.muted, shape = event.shape, src = event.src }
     if isPB then
       curlist[#curlist].value = event.msg2 | (event.msg3 << 7)
     end
@@ -120,11 +120,14 @@ function PrepareList(eventlist)
   -- exclude tables with fewer than 3 points
   for _, v in pairs(eventlist.events) do
     if #v.points < 3 then
-      if eventlist.todelete then
-        for _, p in pairs(v.points) do
+      for _, p in pairs(v.points) do
+        if eventlist.todelete then
           if p.idx >= 0 then
             eventlist.todelete[p.idx] = nil
           end
+        end
+        if p.src then
+          MIDIEvents[p.src].wantsdelete = nil
         end
       end
       v.points = {}

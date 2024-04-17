@@ -1,11 +1,11 @@
 -- @description Thin MIDI CC Events
--- @version 1.7.3
+-- @version 1.7.4
 -- @author sockmonkey72
 -- @about
 --   # Thin MIDI CC Events
 --   Reduce density of MIDI CC events
 -- @changelog
---   - added Thin CCs in Last-Clicked Lane (contributed by smandrap, thank you!)
+--   - fix deletion of non-thinnable lanes (too few points)
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua

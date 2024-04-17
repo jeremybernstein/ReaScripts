@@ -2053,7 +2053,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
       nme.posText = pos
       nme.durText = dur
       nme.relvel = tonumber(relvel:sub(1, 2), 16)
-      nme.posmode = 0 -- cursorpos
+      nme.posmode = NEWEVENT_POSITION_ATCURSOR
 
       for k, v in ipairs(paramTab) do
         if tonumber(v.text) == nme.chanmsg then
@@ -2071,6 +2071,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
       nme.posText = DEFAULT_TIMEFORMAT_STRING
       nme.durText = '0.1.00'
       nme.relvel = 0
+      nme.posmod = NEWEVENT_POSITION_ATCURSOR
     end
     row.nme = nme
   elseif index == 2 then

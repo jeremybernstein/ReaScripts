@@ -1,15 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.39
+-- @version 1.0-alpha.40
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'Under Cursor' position criteria (notes which extend across the cursor position)
---   - new 'New Event' action for creating MIDI messages
---   - fix for metric grid pre-slop (and some other details)
---   - fix for intermittent issue with folder enumeration on Windows
---   - bump MIDI Utis API to fix mutually assured destruction bug
---   - add Stevie folder to Factory Presets (thanks Stevie!)
+--   - fix 'New Event' default position
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -23,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.39'
+local versionStr = '1.0-alpha.40'
 
 local r = reaper
 
@@ -315,7 +310,7 @@ end
 local function makeDefaultNewMIDIEvent(row)
   row.param1Entry = 1
   row.param2Entry = 1
-  row.nme = { -- could just make a mu Event?
+  row.nme = {
     chanmsg = 0x90,
     channel = 0,
     selected = true,
@@ -327,6 +322,7 @@ local function makeDefaultNewMIDIEvent(row)
     relvel = 0,
     projtime = 0,
     projlen = 1,
+    posmode = tx.NEWEVENT_POSITION_ATCURSOR,
   }
 end
 

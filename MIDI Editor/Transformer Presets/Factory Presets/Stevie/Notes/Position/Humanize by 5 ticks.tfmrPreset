@@ -1,0 +1,9 @@
+{
+ actionMacro = "$position :relrandom(-0.0.5t, 0.0.5t)",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
+ findScope = "$everywhere",
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

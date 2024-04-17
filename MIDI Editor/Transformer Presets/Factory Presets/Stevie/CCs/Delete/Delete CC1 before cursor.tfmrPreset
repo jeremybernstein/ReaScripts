@@ -1,0 +1,13 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $cc && $value1 == percent<0.7874> && $position :cursorpos($before)",
+ findScope = "$midieditor",
+ notes = "Authors: David Floyd & Stevie\
+\
+In loving memory to David Floyd\
+\
+Big Thanks!!",
+ scriptIgnoreSelectionInArrangeView = false,
+}

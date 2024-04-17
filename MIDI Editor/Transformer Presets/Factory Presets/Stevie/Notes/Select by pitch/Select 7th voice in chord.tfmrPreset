@@ -1,0 +1,12 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $lastevent :chordpos(6)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+  [1] = "$selectedonly",
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

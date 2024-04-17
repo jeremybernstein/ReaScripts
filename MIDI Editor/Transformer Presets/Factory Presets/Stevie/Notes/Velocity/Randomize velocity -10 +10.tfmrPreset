@@ -1,0 +1,12 @@
+{
+ actionMacro = "$value2 :relrandom(percent<-7.8740>, percent<7.8740>)",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
+ findScope = "$midieditor",
+ findScopeFlags = {
+  [1] = "$selectedonly",
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

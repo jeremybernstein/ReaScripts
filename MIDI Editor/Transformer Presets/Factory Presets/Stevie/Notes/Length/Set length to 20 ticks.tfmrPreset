@@ -1,0 +1,9 @@
+{
+ actionMacro = "$length = 0.0.20t",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
+ findScope = "$everywhere",
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

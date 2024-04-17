@@ -1,0 +1,11 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $position :cursorpos($at)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

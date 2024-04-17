@@ -1,0 +1,11 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $length :eqmusical($1/16|--|40.00|40.00)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

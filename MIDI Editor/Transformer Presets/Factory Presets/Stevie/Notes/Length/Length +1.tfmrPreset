@@ -1,0 +1,7 @@
+{
+ actionMacro = "$length + 0.0.01",
+ actionScope = "$transform",
+ findMacro = "$type == $note",
+ findScope = "$everywhere",
+ notes = "",
+}

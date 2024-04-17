@@ -1,0 +1,11 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $position :onmetricgrid($1/16|-b|0.00|0.00, 01)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

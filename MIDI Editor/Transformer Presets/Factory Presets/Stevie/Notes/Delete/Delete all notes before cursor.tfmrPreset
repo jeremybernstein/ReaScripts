@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$type == $note && $position :cursorpos($before)",
+ findScope = "$midieditor",
+ notes = "",
+}

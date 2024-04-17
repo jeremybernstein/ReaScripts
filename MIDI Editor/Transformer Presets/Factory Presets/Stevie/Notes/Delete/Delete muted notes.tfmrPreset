@@ -1,0 +1,7 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ findMacro = "$type == $note && $property :ismuted()",
+ findScope = "$midieditor",
+ notes = "",
+}

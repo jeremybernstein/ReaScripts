@@ -1,0 +1,11 @@
+{
+ actionMacro = "$value2 :line(percent<100.0000>, percent<0.0000>)",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

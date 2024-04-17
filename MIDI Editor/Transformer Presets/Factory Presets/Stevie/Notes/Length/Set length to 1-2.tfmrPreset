@@ -1,0 +1,7 @@
+{
+ actionMacro = "$length :quantmusical($1/2|--|0.00|0.00)",
+ actionScope = "$transform",
+ findMacro = "$type == $note",
+ findScope = "$everywhere",
+ notes = "",
+}

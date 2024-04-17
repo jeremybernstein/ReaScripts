@@ -1,0 +1,11 @@
+{
+ actionMacro = "",
+ actionScope = "$delete",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $lastevent :everyN(4|-|3)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

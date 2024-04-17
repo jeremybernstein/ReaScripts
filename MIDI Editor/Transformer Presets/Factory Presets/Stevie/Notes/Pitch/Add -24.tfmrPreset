@@ -1,0 +1,12 @@
+{
+ actionMacro = "$value1 - percent<18.8976>",
+ actionScope = "$insert",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
+ findScope = "$midieditor",
+ findScopeFlags = {
+  [1] = "$selectedonly",
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

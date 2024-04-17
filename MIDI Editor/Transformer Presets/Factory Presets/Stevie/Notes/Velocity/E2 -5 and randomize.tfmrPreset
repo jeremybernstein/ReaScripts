@@ -1,0 +1,11 @@
+{
+ actionMacro = "$value2 - percent<3.9370> && $value2 :relrandom(percent<-1.5748>, percent<1.5748>)",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $position :onmetricgrid($1/16|--|0.00|0.00, 0001)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

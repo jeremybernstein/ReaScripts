@@ -1,11 +1,15 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.38
+-- @version 1.0-alpha.39
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
 --   - add 'Under Cursor' position criteria (notes which extend across the cursor position)
 --   - new 'New Event' action for creating MIDI messages
+--   - fix for metric grid pre-slop (and some other details)
+--   - fix for intermittent issue with folder enumeration on Windows
+--   - bump MIDI Utis API to fix mutually assured destruction bug
+--   - add Stevie folder to Factory Presets (thanks Stevie!)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +23,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.38'
+local versionStr = '1.0-alpha.39'
 
 local r = reaper
 

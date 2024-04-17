@@ -1,0 +1,7 @@
+{
+ actionMacro = "$value2 = percent<0.0000>",
+ actionScope = "$transform",
+ findMacro = "$type == $cc && $value1 == percent<0.7874> && $position :cursorpos($before)",
+ findScope = "$midieditor",
+ notes = "Authors: David Floyd & Stevie\n\nIn loving memory to David Floyd\n\nBig Thanks!!",
+}

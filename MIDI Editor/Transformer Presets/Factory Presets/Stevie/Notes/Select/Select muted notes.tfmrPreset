@@ -1,0 +1,11 @@
+{
+ actionMacro = "",
+ actionScope = "$select",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $property :ismuted()",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

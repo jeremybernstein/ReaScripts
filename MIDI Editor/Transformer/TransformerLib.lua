@@ -728,9 +728,14 @@ local actionNewEventOperationEntries = {
   { notation = ':newmidievent', label = 'Create New Event', text = 'CreateNewMIDIEvent()', terms = 2, newevent = true }
 }
 
+local NEWEVENT_POSITION_ATCURSOR = 1
+local NEWEVENT_POSITION_RELCURSOR = 2
+local NEWEVENT_POSITION_ATPOSITION = 3
+
 local newMIDIEventPositionEntries = {
-  { notation = '$atcursor', label = 'At Edit Cursor', text = '0' },
-  { notation = '$atposition', label = 'At Position:', text = '1' },
+  { notation = '$atcursor', label = 'At Edit Cursor', text = '1' },
+  { notation = '$relcursor', label = 'Rel. Edit Cursor:', text = '2' },
+  { notation = '$atposition', label = 'At Position:', text = '3' },
 }
 
 local actionGenericOperationEntries = {
@@ -3358,8 +3363,13 @@ function HandleCreateNewMIDIEvent(take, contextTab)
         if success and pret then
           local timeAdjust = GetTimeOffset()
           local e = tableCopy(nme)
-          local pos = nme.posmode ~= 2 and r.GetCursorPositionEx(0) or 0
-          if nme.posmode == 2 then
+          local pos
+          if nme.posmode == NEWEVENT_POSITION_ATCURSOR then
+            pos = r.GetCursorPositionEx(0)
+          elseif nme.posmode == NEWEVENT_POSITION_RELCURSOR then
+            local curpos = r.GetCursorPositionEx(0)
+            pos = curpos + LengthFormatToSeconds(nme.posText, curpos, context)
+          else
             pos = TimeFormatToSeconds(nme.posText, nil, context) - timeAdjust
           end
 
@@ -4256,6 +4266,10 @@ TransformerLib.EDITOR_7BIT_NOZERO_RANGE = { 1, (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_7BIT_BIPOLAR = EDITOR_TYPE_7BIT_BIPOLAR
 TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -((1 << 7) - 1), (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_BITFIELD = EDITOR_TYPE_BITFIELD
+
+TransformerLib.NEWEVENT_POSITION_ATCURSOR = NEWEVENT_POSITION_ATCURSOR
+TransformerLib.NEWEVENT_POSITION_RELCURSOR = NEWEVENT_POSITION_RELCURSOR
+TransformerLib.NEWEVENT_POSITION_ATPOSITION = NEWEVENT_POSITION_ATPOSITION
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 

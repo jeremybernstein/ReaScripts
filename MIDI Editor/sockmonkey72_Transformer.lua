@@ -4,9 +4,8 @@
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix some preset parsing issues
---   - more ReaImGui 0.9 conformance tweaks
---   - disable lanes Actions Scopes for < R7
+--   - add 'Under Cursor' position criteria (notes which extend across the cursor position)
+--   - new 'New Event' action for creating MIDI messages
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -1131,7 +1130,7 @@ local function windowFn()
     end
   end
 
-  local function handleTableParam(row, condOp, paramName, paramTab, paramType, terms, rowIdx, procFn)
+  local function handleTableParam(row, condOp, paramName, paramTab, paramType, index, rowIdx, procFn)
     local rv = 0
     local editorType = row[paramName .. 'EditorType']
     local isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
@@ -1141,11 +1140,11 @@ local function windowFn()
     local isNewMIDIEvent = paramType == tx.PARAM_TYPE_NEWMIDIEVENT
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
 
-    if isMetricOrMusical and terms == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
-    if isEveryN and terms == 1 then paramType = tx.PARAM_TYPE_MENU end
+    if isMetricOrMusical and index == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
+    if isEveryN and index == 1 then paramType = tx.PARAM_TYPE_MENU end
     if isNewMIDIEvent then paramType = tx.PARAM_TYPE_MENU end
 
-    if condOp.terms >= terms then
+    if condOp.terms >= index then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
       local target = targetTab[row.targetEntry]
 
@@ -1156,7 +1155,7 @@ local function windowFn()
         if isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
         elseif isNewMIDIEvent then
-          label = (terms == 2 and row.param2Entry == 2) and (label .. ' ' .. row.nme.posText) or terms == 1 and (label .. ': ' .. row.nme.msg2 .. ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0) and '' or ('/' .. row.nme.msg3)) .. (row.nme.chanmsg ~= 0x90 and '' or (' [' .. row.nme.durText .. ']'))) or label
+          label = (index == 2 and row.param2Entry ~= tx.NEWEVENT_POSITION_ATCURSOR) and (label .. ' ' .. row.nme.posText) or index == 1 and (label .. ': ' .. row.nme.msg2 .. ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0) and '' or ('/' .. row.nme.msg3)) .. (row.nme.chanmsg ~= 0x90 and '' or (' [' .. row.nme.durText .. ']'))) or label
         end
         if isMetricOrMusical and paramEntry.notation ~= '$grid' then
           if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
@@ -1175,7 +1174,7 @@ local function windowFn()
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
         -- TODO: cleanup these attributes & combinations
-        local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, terms)
+        local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, index)
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
           local strVal = row[paramName .. 'TextEditorStr']
@@ -1209,7 +1208,7 @@ local function windowFn()
           r.ImGui_AlignTextToFramePadding(ctx)
           r.ImGui_PushFont(ctx, fontInfo.small)
           if editorType == tx.EDITOR_TYPE_PERCENT
-            or condOp.percent or (condOp.split and condOp.split[terms].percent) -- hack
+            or condOp.percent or (condOp.split and condOp.split[index].percent) -- hack
           then
             r.ImGui_TextColored(ctx, 0xFFFFFF7F, '%')
           elseif range and range[1] and range[2] then
@@ -1222,7 +1221,7 @@ local function windowFn()
           if r.ImGui_IsMouseClicked(ctx, 0) then
             rv = rowIdx
           -- elseif r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() and r.ImGui_IsMouseClicked(ctx, 1) then
-          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. terms .. 'Type')
+          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. index .. 'Type')
           --   rv = rowIdx
           end
         end
@@ -1240,7 +1239,7 @@ local function windowFn()
           if r.ImGui_IsMouseClicked(ctx, 0) then
             rv = rowIdx
           -- elseif r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() and r.ImGui_IsMouseClicked(ctx, 1) then
-          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. terms .. 'Type')
+          --   r.ImGui_OpenPopup(ctx, 'forceParam' .. index .. 'Type')
           --   rv = rowIdx
           end
         end
@@ -1573,12 +1572,13 @@ local function windowFn()
 
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
     local rv
-    if nme.posmode ~= 2 then r.ImGui_BeginDisabled(ctx) end
-    rv, nme.posText = r.ImGui_InputText(ctx, 'Pos.', nme.posText, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    if nme.posmode == tx.NEWEVENT_POSITION_ATCURSOR then r.ImGui_BeginDisabled(ctx) end
+    local label = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR and 'Rel.' or 'Pos.'
+    rv, nme.posText = r.ImGui_InputText(ctx, label, nme.posText, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
     if rv then
-      nme.posText = tx.timeFormatRebuf(nme.posText)
+      nme.posText = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
     end
-    if nme.posmode ~= 2 then r.ImGui_EndDisabled(ctx) end
+    if nme.posmode == tx.NEWEVENT_POSITION_ATCURSOR then r.ImGui_EndDisabled(ctx) end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then

@@ -115,6 +115,8 @@ local winHeight
 local canonicalFont = r.ImGui_CreateFont(fontStyle, CANONICAL_FONTSIZE_LARGE)
 r.ImGui_Attach(ctx, canonicalFont)
 
+local inputFlag = r.ImGui_InputTextFlags_AutoSelectAll()
+
 local PAREN_COLUMN_WIDTH = 20
 
 local windowInfo
@@ -948,8 +950,6 @@ local function windowFn()
   end
 
   local function enumerateTransformerPresets(pPath, onlyFolders)
-    if not dirExists(pPath) then return {} end
-
     local idx = 0
     local fnames = {}
     local fname
@@ -1078,6 +1078,7 @@ local function windowFn()
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
   if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+    if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetTable = enumerateTransformerPresets(presetPath)
     r.ImGui_OpenPopup(ctx, 'openPresetMenu') -- defined far below
   end
@@ -1376,7 +1377,7 @@ local function windowFn()
     end
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
     local rv, buf = r.ImGui_InputText(ctx, '##everyNentry', evn.textEditorStr,
-      r.ImGui_InputTextFlags_AutoSelectAll() + r.ImGui_InputTextFlags_CallbackCharFilter(),
+      inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(),
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
@@ -1491,7 +1492,7 @@ local function windowFn()
     local is14 = nme.chanmsg == 0xE0
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte1Txt = is14 and tostring((nme.msg3 << 7 | nme.msg2) - (1 << 13)) or tostring(nme.msg2)
-    rv, byte1Txt = r.ImGui_InputText(ctx, 'Val1', byte1Txt, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte1Txt = r.ImGui_InputText(ctx, 'Val1', byte1Txt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if rv then
       local nummy = tonumber(byte1Txt) or 0
       if is14 then
@@ -1512,7 +1513,7 @@ local function windowFn()
     if is14 or twobyte then r.ImGui_BeginDisabled(ctx) end
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte2Txt = (is14 or twobyte) and '0' or tostring(nme.msg3)
-    rv, byte2Txt = r.ImGui_InputText(ctx, 'Val2', byte2Txt, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte2Txt = r.ImGui_InputText(ctx, 'Val2', byte2Txt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if rv then
       local nummy = tonumber(byte2Txt) or 0
       if is14 or twobyte then
@@ -1528,7 +1529,7 @@ local function windowFn()
       r.ImGui_Separator(ctx)
 
       r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-      rv, nme.durText = r.ImGui_InputText(ctx, 'Dur.', nme.durText, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+      rv, nme.durText = r.ImGui_InputText(ctx, 'Dur.', nme.durText, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
       if rv then
         nme.durText = tx.lengthFormatRebuf(nme.durText)
       end
@@ -1538,7 +1539,7 @@ local function windowFn()
 
       r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
       local relVelTxt = tostring(nme.relvel)
-      rv, relVelTxt = r.ImGui_InputText(ctx, 'RelVel', relVelTxt, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      rv, relVelTxt = r.ImGui_InputText(ctx, 'RelVel', relVelTxt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
       if rv then
         nme.relvel = tonumber(relVelTxt) or 0
         nme.relvel = nme.relvel < 0 and 0 or nme.relvel > 127 and 127 or nme.relvel
@@ -1574,7 +1575,7 @@ local function windowFn()
     local rv
     if nme.posmode == tx.NEWEVENT_POSITION_ATCURSOR then r.ImGui_BeginDisabled(ctx) end
     local label = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR and 'Rel.' or 'Pos.'
-    rv, nme.posText = r.ImGui_InputText(ctx, label, nme.posText, r.ImGui_InputTextFlags_AutoSelectAll() | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    rv, nme.posText = r.ImGui_InputText(ctx, label, nme.posText, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
     if rv then
       nme.posText = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
     end
@@ -2263,6 +2264,7 @@ local function windowFn()
   local _, presetButtonHeight = r.ImGui_GetItemRectSize(ctx)
   presetButtonBottom = presetButtonBottom + presetButtonHeight
   if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+    if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetFolders = enumerateTransformerPresets(presetPath, true)
     r.ImGui_OpenPopup(ctx, '##presetfolderselect')
   end
@@ -2468,7 +2470,7 @@ local function windowFn()
       r.ImGui_SetKeyboardFocusHere(ctx)
       refocusOnNextIteration = false
     end
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, r.ImGui_InputTextFlags_AutoSelectAll())
+    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, inputFlag)
     local deactivated = r.ImGui_IsItemDeactivated(ctx)
     if deactivated and (not refocusField or buttonClickSave) then
       local complete = buttonClickSave or completionKeyPress()
@@ -2556,7 +2558,7 @@ local function windowFn()
     updateCurrentRect()
   else
     if justChanged then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, r.ImGui_InputTextFlags_AutoSelectAll())
+    local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, inputFlag)
     if justChanged and r.ImGui_IsItemActivated(ctx) then
       justChanged = false
     end

@@ -1274,15 +1274,29 @@ function OnMetricGrid(take, PPQ, ppqpos, mgParams)
 
   -- CACHED_METRIC is used to avoid iterating from the beginning each time
   -- although it assumes a single metric grid -- how to solve?
-  for i = CACHED_METRIC and CACHED_METRIC or 1, gridLen do
-    local c = gridStr:sub(i, i)
-    local trueStartRange = (gridUnit * (i - 1))
-    local startRange = trueStartRange - preSlop
-    local endRange = trueStartRange + postSlop
-    if modPos >= startRange and modPos <= endRange then
-      CACHED_METRIC = i
-      return c ~= '0' and true or false
+
+  local iter = 0
+  while iter < 2 do
+    local doRestart = false
+    for i = (CACHED_METRIC and iter == 0) and CACHED_METRIC or 1, gridLen do
+      local c = gridStr:sub(i, i)
+      local trueStartRange = (gridUnit * (i - 1))
+      local startRange = trueStartRange - preSlop
+      local endRange = trueStartRange + postSlop
+      local mod2 = modPos
+
+      if modPos > cycleLength - preSlop then
+        mod2 = modPos - cycleLength
+        doRestart = true
+      end
+
+      if mod2 >= startRange and mod2 <= endRange then
+        CACHED_METRIC = i
+        return c ~= '0' and true or false
+      end
     end
+    iter = iter + 1
+    if not doRestart then break end
   end
   return false
 end
@@ -1613,25 +1627,6 @@ end
 
 ---------------------------------------------------------------------------
 --------------------------------- UTILITIES -------------------------------
-
--- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
---- Check if a file or directory exists in this path
-local function filePathExists(file)
-  local ok, err, code = os.rename(file, file)
-  if not ok then
-    if code == 13 then
-    -- Permission denied, but it exists
-      return true
-    end
-  end
-  return ok, err
-end
-
-  --- Check if a directory exists in this path
-local function dirExists(path)
-  -- '/' works on both Unix and Windows
-  return filePathExists(path:match('/$') and path or path..'/')
-end
 
 function EnsureNumString(str, range)
   local num = tonumber(str)
@@ -2793,6 +2788,18 @@ function RunFind(findFn, params, runFn)
   return found, contextTab, getUnfound and unfound or nil
 end
 
+function FnStringToFn(fnString, errFn)
+  local fn
+  local success, pret, err = pcall(load, fnString, nil, nil, context)
+  if success and pret then
+    fn = pret()
+    parserError = ''
+  else
+    if errFn then errFn(err) end
+  end
+  return success, fn
+end
+
 function ProcessFind(take, fromHasTable)
 
   local fnString = ''
@@ -2942,18 +2949,14 @@ function ProcessFind(take, fromHasTable)
 
   context.take = take
   if take then currentGrid, currentSwing = r.MIDI_GetGrid(take) end -- 1.0 is QN, 1.5 dotted, etc.
-  local success, pret, err = pcall(load, fnString, nil, nil, context)
-  if success and pret then
-    findFn = pret()
-    parserError = ''
-  else
+  _, findFn = FnStringToFn(fnString, function(err)
     parserError = 'Fatal error: could not load selection criteria'
     if err then
       if string.match(err, '\'%)\' expected') then
         parserError = parserError .. ' (Unmatched Parentheses)'
       end
     end
-  end
+  end)
 
   if not fromHasTable then dirtyFind = true end
   return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }, fnString
@@ -3358,9 +3361,13 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           fnString = fnString .. s .. '\n'
         end
 
-        local actionFn
-        local success, pret, err = pcall(load, fnString, nil, nil, context)
-        if success and pret then
+        local _, actionFn = FnStringToFn(fnString, function(err)
+          if err then
+            mu.post(err)
+          end
+          parserError = 'Error: could not load action description (New MIDI Event)'
+        end)
+        if actionFn then
           local timeAdjust = GetTimeOffset()
           local e = tableCopy(nme)
           local pos
@@ -3379,7 +3386,6 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
           CalcMIDITime(take, e)
 
-          actionFn = pret()
           actionFn(e, GetSubtypeValueName(e), GetMainValueName(e), contextTab)
 
           local evType = GetEventType(e)
@@ -3397,10 +3403,6 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           elseif evType == CC_TYPE then
             mu.MIDI_InsertCC(take, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3)
           end
-
-        elseif err then
-          mu.post(err)
-          parserError = 'Fatal error: could not load action description (New MIDI Event)'
         end
       end
     end
@@ -3792,13 +3794,12 @@ function ProcessAction(execute, fromScript)
     if findFn then
       local fnString = ProcessActionForTake()
       if fnString then
-        local success, _, err = pcall(load, fnString, nil, nil, context)
-        if success then
-          dirtyFind = true
-        elseif err then
-          mu.post(err)
+        FnStringToFn(fnString, function(err)
+          if err then
+            mu.post(err)
+          end
           parserError = 'Fatal error: could not load action description'
-        end
+        end)
       else
         parserError = 'Fatal error: could not load action description'
       end
@@ -3821,13 +3822,12 @@ function ProcessAction(execute, fromScript)
     if findFn then
       actionFnString = ProcessActionForTake(take)
       if actionFnString then
-        local success, pret, err = pcall(load, actionFnString, nil, nil, context)
-        if success and pret then
-          actionFn = pret()
-        elseif err then
-          mu.post(err)
+        _, actionFn = FnStringToFn(actionFnString, function(err)
+          if err then
+            mu.post(err)
+          end
           parserError = 'Fatal error: could not load action description'
-        end
+        end)
       else
         parserError = 'Fatal error: could not load action description'
       end

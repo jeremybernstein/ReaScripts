@@ -13,7 +13,6 @@
 -- TODO: metric grid editor
 -- TODO: function generator (N sliders, lin interpolate between?)
 -- TODO: split at intervals
--- TODO: new event at position
 
 local r = reaper
 local mu
@@ -466,7 +465,7 @@ local findCursorParam1Entries = {
   { notation = '$at', label = 'At Cursor', text = 'CURSOR_AT', timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = '$before_at', label = 'Before or At Cursor', text = 'CURSOR_LTE', timeselect = SELECT_TIME_MAXRANGE },
   { notation = '$after_at', label = 'After or At Cursor', text = 'CURSOR_GTE', timeselect = SELECT_TIME_MINRANGE },
-  { notation = '$undercursor', label = 'Under Cursor (note)', text = 'CURSOR_UNDER', timeselect = SELECT_TIME_INDIVIDUAL },
+  { notation = '$under', alias = {'$undercursor'}, label = 'Under Cursor (note)', text = 'CURSOR_UNDER', timeselect = SELECT_TIME_INDIVIDUAL },
 }
 
 local findMusicalParam1Entries = {
@@ -2150,11 +2149,25 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
   local isNewEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
   if not (isEveryN or isNewEvent) and #paramTab ~= 0 then
     for kk, vv in ipairs(paramTab) do
-      local pa, pb = string.find(paramStr, vv.notation)
+      local pa, pb
+      if paramStr == vv.notation then
+         pa = 1
+         pb = vv.notation:len() + 1
+      elseif vv.alias then
+        for _, alias in ipairs(vv.alias) do
+          if paramStr == alias then
+            pa = 1
+            pb = alias:len() + 1
+            break
+          end
+        end
+      else
+        pa, pb = string.find(paramStr, vv.notation .. '[%W]')
+      end
       if pa and pb then
         row[paramName .. 'Entry'] = kk
         if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
-          row.mg = ParseMetricGridNotation(paramStr:sub(pb + 1))
+          row.mg = ParseMetricGridNotation(paramStr:sub(pb))
         end
         break
       end

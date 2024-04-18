@@ -1,0 +1,11 @@
+{
+ actionMacro = "$value1 + percent<9.4488>",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note && $lastevent :chordlow()",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "Beware of octaves in chords !!!",
+ scriptIgnoreSelectionInArrangeView = false,
+}

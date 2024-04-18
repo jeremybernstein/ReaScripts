@@ -1,0 +1,11 @@
+{
+ actionMacro = "$newevent :newmidievent(B04000|1|1.1.00|0|00, $atcursor) && $newevent :newmidievent(B0407F|1|0.0.100t|0|00, $relcursor)",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "Sends CC64 0 ane 127 shortly after.",
+ scriptIgnoreSelectionInArrangeView = false,
+}

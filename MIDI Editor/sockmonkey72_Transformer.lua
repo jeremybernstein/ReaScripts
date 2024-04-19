@@ -4,7 +4,7 @@
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'Select Similar'
+--   - add 'Similar to Selection' condition
 --   - minor UI tweaks
 -- @provides
 --   {Transformer}/*
@@ -1209,7 +1209,9 @@ local function windowFn()
           r.ImGui_SameLine(ctx)
           r.ImGui_AlignTextToFramePadding(ctx)
           r.ImGui_PushFont(ctx, fontInfo.small)
-          if editorType == tx.EDITOR_TYPE_PERCENT
+          if condOp.rangelabel then
+            r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
+          elseif editorType == tx.EDITOR_TYPE_PERCENT
             or condOp.percent or (condOp.split and condOp.split[index].percent) -- hack
           then
             r.ImGui_TextColored(ctx, 0xFFFFFF7F, '%')
@@ -1235,6 +1237,13 @@ local function windowFn()
           procFn()
           inTextInput = false
         elseif retval then inTextInput = true
+        end
+        if condOp.rangelabel then
+          r.ImGui_SameLine(ctx)
+          r.ImGui_AlignTextToFramePadding(ctx)
+          r.ImGui_PushFont(ctx, fontInfo.small)
+          r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
+          r.ImGui_PopFont(ctx)
         end
         r.ImGui_EndGroup(ctx)
         if r.ImGui_IsItemHovered(ctx) then

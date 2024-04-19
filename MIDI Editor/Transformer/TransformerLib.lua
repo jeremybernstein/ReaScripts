@@ -355,8 +355,8 @@ local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'Tes
 local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1, notnot = true }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
 local findConditionInRangeExcl = { notation = ':inrangeexcl', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
-local findConditionSimilar = { notation = ':similar', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, 0, 0)', terms = 0 }
-local findConditionSimilarSlop = { notation = ':similarslop', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, {param1}, {param2})', terms = 2, fullrange = true, literal = true, freeterm = true }
+local findConditionSimilar = { notation = ':similar', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, 0, 0)', terms = 0, rangelabel = { 'pre-slop', 'post-slop' } }
+local findConditionSimilarSlop = { notation = ':similarslop', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, {param1}, {param2})', terms = 2, fullrange = true, literal = true, freeterm = true, rangelabel = { 'pre-slop', 'post-slop' } }
 
 local findGenericConditionEntries = {
   findConditionEqual,
@@ -382,8 +382,8 @@ function FindConditionAddSelectRange(t, r)
   return tt
 end
 
-local findConditionPositionSimilarSlop = tableCopy(findConditionSimilarSlop)
-findConditionPositionSimilarSlop.timedur = true
+local findConditionSimilarSlopTime = tableCopy(findConditionSimilarSlop)
+findConditionSimilarSlopTime.timedur = true
 
 local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionEqual, SELECT_TIME_INDIVIDUAL),
@@ -394,7 +394,7 @@ local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionLessThanEqual, SELECT_TIME_MAXRANGE),
   FindConditionAddSelectRange(findConditionInRange, SELECT_TIME_RANGE),
   FindConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
-  FindConditionAddSelectRange(findConditionPositionSimilarSlop, SELECT_TIME_INDIVIDUAL),
+  FindConditionAddSelectRange(findConditionSimilarSlopTime, SELECT_TIME_INDIVIDUAL),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0' }}, timeselect = SELECT_TIME_INDIVIDUAL },
@@ -411,7 +411,7 @@ local findLengthConditionEntries = {
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange,
   findConditionInRangeExcl,
-  findConditionPositionSimilarSlop,
+  findConditionSimilarSlopTime,
 }
 
 local findTypeConditionEntries = {
@@ -816,6 +816,27 @@ function TestEvent1(event, property, op, param1)
   return retval
 end
 
+function EventIsSimilar(event, property, val, param1, param2)
+  for _, e in ipairs(selectedEvents) do
+    if e.chanmsg == event.chanmsg then -- a little hacky here
+      local check = true
+      if e.chanmsg == 0xB0 -- special case for real CC msgs, must match the CC#, as well
+        and property ~= 'msg2'
+        and e.msg2 ~= event.msg2
+      then
+        check = false
+      end
+      if check then
+        local eval = GetValue(e, property)
+        if val >= (eval - param1) and val <= (eval + param2) then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 function TestEvent2(event, property, op, param1, param2)
   local val = GetValue(event, property)
   local retval = false
@@ -827,20 +848,7 @@ function TestEvent2(event, property, op, param1, param2)
   elseif op == OP_EQ_SLOP then
     retval = (val >= (param1 - param2) and val <= (param1 + param2))
   elseif op == OP_SIMILAR then
-    for _, e in ipairs(selectedEvents) do
-      if e.chanmsg == event.chanmsg then -- a little hacky here
-        local check = true
-        if e.chanmsg == 0xB0 -- special case for real CC msgs, must match the CC#, as well
-          and property ~= 'msg2'
-          and e.msg2 ~= event.msg2
-        then
-          check = false
-        end
-        if check and val >= (e[property] - param1) and val <= (e[property] + param2) then
-          return true
-        end
-      end
-    end
+    if EventIsSimilar(event, property, val, param1, param2) then return true end
   end
   return retval
 end

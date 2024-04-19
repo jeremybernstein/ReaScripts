@@ -1,11 +1,12 @@
 -- @description MIDI Utils API
--- @version 0.1.26
+-- @version 0.1.27
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix extents adjustment calculation with project time offset
+--   - un-fix extents correction fix (it wasn't the problem)
+--   - fix detail about new event creation which broke extents correction
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -138,12 +139,6 @@ local function ensureValueRange(val)
   else
     return val & 0x7F
   end
-end
-
-local function getTimeOffsets()
-  local offset = r.GetProjectTimeOffset(0, false)
-  local offsetQN = r.TimeMap2_timeToQN(0, offset)
-  return offset, offsetQN
 end
 
 -----------------------------------------------------------------------------
@@ -572,6 +567,7 @@ local function Reset()
 end
 
 local function InsertMIDIEvent(event)
+  event.recalcMIDI = true
   if event:is_a(BezierEvent) then -- special case for BezierEvents
     bezTable[event.ccIdx + 1] = event
     ccEvents[event.ccIdx + 1].hasBezier = true
@@ -857,10 +853,8 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     local itemStartTime = r.GetMediaItemInfo_Value(item, 'D_POSITION')
     local itemEndTime = itemStartTime + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
 
-    local timeAdjust, timeAdjustQN = getTimeOffsets()
-
-    local itemStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemStartTime + timeAdjust)
-    local itemEndPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemEndTime + timeAdjust)
+    local itemStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemStartTime)
+    local itemEndPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemEndTime)
 
     local firstEventPPQ
     local lastEventPPQ
@@ -890,10 +884,10 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
       if firstEventPPQ or lastEventPPQ then
         local newItemStartQN, newItemEndQN
         if firstEventPPQ then
-          newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ) - timeAdjustQN
+          newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ)
         end
         if lastEventPPQ then
-          newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ) - timeAdjustQN
+          newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ)
         end
 
         if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end

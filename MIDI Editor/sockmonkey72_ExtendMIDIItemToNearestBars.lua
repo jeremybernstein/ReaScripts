@@ -1,11 +1,11 @@
 -- @description Extend MIDI Item to Nearest Bars
--- @version 1.0.2
+-- @version 1.0.3
 -- @author sockmonkey72
 -- @about
 --   # Extend MIDI Item to Nearest Bars
 --   Extend both ends of a MIDI item to the nearest full measure. The item can only get larger.
 -- @changelog
---   add smandrap's resident variation to the package (thank you!)
+--   smandrap: add on/off state to resident script
 -- @provides
 --   [main=main] sockmonkey72_ExtendMIDIItemToNearestBars.lua
 --   [main=main] sockmonkey72_ExtendRecordedMIDIItemsToNearestMeasureResident.lua

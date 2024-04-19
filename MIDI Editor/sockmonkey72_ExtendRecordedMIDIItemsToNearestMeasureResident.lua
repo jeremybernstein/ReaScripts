@@ -1,14 +1,14 @@
 --[[
    * Author: sockmonkey72 / smandrap
    * Licence: MIT
-   * Version: 1.00
+   * Version: 1.01
    * NoIndex: true
 --]]
 
 local DELETE_EMPTY = false
 
 local reaper = reaper
-
+reaper.set_action_options(5)
 local swsok = reaper.CF_GetSWSVersion and true or false
 
 local playstate = reaper.GetPlayState()
@@ -68,5 +68,10 @@ local function main()
   reaper.defer(main)
 end
 
+local function Exit()
+  reaper.set_action_options(8)
+end
+
+reaper.atexit(Exit)
 main()
 

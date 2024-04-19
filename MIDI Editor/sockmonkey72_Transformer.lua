@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-alpha.42
+-- @version 1.0-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add actions for setting/unsetting property flags individually
+--   - first beta revision (identical to alpha.42)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-alpha.42'
+local versionStr = '1.0-beta.1'
 
 local r = reaper
 

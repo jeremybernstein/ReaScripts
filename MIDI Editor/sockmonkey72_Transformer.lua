@@ -4,7 +4,8 @@
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - disable extents changes for 'select' action scopes
+--   - add 'Select Similar'
+--   - minor UI tweaks
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -1875,6 +1876,8 @@ local function windowFn()
   r.ImGui_SetCursorPosY(ctx, restoreY)
 
   Spacing(true)
+  local saveSeparatorX = r.ImGui_GetCursorPosX(ctx)
+
   r.ImGui_Separator(ctx)
 
   r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
@@ -1939,10 +1942,12 @@ local function windowFn()
 
   r.ImGui_PopStyleColor(ctx, 4)
 
+  r.ImGui_SetCursorPosX(ctx, saveSeparatorX)
+
   Spacing(true)
   r.ImGui_Separator(ctx)
   r.ImGui_SameLine(ctx)
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + 15)
+  r.ImGui_SetCursorPos(ctx, saveSeparatorX, r.ImGui_GetCursorPosY(ctx) + 15)
   r.ImGui_Separator(ctx)
 
   ---------------------------------------------------------------------------

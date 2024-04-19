@@ -66,6 +66,9 @@ local parserError = ''
 local dirtyFind = false
 local wantsTab = {}
 
+local allEvents = {}
+local selectedEvents = {}
+
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
 
@@ -343,6 +346,7 @@ local OP_LTE = 5
 local OP_INRANGE = 6
 local OP_INRANGE_EXCL = 7
 local OP_EQ_SLOP = 8
+local OP_SIMILAR = 9
 
 local findConditionEqual = { notation = '==', label = 'Equal', text = 'TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
 local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = 'TestEvent1(event, {tgt}, OP_GT, {param1})', terms = 1, notnot = true }
@@ -351,6 +355,8 @@ local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'Tes
 local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1, notnot = true }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
 local findConditionInRangeExcl = { notation = ':inrangeexcl', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
+local findConditionSimilar = { notation = ':similar', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, 0, 0)', terms = 0 }
+local findConditionSimilarSlop = { notation = ':similarslop', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, {param1}, {param2})', terms = 2, fullrange = true, literal = true, freeterm = true }
 
 local findGenericConditionEntries = {
   findConditionEqual,
@@ -358,6 +364,7 @@ local findGenericConditionEntries = {
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange,
   findConditionInRangeExcl,
+  findConditionSimilarSlop,
 }
 
 local findLastEventConditionEntries = {
@@ -375,6 +382,9 @@ function FindConditionAddSelectRange(t, r)
   return tt
 end
 
+local findConditionPositionSimilarSlop = tableCopy(findConditionSimilarSlop)
+findConditionPositionSimilarSlop.timedur = true
+
 local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionEqual, SELECT_TIME_INDIVIDUAL),
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true, timeselect = SELECT_TIME_RANGE },
@@ -384,6 +394,7 @@ local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionLessThanEqual, SELECT_TIME_MAXRANGE),
   FindConditionAddSelectRange(findConditionInRange, SELECT_TIME_RANGE),
   FindConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
+  FindConditionAddSelectRange(findConditionPositionSimilarSlop, SELECT_TIME_INDIVIDUAL),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0' }}, timeselect = SELECT_TIME_INDIVIDUAL },
@@ -400,11 +411,13 @@ local findLengthConditionEntries = {
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange,
   findConditionInRangeExcl,
+  findConditionPositionSimilarSlop,
 }
 
 local findTypeConditionEntries = {
   findConditionEqual,
-  { notation = ':all', label = 'All', text = 'event.chanmsg ~= nil', terms = 0, notnot = true }
+  { notation = ':all', label = 'All', text = 'event.chanmsg ~= nil', terms = 0, notnot = true },
+  findConditionSimilar,
 }
 
 local findPropertyConditionEntries = {
@@ -805,7 +818,7 @@ end
 
 function TestEvent2(event, property, op, param1, param2)
   local val = GetValue(event, property)
-  local retval
+  local retval = false
 
   if op == OP_INRANGE then
     retval = (val >= param1 and val <= param2)
@@ -813,6 +826,21 @@ function TestEvent2(event, property, op, param1, param2)
     retval = (val >= param1 and val < param2)
   elseif op == OP_EQ_SLOP then
     retval = (val >= (param1 - param2) and val <= (param1 + param2))
+  elseif op == OP_SIMILAR then
+    for _, e in ipairs(selectedEvents) do
+      if e.chanmsg == event.chanmsg then -- a little hacky here
+        local check = true
+        if e.chanmsg == 0xB0 -- special case for real CC msgs, must match the CC#, as well
+          and property ~= 'msg2'
+          and e.msg2 ~= event.msg2
+        then
+          check = false
+        end
+        if check and val >= (e[property] - param1) and val <= (e[property] + param2) then
+          return true
+        end
+      end
+    end
   end
   return retval
 end
@@ -1550,11 +1578,6 @@ end
 
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
-
----------------------------------------------------------------------------
---------------------------- BUNCH OF VARIABLES ----------------------------
-
-local allEvents = {}
 
 ---------------------------------------------------------------------------
 --------------------------- BUNCH OF FUNCTIONS ----------------------------
@@ -2457,6 +2480,7 @@ context.OP_LTE = OP_LTE
 context.OP_INRANGE = OP_INRANGE
 context.OP_INRANGE_EXCL = OP_INRANGE_EXCL
 context.OP_EQ_SLOP = OP_EQ_SLOP
+context.OP_SIMILAR = OP_SIMILAR
 
 context.CURSOR_LT = CURSOR_LT
 context.CURSOR_GT = CURSOR_GT
@@ -3229,6 +3253,7 @@ function InitializeTake(take)
   local onlyNotes = false
   local activeNoteRow = false
   allEvents = {}
+  selectedEvents = {}
   mu.MIDI_InitializeTake(take) -- reset this each cycle
   if findScopeTable[currentFindScope].notation == '$midieditor' then
     if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then
@@ -3262,6 +3287,7 @@ function InitializeTake(take)
       e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
       CalcMIDITime(take, e)
       table.insert(allEvents, e)
+      if e.selected then table.insert(selectedEvents, e) end
     end
     noteidx = enumNotesFn(take, noteidx)
   end
@@ -3284,6 +3310,7 @@ function InitializeTake(take)
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
     CalcMIDITime(take, e)
     table.insert(allEvents, e)
+    if e.selected then table.insert(selectedEvents, e) end
     ccidx = enumCCFn(take, ccidx)
   end
 
@@ -3294,6 +3321,7 @@ function InitializeTake(take)
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
     CalcMIDITime(take, e)
     table.insert(allEvents, e)
+    if e.selected then table.insert(selectedEvents, e) end
     syxidx = enumTextSysexFn(take, syxidx)
   end
 

@@ -1,5 +1,5 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.2
+-- @version 1.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.2'
+local versionStr = '1.0-beta.3'
 
 local r = reaper
 

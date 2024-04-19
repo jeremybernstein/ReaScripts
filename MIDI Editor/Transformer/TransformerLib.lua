@@ -355,8 +355,10 @@ local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'Tes
 local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1, notnot = true }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
 local findConditionInRangeExcl = { notation = ':inrangeexcl', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
+
+-- these have the same notation, should be fine since they will never be in the same menu
 local findConditionSimilar = { notation = ':similar', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, 0, 0)', terms = 0, rangelabel = { 'pre-slop', 'post-slop' } }
-local findConditionSimilarSlop = { notation = ':similarslop', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, {param1}, {param2})', terms = 2, fullrange = true, literal = true, freeterm = true, rangelabel = { 'pre-slop', 'post-slop' } }
+local findConditionSimilarSlop = { notation = ':similar', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, {param1}, {param2})', terms = 2, fullrange = true, literal = true, freeterm = true, rangelabel = { 'pre-slop', 'post-slop' } }
 
 local findGenericConditionEntries = {
   findConditionEqual,

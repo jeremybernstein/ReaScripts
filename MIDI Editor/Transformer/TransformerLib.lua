@@ -210,10 +210,10 @@ local function isREAPER7()
 end
 
 local actionScopeTable = {
-  { notation = '$select', label = 'Select' },
-  { notation = '$selectadd', label = 'Add To Selection' },
-  { notation = '$invertselect', label = 'Inverted Select' },
-  { notation = '$deselect', label = 'Deselect' },
+  { notation = '$select', label = 'Select', selectonly = true },
+  { notation = '$selectadd', label = 'Add To Selection', selectonly = true },
+  { notation = '$invertselect', label = 'Inverted Select', selectonly = true },
+  { notation = '$deselect', label = 'Deselect', selectonly = true },
   { notation = '$transform', label = 'Transform' },
   { notation = '$replace', label = 'Transform & Replace' },
   { notation = '$copy', label = 'Transform to Track' },
@@ -3873,6 +3873,9 @@ function ProcessAction(execute, fromScript)
         findFnString = findFnString,
         actionFnString = actionFnString,
       }
+      local selectonly = actionScopeTable[currentActionScope].selectonly
+      local extentsstate = mu.CORRECT_EXTENTS
+      mu.CORRECT_EXTENTS = not selectonly and extentsstate or false
       if notation == '$select' then
         mu.MIDI_OpenWriteTransaction(take)
         local found = RunFind(findFn, defParams)
@@ -3979,6 +3982,7 @@ function ProcessAction(execute, fromScript)
           DeleteEventsInTake(take, found) -- could use runFn
         end
       end
+      mu.CORRECT_EXTENTS = extentsstate
     end
   end
 

@@ -688,11 +688,19 @@ local actionTypeOperationEntries = {
 }
 
 local actionPropertyOperationEntries = {
-  actionOperationFixed
+  actionOperationFixed,
+  { notation = ':addprop', label = 'Add Property', text = 'event.flags = event.flags | {param1}', terms = 1, menu = true },
+  { notation = ':removeprop', label = 'Remove Property', text = 'event.flags = event.flags & ~({param1})', terms = 1, menu = true },
 }
 
 local actionPropertyParam1Entries = {
   { notation = '0', label = 'Clear', text = '0' },
+  { notation = '1', label = 'Selected', text = '1' },
+  { notation = '2', label = 'Muted', text = '2' },
+  { notation = '3', label = 'Selected + Muted', text = '3' },
+}
+
+local actionPropertyAddRemParam1Entries = {
   { notation = '1', label = 'Selected', text = '1' },
   { notation = '2', label = 'Muted', text = '2' },
   { notation = '3', label = 'Selected + Muted', text = '3' },
@@ -3036,9 +3044,13 @@ function ActionTabsFromTarget(row)
   elseif notation == '$channel' then
     param1Tab = findChannelParam1Entries -- same as find
   elseif notation == '$type' then
-    param1Tab = findTypeParam1Entries -- same entries as find
+    param1Tab = typeEntries
   elseif notation == '$property' then
-    param1Tab = actionPropertyParam1Entries
+    if operation.notation == '=' then
+      param1Tab = actionPropertyParam1Entries
+    else
+      param1Tab = actionPropertyAddRemParam1Entries
+    end
   elseif notation == '$newevent' then
     param1Tab = typeEntries -- no $syx
     param2Tab = newMIDIEventPositionEntries

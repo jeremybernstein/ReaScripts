@@ -897,8 +897,8 @@ function FindEveryNNote(event, evnParams, notenum)
   count = count - (evnParams.offset and evnParams.offset or 0)
 
   if count % param1 == 0 then
-    if notenum > 11 and event.msg2 == notenum then return true
-    elseif notenum < 11 and event.msg2 % 12 == notenum then return true
+    if notenum >= 12 and event.msg2 == notenum then return true
+    elseif notenum < 12 and event.msg2 % 12 == notenum then return true
     end
   end
   return false
@@ -3444,15 +3444,17 @@ function HandleCreateNewMIDIEvent(take, contextTab)
             pos = TimeFormatToSeconds(nme.posText, nil, context) - timeAdjust
           end
 
-          e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos) -- check for abs pos mode\
-          e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + LengthFormatToSeconds(nme.durText, pos, context))
+          local evType = GetEventType(e)
+
+          e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos) -- check for abs pos mode
+          if evType == NOTE_TYPE then
+            e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + LengthFormatToSeconds(nme.durText, pos, context))
+          end
           e.chan = e.channel
           e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
           CalcMIDITime(take, e)
 
           actionFn(e, GetSubtypeValueName(e), GetMainValueName(e), contextTab)
-
-          local evType = GetEventType(e)
 
           e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, e.projtime - timeAdjust)
           if evType == NOTE_TYPE then

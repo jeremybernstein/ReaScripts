@@ -1,11 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.3
+-- @version 1.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'Similar to Selection' condition
---   - minor UI tweaks
+--   - fix new CC event creation
+--   - fix everyN note 'B' selection
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.3'
+local versionStr = '1.0-beta.4'
 
 local r = reaper
 

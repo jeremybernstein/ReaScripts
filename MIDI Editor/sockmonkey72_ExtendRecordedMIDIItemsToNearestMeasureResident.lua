@@ -12,6 +12,10 @@ reaper.set_action_options(5)
 local swsok = reaper.CF_GetSWSVersion and true or false
 
 local playstate = reaper.GetPlayState()
+local prev_selitems = {}
+
+local GetPlayState = reaper.GetPlayState
+
 
 local function RemoveEmptyTake(item, take)
   if reaper.MIDI_CountEvts(take) == 0 then
@@ -27,6 +31,7 @@ local function table_delete(t)
 end
 
 local function ExtendRecordedMidiItems()
+  if reaper.GetSelectedMediaItem(0, 0) == prev_selitems[1] then return end
   local selectedItems = {}
   for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
     selectedItems[#selectedItems + 1] = reaper.GetSelectedMediaItem(0, i)
@@ -58,7 +63,12 @@ local function ExtendRecordedMidiItems()
 end
 
 local function main()
-  local new_playstate = reaper.GetPlayState()
+  local new_playstate = GetPlayState()
+  if playstate ~= 5 and new_playstate == 5 then
+    for i = 0, reaper.CountSelectedMediaItems(0) do
+      prev_selitems[#prev_selitems + 1] = reaper.GetSelectedMediaItem(0, i)
+    end
+  end
   if playstate == 5 and new_playstate ~= 5 then
     local recmode = reaper.GetToggleCommandState(40253) + reaper.GetToggleCommandState(40076)
     if recmode == 0 then ExtendRecordedMidiItems() end
@@ -74,4 +84,3 @@ end
 
 reaper.atexit(Exit)
 main()
-

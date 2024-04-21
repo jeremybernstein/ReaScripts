@@ -1,0 +1,11 @@
+{
+ actionMacro = "",
+ actionScope = "$extracttrack",
+ actionScopeFlags = "$none",
+ findMacro = "$channel :similar(1, 1)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

@@ -1,0 +1,9 @@
+{
+ actionMacro = "$value1 - percent<0.7874>",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$lastevent :everyNnote(1|-|0, e)",
+ findScope = "$everywhere",
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

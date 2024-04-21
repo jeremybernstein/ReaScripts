@@ -1,11 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.4
+-- @version 1.0-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix new CC event creation
---   - fix everyN note 'B' selection
+--   - add label for metric grid bitfield
+--   - add property search/action for CC shape
+--   - presets updates (thank you smandrap!)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.4'
+local versionStr = '1.0-beta.5'
 
 local r = reaper
 
@@ -1205,13 +1206,15 @@ local function windowFn()
           inTextInput = false
         elseif retval then inTextInput = true
         end
-        if range then
+        local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
+        if rangelabel then
+          r.ImGui_SameLine(ctx)
+          r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. rangelabel .. ')')
+        elseif range then
           r.ImGui_SameLine(ctx)
           r.ImGui_AlignTextToFramePadding(ctx)
           r.ImGui_PushFont(ctx, fontInfo.small)
-          if condOp.rangelabel then
-            r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
-          elseif editorType == tx.EDITOR_TYPE_PERCENT
+          if editorType == tx.EDITOR_TYPE_PERCENT
             or condOp.percent or (condOp.split and condOp.split[index].percent) -- hack
           then
             r.ImGui_TextColored(ctx, 0xFFFFFF7F, '%')
@@ -1238,7 +1241,8 @@ local function windowFn()
           inTextInput = false
         elseif retval then inTextInput = true
         end
-        if condOp.rangelabel then
+        local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
+        if rangelabel then
           r.ImGui_SameLine(ctx)
           r.ImGui_AlignTextToFramePadding(ctx)
           r.ImGui_PushFont(ctx, fontInfo.small)

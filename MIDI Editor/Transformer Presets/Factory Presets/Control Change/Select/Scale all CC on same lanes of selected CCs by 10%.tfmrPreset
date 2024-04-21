@@ -1,0 +1,11 @@
+{
+ actionMacro = "$value2 * 1.1",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $cc && $value1 :similar(percent<0.0000>, percent<0.0000>)",
+ findScope = "$midieditor",
+ findScopeFlags = {
+ },
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

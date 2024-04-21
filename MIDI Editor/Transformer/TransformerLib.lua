@@ -56,6 +56,13 @@ local CC_TYPE = 1
 local SYXTEXT_TYPE = 2
 local OTHER_TYPE = 7
 
+local CC_CURVE_SQUARE = 0
+local CC_CURVE_LINEAR = 1
+local CC_CURVE_SLOW_START_END = 2
+local CC_CURVE_FAST_START = 3
+local CC_CURVE_FAST_END = 4
+local CC_CURVE_BEZIER = 5
+
 local SELECT_TIME_SHEBANG = 0
 local SELECT_TIME_MINRANGE = 1
 local SELECT_TIME_MAXRANGE = 2
@@ -399,7 +406,7 @@ local findPositionConditionEntries = {
   FindConditionAddSelectRange(findConditionSimilarSlopTime, SELECT_TIME_INDIVIDUAL),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
-  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0' }}, timeselect = SELECT_TIME_INDIVIDUAL },
+  { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0', rangelabel = 'bitfield' }}, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
@@ -427,6 +434,7 @@ local findPropertyConditionEntries = {
   { notation = ':ismuted', label = 'Muted', text = '(event.flags & 0x02) ~= 0', terms = 0 },
   { notation = ':inchord', label = 'In Chord', text = '(event.flags & 0x04) ~= 0', terms = 0 },
   { notation = ':inscale', label = 'In Scale', text = 'InScale(event, {param1}, {param2})', terms = 2, menu = true },
+  { notation = ':cchascurve', label = 'CC has Curve', text = 'CCHasCurve(take, event, {param1})', terms = 1, menu = true },
 }
 
 local typeEntries = {
@@ -558,6 +566,15 @@ local scaleRoots = {
   { notation = 'a', label = 'A', text = '9' },
   { notation = 'a#', label = 'A#', text = '10' },
   { notation = 'b', label = 'B', text = '11' },
+}
+
+local findCCCurveParam1Entries = {
+  { notation = '$square', label = 'Square', text = '0'},
+  { notation = '$linear', label = 'Linear', text = '1'},
+  { notation = '$slowstartend', label = 'Slow Start/End', text = '2'},
+  { notation = '$faststart', label = 'Fast Start', text = '3'},
+  { notation = '$fastend', label = 'Fast End', text = '4'},
+  { notation = '$bezier', label = 'Bezier', text = '5'},
 }
 
 local findPropertyParam1Entries = nornsScales
@@ -706,6 +723,7 @@ local actionPropertyOperationEntries = {
   actionOperationFixed,
   { notation = ':addprop', label = 'Add Property', text = 'event.flags = event.flags | {param1}', terms = 1, menu = true },
   { notation = ':removeprop', label = 'Remove Property', text = 'event.flags = event.flags & ~({param1})', terms = 1, menu = true },
+  { notation = ':ccsetcurve', label = 'Set CC Curve', text = 'CCSetCurve(take, event, {param1}, {param2})', terms = 2, split = {{ menu = true }, { floateditor = true, range = { -1, 1 }, default = 0, rangelabel = 'bezier' }}, freeterm = true, nooverride = true },
 }
 
 local actionPropertyParam1Entries = {
@@ -1118,6 +1136,20 @@ end
 function GetTimeSelectionEnd()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   return ts_end + GetTimeOffset()
+end
+
+function CCHasCurve(take, event, ctype)
+  if event.chanmsg < 0xA0 or event.chanmsg >= 0xF0 then return false end
+  local rv, curveType = mu.MIDI_GetCCShape(take, event.idx)
+  return rv and curveType == ctype
+end
+
+function CCSetCurve(take, event, ctype, bzext)
+  if event.chanmsg < 0xA0 or event.chanmsg >= 0xF0 then return false end
+  ctype = ctype < CC_CURVE_SQUARE and CC_CURVE_SQUARE or ctype > CC_CURVE_BEZIER and CC_CURVE_BEZIER or ctype
+  event.setcurve = ctype
+  event.setcurveext = ctype == CC_CURVE_BEZIER and bzext or 0
+  return ctype
 end
 
 function ChanMsgToType(chanmsg)
@@ -1983,8 +2015,13 @@ function FindTabsFromTarget(row)
     param1Tab = findTypeParam1Entries
   elseif notation == '$property' then
     condTab = findPropertyConditionEntries
-    param1Tab = findPropertyParam1Entries
-    param2Tab = findPropertyParam2Entries
+    condition = condTab[row.conditionEntry]
+    if condition and string.match(condition.notation, ':cchascurve') then
+      param1Tab = findCCCurveParam1Entries
+    else
+      param1Tab = findPropertyParam1Entries
+      param2Tab = findPropertyParam2Entries
+    end
   -- elseif notation == '$value1' then
   -- elseif notation == '$value2' then
   -- elseif notation == '$velocity' then
@@ -2515,6 +2552,8 @@ context.OnMetricGrid = OnMetricGrid
 context.OnGrid = OnGrid
 context.InBarRange = InBarRange
 context.InRazorArea = InRazorArea
+context.CCHasCurve = CCHasCurve
+context.CCSetCurve = CCSetCurve
 context.LinearChangeOverSelection = LinearChangeOverSelection
 context.AddDuration = AddDuration
 context.SubtractDuration = SubtractDuration
@@ -3082,6 +3121,8 @@ function ActionTabsFromTarget(row)
   elseif notation == '$property' then
     if operation.notation == '=' then
       param1Tab = actionPropertyParam1Entries
+    elseif operation.notation == ':ccsetcurve' then
+      param1Tab = findCCCurveParam1Entries
     else
       param1Tab = actionPropertyAddRemParam1Entries
     end
@@ -3493,7 +3534,10 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
       mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
     elseif GetEventType(event) == CC_TYPE then
-      mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+      local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+      if rv and event.setcurve then
+        mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
+      end
     elseif GetEventType(event) == SYXTEXT_TYPE then
       mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
     end
@@ -3642,8 +3686,14 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     elseif eventType == CC_TYPE then
       if not event.orig_type or event.orig_type == CC_TYPE then
         mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+        if event.setcurve then
+          mu.MIDI_SetCCShape(take, event.idx, event.setcurve, event.setcurveext)
+        end
       else
-        mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+        local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+        if rv and event.setcurve then
+          mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
+        end
         if event.orig_type == NOTE_TYPE then
           mu.MIDI_DeleteNote(take, event.idx)
         elseif event.orig_type == SYXTEXT_TYPE then

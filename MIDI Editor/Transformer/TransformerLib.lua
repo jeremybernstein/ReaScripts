@@ -555,16 +555,16 @@ local nornsScales = { -- https://github.com/monome/norns/blob/main/lua/lib/music
 
 local scaleRoots = {
   { notation = 'c', label = 'C', text = '0' },
-  { notation = 'c#', label = 'C#', text = '1' },
+  { notation = 'c#', label = 'C# / Db', text = '1' },
   { notation = 'd', label = 'D', text = '2' },
-  { notation = 'd#', label = 'D#', text = '3' },
+  { notation = 'd#', label = 'D# / Eb', text = '3' },
   { notation = 'e', label = 'E', text = '4' },
   { notation = 'f', label = 'F', text = '5' },
-  { notation = 'f#', label = 'F#', text = '6' },
+  { notation = 'f#', label = 'F# / Gb', text = '6' },
   { notation = 'g', label = 'G', text = '7' },
-  { notation = 'g#', label = 'G#', text = '8' },
+  { notation = 'g#', label = 'G# / Ab', text = '8' },
   { notation = 'a', label = 'A', text = '9' },
-  { notation = 'a#', label = 'A#', text = '10' },
+  { notation = 'a#', label = 'A# / Bb', text = '10' },
   { notation = 'b', label = 'B', text = '11' },
 }
 
@@ -629,10 +629,10 @@ local OP_DIV = 4
 local OP_FIXED = 5
 local OP_SCALEOFF = 6
 
-local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
-local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true }
-local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1})', terms = 1, floateditor = true, norange = true, literal = true }
-local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1})', terms = 1, floateditor = true, norange = true, literal = true }
+local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true, nixnote = true }
+local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true, nixnote = true }
+local actionOperationMult = { notation = '*', label = 'Multiply', text = 'OperateEvent1(event, {tgt}, OP_MULT, {param1})', terms = 1, floateditor = true, norange = true, literal = true, nixnote = true }
+local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1})', terms = 1, floateditor = true, norange = true, literal = true, nixnote = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = 'QuantizeTo(event, {tgt}, {param1})', terms = 1, inteditor = true, literal = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = 'ClampValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
 local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
@@ -640,10 +640,8 @@ local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Ra
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1})', terms = 1 }
 local actionOperationLine = { notation = ':line', label = 'Linear Change in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, _context)', terms = 2, inteditor = true, freeterm = true }
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Change in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, _context))', terms = 2, inteditor = true, range = { -127, 127 }, freeterm = true, fullrange = true, bipolar = true }
-local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true }
+local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true, nixnote = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
-
-local actionOperationTimeScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, _context, true))', terms = 2, split = {{ floateditor = true }, { timedur = true }}, range = {}, timearg = true }
 
 local function positionMod(op)
   local newop = tableCopy(op)
@@ -670,8 +668,8 @@ end
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
-  { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
-  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
+  { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, 0, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, 0, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound),
   { notation = ':roundmusical', label = 'Quantize to Musical Value', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
   positionMod(actionOperationFixed),
@@ -679,7 +677,8 @@ local actionPositionOperationEntries = {
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1})', terms = 1, menu = true },
-  actionOperationTimeScaleOff
+  { notation = ':scaleoffset', label = 'Scale + Offset (item-rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, nil, \'{param2}\', _context)', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
+  { notation = ':scaleoffset_e', label = 'Scale + Offset (event-rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, 1, \'{param2}\', _context)', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
 }
 
 local actionPositionMultParam2Menu = {
@@ -698,7 +697,7 @@ local actionLengthOperationEntries = {
   { notation = ':quantmusical', label = 'Set to Musical Length', text = 'SetMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
-  actionOperationTimeScaleOff
+  { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, _context, true))', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
 }
 
 local function channelMod(op)
@@ -951,8 +950,8 @@ function GetGridUnitFromSubdiv(subdiv, PPQ, modifiers)
   local gridUnit
   if subdiv > 0 then
     gridUnit = PPQ * (subdiv * 4)
-    if ((modifiers & 1) ~= 0) then gridUnit = gridUnit * 1.5
-    elseif ((modifiers & 2) ~= 0) then gridUnit = (gridUnit * 2 / 3) end
+    if (modifiers & 1) ~= 0 then gridUnit = gridUnit * 1.5
+    elseif (modifiers & 2) ~= 0 then gridUnit = (gridUnit * 2 / 3) end
   else
     gridUnit = PPQ * currentGrid
   end
@@ -1245,7 +1244,7 @@ function OnGrid(event, property, take, PPQ)
   local swingUnit = swing and math.floor((gridUnit + (swing * gridUnit * 0.5)) + 0.5) or nil
 
   local testppq = (ppqpos - measppq) % subMeas
-  if (testppq == 0) or (swingUnit and testppq % swingUnit == 0) then
+  if testppq == 0 or (swingUnit and testppq % swingUnit == 0) then
     return true
   end
   return false
@@ -2484,7 +2483,8 @@ function SubtractDuration(event, property, duration, baseTime, context)
   return event[property]
 end
 
-function MultiplyPosition(event, property, param, relative, context)
+-- uses a timeval for the offset so that we can get an offset relative to the new position
+function MultiplyPosition(event, property, param, relative, offset, context)
   local take = context.take
   if not take then return event[property] end
 
@@ -2492,15 +2492,16 @@ function MultiplyPosition(event, property, param, relative, context)
   if not item then return event[property] end
 
   local scaledPosition
-  if relative == 1 then
+  if relative == 1 then -- first event
     local firstTime = context.firstTime
     local distanceFromStart = event.projtime - firstTime
     scaledPosition = firstTime + (distanceFromStart * param)
   else
-    local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
+    local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset() -- item
     local distanceFromStart = event.projtime - itemStartPos
     scaledPosition = itemStartPos + (distanceFromStart * param)
   end
+  scaledPosition = scaledPosition + LengthFormatToSeconds(offset, scaledPosition, context)
 
   event[property] = scaledPosition
   return scaledPosition
@@ -2909,7 +2910,7 @@ function ProcessFind(take, fromHasTable)
     if v.except then goto continue end
     local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
 
-    if (#condTab == 0) then return end -- continue?
+    if #condTab == 0 then return end -- continue?
 
     local targetTerm = curTarget.text
     local condition = curCondition
@@ -3808,7 +3809,7 @@ function ProcessActionForTake(take)
   for k, v in ipairs(actionRowTable) do
     local opTab, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(v)
 
-    if (#opTab == 0) then return end -- continue?
+    if #opTab == 0 then return end -- continue?
 
     local targetTerm = curTarget.text
     local operation = curOperation
@@ -4108,7 +4109,7 @@ function SavePreset(pPath, notes, scriptTab)
     saved = true
   end
 
-  if (saved and wantsScript) then
+  if saved and wantsScript then
     saved = false
 
     local fPath, fName = pPath:match('^(.*[/\\])(.*)$')
@@ -4394,6 +4395,7 @@ TransformerLib.NEWEVENT_POSITION_ATPOSITION = NEWEVENT_POSITION_ATPOSITION
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 
 TransformerLib.startup = startup
+TransformerLib.mu = mu
 
 return TransformerLib
 

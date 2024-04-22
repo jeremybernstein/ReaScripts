@@ -27,21 +27,9 @@ local r = reaper
 -- local fontStyle = 'monospace'
 local fontStyle = 'sans-serif'
 
-local DEBUG = false
-
-local mu
-
-if DEBUG then
-  package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI Editor/Transformer/?.lua'
-  mu = require 'MIDIUtils'
-
-  function P(...)
-    mu.post(...)
-  end
-end
-
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
 local tx = require 'TransformerLib'
+local mu = tx.mu
 
 local canStart = true
 
@@ -208,12 +196,22 @@ local inTextInput = false
 ----------------------------- GLOBAL FUNS -----------------------------------
 
 local bitFieldCallback = r.ImGui_CreateFunctionFromEEL([[
-  (EventChar < '0' || EventChar > '9') ? EventChar = 0 :
-  EventChar != '0' ? EventChar = '1' : EventChar = '0';
+  (EventChar < '0' || EventChar > '9') ? EventChar = 0
+    : EventChar != '0' ? EventChar = '1'
+    : EventChar = '0';
 ]])
 
 local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
   (EventChar < '0' || EventChar > '9') && EventChar != '-' ? EventChar = 0;
+]])
+
+local numbersOrNoteNameCallback = r.ImGui_CreateFunctionFromEEL([[
+  (EventChar < '0' || EventChar > '9')
+  && EventChar != '-'
+  && !(EventChar >= 'A' && EventChar <= 'G')
+  && !(EventChar >= 'a' && EventChar <= 'g')
+  && EventChar != '#'
+  ? EventChar = 0;
 ]])
 
 local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
@@ -227,6 +225,7 @@ local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
 
 r.ImGui_Attach(ctx, bitFieldCallback)
 r.ImGui_Attach(ctx, numbersOnlyCallback)
+r.ImGui_Attach(ctx, numbersOrNoteNameCallback)
 r.ImGui_Attach(ctx, timeFormatOnlyCallback)
 
 local function positionModalWindow(yOff, yScale)
@@ -1079,7 +1078,7 @@ local function windowFn()
   Spacing(true)
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetTable = enumerateTransformerPresets(presetPath)
     r.ImGui_OpenPopup(ctx, 'openPresetMenu') -- defined far below
@@ -1110,7 +1109,7 @@ local function windowFn()
   end
 
   r.ImGui_Button(ctx, 'Insert Criteria', DEFAULT_ITEM_WIDTH * 2)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     addFindRow()
   end
 
@@ -1124,13 +1123,20 @@ local function windowFn()
     r.ImGui_EndDisabled(ctx)
   end
 
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     if optDown then
       tx.clearFindRows()
       selectedFindRow = 0
     else
       removeFindRow()
     end
+  end
+
+  local function rewriteNoteName(buf)
+    if buf:match('[A-Ga-g][%-#b]*%d') then
+      return tostring(mu.MIDI_NoteNameToNoteNumber(buf))
+    end
+    return buf
   end
 
   local function handleTableParam(row, condOp, paramName, paramTab, paramType, index, rowIdx, procFn)
@@ -1166,7 +1172,7 @@ local function windowFn()
           end
         end
         r.ImGui_Button(ctx, label)
-        if (canOpen and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        if canOpen and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
           rv = rowIdx
           r.ImGui_OpenPopup(ctx, paramName .. 'Menu')
         end
@@ -1176,12 +1182,16 @@ local function windowFn()
         or editorType == tx.EDITOR_TYPE_PITCHBEND
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
+        local isNote = (target.notation == '$value1' and subtypeValueLabel == 'Note #' and not condOp.nixnote)
+
         -- TODO: cleanup these attributes & combinations
         local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, index)
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
           local strVal = row[paramName .. 'TextEditorStr']
-          if not (isMetricOrMusical or isBitField) then strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR) end
+          if not (isMetricOrMusical or isBitField) then
+            strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR)
+          end
           if range and range[1] and range[2] and row[paramName .. 'PercentVal'] then
             local percentVal = row[paramName .. 'PercentVal'] / 100
             local scaledVal
@@ -1199,16 +1209,36 @@ local function windowFn()
           end
           row[paramName .. 'TextEditorStr'] = strVal
         end
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TextEditorStr'], isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(), isFloat and nil or isBitField and bitFieldCallback or numbersOnlyCallback)
+
+        if isNote then r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75) end
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit',
+          row[paramName .. 'TextEditorStr'],
+          isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(),
+          isFloat and nil or isNote and numbersOrNoteNameCallback or isBitField and bitFieldCallback or numbersOnlyCallback)
+
         if kbdEntryIsCompleted(retval) then
+          if isNote then
+            buf = rewriteNoteName(buf)
+          end
           tx.setRowParam(row, paramName, paramType, editorType, buf, range, condOp.literal and true or false)
           procFn()
           inTextInput = false
         elseif retval then inTextInput = true
         end
+        -- note name support
+        if isNote then
+          local noteNum = tonumber(row[paramName .. 'TextEditorStr'])
+          if noteNum then
+            r.ImGui_SameLine(ctx)
+            r.ImGui_AlignTextToFramePadding(ctx)
+            r.ImGui_TextColored(ctx, 0x7FFFFFCF, '[' .. mu.MIDI_NoteNumberToNoteName(noteNum) .. ']')
+          end
+        end
+
         local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
         if rangelabel then
           r.ImGui_SameLine(ctx)
+          r.ImGui_AlignTextToFramePadding(ctx)
           r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. rangelabel .. ')')
         elseif range then
           r.ImGui_SameLine(ctx)
@@ -1223,6 +1253,7 @@ local function windowFn()
           end
           r.ImGui_PopFont(ctx)
         end
+
         r.ImGui_EndGroup(ctx)
         if r.ImGui_IsItemHovered(ctx) then
           if r.ImGui_IsMouseClicked(ctx, 0) then
@@ -1672,7 +1703,7 @@ local function windowFn()
       else
         r.ImGui_Button(ctx, tx.startParenEntries[currentRow.startParenEntry].label)
       end
-      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
         r.ImGui_OpenPopup(ctx, 'startParenMenu')
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
@@ -1682,7 +1713,7 @@ local function windowFn()
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Target'
       local targetText = currentRow.targetEntry > 0 and currentFindTarget.label or '---'
       r.ImGui_Button(ctx, decorateTargetLabel(targetText))
-      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
         currentRow.except = true
@@ -1712,7 +1743,7 @@ local function windowFn()
       colIdx = colIdx + 1
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Condition'
       r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
-      if (#conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      if #conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
         r.ImGui_OpenPopup(ctx, 'conditionMenu')
@@ -1739,7 +1770,7 @@ local function windowFn()
         r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Time format
         if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
           r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
-          if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+          if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
             selectedFindRow = k
             lastSelectedRowType = 0
             r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
@@ -1754,7 +1785,7 @@ local function windowFn()
       else
         r.ImGui_Button(ctx, tx.endParenEntries[currentRow.endParenEntry].label)
       end
-      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
         r.ImGui_OpenPopup(ctx, 'endParenMenu')
         selectedFindRow = k
         lastSelectedRowType = 0
@@ -1764,7 +1795,7 @@ local function windowFn()
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Boolean
       if k ~= #tx.findRowTable() then
         r.ImGui_Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
-        if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
           currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
           selectedFindRow = k
           lastSelectedRowType = 0
@@ -1898,7 +1929,7 @@ local function windowFn()
   r.ImGui_AlignTextToFramePadding(ctx)
 
   r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 2)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     r.ImGui_OpenPopup(ctx, 'findScopeMenu')
   end
 
@@ -1920,7 +1951,7 @@ local function windowFn()
   if not isActiveEditorScope then r.ImGui_BeginDisabled(ctx) end
 
   r.ImGui_Button(ctx, tx.getFindScopeFlagLabel(), DEFAULT_ITEM_WIDTH * 1.7)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     r.ImGui_OpenPopup(ctx, 'findScopeFlagMenu')
   end
 
@@ -1976,7 +2007,7 @@ local function windowFn()
   r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight * 0.75)
 
   r.ImGui_Button(ctx, 'Insert Action', DEFAULT_ITEM_WIDTH * 2)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     local numRows = #tx.actionRowTable()
     addActionRow()
 
@@ -2002,7 +2033,7 @@ local function windowFn()
     r.ImGui_EndDisabled(ctx)
   end
 
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     if optDown then
       tx.clearActionRows()
       selectedActionRow = 0
@@ -2073,7 +2104,7 @@ local function windowFn()
       r.ImGui_TableSetColumnIndex(ctx, 0) -- 'Target'
       local targetText = currentRow.targetEntry > 0 and currentActionTarget.label or '---'
       r.ImGui_Button(ctx, decorateTargetLabel(targetText))
-      if (currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
         selectedActionRow = k
         lastSelectedRowType = 1
         r.ImGui_OpenPopup(ctx, 'targetMenu')
@@ -2081,7 +2112,7 @@ local function windowFn()
 
       r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Operation'
       r.ImGui_Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---')
-      if (#operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+      if #operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
         selectedActionRow = k
         lastSelectedRowType = 1
         r.ImGui_OpenPopup(ctx, 'operationMenu')
@@ -2221,7 +2252,7 @@ local function windowFn()
   restoreX, restoreY = r.ImGui_GetCursorPos(ctx)
 
   r.ImGui_Button(ctx, 'Apply', DEFAULT_ITEM_WIDTH / 1.25)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     tx.processAction(true)
   end
 
@@ -2230,7 +2261,7 @@ local function windowFn()
   r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(5))
 
   r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, DEFAULT_ITEM_WIDTH * 2)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     r.ImGui_OpenPopup(ctx, 'actionScopeMenu')
   end
 
@@ -2255,7 +2286,7 @@ local function windowFn()
   if isSelectScope then r.ImGui_BeginDisabled(ctx) end
 
   r.ImGui_Button(ctx, tx.actionScopeFlagsTable[tx.currentActionScopeFlags()].label, DEFAULT_ITEM_WIDTH * 2.5)
-  if (r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) then
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
     r.ImGui_OpenPopup(ctx, 'actionScopeFlagsMenu')
   end
 
@@ -2362,7 +2393,7 @@ local function windowFn()
     if inOKDialog then
       positionModalWindow(r.ImGui_GetFrameHeight(ctx) / 2)
       r.ImGui_OpenPopup(ctx, title)
-    elseif (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()
       or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())) then
         doOK = true
     end

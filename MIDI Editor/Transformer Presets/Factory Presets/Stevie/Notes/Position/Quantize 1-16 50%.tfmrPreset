@@ -1,0 +1,9 @@
+{
+ actionMacro = "$position :roundmusical($1/16|--|0.00|0.00, 50)",
+ actionScope = "$transform",
+ actionScopeFlags = "$none",
+ findMacro = "$type == $note",
+ findScope = "$everywhere",
+ notes = "",
+ scriptIgnoreSelectionInArrangeView = false,
+}

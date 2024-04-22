@@ -1921,12 +1921,6 @@ local function windowFn()
       createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
           if not isSpecial then
             currentRow.param1Entry = i
-            currentRow.param1Val = param1Entries[i]
-            -- if string.match(conditionEntries[currentRow.conditionEntry].notation, 'metricgrid') then
-            --   metricLastUnit = i
-            -- elseif string.match(conditionEntries[currentRow.conditionEntry].notation, 'eqmusical') then
-            --   musicalLastUnit = i
-            -- end
           end
           tx.processFind()
         end,
@@ -1940,7 +1934,6 @@ local function windowFn()
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i)
           currentRow.param2Entry = i
-          currentRow.param2Val = param2Entries[i]
           tx.processFind()
         end)
 
@@ -2242,11 +2235,10 @@ local function windowFn()
       createPopup(currentRow, 'param1Menu', param1Entries, currentRow.param1Entry, function(i, isSpecial)
           if not isSpecial then
             currentRow.param1Entry = i
-            currentRow.param1Val = param1Entries[i]
             if operationEntries[currentRow.operationEntry].musical then
               musicalLastUnit = i
             elseif operationEntries[currentRow.operationEntry].newevent then
-              currentRow.nme.chanmsg = tonumber(currentRow.param1Val.text)
+              currentRow.nme.chanmsg = tonumber(param1Entries[i].text)
             end
             tx.processAction()
           end
@@ -2263,7 +2255,6 @@ local function windowFn()
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.param2Entry, function(i, isSpecial)
           if not isSpecial then
             currentRow.param2Entry = i
-            currentRow.param2Val = param2Entries[i]
             if operationEntries[currentRow.operationEntry].newevent then
               currentRow.nme.posmode = i
             end

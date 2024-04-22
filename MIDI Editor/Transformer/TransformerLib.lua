@@ -284,9 +284,7 @@ function FindRow:init()
   self.targetEntry = 1
   self.conditionEntry = 1
   self.param1Entry = 1
-  self.param1Val = ''
   self.param2Entry = 1
-  self.param2Val = ''
   self.timeFormatEntry = 1
   self.booleanEntry = 1
   self.param1TextEditorStr = '0'
@@ -589,9 +587,7 @@ function ActionRow:init()
   self.targetEntry = 1
   self.operationEntry = 1
   self.param1Entry = 1
-  self.param1Val = ''
   self.param2Entry = 1
-  self.param2Val = ''
   self.param1TextEditorStr = '0'
   self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
   self.param2TextEditorStr = '0'
@@ -2338,7 +2334,6 @@ function ProcessFindMacroRow(buf, boolstr)
         bufstart = findend + 1
         param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
       end
-      row.param1Val = param1
       break
     else
       findstart, findend, hasNot, param1, param2 = string.find(buf, '^%s-(!*)' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
@@ -2360,8 +2355,6 @@ function ProcessFindMacroRow(buf, boolstr)
           -- mu.post('param2', param2)
           param2 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param2', param2Tab, param2, 2)
         end
-        row.param1Val = param1
-        row.param2Val = param2
         break
       -- else -- still not found, maybe an old thing (can be removed post-release)
       --   P(string.sub(buf, bufstart))
@@ -2417,7 +2410,6 @@ function TimeFormatToSeconds(buf, baseTime, context, isLength)
 
   local isneg = string.match(buf, '^%s*%-')
 
-  P(buf)
   if format == TIME_FORMAT_MEASURES then
     local absTicks = false
     local tbars, tbeats, tfraction, tsubfrac = string.match(buf, '(%d+)%.(%d+)%.(%d+)%.(%d+)')
@@ -2927,10 +2919,7 @@ function ProcessFind(take, fromHasTable)
     if curTarget.notation == '$lastevent' then wantsEventPreprocessing = true
     elseif string.match(condition.notation, ':inchord') then wantsEventPreprocessing = true end
 
-    v.param1Val, v.param2Val = ProcessParams(v, curTarget, condition, param1Tab, param2Tab, false, context)
-
-    local param1Term = v.param1Val
-    local param2Term = v.param2Val
+    local param1Term, param2Term = ProcessParams(v, curTarget, condition, param1Tab, param2Tab, false, context)
 
     if curCondition.terms > 0 and param1Term == '' then return end
 
@@ -3199,7 +3188,7 @@ function ProcessActionMacroRow(buf)
         else bufstart = cachestart end
       end
       if not tryagain then
-        row.param1Val = param1
+        row.param1TextEditorStr = param1
         break
       end
     end
@@ -3228,8 +3217,8 @@ function ProcessActionMacroRow(buf)
           row.param3 = param3 -- very primitive
         end
 
-        row.param1Val = param1
-        row.param2Val = param2
+        row.param1TextEditorStr = param1
+        row.param2TextEditorStr = param2
         -- mu.post(v.label .. ': ' .. (param1 and param1 or '') .. ' / ' .. (param2 and param2 or ''))
         break
       end
@@ -3834,10 +3823,7 @@ function ProcessActionForTake(take)
     local operationVal = operation.text
     local actionTerm = ''
 
-    v.param1Val, v.param2Val = ProcessParams(v, curTarget, curOperation, param1Tab, param2Tab, false, context)
-
-    local param1Term = v.param1Val
-    local param2Term = v.param2Val
+    local param1Term, param2Term = ProcessParams(v, curTarget, curOperation, param1Tab, param2Tab, false, context)
 
     if param1Term == '' and curOperation.terms ~= 0 then return end
 

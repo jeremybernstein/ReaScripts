@@ -327,6 +327,13 @@ local function makeDefaultNewMIDIEvent(row)
   }
 end
 
+local function makePositionScaleOffset(row)
+  row.param1Entry = 1
+  row.param2Entry = 1
+  row.param1TextEditorStr = '1' -- default
+  row.param3 = tx.DEFAULT_LENGTHFORMAT_STRING
+end
+
 local function setupRowFormat(row, condOpTab)
   local isFind = row:is_a(tx.FindRow)
 
@@ -337,6 +344,7 @@ local function setupRowFormat(row, condOpTab)
   local isNewMIDIEvent = condOp.newevent
   local isMetric = condOp.metricgrid
   local isMusical = condOp.musical
+  local isParam3 = condOp.param3
 
   if condOp.split and condOp.split[1].default then
     row.param1TextEditorStr = tostring(condOp.split[1].default) -- hack
@@ -349,6 +357,7 @@ local function setupRowFormat(row, condOpTab)
   row.mg = nil
   row.evn = nil
   row.nme = nil
+  row.param3 = nil
 
   if isMetric or isMusical then
     makeDefaultMetricGrid(row, isFind and isMetric or false)
@@ -356,6 +365,9 @@ local function setupRowFormat(row, condOpTab)
     makeDefaultEveryN(row)
   elseif isNewMIDIEvent then
     makeDefaultNewMIDIEvent(row)
+  elseif isParam3 then
+    -- only 1 param3 at the moment
+    makePositionScaleOffset(row)
   end
 
   local p1 = tx.DEFAULT_TIMEFORMAT_STRING
@@ -1147,24 +1159,28 @@ local function windowFn()
     local isBitField = editorType == tx.EDITOR_TYPE_BITFIELD
     local isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     local isNewMIDIEvent = paramType == tx.PARAM_TYPE_NEWMIDIEVENT
+    local isParam3 = paramType == tx.PARAM_TYPE_PARAM3
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
 
     if isMetricOrMusical and index == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
     if isEveryN and index == 1 then paramType = tx.PARAM_TYPE_MENU end
     if isNewMIDIEvent then paramType = tx.PARAM_TYPE_MENU end
+    if isParam3 then paramType = tx.PARAM_TYPE_MENU end
 
     if condOp.terms >= index then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
       local target = targetTab[row.targetEntry]
 
       if paramType == tx.PARAM_TYPE_MENU then
-        local canOpen = isEveryN and true or #paramTab ~= 0
+        local canOpen = (isEveryN or isParam3) and true or #paramTab ~= 0
         local paramEntry = paramTab[row[paramName .. 'Entry']]
         local label =  #paramTab ~= 0 and paramEntry.label or '---'
         if isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
         elseif isNewMIDIEvent then
           label = (index == 2 and row.param2Entry ~= tx.NEWEVENT_POSITION_ATCURSOR) and (label .. ' ' .. row.nme.posText) or index == 1 and (label .. ': ' .. row.nme.msg2 .. ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0) and '' or ('/' .. row.nme.msg3)) .. (row.nme.chanmsg ~= 0x90 and '' or (' [' .. row.nme.durText .. ']'))) or label
+        elseif isParam3 then
+          label = '* ' .. row.param1TextEditorStr .. ' + ' .. row.param3
         end
         if isMetricOrMusical and paramEntry.notation ~= '$grid' then
           if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
@@ -1638,6 +1654,35 @@ local function windowFn()
 
   local function newMIDIEventParam2Special(fun, row)
     newMIDIEventActionParam2Special(fun, row)
+  end
+
+  local function positionScaleOffsetParam1Special(fun, row)
+    local deactivated = false
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    r.ImGui_AlignTextToFramePadding(ctx)
+
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local rv, buf = r.ImGui_InputText(ctx, 'Scale', row.param1TextEditorStr, inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    tx.setRowParam(row, 'param1', tx.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
+
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    rv, buf = r.ImGui_InputText(ctx, 'Offset', row.param3 and row.param3 or tx.DEFAULT_LENGTHFORMAT_STRING, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    if rv then
+      row.param3 = tx.lengthFormatRebuf(buf)
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 2)
   end
 
   ----------------------------------------------
@@ -2210,6 +2255,8 @@ local function windowFn()
             and musicalParam1SpecialNoSlop
           or paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT
             and newMIDIEventParam1Special
+          or currentActionOperation.param3 -- only 1 param3 at the moment
+            and positionScaleOffsetParam1Special
           or nil,
           paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT)
 

@@ -668,8 +668,8 @@ end
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
-  { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, 0, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
-  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, 0, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
+  { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, nil, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
+  { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, nil, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound),
   { notation = ':roundmusical', label = 'Quantize to Musical Value', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
   positionMod(actionOperationFixed),
@@ -677,8 +677,7 @@ local actionPositionOperationEntries = {
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1})', terms = 1, menu = true },
-  { notation = ':scaleoffset', label = 'Scale + Offset (item-rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, nil, \'{param2}\', _context)', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
-  { notation = ':scaleoffset_e', label = 'Scale + Offset (event-rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, 1, \'{param2}\', _context)', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
+  { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 2, split = {{ }, { menu = true }}, param3 = true },
 }
 
 local actionPositionMultParam2Menu = {
@@ -793,6 +792,7 @@ local PARAM_TYPE_METRICGRID = 6
 local PARAM_TYPE_MUSICAL = 7
 local PARAM_TYPE_EVERYN = 8
 local PARAM_TYPE_NEWMIDIEVENT = 9
+local PARAM_TYPE_PARAM3 = 10
 
 local EDITOR_TYPE_PITCHBEND = 100
 local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
@@ -2171,6 +2171,7 @@ function GetParamType(src)
     or src.musical and PARAM_TYPE_MUSICAL
     or src.everyn and PARAM_TYPE_EVERYN
     or src.newevent and PARAM_TYPE_NEWMIDIEVENT
+    or src.param3 and PARAM_TYPE_PARAM3
     or PARAM_TYPE_UNKNOWN
 end
 
@@ -2272,6 +2273,7 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
     or paramType == PARAM_TYPE_MUSICAL
     or paramType == PARAM_TYPE_EVERYN
     or paramType == PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
+    or paramType == PARAM_TYPE_PARAM3
   then
     row[paramName .. 'TextEditorStr'] = paramStr
   end
@@ -2415,6 +2417,7 @@ function TimeFormatToSeconds(buf, baseTime, context, isLength)
 
   local isneg = string.match(buf, '^%s*%-')
 
+  P(buf)
   if format == TIME_FORMAT_MEASURES then
     local absTicks = false
     local tbars, tbeats, tfraction, tsubfrac = string.match(buf, '(%d+)%.(%d+)%.(%d+)%.(%d+)')
@@ -2501,7 +2504,7 @@ function MultiplyPosition(event, property, param, relative, offset, context)
     local distanceFromStart = event.projtime - itemStartPos
     scaledPosition = itemStartPos + (distanceFromStart * param)
   end
-  scaledPosition = scaledPosition + LengthFormatToSeconds(offset, scaledPosition, context)
+  scaledPosition = scaledPosition + (offset and LengthFormatToSeconds(offset, scaledPosition, context) or 0)
 
   event[property] = scaledPosition
   return scaledPosition
@@ -2581,6 +2584,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, in
   local addMetricGridNotation = false
   local addEveryNNotation = false
   local addNewMIDIEventNotation = false
+  local isParam3 = paramType == PARAM_TYPE_PARAM3
 
   if paramType == PARAM_TYPE_METRICGRID
     or paramType == PARAM_TYPE_MUSICAL
@@ -2633,6 +2637,7 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, in
   elseif paramType == PARAM_TYPE_METRICGRID
     or paramType == PARAM_TYPE_MUSICAL
     or paramType == PARAM_TYPE_EVERYN
+    or paramType == PARAM_TYPE_PARAM3
     or override == EDITOR_TYPE_BITFIELD
   then
     paramVal = row[paramName .. 'TextEditorStr']
@@ -3107,6 +3112,9 @@ function ActionTabsFromTarget(row)
       param2Tab = actionPositionMultParam2Menu
     elseif operation.notation == ':roundmusical' then
       param1Tab = findMusicalParam1Entries
+    elseif operation.notation == ':scaleoffset' then
+      param1Tab = { }
+      param2Tab = actionPositionMultParam2Menu
     end
   elseif notation == '$length' then
     if operation.notation == ':quantmusical'
@@ -3196,8 +3204,11 @@ function ProcessActionMacroRow(buf)
       end
     end
     if tryagain then
-      local param1, param2
-      findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%s*%(([^,]*)[,%s]*([^,]*)%)', bufstart)
+      local param1, param2, param3
+      findstart, findend, param1, param2, param3 = string.find(buf, '^%s*' .. v.notation .. '%s*%(([^,]*)[,%s]*([^,]*)[,%s]*([^,]*)%)', bufstart)
+      if not (findstart and findend) then
+        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%s*%(([^,]*)[,%s]*([^,]*)%)', bufstart)
+      end
       if findstart and findend then
         row.operationEntry = k
         local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
@@ -3213,6 +3224,10 @@ function ProcessActionMacroRow(buf)
         else
           param2 = DefaultValueIfAny(row, operation, 2)
         end
+        if param3 and param3 ~= '' then
+          row.param3 = param3 -- very primitive
+        end
+
         row.param1Val = param1
         row.param2Val = param2
         -- mu.post(v.label .. ': ' .. (param1 and param1 or '') .. ' / ' .. (param2 and param2 or ''))
@@ -3402,6 +3417,9 @@ function ActionRowToNotation(row, index)
       rowText = rowText .. param1Val
       if param2Val and param2Val ~= '' then
         rowText = rowText .. ', ' .. param2Val
+        if row.param3 then
+          rowText = rowText .. ', ' .. row.param3
+        end
       end
     end
     rowText = rowText .. ')'
@@ -3846,6 +3864,9 @@ function ProcessActionForTake(take)
     actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
     actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
     actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
+    if v.param3 then
+      actionTerm = string.gsub(actionTerm, '{param3}', tostring(v.param3))
+    end
 
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
     if isMusical then
@@ -4367,6 +4388,7 @@ TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
 TransformerLib.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
 TransformerLib.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
 TransformerLib.PARAM_TYPE_NEWMIDIEVENT = PARAM_TYPE_NEWMIDIEVENT
+TransformerLib.PARAM_TYPE_PARAM3 = PARAM_TYPE_PARAM3
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }

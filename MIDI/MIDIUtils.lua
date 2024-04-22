@@ -1,12 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.27
+-- @version 0.1.28
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - un-fix extents correction fix (it wasn't the problem)
---   - fix detail about new event creation which broke extents correction
+--   - add MIDI_NoteNameToNoteNumber utility
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -2043,7 +2042,7 @@ end
 local noteNames = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' }
 
 local function MIDI_NoteNumberToNoteName(notenum, names)
-  notenum = math.abs(notenum) % 128
+  notenum = MIDIUtils.CLAMP_MIDI_BYTES and ensureValueRange(notenum) or math.floor(math.abs(notenum) + 0.5) % 128
   names = names or noteNames
   local notename = names[notenum % 12 + 1]
   local octave = math.floor((notenum / 12)) - 1
@@ -2053,6 +2052,32 @@ local function MIDI_NoteNumberToNoteName(notenum, names)
     octave = octave + noteOffset
   end
   return notename..octave
+end
+
+local function MIDI_NoteNameToNoteNumber(notename, names)
+  names = names or noteNames
+  local notenum = 0
+  local noteclass
+  local octave
+  notename = notename:lower()
+
+  for k, v in ipairs(names) do
+    local fs, fe, oct = notename:find('^' .. v:lower() .. '([%-%d]+)')
+    if fs and fe then
+      noteclass = k - 1
+      octave = tonumber(oct)
+      break
+    end
+  end
+  if noteclass then
+    notenum = noteclass
+    if octave then
+      local noteOffset = ReadREAPERConfigVar_Int('midioctoffs') - 1 or nil
+      octave = (octave + 1) - (noteOffset and noteOffset or 0)
+      notenum = noteclass + (12 * octave)
+    end
+  end
+  return notenum
 end
 
 local function MIDI_DebugInfo(take)
@@ -2110,6 +2135,14 @@ MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
     MakeTypedArg(names, 'table', true)
   )
   return select(2, xpcall(MIDI_NoteNumberToNoteName, OnError, notenum, names))
+end
+
+MIDIUtils.MIDI_NoteNameToNoteNumber = function(notename, names)
+  EnforceArgs(
+    MakeTypedArg(notename, 'string'),
+    MakeTypedArg(names, 'table', true)
+  )
+  return select(2, xpcall(MIDI_NoteNameToNoteNumber, OnError, notename, names))
 end
 
 MIDIUtils.MIDI_DebugInfo = function(take)

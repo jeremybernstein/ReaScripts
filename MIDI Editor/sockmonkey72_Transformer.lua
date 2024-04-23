@@ -571,6 +571,7 @@ local function moveFindRowUp()
     rows[index - 1] = rows[index]
     rows[index] = tmp
     selectedFindRow = index - 1
+    ProcessFind()
   end
 end
 
@@ -582,6 +583,7 @@ local function moveFindRowDown()
     rows[index + 1] = rows[index]
     rows[index] = tmp
     selectedFindRow = index + 1
+    ProcessFind()
   end
 end
 
@@ -593,6 +595,7 @@ local function moveActionRowUp()
     rows[index - 1] = rows[index]
     rows[index] = tmp
     selectedActionRow = index - 1
+    ProcessAction()
   end
 end
 
@@ -604,6 +607,25 @@ local function moveActionRowDown()
     rows[index + 1] = rows[index]
     rows[index] = tmp
     selectedActionRow = index + 1
+    ProcessAction()
+  end
+end
+
+local function enableDisableFindRow()
+  local index = selectedFindRow
+  local rows = tx.findRowTable()
+  if index > 0 and index <= #rows then
+    rows[index].disabled = not rows[index].disabled and true or false
+    ProcessFind()
+  end
+end
+
+local function enableDisableActionRow()
+  local index = selectedActionRow
+  local rows = tx.actionRowTable()
+  if index > 0 and index <= #rows then
+    rows[index].disabled = not rows[index].disabled and true or false
+    ProcessAction()
   end
 end
 
@@ -1732,6 +1754,8 @@ local function windowFn()
       local param1Entries = {}
       local param2Entries = {}
 
+      if v.disabled then r.ImGui_BeginDisabled(ctx) end
+
       conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
 
       r.ImGui_TableNextRow(ctx)
@@ -1847,6 +1871,8 @@ local function windowFn()
           tx.processFind()
         end
       end
+
+      if v.disabled then r.ImGui_EndDisabled(ctx) end
 
       r.ImGui_SameLine(ctx)
 
@@ -2131,6 +2157,8 @@ local function windowFn()
       local param1Entries = {}
       local param2Entries = {}
 
+      if v.disabled then r.ImGui_BeginDisabled(ctx) end
+
       operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)
 
       r.ImGui_TableNextRow(ctx)
@@ -2169,6 +2197,8 @@ local function windowFn()
       selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, paramTypes[2], 2, k, tx.processAction)
       if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
 
+      if v.disabled then r.ImGui_EndDisabled(ctx) end
+
       r.ImGui_SameLine(ctx)
 
       r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
@@ -2185,6 +2215,7 @@ local function windowFn()
         lastSelectedRowType = 1
         r.ImGui_OpenPopup(ctx, 'defaultActionRow')
       end
+
       -- TODO: row drag/drop
       -- if r.ImGui_BeginDragDropSource(ctx) then
       --   r.ImGui_SetDragDropPayload(ctx, 'row', 'somedata')
@@ -2793,6 +2824,12 @@ local function windowFn()
         moveFindRowDown()
       elseif lastSelectedRowType == 1 then
         moveActionRowDown()
+      end
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Slash()) then
+      if lastSelectedRowType == 0 then
+        enableDisableFindRow()
+      else
+        enableDisableActionRow()
       end
     end
   end

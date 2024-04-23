@@ -2903,8 +2903,14 @@ function ProcessFind(take, fromHasTable)
   wantsTab = {}
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
 
-  for k, v in ipairs(findRowTable) do
-    if v.except then goto continue end
+  local iterTab = {}
+  for _, v in ipairs(findRowTable) do
+    if not (v.except or v.disabled) then
+      table.insert(iterTab, v)
+    end
+  end
+
+  for k, v in ipairs(iterTab) do
     local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
 
     if #condTab == 0 then return end -- continue?
@@ -3013,22 +3019,28 @@ function ProcessFind(take, fromHasTable)
 
     findTerm = string.gsub(findTerm, '^%s*(.-)%s*$', '%1')
 
+    -- different approach, but false needs to be true for AND conditions
+    -- and to do that, we need to know whether we're in and AND or OR clause
+    -- and to do that, we need to perform more analysis, not sure if it's worth it
+    -- if v.except or v.disabled then
+    --   findTerm = '( false and ( ' .. findTerm .. ' ) )'
+    -- end
+
     local startParen = v.startParenEntry > 1 and (startParenEntries[v.startParenEntry].text .. ' ') or ''
     local endParen = v.endParenEntry > 1 and (' ' .. endParenEntries[v.endParenEntry].text) or ''
 
     local rowStr = startParen .. '( ' .. findTerm .. ' )' .. endParen
-    if k ~= #findRowTable then
+
+    if k ~= #iterTab then
       rowStr = rowStr .. ' ' .. findBooleanEntries[v.booleanEntry].text
     end
     -- mu.post(k .. ': ' .. rowStr)
 
     fnString = fnString == '' and (' ' .. rowStr .. '\n') or (fnString .. ' ' .. rowStr .. '\n')
-    ::continue::
   end
 
   fnString = 'return function(event, _value1, _value2)\nreturn ' .. fnString .. '\nend'
 
-  -- fnString = 'local event = ... \nreturn ' .. fnString
   if DEBUGPOST then
     mu.post('======== FIND FUN ========')
     mu.post(fnString)
@@ -3457,7 +3469,7 @@ local CreateNewMIDIEvent_Once
 function HandleCreateNewMIDIEvent(take, contextTab)
   if CreateNewMIDIEvent_Once then
     for i, row in ipairs(actionRowTable) do
-      if row.nme then
+      if row.nme and not row.disabled then
         local nme = row.nme
 
         -- magic
@@ -3813,7 +3825,15 @@ function ProcessActionForTake(take)
   local fnString = ''
 
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
-  for k, v in ipairs(actionRowTable) do
+
+  local iterTab = {}
+  for _, v in ipairs(actionRowTable) do
+    if not (v.except or v.disabled) then
+      table.insert(iterTab, v)
+    end
+  end
+
+  for k, v in ipairs(iterTab) do
     local opTab, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(v)
 
     if #opTab == 0 then return end -- continue?
@@ -3879,7 +3899,9 @@ function ProcessActionForTake(take)
 
     fnString = fnString == '' and (' ' .. rowStr .. '\n') or (fnString .. ' ' .. rowStr .. '\n')
   end
+
   fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\n return event' .. '\nend'
+
   if DEBUGPOST then
     mu.post('======== ACTION FUN ========')
     mu.post(fnString)

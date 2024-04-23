@@ -286,7 +286,7 @@ end
 
 local function makeDefaultMetricGrid(row, isMetric)
   row.param1Entry = isMetric and metricLastUnit or musicalLastUnit
-  row.param2TextEditorStr = '0'
+  row.params[2].textEditorStr = '0'
   row.mg = {
     wantsBarRestart = metricLastBarRestart,
     preSlopPercent = 0,
@@ -298,7 +298,7 @@ end
 
 local function makeDefaultEveryN(row)
   row.param1Entry = 1
-  row.param2TextEditorStr = '0'
+  row.params[2].textEditorStr = '0'
   row.evn = {
     pattern = '1',
     interval = 1,
@@ -329,13 +329,6 @@ local function makeDefaultNewMIDIEvent(row)
   }
 end
 
-local function makePositionScaleOffset(row)
-  row.param1Entry = 1
-  row.param2Entry = 1
-  row.param1TextEditorStr = '1' -- default
-  row.param3 = tx.DEFAULT_LENGTHFORMAT_STRING
-end
-
 local function setupRowFormat(row, condOpTab)
   local isFind = row:is_a(tx.FindRow)
 
@@ -349,10 +342,10 @@ local function setupRowFormat(row, condOpTab)
   local isParam3 = condOp.param3
 
   if condOp.split and condOp.split[1].default then
-    row.param1TextEditorStr = tostring(condOp.split[1].default) -- hack
+    row.params[1].textEditorStr = tostring(condOp.split[1].default) -- hack
   end
   if condOp.split and condOp.split[2].default then
-    row.param2TextEditorStr = tostring(condOp.split[2].default) -- hack
+    row.params[2].textEditorStr = tostring(condOp.split[2].default) -- hack
   end
 
   -- ensure that there are no lingering tables
@@ -369,7 +362,7 @@ local function setupRowFormat(row, condOpTab)
     makeDefaultNewMIDIEvent(row)
   elseif isParam3 then
     -- only 1 param3 at the moment
-    makePositionScaleOffset(row)
+    tx.makePositionScaleOffset(row)
   end
 
   local p1 = tx.DEFAULT_TIMEFORMAT_STRING
@@ -383,8 +376,8 @@ local function setupRowFormat(row, condOpTab)
   if paramTypes[1] == tx.PARAM_TYPE_TIMEDUR then p1 = tx.DEFAULT_LENGTHFORMAT_STRING end
   if paramTypes[2] == tx.PARAM_TYPE_TIMEDUR then p2 = tx.DEFAULT_LENGTHFORMAT_STRING end
 
-  row.param1TimeFormatStr = p1
-  row.param2TimeFormatStr = p2
+  row.params[1].timeFormatStr = p1
+  row.params[2].timeFormatStr = p2
 end
 
 local function addActionRow(idx, row)
@@ -426,27 +419,27 @@ local function handleExtState()
   local state
 
   state = r.GetExtState(scriptID, 'defaultFindRow')
-  if state and state ~= '' then
+  if tx.isValidString(state) then
     defaultFindRow = state
   end
 
   state = r.GetExtState(scriptID, 'defaultActionRow')
-  if state and state ~= '' then
+  if tx.isValidString(state) then
     defaultActionRow = state
   end
 
   state = r.GetExtState(scriptID, 'scriptWritesMainContext')
-  if state and state ~= '' then
+  if tx.isValidString(state) then
     scriptWritesMainContext = tonumber(state) == 1 and true or false
   end
 
   state = r.GetExtState(scriptID, 'scriptWritesMIDIContexts')
-  if state and state ~= '' then
+  if tx.isValidString(state) then
     scriptWritesMIDIContexts = tonumber(state) == 1 and true or false
   end
 
   state = r.GetExtState(scriptID, 'updateItemBoundsOnEdit')
-  if state and state ~= '' then
+  if tx.isValidString(state) then
     updateItemBoundsOnEdit = state == '1' and true or false
     tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
   end
@@ -1031,9 +1024,9 @@ local function windowFn()
 
   local function decorateTargetLabel(label)
     if label == 'Value 1' then
-      label = label .. ((subtypeValueLabel and subtypeValueLabel ~= '') and ' (' .. subtypeValueLabel .. ')' or '')
+      label = label .. (tx.isValidString(subtypeValueLabel) and ' (' .. subtypeValueLabel .. ')' or '')
     elseif label == 'Value 2' then
-      label = label .. ((mainValueLabel and mainValueLabel ~= '') and ' (' .. mainValueLabel .. ')' or '')
+      label = label .. (tx.isValidString(mainValueLabel) and ' (' .. mainValueLabel .. ')' or '')
     end
     return label
   end
@@ -1175,9 +1168,9 @@ local function windowFn()
     return buf
   end
 
-  local function handleTableParam(row, condOp, paramName, paramTab, paramType, index, rowIdx, procFn)
+  local function handleTableParam(row, condOp, paramTab, paramType, index, rowIdx, procFn)
     local rv = 0
-    local editorType = row[paramName .. 'EditorType']
+    local editorType = row.params[index].editorType
     local isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
     local isEveryN = paramType == tx.PARAM_TYPE_EVERYN and row.evn
     local isBitField = editorType == tx.EDITOR_TYPE_BITFIELD
@@ -1197,7 +1190,7 @@ local function windowFn()
 
       if paramType == tx.PARAM_TYPE_MENU then
         local canOpen = (isEveryN or isParam3) and true or #paramTab ~= 0
-        local paramEntry = paramTab[row[paramName .. 'Entry']]
+        local paramEntry = paramTab[row['param' .. index .. 'Entry']]
         local label =  #paramTab ~= 0 and paramEntry.label or '---'
         if isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
@@ -1215,8 +1208,8 @@ local function windowFn()
                         and ''
                         or (' [' .. row.nme.durText .. ']')))
             or label
-        elseif isParam3 then
-          label = '* ' .. row.param1TextEditorStr .. ' + ' .. row.param3
+        elseif isParam3 and row.param3 and row.param3.textEditorStr then
+          label = '* ' .. row.params[1].textEditorStr .. ' + ' .. row.param3.textEditorStr
         end
         if isMetricOrMusical and paramEntry.notation ~= '$grid' then
           if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
@@ -1226,7 +1219,7 @@ local function windowFn()
         r.ImGui_Button(ctx, label)
         if canOpen and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
           rv = rowIdx
-          r.ImGui_OpenPopup(ctx, paramName .. 'Menu')
+          r.ImGui_OpenPopup(ctx, 'param' .. index .. 'Menu')
         end
       elseif paramType == tx.PARAM_TYPE_INTEDITOR
         or isFloat
@@ -1240,12 +1233,12 @@ local function windowFn()
         local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, index)
         r.ImGui_BeginGroup(ctx)
         if newHasTable then
-          local strVal = row[paramName .. 'TextEditorStr']
+          local strVal = row.params[index].textEditorStr
           if not (isMetricOrMusical or isBitField) then
-            strVal = ensureNumString(row[paramName .. 'TextEditorStr'], range, paramType == tx.PARAM_TYPE_INTEDITOR)
+            strVal = ensureNumString(row.params[index].textEditorStr, range, paramType == tx.PARAM_TYPE_INTEDITOR)
           end
-          if range and range[1] and range[2] and row[paramName .. 'PercentVal'] then
-            local percentVal = row[paramName .. 'PercentVal'] / 100
+          if range and range[1] and range[2] and row.params[index].percentVal then
+            local percentVal = row.params[index].percentVal / 100
             local scaledVal
             if editorType == tx.EDITOR_TYPE_PITCHBEND and condOp.literal then
               scaledVal = percentVal * ((1 << 14) - 1)
@@ -1259,12 +1252,12 @@ local function windowFn()
             end
             strVal = tostring(scaledVal)
           end
-          row[paramName .. 'TextEditorStr'] = strVal
+          row.params[index].textEditorStr = strVal
         end
 
         if isNote then r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75) end
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit',
-          row[paramName .. 'TextEditorStr'],
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. 'param' .. index .. 'Edit',
+        row.params[index].textEditorStr,
           isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(),
           isFloat and nil or isNote and numbersOrNoteNameCallback or isBitField and bitFieldCallback or numbersOnlyCallback)
 
@@ -1272,14 +1265,14 @@ local function windowFn()
           if isNote then
             buf = rewriteNoteName(buf)
           end
-          tx.setRowParam(row, paramName, paramType, editorType, buf, range, condOp.literal and true or false)
+          tx.setRowParam(row, index, paramType, editorType, buf, range, condOp.literal and true or false)
           procFn()
           inTextInput = false
         elseif retval then inTextInput = true
         end
         -- note name support
         if isNote then
-          local noteNum = tonumber(row[paramName .. 'TextEditorStr'])
+          local noteNum = tonumber(row.params[index].textEditorStr)
           if noteNum then
             r.ImGui_SameLine(ctx)
             r.ImGui_AlignTextToFramePadding(ctx)
@@ -1317,9 +1310,9 @@ local function windowFn()
         end
       elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
         r.ImGui_BeginGroup(ctx)
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. paramName .. 'edit', row[paramName .. 'TimeFormatStr'], r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+        local retval, buf = r.ImGui_InputText(ctx, '##' .. 'param' .. index .. 'Edit', row.params[index].timeFormatStr, r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
         if kbdEntryIsCompleted(retval) then
-          row[paramName .. 'TimeFormatStr'] = paramType == tx.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
+          row.params[index].timeFormatStr = paramType == tx.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
           procFn()
           inTextInput = false
         elseif retval then inTextInput = true
@@ -1478,7 +1471,7 @@ local function windowFn()
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      if buf and buf ~= '' then
+      if tx.isValidString(buf) then
         evn.textEditorStr = buf
         if evn.isBitField then
           evn.pattern = evn.textEditorStr
@@ -1513,7 +1506,7 @@ local function windowFn()
     rv, buf = r.ImGui_InputText(ctx, '##everyNoffset', evn.offsetEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      if buf and buf ~= '' then
+      if tx.isValidString(buf) then
         evn.offsetEditorStr = buf
         evn.offset = tonumber(evn.offsetEditorStr)
         fun(3, true)
@@ -1703,14 +1696,14 @@ local function windowFn()
     r.ImGui_AlignTextToFramePadding(ctx)
 
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local rv, buf = r.ImGui_InputText(ctx, 'Scale', row.param1TextEditorStr, inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
+    local rv, buf = r.ImGui_InputText(ctx, 'Scale', row.params[1].textEditorStr, inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    tx.setRowParam(row, 'param1', tx.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
+    tx.setRowParam(row, 1, tx.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
 
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = r.ImGui_InputText(ctx, 'Offset', row.param3 and row.param3 or tx.DEFAULT_LENGTHFORMAT_STRING, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    rv, buf = r.ImGui_InputText(ctx, 'Offset', (row.param3 and row.param3.textEditorStr) and row.param3.textEditorStr or tx.DEFAULT_LENGTHFORMAT_STRING, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
     if rv then
-      row.param3 = tx.lengthFormatRebuf(buf)
+      row.param3.textEditorStr = tx.lengthFormatRebuf(buf)
     end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
 
@@ -1840,13 +1833,13 @@ local function windowFn()
       colIdx = colIdx + 1
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
       overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
-      selected = handleTableParam(currentRow, currentFindCondition, 'param1', param1Entries, paramTypes[1], 1, k, tx.processFind)
+      selected = handleTableParam(currentRow, currentFindCondition, param1Entries, paramTypes[1], 1, k, tx.processFind)
       if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
 
       colIdx = colIdx + 1
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
       overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
-      selected = handleTableParam(currentRow, currentFindCondition, 'param2', param2Entries, paramTypes[2], 2, k, tx.processFind)
+      selected = handleTableParam(currentRow, currentFindCondition, param2Entries, paramTypes[2], 2, k, tx.processFind)
       if selected and selected > 0 then selectedFindRow = selected lastSelectedRowType = 0 end
 
       -- unused currently
@@ -2205,12 +2198,12 @@ local function windowFn()
 
       r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
       overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
-      selected = handleTableParam(currentRow, currentActionOperation, 'param1', param1Entries, paramTypes[1], 1, k, tx.processAction)
+      selected = handleTableParam(currentRow, currentActionOperation, param1Entries, paramTypes[1], 1, k, tx.processAction)
       if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
 
       r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
       overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
-      selected = handleTableParam(currentRow, currentActionOperation, 'param2', param2Entries, paramTypes[2], 2, k, tx.processAction)
+      selected = handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, k, tx.processAction)
       if selected and selected > 0 then selectedActionRow = selected lastSelectedRowType = 1 end
 
       if v.disabled then r.ImGui_EndDisabled(ctx) end
@@ -2572,7 +2565,7 @@ local function windowFn()
       end
     end
 
-    if presetNameTextBuffer and presetNameTextBuffer ~= '' then
+    if tx.isValidString(presetNameTextBuffer) then
       local okrv, okval = handleOKDialog('Overwrite File?', 'Overwrite file '..presetNameTextBuffer..'?')
       if okrv then
         if okval == 1 then

@@ -163,6 +163,10 @@ local function tableCopy(obj, seen)
   return res
 end
 
+local function isValidString(str)
+  return str ~= nil and str ~= ''
+end
+
 -----------------------------------------------------------------------------
 ------------------------------- TRANSFORMER ---------------------------------
 
@@ -236,7 +240,7 @@ local actionScopeTable = {
 }
 
 function ActionScopeFromNotation(notation)
-  if notation and notation ~= '' then
+  if isValidString(notation) then
     for k, v in ipairs(actionScopeTable) do
       if v.notation == notation then
         return k
@@ -254,7 +258,7 @@ local actionScopeFlagsTable = {
 }
 
 function ActionScopeFlagsFromNotation(notation)
-  if notation and notation ~= '' then
+  if isValidString(notation) then
     for k, v in ipairs(actionScopeFlagsTable) do
       if v.notation == notation then
         return k
@@ -278,6 +282,15 @@ local scriptIgnoreSelectionInArrangeView = false
 -----------------------------------------------------------------------------
 ------------------------------ FIND DEFS ------------------------------------
 
+local ParamInfo = class(nil, {})
+
+function ParamInfo:init()
+  self.textEditorStr = '0'
+  self.timeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  self.editorType = nil
+  self.percentVal = nil
+end
+
 local FindRow = class(nil, {})
 
 function FindRow:init()
@@ -287,16 +300,13 @@ function FindRow:init()
   self.param2Entry = 1
   self.timeFormatEntry = 1
   self.booleanEntry = 1
-  self.param1TextEditorStr = '0'
-  self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
-  self.param2TextEditorStr = '0'
-  self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
   self.startParenEntry = 1
   self.endParenEntry = 1
-  self.param1EditorType = nil
-  self.param2EditorType = nil
-  self.param1PercentVal = nil
-  self.param2PercentVal = nil
+
+  self.params = {
+    ParamInfo(),
+    ParamInfo()
+  }
   self.isNot = false
   self.except = nil
 end
@@ -588,14 +598,10 @@ function ActionRow:init()
   self.operationEntry = 1
   self.param1Entry = 1
   self.param2Entry = 1
-  self.param1TextEditorStr = '0'
-  self.param1TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
-  self.param2TextEditorStr = '0'
-  self.param2TimeFormatStr = DEFAULT_TIMEFORMAT_STRING
-  self.param1EditorType = nil
-  self.param2EditorType = nil
-  self.param1PercentVal = nil
-  self.param2PercentVal = nil
+  self.params = {
+    ParamInfo(),
+    ParamInfo()
+  }
 end
 
 local actionRowTable = {}
@@ -661,6 +667,51 @@ local function lengthMod(op)
   return newop
 end
 
+-- param3Formatter
+function FormatPositionScaleOffset(row)
+  -- reverse p2 and p3, another param3 user might need to do weirder stuff
+  local rowText, param1Val, param2Val = GetRowTextAndParameterValues(row)
+  rowText = rowText .. '('
+  if isValidString(param1Val) then
+    rowText = rowText .. param1Val
+    if row.param3 and isValidString(row.param3.textEditorStr) then
+      rowText = rowText .. ', ' .. row.param3.textEditorStr
+      if isValidString(param2Val) then
+        rowText = rowText .. ', ' .. param2Val
+      end
+    end
+  end
+  rowText = rowText .. ')'
+  return rowText
+end
+
+-- param3Parser
+function ParsePositionScaleOffset(row, param1, param2, param3)
+  local _, param1Tab, param2Tab, target, condOp = ActionTabsFromTarget(row)
+  if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
+  if isValidString(param1) then
+    param1 = HandleMacroParam(row, target, condOp, param1Tab, param1, 1)
+  else
+    param1 = DefaultValueIfAny(row, condOp, 1)
+  end
+  if isValidString(param3) then
+    local tmp = param2
+    param2 = param3
+    param3 = tmp
+  end
+  if isValidString(param2) then
+    param2 = HandleMacroParam(row, target, condOp, param2Tab, param2, 2)
+  else
+    param2 = DefaultValueIfAny(row, condOp, 2)
+  end
+
+  row.params[1].textEditorStr = param1
+  row.params[2].textEditorStr = param2
+  row.param3.textEditorStr = LengthFormatRebuf(param3)
+end
+
+local positionScaleOffsetParam3Tab = { formatter = FormatPositionScaleOffset, parser = ParsePositionScaleOffset }
+
 local actionPositionOperationEntries = {
   { notation = '+', label = 'Add', text = 'AddDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projtime, _context)', terms = 1, timedur = true, timearg = true },
@@ -673,7 +724,7 @@ local actionPositionOperationEntries = {
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1})', terms = 1, menu = true },
-  { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 2, split = {{ }, { menu = true }}, param3 = true },
+  { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 2, split = {{ }, { menu = true }}, param3 = positionScaleOffsetParam3Tab },
 }
 
 local actionPositionMultParam2Menu = {
@@ -2204,10 +2255,10 @@ function Check14Bit(paramType)
   return has14bit, hasOther
 end
 
-function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, index)
+function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
   local paramType
   local paramTypes = GetParamTypesForRow(row, target, condOp)
-  paramType = paramTypes[index]
+  paramType = paramTypes[index] or PARAM_TYPE_UNKNOWN
 
   local percent = string.match(paramStr, 'percent<(.-)>')
   if percent then
@@ -2215,9 +2266,9 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
     if percentNum then
       local min = condOp.bipolar and -100 or 0
       percentNum = percentNum < min and min or percentNum > 100 and 100 or percentNum -- what about negative percents???
-      row[paramName .. 'PercentVal'] = percentNum
-      row[paramName .. 'TextEditorStr'] = string.format('%g', percentNum)
-      return row[paramName .. 'TextEditorStr']
+      row.params[index].percentVal = percentNum
+      row.params[index].textEditorStr = string.format('%g', percentNum)
+      return row.params[index].textEditorStr
     end
   end
 
@@ -2243,7 +2294,7 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
         pa, pb = string.find(paramStr, vv.notation .. '[%W]')
       end
       if pa and pb then
-        row[paramName .. 'Entry'] = kk
+        row['param' .. index .. 'Entry'] = kk
         if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
           row.mg = ParseMetricGridNotation(paramStr:sub(pb))
         end
@@ -2254,8 +2305,8 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
     row.evn = ParseEveryNNotation(paramStr)
   elseif isNewEvent then
     ParseNewMIDIEventNotation(paramStr, row, paramTab, index)
-  elseif condOp.bitfield or (condOp.split and condOp.split[index].bitfield) then
-    row[paramName .. 'TextEditorStr'] = paramStr
+  elseif condOp.bitfield or (condOp.split and condOp.split[index] and condOp.split[index].bitfield) then
+    row.params[index].textEditorStr = paramStr
   elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
     local range = condOp.range and condOp.range or target.range
     local has14bit, hasOther = Check14Bit(paramType)
@@ -2264,18 +2315,18 @@ function HandleMacroParam(row, target, condOp, paramName, paramTab, paramStr, in
       else range = condOp.bipolar and TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE or TransformerLib.PARAM_PITCHBEND_RANGE
       end
     end
-    row[paramName .. 'TextEditorStr'] = EnsureNumString(paramStr, range)
+    row.params[index].textEditorStr = EnsureNumString(paramStr, range)
   elseif paramType == PARAM_TYPE_TIME then
-    row[paramName .. 'TimeFormatStr'] = TimeFormatRebuf(paramStr)
+    row.params[index].timeFormatStr = TimeFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_TIMEDUR then
-    row[paramName .. 'TimeFormatStr'] = LengthFormatRebuf(paramStr)
+    row.params[index].timeFormatStr = LengthFormatRebuf(paramStr)
   elseif paramType == PARAM_TYPE_METRICGRID
     or paramType == PARAM_TYPE_MUSICAL
     or paramType == PARAM_TYPE_EVERYN
     or paramType == PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
     or paramType == PARAM_TYPE_PARAM3
   then
-    row[paramName .. 'TextEditorStr'] = paramStr
+    row.params[index].textEditorStr = paramStr
   end
   return paramStr
 end
@@ -2334,9 +2385,9 @@ function ProcessFindMacroRow(buf, boolstr)
       bufstart = findend + 1
       condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
-      if param1 and param1 ~= '' then
+      if isValidString(param1) then
         bufstart = findend + 1
-        param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
+        param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
       end
       break
     else
@@ -2350,14 +2401,14 @@ function ProcessFindMacroRow(buf, boolstr)
         bufstart = findend + 1
 
         condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
-        if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
-        if param1 and param1 ~= '' then
+        if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
+        if isValidString(param1) then
           -- mu.post('param1', param1)
-          param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param1', param1Tab, param1, 1)
+          param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
         end
-        if param2 and param2 ~= '' then
+        if isValidString(param2) then
           -- mu.post('param2', param2)
-          param2 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], 'param2', param2Tab, param2, 2)
+          param2 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
         end
         break
       -- else -- still not found, maybe an old thing (can be removed post-release)
@@ -2576,7 +2627,7 @@ context.OP_DIV = OP_DIV
 context.OP_FIXED = OP_FIXED
 context.OP_SCALEOFF = OP_SCALEOFF
 
-function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, index, notation, takectx)
+function DoProcessParams(row, target, condOp, paramType, paramTab, index, notation, takectx)
   local addMetricGridNotation = false
   local addEveryNNotation = false
   local addNewMIDIEventNotation = false
@@ -2602,43 +2653,43 @@ function DoProcessParams(row, target, condOp, paramName, paramType, paramTab, in
   end
 
   local percentFormat = 'percent<%0.4f>'
-  local override = row['param' .. index .. 'EditorType']
-  local percentVal = row[paramName .. 'PercentVal']
+  local override = row.params[index].editorType
+  local percentVal = row.params[index].percentVal
   local paramVal
   if condOp.terms < index then
     paramVal = ''
   elseif notation and override then
     if override == EDITOR_TYPE_BITFIELD then
-      paramVal = row[paramName .. 'TextEditorStr']
+      paramVal = row.params[index].textEditorStr
     elseif (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row[paramName .. 'TextEditorStr']))
+      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row.params[index].textEditorStr))
     elseif (override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) + (1 << 13)) / ((1 << 14) - 1) * 100)
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) + (1 << 13)) / ((1 << 14) - 1) * 100)
     elseif ((override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_BIPOLAR)) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 14) - 1)) * 100)
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 14) - 1)) * 100)
     elseif ((override == EDITOR_TYPE_7BIT
         or override == EDITOR_TYPE_7BIT_NOZERO
         or override == EDITOR_TYPE_7BIT_BIPOLAR))
       then
-        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row[paramName .. 'TextEditorStr']) / ((1 << 7) - 1)) * 100)
+        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 7) - 1)) * 100)
     else
       mu.post('unknown override: ' .. override)
     end
   elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
-    paramVal = percentVal and string.format('%g', percentVal) or row[paramName .. 'TextEditorStr']
+    paramVal = percentVal and string.format('%g', percentVal) or row.params[index].textEditorStr
   elseif paramType == PARAM_TYPE_TIME then
-    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(TimeFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
+    paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(TimeFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
   elseif paramType == PARAM_TYPE_TIMEDUR then
-    paramVal = (notation or condOp.timearg) and row[paramName .. 'TimeFormatStr'] or tostring(LengthFormatToSeconds(row[paramName .. 'TimeFormatStr'], nil, takectx))
+    paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(LengthFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
   elseif paramType == PARAM_TYPE_METRICGRID
     or paramType == PARAM_TYPE_MUSICAL
     or paramType == PARAM_TYPE_EVERYN
     or paramType == PARAM_TYPE_PARAM3
     or override == EDITOR_TYPE_BITFIELD
   then
-    paramVal = row[paramName .. 'TextEditorStr']
+    paramVal = row.params[index].textEditorStr
   elseif #paramTab ~= 0 then
-    paramVal = notation and paramTab[row[paramName .. 'Entry']].notation or paramTab[row[paramName .. 'Entry']].text
+    paramVal = notation and paramTab[row['param' .. index .. 'Entry']].notation or paramTab[row['param' .. index .. 'Entry']].text
   end
 
   if addMetricGridNotation then
@@ -2655,8 +2706,8 @@ end
 function ProcessParams(row, target, condOp, param1Tab, param2Tab, notation, takectx)
   local paramTypes = GetParamTypesForRow(row, target, condOp)
 
-  local param1Val = DoProcessParams(row, target, condOp, 'param1', paramTypes[1], param1Tab, 1, notation, takectx)
-  local param2Val = DoProcessParams(row, target, condOp, 'param2', paramTypes[2], param2Tab, 2, notation, takectx)
+  local param1Val = DoProcessParams(row, target, condOp, paramTypes[1], param1Tab, 1, notation, takectx)
+  local param2Val = DoProcessParams(row, target, condOp, paramTypes[2], param2Tab, 2, notation, takectx)
 
   return param1Val, param2Val
 end
@@ -2682,15 +2733,15 @@ function FindRowToNotation(row, index)
 
   if string.match(curCondition.notation, '[!]*%:') then
     rowText = rowText .. '('
-    if param1Val and param1Val ~= '' then
+    if isValidString(param1Val) then
       rowText = rowText .. param1Val
-      if param2Val and param2Val ~= '' then
+      if isValidString(param2Val) then
         rowText = rowText .. ', ' .. param2Val
       end
     end
     rowText = rowText .. ')'
   else
-    if param1Val and param1Val ~= '' then
+    if isValidString(param1Val) then
       rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
     end
   end
@@ -3153,7 +3204,7 @@ function DefaultValueIfAny(row, operation, index)
   local default = operation.split and operation.split[index].default or nil -- hack
   if default then
     param = tostring(default)
-    row['param' .. index .. 'TextEditorStr'] = param
+    row.params[index].textEditorStr = param
   end
   return param
 end
@@ -3196,15 +3247,15 @@ function ProcessActionMacroRow(buf)
       bufstart = findend + (buf[findend] ~= '(' and 1 or 0)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s%()]*)%s*', bufstart)
-      if param1 and param1 ~= '' then
-        param1 = HandleMacroParam(row, target, operation, 'param1', param1Tab, param1, 1)
+      if isValidString(param1) then
+        param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
         tryagain = false
       else
         if operation.terms == 0 then tryagain = false
         else bufstart = cachestart end
       end
       if not tryagain then
-        row.param1TextEditorStr = param1
+        row.params[1].textEditorStr = param1
         break
       end
     end
@@ -3216,25 +3267,37 @@ function ProcessActionMacroRow(buf)
       end
       if findstart and findend then
         row.operationEntry = k
-        local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
 
-        if param2 and not (param1 and param1 ~= '') then param1 = param2 param2 = nil end
-        if param1 and param1 ~= '' then
-          param1 = HandleMacroParam(row, target, operation, 'param1', param1Tab, param1, 1)
+        if param3 and v.param3 then
+          row.param3 = tableCopy(v.param3)
+          row.param3.textEditorStr = param3
         else
-          param1 = DefaultValueIfAny(row, operation, 1)
-        end
-        if param2 and param2 ~= '' then
-          param2 = HandleMacroParam(row, target, operation, 'param2', param2Tab, param2, 2)
-        else
-          param2 = DefaultValueIfAny(row, operation, 2)
-        end
-        if param3 and param3 ~= '' then
-          row.param3 = param3 -- very primitive
+          row.param3 = nil -- just to be safe
+          param3 = nil
         end
 
-        row.param1TextEditorStr = param1
-        row.param2TextEditorStr = param2
+        if row.param3 and row.param3.parser then row.param3.parser(row, param1, param2, param3)
+        else
+          local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
+
+          if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
+          if isValidString(param1) then
+            param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
+          else
+            param1 = DefaultValueIfAny(row, operation, 1)
+          end
+          if isValidString(param2) then
+            param2 = HandleMacroParam(row, target, operation, param2Tab, param2, 2)
+          else
+            param2 = DefaultValueIfAny(row, operation, 2)
+          end
+          if isValidString(param3) then
+            row.param3.textEditorStr = param3 -- very primitive
+          end
+          row.params[1].textEditorStr = param1
+          row.params[2].textEditorStr = param2
+        end
+
         -- mu.post(v.label .. ': ' .. (param1 and param1 or '') .. ' / ' .. (param2 and param2 or ''))
         break
       end
@@ -3403,34 +3466,28 @@ end
 function ActionRowToNotation(row, index)
   local rowText = ''
 
-  local _, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(row)
-  rowText = curTarget.notation .. ' ' .. curOperation.notation
-  local param1Val, param2Val
-  local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
+  local _, _, _, _, curOperation = ActionTabsFromTarget(row)
 
-  param1Val, param2Val = ProcessParams(row, curTarget, curOperation, param1Tab, param2Tab, true, { PPQ = 960 } )
-  if paramTypes[1] == PARAM_TYPE_MENU then
-    param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
-  end
-  if paramTypes[2] == PARAM_TYPE_MENU then
-    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
-  end
-
-  if string.match(curOperation.notation, '[!]*%:') then
-    rowText = rowText .. '('
-    if param1Val and param1Val ~= '' then
-      rowText = rowText .. param1Val
-      if param2Val and param2Val ~= '' then
-        rowText = rowText .. ', ' .. param2Val
-        if row.param3 then
-          rowText = rowText .. ', ' .. row.param3
+  if row.param3 and row.param3.formatter then rowText = rowText .. row.param3.formatter(row)
+  else
+    local param1Val, param2Val
+    rowText, param1Val, param2Val = GetRowTextAndParameterValues(row)
+    if string.match(curOperation.notation, '[!]*%:') then
+      rowText = rowText .. '('
+      if isValidString(param1Val) then
+        rowText = rowText .. param1Val
+        if isValidString(param2Val) then
+          rowText = rowText .. ', ' .. param2Val
+          if row.param3 and isValidString(row.param3.textEditorStr) then
+            rowText = rowText .. ', ' .. row.param3.textEditorStr
+          end
         end
       end
-    end
-    rowText = rowText .. ')'
-  else
-    if param1Val and param1Val ~= '' then
-      rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
+      rowText = rowText .. ')'
+    else
+      if isValidString(param1Val) then
+        rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
+      end
     end
   end
 
@@ -3879,8 +3936,8 @@ function ProcessActionForTake(take)
     actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
     actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
     actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
-    if v.param3 then
-      actionTerm = string.gsub(actionTerm, '{param3}', tostring(v.param3))
+    if v.param3 and isValidString(v.param3.textEditorStr) then
+      actionTerm = string.gsub(actionTerm, '{param3}', tostring(v.param3.textEditorStr))
     end
 
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
@@ -4204,7 +4261,7 @@ function LoadPreset(pPath)
       else
         tabStr = presetStr -- fallback for old presets
       end
-      if tabStr and tabStr ~= '' then
+      if isValidString(tabStr) then
         local presetTab = deserialize(tabStr)
         if presetTab then
           local notes = LoadPresetFromTable(presetTab)
@@ -4225,22 +4282,22 @@ function PitchBendTo14Bit(val, literal)
   return (val / ((1 << 14) - 1)) * 100
 end
 
-function SetRowParam(row, paramName, paramType, editorType, strVal, range, literal)
+function SetRowParam(row, index, paramType, editorType, strVal, range, literal)
   local isMetricOrMusical = (paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL)
   local isNewMIDIEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
   local isBitField = editorType == EDITOR_TYPE_BITFIELD
-  row[paramName .. 'TextEditorStr'] = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or EnsureNumString(strVal, range)
+  row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or EnsureNumString(strVal, range)
   if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
-    row[paramName .. 'PercentVal'] = nil
+    row.params[index].percentVal = nil
     -- nothing
   else
-    local val = tonumber(row[paramName .. 'TextEditorStr'])
+    local val = tonumber(row.params[index].textEditorStr)
     if editorType == EDITOR_TYPE_PERCENT or editorType == EDITOR_TYPE_PERCENT_BIPOLAR then
-      row[paramName .. 'PercentVal'] = literal and nil or val
+      row.params[index].percentVal = literal and nil or val
     elseif editorType == EDITOR_TYPE_PITCHBEND or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then
-      row[paramName .. 'PercentVal'] = PitchBendTo14Bit(val, literal or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR)
+      row.params[index].percentVal = PitchBendTo14Bit(val, literal or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR)
     elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO or editorType == EDITOR_TYPE_7BIT_BIPOLAR then
-      row[paramName .. 'PercentVal'] = (val / ((1 << 7) - 1)) * 100
+      row.params[index].percentVal = (val / ((1 << 7) - 1)) * 100
     end
   end
 end
@@ -4266,6 +4323,24 @@ function GetRowParamRange(row, target, condOp, paramType, editorType, idx)
 
   if range and #range == 0 then range = nil end
   return range, bipolar
+end
+
+function GetRowTextAndParameterValues(row)
+  local _, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(row)
+  local rowText = curTarget.notation .. ' ' .. curOperation.notation
+
+  local param1Val, param2Val
+  local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
+
+  param1Val, param2Val = ProcessParams(row, curTarget, curOperation, param1Tab, param2Tab, true, { PPQ = 960 } )
+  if paramTypes[1] == PARAM_TYPE_MENU then
+    param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.param1Entry].notation or nil
+  end
+  if paramTypes[2] == PARAM_TYPE_MENU then
+    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.param2Entry].notation or nil
+  end
+
+  return rowText, param1Val, param2Val
 end
 
 TransformerLib.findScopeTable = findScopeTable
@@ -4374,7 +4449,7 @@ TransformerLib.getHasTable = function()
 end
 
 TransformerLib.setEditorTypeForRow = function(row, idx, type)
-  row['param' .. idx .. 'EditorType'] = type
+  row.params[idx].editorType = type
 end
 
 TransformerLib.getFindScopeFlagLabel = function()
@@ -4432,9 +4507,17 @@ TransformerLib.NEWEVENT_POSITION_RELCURSOR = NEWEVENT_POSITION_RELCURSOR
 TransformerLib.NEWEVENT_POSITION_ATPOSITION = NEWEVENT_POSITION_ATPOSITION
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
+TransformerLib.makePositionScaleOffset = function(row)
+  row.param1Entry = 1
+  row.param2Entry = 1
+  row.params[1].textEditorStr = '1' -- default
+  row.param3 = tableCopy(positionScaleOffsetParam3Tab)
+  row.param3.textEditorStr = DEFAULT_LENGTHFORMAT_STRING
+end
 
 TransformerLib.startup = startup
 TransformerLib.mu = mu
+TransformerLib.isValidString = isValidString
 
 return TransformerLib
 

@@ -764,12 +764,16 @@ local actionNewEventOperationEntries = {
 
 local NEWEVENT_POSITION_ATCURSOR = 1
 local NEWEVENT_POSITION_RELCURSOR = 2
-local NEWEVENT_POSITION_ATPOSITION = 3
+local NEWEVENT_POSITION_ITEMSTART = 3
+local NEWEVENT_POSITION_ITEMEND = 4
+local NEWEVENT_POSITION_ATPOSITION = 5
 
 local newMIDIEventPositionEntries = {
   { notation = '$atcursor', label = 'At Edit Cursor', text = '1' },
   { notation = '$relcursor', label = 'Rel. Edit Cursor:', text = '2' },
-  { notation = '$atposition', label = 'At Position:', text = '3' },
+  { notation = '$itemstart', label = 'Item Start', text = '3' },
+  { notation = '$itemend', label = 'Item End', text = '4' },
+  { notation = '$atposition', label = 'At Position:', text = '5' },
 }
 
 local actionGenericOperationEntries = {
@@ -3501,6 +3505,11 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           elseif nme.posmode == NEWEVENT_POSITION_RELCURSOR then
             local curpos = r.GetCursorPositionEx(0)
             pos = curpos + LengthFormatToSeconds(nme.posText, curpos, context)
+          elseif nme.posmode == NEWEVENT_POSITION_ITEMSTART then
+            pos = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_POSITION')
+          elseif nme.posmode == NEWEVENT_POSITION_ITEMEND then
+            local item = r.GetMediaItemTake_Item(take)
+            pos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
           else
             pos = TimeFormatToSeconds(nme.posText, nil, context) - timeAdjust
           end

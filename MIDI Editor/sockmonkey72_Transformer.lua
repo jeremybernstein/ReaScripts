@@ -4,9 +4,11 @@
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add label for metric grid bitfield
---   - add property search/action for CC shape
---   - presets updates (thank you smandrap!)
+--   - fix position scale/offset to be relative
+--   - MIDI note names can be used where appropriate
+--   - cmd/ctrl-forwardslash will disable/re-enable a row (disabled rows are NOT saved as such; disabling a row might break your parentheses)
+--   - add item start/end new event position options
+--   - preset cleanup (dupe removal & new presets, thanks @__Stevie__ and @smandrap)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -1200,7 +1202,19 @@ local function windowFn()
         if isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
         elseif isNewMIDIEvent then
-          label = (index == 2 and row.param2Entry ~= tx.NEWEVENT_POSITION_ATCURSOR) and (label .. ' ' .. row.nme.posText) or index == 1 and (label .. ': ' .. row.nme.msg2 .. ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0) and '' or ('/' .. row.nme.msg3)) .. (row.nme.chanmsg ~= 0x90 and '' or (' [' .. row.nme.durText .. ']'))) or label
+          label = (index == 2
+                    and (row.param2Entry == tx.NEWEVENT_POSITION_ATPOSITION
+                      or row.param2Entry == tx.NEWEVENT_POSITION_RELCURSOR))
+              and (label .. ' ' .. row.nme.posText)
+            or index == 1
+                    and (label .. ': ' .. row.nme.msg2 ..
+                      ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0)
+                        and ''
+                        or ('/' .. row.nme.msg3)) ..
+                      (row.nme.chanmsg ~= 0x90
+                        and ''
+                        or (' [' .. row.nme.durText .. ']')))
+            or label
         elseif isParam3 then
           label = '* ' .. row.param1TextEditorStr .. ' + ' .. row.param3
         end
@@ -1656,13 +1670,15 @@ local function windowFn()
 
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
     local rv
-    if nme.posmode == tx.NEWEVENT_POSITION_ATCURSOR then r.ImGui_BeginDisabled(ctx) end
-    local label = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR and 'Rel.' or 'Pos.'
+    local isRel = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR
+    local disableNumbox = not isRel and nme.posmode ~= tx.NEWEVENT_POSITION_ATPOSITION
+    if disableNumbox then r.ImGui_BeginDisabled(ctx) end
+    local label = disableNumbox and '-' or isRel and 'Rel.' or 'Pos.'
     rv, nme.posText = r.ImGui_InputText(ctx, label, nme.posText, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
     if rv then
-      nme.posText = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
+      nme.posText = isRel and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
     end
-    if nme.posmode == tx.NEWEVENT_POSITION_ATCURSOR then r.ImGui_EndDisabled(ctx) end
+    if disableNumbox then r.ImGui_EndDisabled(ctx) end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then

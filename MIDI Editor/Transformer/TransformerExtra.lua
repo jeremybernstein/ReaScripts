@@ -1,3 +1,10 @@
+--[[
+   * Author: sockmonkey72
+   * Licence: MIT
+   * Version: 1.00
+   * NoIndex: true
+--]]
+
 local Extra = {}
 
 local function tableCopy(obj, seen)
@@ -182,18 +189,14 @@ local function param3ParseLine(row, param1, param2, param3)
   row.params[3].textEditorStr = param3
 end
 
-local lastHasTable
-
 local function param3LineMenuLabel(row, target, condOp)
   if not isValidString(row.params[3].textEditorStr) then
     row.params[3].textEditorStr = '0'
   end
 
-  local hasTable, fresh = GetHasTable()
-  if hasTable ~= lastHasTable or fresh then
+  if NewHasTable then
     row.params[1].textEditorStr = HandlePercentString(row.params[1].textEditorStr, row, target, condOp, 2, row.params[1].editorType, 1)
     row.params[3].textEditorStr = HandlePercentString(row.params[3].textEditorStr, row, target, condOp, 2, row.params[1].editorType, 3)
-    lastHasTable = hasTable
   end
 
   return row.params[1].textEditorStr .. ' / ' .. row.params[3].textEditorStr

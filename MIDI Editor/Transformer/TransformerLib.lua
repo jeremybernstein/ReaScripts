@@ -2155,7 +2155,7 @@ function Check14Bit(paramType)
   local has14bit = false
   local hasOther = false
   if paramType == PARAM_TYPE_INTEDITOR then
-    local hasTable = TransformerLib.getHasTable()
+    local hasTable = GetHasTable()
     has14bit = hasTable[0xE0] and true or false
     hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
   end
@@ -4403,7 +4403,6 @@ TransformerLib.actionRowToNotation = ActionRowToNotation
 TransformerLib.setRowParam = SetRowParam
 TransformerLib.getRowParamRange = GetRowParamRange
 
-TransformerLib.setDirtyFind = function() dirtyFind = true end
 TransformerLib.getHasTable = GetHasTable
 
 TransformerLib.setEditorTypeForRow = function(row, idx, type)

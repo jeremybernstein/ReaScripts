@@ -183,8 +183,10 @@ local showTimeFormatColumn = false
 local defaultFindRow
 local defaultActionRow
 
-local newHasTable = false
 local inTextInput = false
+
+-- should be global
+NewHasTable = false
 
 -- local focuswait
 -- local wantsRecede -- = tonumber(r.GetExtState('sm72_CreateCrossfade', 'ConfigWantsRecede'))
@@ -513,7 +515,7 @@ local function check14Bit(paramType)
     local hasTable, fresh = tx.getHasTable()
     has14bit = hasTable[0xE0] and true or false
     hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
-    if fresh then newHasTable = true end
+    if fresh then NewHasTable = true end
   end
   return has14bit, hasOther
 end
@@ -1174,7 +1176,7 @@ local function windowFn()
 
     -- TODO: cleanup these attributes & combinations
     local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, index)
-    if newHasTable then
+    if NewHasTable then
       local strVal = row.params[index].textEditorStr
       if not (flags.isMetricOrMusical or flags.isBitField) then
         strVal = ensureNumString(row.params[index].textEditorStr, range, paramType == tx.PARAM_TYPE_INTEDITOR)
@@ -1371,7 +1373,7 @@ local function windowFn()
       subtypeValueLabel = 'Multiple (Databyte 1)'
       mainValueLabel = 'Multiple (Databyte 2)'
     end
-    if fresh then newHasTable = true end
+    if fresh then NewHasTable = true end
   end
 
   local function musicalActionParam1Special(fun, row, addMetric, addSlop, paramEntry)
@@ -2909,7 +2911,7 @@ local function windowFn()
   end
 
   -- if recalcEventTimes or recalcSelectionTimes then canProcess = true end
-  if newHasTable then newHasTable = false end
+  if NewHasTable then NewHasTable = false end
 end
 
 -----------------------------------------------------------------------------

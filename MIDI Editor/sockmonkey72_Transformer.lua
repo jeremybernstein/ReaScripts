@@ -343,11 +343,15 @@ local function setupRowFormat(row, condOpTab)
   local isMusical = condOp.musical
   local isParam3 = condOp.param3
 
-  if condOp.split and condOp.split[1].default then
-    row.params[1].textEditorStr = tostring(condOp.split[1].default) -- hack
-  end
-  if condOp.split and condOp.split[2].default then
-    row.params[2].textEditorStr = tostring(condOp.split[2].default) -- hack
+  for i = 1, 2 do
+    if condOp.split and condOp.split[i].default then
+      row.params[i].textEditorStr = tostring(condOp.split[i].default) -- hack
+    else
+      row.params[i].textEditorStr = '0'
+    end
+    row.params[i].percentVal = nil
+    row.params[i].editorType = nil
+    row.params[i].menuEntry = 1
   end
 
   -- ensure that there are no lingering tables

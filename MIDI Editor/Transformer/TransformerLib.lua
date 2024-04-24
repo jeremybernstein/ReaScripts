@@ -28,9 +28,6 @@ else
   mu = require 'MIDIUtils'
 end
 
-package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
-local te = require 'TransformerExtra'
-
 mu.ENFORCE_ARGS = false -- turn off type checking
 mu.CORRECT_OVERLAPS = true
 mu.CLAMP_MIDI_BYTES = true
@@ -54,6 +51,10 @@ local function startup(scriptName)
 end
 
 local TransformerLib = {}
+
+package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
+local te = require 'TransformerExtra'
+te.initExtra(TransformerLib)
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -4315,7 +4316,7 @@ function GetHasTable()
     CACHED_WRAPPED = nil
     SOM = nil
 
-    local gotSomething = false
+    local count = 0
 
     for _, v in ipairs(takes) do
       InitializeTake(v.take)
@@ -4325,27 +4326,26 @@ function GetHasTable()
       for kk, vv in pairs(tab) do
         if vv == true then
           hasTable[kk] = true
-          gotSomething = true
+          count = count + 1
         end
       end
     end
 
-    if not gotSomething then
+    if count == 0 then
       for kk, vv in pairs(wantsTab) do
         if vv == true then
           hasTable[kk] = true
-          gotSomething = true
+          count = count + 1
         end
       end
     end
 
-    if not gotSomething then
+    if count == 0 then
       hasTable[0x90] = true -- if there's really nothing, just display as if it's notes-only
-      -- for i = 9, 15 do
-      --   hasTable[i << 4] = true
-      -- end
+      count = count + 1
     end
 
+    hasTable._size = count
     dirtyFind = false
     lastHasTable = hasTable
     fresh = true
@@ -4478,6 +4478,14 @@ TransformerLib.startup = startup
 TransformerLib.mu = mu
 TransformerLib.isValidString = te.isValidString
 TransformerLib.handlePercentString = HandlePercentString
+TransformerLib.isANote = function(target, condOp)
+  local isNote = target.notation == '$value1' and not condOp.nixnote
+  if isNote then
+    local hasTable = GetHasTable()
+    isNote = hasTable._size == 1 and hasTable[0x90]
+  end
+  return isNote
+end
 
 return TransformerLib
 

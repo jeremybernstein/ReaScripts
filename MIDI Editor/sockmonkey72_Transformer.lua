@@ -1171,7 +1171,7 @@ local function windowFn()
   end
 
   local function doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
-    local isNote = (target.notation == '$value1' and subtypeValueLabel == 'Note #' and not condOp.nixnote)
+    local isNote = tx.isANote(target, condOp)
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
 
     -- TODO: cleanup these attributes & combinations
@@ -1198,6 +1198,7 @@ local function windowFn()
       tx.setRowParam(row, index, paramType, editorType, buf, range, condOp.literal and true or false)
       procFn()
       inTextInput = false
+      row.dirty = true
     elseif retval then inTextInput = true
     end
 
@@ -1205,12 +1206,18 @@ local function windowFn()
 
     -- note name support
     if isNote then
-      local noteNum = tonumber(row.params[index].textEditorStr)
-      if noteNum then
+      if row.dirty or not row.params[index].noteName then
+        local noteNum = tonumber(row.params[index].textEditorStr)
+        if noteNum then
+          row.params[index].noteName = mu.MIDI_NoteNumberToNoteName(noteNum)
+        end
+      else
         r.ImGui_SameLine(ctx)
         r.ImGui_AlignTextToFramePadding(ctx)
-        r.ImGui_TextColored(ctx, 0x7FFFFFCF, '[' .. mu.MIDI_NoteNumberToNoteName(noteNum) .. ']')
+        r.ImGui_TextColored(ctx, 0x7FFFFFCF, '[' .. row.params[index].noteName .. ']')
       end
+    else
+      row.params[index].noteName = nil
     end
 
     local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
@@ -1816,6 +1823,7 @@ local function windowFn()
       local param1Entries = {}
       local param2Entries = {}
 
+      currentRow.dirty = false
       if v.disabled then r.ImGui_BeginDisabled(ctx) end
 
       conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
@@ -2222,6 +2230,7 @@ local function windowFn()
       local param1Entries = {}
       local param2Entries = {}
 
+      currentRow.dirty = false
       if v.disabled then r.ImGui_BeginDisabled(ctx) end
 
       operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)

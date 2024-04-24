@@ -6,6 +6,11 @@
 --]]
 
 local Extra = {}
+local tx
+
+local function initExtra(txlib)
+  tx = txlib
+end
 
 local function tableCopy(obj, seen)
   if type(obj) ~= 'table' then return obj end
@@ -128,8 +133,7 @@ end
 
 local function param3PositionScaleOffsetMenuLabel(row)
   if not isValidString(row.params[3].textEditorStr) then
-    local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
-    row.params[3].textEditorStr = DEFAULT_LENGTHFORMAT_STRING
+    row.params[3].textEditorStr = tx.DEFAULT_LENGTHFORMAT_STRING
   end
   return '* ' .. row.params[1].textEditorStr .. ' + ' .. row.params[3].textEditorStr
 end
@@ -195,11 +199,25 @@ local function param3LineMenuLabel(row, target, condOp)
   end
 
   if NewHasTable then
-    row.params[1].textEditorStr = HandlePercentString(row.params[1].textEditorStr, row, target, condOp, 2, row.params[1].editorType, 1)
-    row.params[3].textEditorStr = HandlePercentString(row.params[3].textEditorStr, row, target, condOp, 2, row.params[1].editorType, 3)
+    row.params[1].textEditorStr = HandlePercentString(row.params[1].textEditorStr, row, target, condOp, tx.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 1)
+    row.params[3].textEditorStr = HandlePercentString(row.params[3].textEditorStr, row, target, condOp, tx.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 3)
   end
 
-  return row.params[1].textEditorStr .. ' / ' .. row.params[3].textEditorStr
+  local note1 = row.params[1].noteName
+  local note3 = row.params[3].noteName
+  if row.dirty or not (note1 and note3) then
+    if tx.isANote(target, condOp) then
+      note1 = tx.mu.MIDI_NoteNumberToNoteName(tonumber(row.params[1].textEditorStr))
+      row.params[1].noteName = note1
+      note3 = tx.mu.MIDI_NoteNumberToNoteName(tonumber(row.params[3].textEditorStr))
+      row.params[3].noteName = note3
+    else
+      row.params[1].noteName = nil
+      row.params[3].noteName = nil
+    end
+  end
+
+  return row.params[1].textEditorStr .. (note1 and ' [' .. note1 .. ']' or '') .. ' / ' .. row.params[3].textEditorStr .. (note3 and ' [' .. note3 .. ']' or '')
 end
 
 local function param3LineFunArg(row, target, condOp)
@@ -219,6 +237,7 @@ local lineParam3Tab = {
     funArg = param3LineFunArg,
 }
 
+Extra.initExtra = initExtra
 Extra.tableCopy = tableCopy
 Extra.isValidString = isValidString
 Extra.spairs = spairs

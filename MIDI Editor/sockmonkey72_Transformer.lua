@@ -2897,7 +2897,7 @@ local function windowFn()
       elseif lastSelectedRowType == 1 then
         moveActionRowDown()
       end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Slash()) then
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_K()) then
       if lastSelectedRowType == 0 then
         enableDisableFindRow()
       else

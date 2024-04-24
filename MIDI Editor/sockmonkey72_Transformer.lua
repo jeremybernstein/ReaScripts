@@ -1724,7 +1724,7 @@ local function windowFn()
 
     r.ImGui_AlignTextToFramePadding(ctx)
 
-    local _, param1Tab, param2Tab, target, operation = tx.actionTabsFromTarget(row)
+    local _, _, _, target, operation = tx.actionTabsFromTarget(row)
     local paramTypes = tx.GetParamTypesForRow(row, target, operation)
     local flags = {}
 
@@ -1733,6 +1733,10 @@ local function windowFn()
       local paramType = paramTypes[i]
       local editorType = row.params[i].editorType
       flags.isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
+      r.ImGui_AlignTextToFramePadding(ctx)
+      r.ImGui_Text(ctx, i == 1 and 'Lo:' or 'Hi:')
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetCursorPosX(ctx, currentFontWidth * 4)
       r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
       if doHandleTableParam(row, target, operation, paramType, editorType, i, flags, tx.processAction) then deactivated = true end
     end

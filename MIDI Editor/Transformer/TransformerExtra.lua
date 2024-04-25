@@ -144,6 +144,18 @@ local positionScaleOffsetParam3Tab = {
   menuLabel = param3PositionScaleOffsetMenuLabel,
 }
 
+local function makeParam3PositionScaleOffset(row)
+  row.params[1].menuEntry = 1
+  row.params[2].menuEntry = 1
+  row.params[1].textEditorStr = '1' -- default
+  row.params[3] = tx.ParamInfo()
+  for k, v in pairs(positionScaleOffsetParam3Tab) do row.params[3][k] = v end
+  row.params[3].textEditorStr = tx.DEFAULT_LENGTHFORMAT_STRING
+end
+
+----------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
+
 local function param3FormatLine(row)
   -- reverse p2 and p3, another param3 user might need to do weirder stuff
   local rowText, param1Val, param2Val, param3Val = GetRowTextAndParameterValues(row)
@@ -237,14 +249,30 @@ local lineParam3Tab = {
     funArg = param3LineFunArg,
 }
 
+local function makeParam3Line(row)
+  row.params[1].menuEntry = 1 -- unused
+  row.params[2].menuEntry = 1 -- this is the curve type menu
+  row.params[1].textEditorStr = '0'
+  row.params[3] = tx.ParamInfo()
+  for k, v in pairs(lineParam3Tab) do row.params[3][k] = v end
+  row.params[3].textEditorStr = '0'
+  row.params[3].mod = 2. -- curve type mod, a param4
+end
+
+----------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
+
 Extra.initExtra = initExtra
-Extra.tableCopy = tableCopy
-Extra.isValidString = isValidString
-Extra.spairs = spairs
-Extra.deserialize = deserialize
-Extra.serialize = serialize
-Extra.isValidString = isValidString
 Extra.positionScaleOffsetParam3Tab = positionScaleOffsetParam3Tab
+Extra.makeParam3PositionScaleOffset = makeParam3PositionScaleOffset
 Extra.lineParam3Tab = lineParam3Tab
+Extra.makeParam3Line = makeParam3Line
+
+-- put these things in the global table so we can call them from anywhere
+_G['tableCopy'] = tableCopy
+_G['isValidString'] = isValidString
+_G['spairs'] = spairs
+_G['serialize'] = serialize
+_G['deserialize'] = deserialize
 
 return Extra

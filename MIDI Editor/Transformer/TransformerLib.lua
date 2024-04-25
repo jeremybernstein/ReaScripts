@@ -233,7 +233,7 @@ local actionScopeTable = {
 }
 
 function ActionScopeFromNotation(notation)
-  if te.isValidString(notation) then
+  if isValidString(notation) then
     for k, v in ipairs(actionScopeTable) do
       if v.notation == notation then
         return k
@@ -251,7 +251,7 @@ local actionScopeFlagsTable = {
 }
 
 function ActionScopeFlagsFromNotation(notation)
-  if te.isValidString(notation) then
+  if isValidString(notation) then
     for k, v in ipairs(actionScopeFlagsTable) do
       if v.notation == notation then
         return k
@@ -386,12 +386,12 @@ local findLastEventConditionEntries = {
 }
 
 function FindConditionAddSelectRange(t, r)
-  local tt = te.tableCopy(t)
+  local tt = tableCopy(t)
   tt.timeselect = r
   return tt
 end
 
-local findConditionSimilarSlopTime = te.tableCopy(findConditionSimilarSlop)
+local findConditionSimilarSlopTime = tableCopy(findConditionSimilarSlop)
 findConditionSimilarSlopTime.timedur = true
 
 local findPositionConditionEntries = {
@@ -446,7 +446,7 @@ local typeEntries = {
   { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
 }
 
-local findTypeParam1Entries = te.tableCopy(typeEntries)
+local findTypeParam1Entries = tableCopy(typeEntries)
 table.insert(findTypeParam1Entries, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
 
 local findChannelParam1Entries = {
@@ -636,7 +636,7 @@ local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Of
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 
 local function positionMod(op)
-  local newop = te.tableCopy(op)
+  local newop = tableCopy(op)
   newop.menu = false
   newop.inteditor = false
   newop.floateditor = false
@@ -647,7 +647,7 @@ local function positionMod(op)
 end
 
 local function lengthMod(op)
-  local newop = te.tableCopy(op)
+  local newop = tableCopy(op)
   newop.menu = false
   newop.inteditor = false
   newop.floateditor = false
@@ -692,7 +692,7 @@ local actionLengthOperationEntries = {
 }
 
 local function channelMod(op)
-  local newop = te.tableCopy(op)
+  local newop = tableCopy(op)
   newop.literal = true
   newop.range = newop.bipolar and { -15, 15 } or { 0, 15 }
   return newop
@@ -2293,7 +2293,7 @@ function ProcessFindMacroRow(buf, boolstr)
       bufstart = findend + 1
       condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
-      if te.isValidString(param1) then
+      if isValidString(param1) then
         bufstart = findend + 1
         param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
       end
@@ -2309,12 +2309,12 @@ function ProcessFindMacroRow(buf, boolstr)
         bufstart = findend + 1
 
         condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
-        if param2 and not te.isValidString(param1) then param1 = param2 param2 = nil end
-        if te.isValidString(param1) then
+        if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
+        if isValidString(param1) then
           -- mu.post('param1', param1)
           param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
         end
-        if te.isValidString(param2) then
+        if isValidString(param2) then
           -- mu.post('param2', param2)
           param2 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
         end
@@ -2642,15 +2642,15 @@ function FindRowToNotation(row, index)
 
   if string.match(curCondition.notation, '[!]*%:') then
     rowText = rowText .. '('
-    if te.isValidString(param1Val) then
+    if isValidString(param1Val) then
       rowText = rowText .. param1Val
-      if te.isValidString(param2Val) then
+      if isValidString(param2Val) then
         rowText = rowText .. ', ' .. param2Val
       end
     end
     rowText = rowText .. ')'
   else
-    if te.isValidString(param1Val) then
+    if isValidString(param1Val) then
       rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
     end
   end
@@ -2818,12 +2818,12 @@ function RunFind(findFn, params, runFn)
     for _, rData in pairs(firstLastEventsByType) do
       for _, rEvent in pairs(rData) do
         local newEvent
-        newEvent = te.tableCopy(rEvent.firstEvent)
+        newEvent = tableCopy(rEvent.firstEvent)
         newEvent.projtime = frStart
         newEvent.firstlastevent = true
         newEvent.orig_type = OTHER_TYPE
         table.insert(found, newEvent)
-        newEvent = te.tableCopy(rEvent.lastEvent)
+        newEvent = tableCopy(rEvent.lastEvent)
         newEvent.projtime = frEnd
         newEvent.firstlastevent = true
         newEvent.orig_type = OTHER_TYPE
@@ -2969,13 +2969,13 @@ function ProcessFind(take, fromHasTable)
     local isEveryN = paramTypes[1] == PARAM_TYPE_EVERYN and true or false
 
     if isMetricGrid or isMusical then
-      local mgParams = te.tableCopy(row.mg)
+      local mgParams = tableCopy(row.mg)
       mgParams.param1 = param1Num
       mgParams.param2 = param2Term
-      findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', te.serialize(mgParams))
+      findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', serialize(mgParams))
     elseif isEveryN then
-      local evnParams = te.tableCopy(row.evn)
-      findTerm = string.gsub(findTerm, '{everyNparams}', te.serialize(evnParams))
+      local evnParams = tableCopy(row.evn)
+      findTerm = string.gsub(findTerm, '{everyNparams}', serialize(evnParams))
     end
 
     if curTarget.cond then
@@ -3162,7 +3162,7 @@ function ProcessActionMacroRow(buf)
       bufstart = findend + (buf[findend] ~= '(' and 1 or 0)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s%()]*)%s*', bufstart)
-      if te.isValidString(param1) then
+      if isValidString(param1) then
         param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
         tryagain = false
       else
@@ -3196,18 +3196,18 @@ function ProcessActionMacroRow(buf)
         else
           local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
 
-          if param2 and not te.isValidString(param1) then param1 = param2 param2 = nil end
-          if te.isValidString(param1) then
+          if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
+          if isValidString(param1) then
             param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
           else
             param1 = DefaultValueIfAny(row, operation, 1)
           end
-          if te.isValidString(param2) then
+          if isValidString(param2) then
             param2 = HandleMacroParam(row, target, operation, param2Tab, param2, 2)
           else
             param2 = DefaultValueIfAny(row, operation, 2)
           end
-          if te.isValidString(param3) then
+          if isValidString(param3) then
             row.params[3].textEditorStr = param3 -- very primitive
           end
           row.params[1].textEditorStr = param1
@@ -3390,18 +3390,18 @@ function ActionRowToNotation(row, index)
     rowText, param1Val, param2Val, param3Val = GetRowTextAndParameterValues(row)
     if string.match(curOperation.notation, '[!]*%:') then
       rowText = rowText .. '('
-      if te.isValidString(param1Val) then
+      if isValidString(param1Val) then
         rowText = rowText .. param1Val
-        if te.isValidString(param2Val) then
+        if isValidString(param2Val) then
           rowText = rowText .. ', ' .. param2Val
-          if te.isValidString(param3Val) then
+          if isValidString(param3Val) then
             rowText = rowText .. ', ' .. param3Val
           end
         end
       end
       rowText = rowText .. ')'
     else
-      if te.isValidString(param1Val) then
+      if isValidString(param1Val) then
         rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
       end
     end
@@ -3471,7 +3471,7 @@ function HandleCreateNewMIDIEvent(take, contextTab)
         end)
         if actionFn then
           local timeAdjust = GetTimeOffset()
-          local e = te.tableCopy(nme)
+          local e = tableCopy(nme)
           local pos
           if nme.posmode == NEWEVENT_POSITION_ATCURSOR then
             pos = r.GetCursorPositionEx(0)
@@ -3853,23 +3853,23 @@ function ProcessActionForTake(take)
     actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
     actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
     actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
-    if row.params[3] and te.isValidString(row.params[3].textEditorStr) then
+    if row.params[3] and isValidString(row.params[3].textEditorStr) then
       actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation) or row.params[3].textEditorStr)
     end
 
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
     if isMusical then
-      local mgParams = te.tableCopy(row.mg)
+      local mgParams = tableCopy(row.mg)
       mgParams.param1 = param1Num
       mgParams.param2 = param2Term
-      actionTerm = string.gsub(actionTerm, '{musicalparams}', te.serialize(mgParams))
+      actionTerm = string.gsub(actionTerm, '{musicalparams}', serialize(mgParams))
     end
 
     local isNewMIDIEvent = paramTypes[1] == PARAM_TYPE_NEWMIDIEVENT and true or false
     if isNewMIDIEvent then
-      -- local nmeParams = te.tableCopy(row.nme)
+      -- local nmeParams = tableCopy(row.nme)
       CreateNewMIDIEvent_Once = true
-      -- actionTerm = string.gsub(actionTerm, '{neweventparams}', te.serialize(nmeParams))
+      -- actionTerm = string.gsub(actionTerm, '{neweventparams}', serialize(nmeParams))
     end
 
     actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
@@ -4017,7 +4017,7 @@ function ProcessAction(execute, fromScript)
           TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$replace' then
-        local repParams = te.tableCopy(defParams)
+        local repParams = tableCopy(defParams)
         repParams.wantsUnfound = true
         repParams.addRangeEvents = true
         local found, contextTab, unfound = RunFind(findFn, repParams)
@@ -4048,7 +4048,7 @@ function ProcessAction(execute, fromScript)
           InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$insertexclusive' then
-        local ieParams = te.tableCopy(defParams)
+        local ieParams = tableCopy(defParams)
         ieParams.wantsUnfound = true
         local found, contextTab, unfound = RunFind(findFn, ieParams)
         mu.MIDI_OpenWriteTransaction(take)
@@ -4116,7 +4116,7 @@ function SavePreset(pPath, notes, scriptTab)
       notes = notes,
       scriptIgnoreSelectionInArrangeView = ignoreSelectionInArrangeView
     }
-    f:write(te.serialize(presetTab) .. '\n')
+    f:write(serialize(presetTab) .. '\n')
     f:close()
     saved = true
   end
@@ -4178,8 +4178,8 @@ function LoadPreset(pPath)
       else
         tabStr = presetStr -- fallback for old presets
       end
-      if te.isValidString(tabStr) then
-        local presetTab = te.deserialize(tabStr)
+      if isValidString(tabStr) then
+        local presetTab = deserialize(tabStr)
         if presetTab then
           local notes = LoadPresetFromTable(presetTab)
           dirtyFind = true
@@ -4281,25 +4281,6 @@ function HandlePercentString(strVal, row, target, condOp, paramType, editorType,
   return strVal
 end
 
-local function makeParam3PositionScaleOffset(row)
-  row.params[1].menuEntry = 1
-  row.params[2].menuEntry = 1
-  row.params[1].textEditorStr = '1' -- default
-  row.params[3] = ParamInfo()
-  for k, v in pairs(te.positionScaleOffsetParam3Tab) do row.params[3][k] = v end
-  row.params[3].textEditorStr = DEFAULT_LENGTHFORMAT_STRING
-end
-
-local function makeParam3Line(row)
-  row.params[1].menuEntry = 1 -- unused
-  row.params[2].menuEntry = 1 -- this is the curve type menu
-  row.params[1].textEditorStr = '0'
-  row.params[3] = ParamInfo()
-  for k, v in pairs(actionOperationLine.param3) do row.params[3][k] = v end
-  row.params[3].textEditorStr = '0'
-  row.params[3].mod = 2. -- curve type mod, a param4
-end
-
 local lastHasTable = {}
 
 function GetHasTable()
@@ -4362,6 +4343,8 @@ TransformerLib.setCurrentActionScope = function(val) currentActionScope = val < 
 TransformerLib.actionScopeFlagsTable = actionScopeFlagsTable
 TransformerLib.currentActionScopeFlags = function() return currentActionScopeFlags end
 TransformerLib.setCurrentActionScopeFlags = function(val) currentActionScopeFlags = val < 1 and 1 or val > #actionScopeFlagsTable and #actionScopeFlagsTable or val end
+
+TransformerLib.ParamInfo = ParamInfo
 
 TransformerLib.FindRow = FindRow
 TransformerLib.findRowTable = function() return findRowTable end
@@ -4468,15 +4451,14 @@ TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v an
 TransformerLib.makeParam3 = function(row)
   local _, _, _, target, operation = ActionTabsFromTarget(row)
   if target.notation == '$position' and operation.notation == ':scaleoffset' then
-    makeParam3PositionScaleOffset(row)
+    te.makeParam3PositionScaleOffset(row)
   elseif operation.notation == ':line' or operation.notation == ':relline' then
-    makeParam3Line(row)
+    te.makeParam3Line(row)
   end
 end
 
 TransformerLib.startup = startup
 TransformerLib.mu = mu
-TransformerLib.isValidString = te.isValidString
 TransformerLib.handlePercentString = HandlePercentString
 TransformerLib.isANote = function(target, condOp)
   local isNote = target.notation == '$value1' and not condOp.nixnote

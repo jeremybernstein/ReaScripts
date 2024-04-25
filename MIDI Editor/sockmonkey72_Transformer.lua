@@ -424,27 +424,27 @@ local function handleExtState()
   local state
 
   state = r.GetExtState(scriptID, 'defaultFindRow')
-  if tx.isValidString(state) then
+  if isValidString(state) then
     defaultFindRow = state
   end
 
   state = r.GetExtState(scriptID, 'defaultActionRow')
-  if tx.isValidString(state) then
+  if isValidString(state) then
     defaultActionRow = state
   end
 
   state = r.GetExtState(scriptID, 'scriptWritesMainContext')
-  if tx.isValidString(state) then
+  if isValidString(state) then
     scriptWritesMainContext = tonumber(state) == 1 and true or false
   end
 
   state = r.GetExtState(scriptID, 'scriptWritesMIDIContexts')
-  if tx.isValidString(state) then
+  if isValidString(state) then
     scriptWritesMIDIContexts = tonumber(state) == 1 and true or false
   end
 
   state = r.GetExtState(scriptID, 'updateItemBoundsOnEdit')
-  if tx.isValidString(state) then
+  if isValidString(state) then
     updateItemBoundsOnEdit = state == '1' and true or false
     tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
   end
@@ -838,27 +838,6 @@ local function windowFn()
     return tostring(num)
   end
 
-  local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/questions/15706270/sort-a-table-in-lua)
-    -- collect the keys
-    local keys = {}
-    for k in pairs(t) do keys[#keys+1] = k end
-    -- if order function given, sort by it by passing the table and keys a, b,
-    -- otherwise just sort the keys
-    if order then
-      table.sort(keys, function(a,b) return order(t, a, b) end)
-    else
-      table.sort(keys)
-    end
-    -- return the iterator function
-    local i = 0
-    return function()
-      i = i + 1
-      if keys[i] then
-        return keys[i], t[keys[i]]
-      end
-    end
-  end
-
   local function handleNewFolderCreationDialog(title, text)
     local rv = false
     local doOK = false
@@ -1030,9 +1009,9 @@ local function windowFn()
 
   local function decorateTargetLabel(label)
     if label == 'Value 1' then
-      label = label .. (tx.isValidString(subtypeValueLabel) and ' (' .. subtypeValueLabel .. ')' or '')
+      label = label .. (isValidString(subtypeValueLabel) and ' (' .. subtypeValueLabel .. ')' or '')
     elseif label == 'Value 2' then
-      label = label .. (tx.isValidString(mainValueLabel) and ' (' .. mainValueLabel .. ')' or '')
+      label = label .. (isValidString(mainValueLabel) and ' (' .. mainValueLabel .. ')' or '')
     end
     return label
   end
@@ -1475,7 +1454,7 @@ local function windowFn()
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      if tx.isValidString(buf) then
+      if isValidString(buf) then
         evn.textEditorStr = buf
         if evn.isBitField then
           evn.pattern = evn.textEditorStr
@@ -1510,7 +1489,7 @@ local function windowFn()
     rv, buf = r.ImGui_InputText(ctx, '##everyNoffset', evn.offsetEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      if tx.isValidString(buf) then
+      if isValidString(buf) then
         evn.offsetEditorStr = buf
         evn.offset = tonumber(evn.offsetEditorStr)
         fun(3, true)
@@ -2647,7 +2626,7 @@ local function windowFn()
       end
     end
 
-    if tx.isValidString(presetNameTextBuffer) then
+    if isValidString(presetNameTextBuffer) then
       local okrv, okval = handleOKDialog('Overwrite File?', 'Overwrite file '..presetNameTextBuffer..'?')
       if okrv then
         if okval == 1 then

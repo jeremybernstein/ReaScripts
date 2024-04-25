@@ -1,14 +1,19 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.5
+-- @version 1.0-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
 --   - fix position scale/offset to be relative
 --   - MIDI note names can be used where appropriate
---   - cmd/ctrl-forwardslash will disable/re-enable a row (disabled rows are NOT saved as such; disabling a row might break your parentheses)
---   - add item start/end new event position options
+--   - add item start/end new event position options (start/end of item)
+--   - 'linear change' is now called 'ramp' and supports exponential and logarithmic curves
+--   - cmd/ctrl-k will disable/re-enable a row
+--       NOTE: (disabled rows are NOT saved as such; disabling a row might break your parentheses)
+--   - cmd/ctrl-enter will 'Apply'
 --   - preset cleanup (dupe removal & new presets, thanks @__Stevie__ and @smandrap)
+--   - a ton of internal reshuffling to support a bunch of things which will be largely invisible
+--       to you, but which were heroic in their scope, trust me on that
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -22,7 +27,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.5'
+local versionStr = '1.0-beta.6'
 
 local r = reaper
 

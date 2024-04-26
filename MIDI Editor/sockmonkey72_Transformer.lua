@@ -1,19 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.6
+-- @version 1.0-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix position scale/offset to be relative
---   - MIDI note names can be used where appropriate
---   - add item start/end new event position options (start/end of item)
---   - 'linear change' is now called 'ramp' and supports exponential and logarithmic curves
---   - cmd/ctrl-k will disable/re-enable a row
---       NOTE: (disabled rows are NOT saved as such; disabling a row might break your parentheses)
---   - cmd/ctrl-enter will 'Apply'
---   - preset cleanup (dupe removal & new presets, thanks @__Stevie__ and @smandrap)
---   - a ton of internal reshuffling to support a bunch of things which will be largely invisible
---       to you, but which were heroic in their scope, trust me on that
+--   - corrections to preset read/write in new ramp implementation
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -27,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.6'
+local versionStr = '1.0-beta.7'
 
 local r = reaper
 
@@ -1757,7 +1748,7 @@ local function windowFn()
     if row.params[2].menuEntry == 1 then r.ImGui_EndDisabled(ctx) end
 
     local mod = tonumber(buf)
-    if mod and mod > 0 then row.params[3].mod = mod end
+    if mod and mod >= 0 then row.params[3].mod = mod end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
@@ -2264,6 +2255,10 @@ local function windowFn()
       if handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, tx.processAction) then
         selectedActionRow = k
         lastSelectedRowType = 1
+      end
+
+      if currentActionOperation.param3 then
+        overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 3)
       end
 
       if v.disabled then r.ImGui_EndDisabled(ctx) end

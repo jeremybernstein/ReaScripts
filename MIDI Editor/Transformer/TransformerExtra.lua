@@ -232,14 +232,9 @@ local function param3LineMenuLabel(row, target, condOp)
   return row.params[1].textEditorStr .. (note1 and ' [' .. note1 .. ']' or '') .. ' / ' .. row.params[3].textEditorStr .. (note3 and ' [' .. note3 .. ']' or '')
 end
 
-local function param3LineFunArg(row, target, condOp)
+local function param3LineFunArg(row, target, condOp, param3Term)
   if not row.params[3].mod then row.params[3].mod = 2 end
-  local param2 = row.params[3].textEditorStr
-  local param2Num = tonumber(param2) or 0
-  if row.params[3].percentVal then
-      param2 = GetParamPercentTerm(param2Num, condOp.bipolar)
-  end
-  return param2 .. ', ' .. row.params[3].mod
+  return param3Term .. ', ' .. row.params[3].mod
 end
 
 local lineParam3Tab = {

@@ -744,6 +744,7 @@ local actionLineParam2Entries = {
   { notation = '$lin', label = 'Linear', text = '0' },
   { notation = '$exp', label = 'Exponential', text = '1' },
   { notation = '$log', label = 'Logarithmic', text = '2' },
+  -- { notation = '$scurve', label = 'S-Curve', text = '3' }, -- needs tuning
   -- { notation = '$table', label = 'Lookup Table', text = '3' },
 }
 
@@ -1510,6 +1511,15 @@ function LinearChangeOverSelection(event, property, projTime, p1, type, p2, mult
       local ePos = (linearPos * (e3 - 1)) + 1 -- scale from 1 - e
       local logPos = math.log(ePos, e3)
       local newval = ((p2 - p1) * logPos) + p1
+      return SetValue(event, property, newval)
+    elseif type == 3 then -- s
+      mult = (mult / 2) - 1
+      mult = mult <= -1 and -0.999999 or mult >= 1 and 0.999999 or mult
+      local sPos = ((mult - 1) * ((2 * linearPos) - 1)) / (2 * ((4 * mult) * math.abs(linearPos - 0.5) - mult - 1)) + 0.5
+
+      -- local sPos = (0.5 * (1 + math.sin((linearPos * math.pi) - (math.pi * 0.5))))
+
+      local newval = ((p2 - p1) * sPos) + p1
       return SetValue(event, property, newval)
     end
   end
@@ -2890,26 +2900,24 @@ function ProcessFind(take, fromHasTable)
     if curTarget.notation == '$lastevent' then wantsEventPreprocessing = true
     elseif string.match(condition.notation, ':inchord') then wantsEventPreprocessing = true end
 
-    local param1Term, param2Term = ProcessParams(v, curTarget, condition, { param1Tab, param2Tab, {} }, false, context)
+    local paramTerms = { ProcessParams(v, curTarget, condition, { param1Tab, param2Tab, {} }, false, context) }
 
-    if curCondition.terms > 0 and param1Term == '' then return end
+    if curCondition.terms > 0 and paramTerms[1] == '' then return end
 
-    local param1Num = tonumber(param1Term)
-    local param2Num = tonumber(param2Term)
-    if param1Num and param2Num and param2Num < param1Num
+    local paramNums = { tonumber(paramTerms[1]), tonumber(paramTerms[2]), tonumber(paramTerms[3]) }
+    if paramNums[1] and paramNums[2] and paramNums[2] < paramNums[1]
       and not curCondition.freeterm
     then
-      local tmp = param2Term
-      param2Term = param1Term
-      param1Term = tmp
+      local tmp = paramTerms[2]
+      paramTerms[2] = paramTerms[1]
+      paramTerms[1] = tmp
     end
 
     local paramTypes = GetParamTypesForRow(v, curTarget, condition)
-    if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and row.params[1].percentVal then
-      param1Term = GetParamPercentTerm(param1Num, curCondition.bipolar) -- it's a percent coming from the system
-    end
-    if param2Num and (paramTypes[2] == PARAM_TYPE_INTEDITOR or paramTypes[2] == PARAM_TYPE_FLOATEDITOR) and row.params[2].percentVal then
-      param2Term = GetParamPercentTerm(param2Num, curCondition.bipolar)
+    for i = 1, 2 do -- param3 for Find?
+      if paramNums[i] and (paramTypes[i] == PARAM_TYPE_INTEDITOR or paramTypes[i] == PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
+        paramTerms[i] = GetParamPercentTerm(paramNums[i], curCondition.bipolar)
+      end
     end
 
     -- wants
@@ -2948,12 +2956,6 @@ function ProcessFind(take, fromHasTable)
         local ts2 = GetTimeSelectionEnd()
         if not findRangeStart or ts1 < findRangeStart then findRangeStart = ts1 end
         if not findRangeEnd or ts2 > findRangeEnd then findRangeEnd = ts2 end
-      else
-        -- ONLY TIME SELECTION
-        -- if param1Num and param2Num then
-        --   if not findRangeStart or param1Num < findRangeStart then findRangeStart = param1Num end
-        --   if not findRangeEnd or param2Num > findRangeEnd then findRangeEnd = param2Num end
-        -- end
       end
     end
 
@@ -2961,8 +2963,8 @@ function ProcessFind(take, fromHasTable)
 
     findTerm = conditionVal
     findTerm = string.gsub(findTerm, '{tgt}', targetTerm)
-    findTerm = string.gsub(findTerm, '{param1}', tostring(param1Term))
-    findTerm = string.gsub(findTerm, '{param2}', tostring(param2Term))
+    findTerm = string.gsub(findTerm, '{param1}', tostring(paramTerms[1]))
+    findTerm = string.gsub(findTerm, '{param2}', tostring(paramTerms[2]))
 
     local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
@@ -2970,8 +2972,8 @@ function ProcessFind(take, fromHasTable)
 
     if isMetricGrid or isMusical then
       local mgParams = tableCopy(row.mg)
-      mgParams.param1 = param1Num
-      mgParams.param2 = param2Term
+      mgParams.param1 = paramNums[1]
+      mgParams.param2 = paramTerms[2]
       findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', serialize(mgParams))
     elseif isEveryN then
       local evnParams = tableCopy(row.evn)
@@ -3826,42 +3828,40 @@ function ProcessActionForTake(take)
     local operationVal = operation.text
     local actionTerm = ''
 
-    local param1Term, param2Term = ProcessParams(v, curTarget, curOperation, { param1Tab, param2Tab, {} }, false, context)
+    local paramTerms = { ProcessParams(v, curTarget, curOperation, { param1Tab, param2Tab, {} }, false, context) }
 
-    if param1Term == '' and curOperation.terms ~= 0 then return end
+    if paramTerms[1] == '' and curOperation.terms ~= 0 then return end
 
-    local param1Num = tonumber(param1Term)
-    local param2Num = tonumber(param2Term)
-    if param1Num and param2Num and param2Num < param1Num
+    local paramNums = { tonumber(paramTerms[1]), tonumber(paramTerms[2]), tonumber(paramTerms[3]) }
+    if paramNums[1] and paramNums[2] and paramNums[2] < paramNums[1]
       and not curOperation.freeterm
     then
-      local tmp = param2Term
-      param2Term = param1Term
-      param1Term = tmp
+      local tmp = paramTerms[2]
+      paramTerms[2] = paramTerms[1]
+      paramTerms[1] = tmp
     end
 
     local paramTypes = GetParamTypesForRow(v, curTarget, curOperation)
-    if param1Num and (paramTypes[1] == PARAM_TYPE_INTEDITOR or paramTypes[1] == PARAM_TYPE_FLOATEDITOR) and row.params[1].percentVal then
-      param1Term = GetParamPercentTerm(param1Num, curOperation.bipolar)
-    end
-    if param2Num and (paramTypes[2] == PARAM_TYPE_INTEDITOR or paramTypes[2] == PARAM_TYPE_FLOATEDITOR) and row.params[2].percentVal then
-      param2Term = GetParamPercentTerm(param2Num, curOperation.bipolar)
+    for i = 1, 3 do -- param3
+      if paramNums[i] and (paramTypes[i] == PARAM_TYPE_INTEDITOR or paramTypes[i] == PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
+        paramTerms[i] = GetParamPercentTerm(paramNums[i], curOperation.bipolar)
+      end
     end
 
     -- always sub
     actionTerm = operationVal
     actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
-    actionTerm = string.gsub(actionTerm, '{param1}', tostring(param1Term))
-    actionTerm = string.gsub(actionTerm, '{param2}', tostring(param2Term))
+    actionTerm = string.gsub(actionTerm, '{param1}', tostring(paramTerms[1]))
+    actionTerm = string.gsub(actionTerm, '{param2}', tostring(paramTerms[2]))
     if row.params[3] and isValidString(row.params[3].textEditorStr) then
-      actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation) or row.params[3].textEditorStr)
+      actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation, paramTerms[3]) or row.params[3].textEditorStr)
     end
 
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
     if isMusical then
       local mgParams = tableCopy(row.mg)
-      mgParams.param1 = param1Num
-      mgParams.param2 = param2Term
+      mgParams.param1 = paramNums[1]
+      mgParams.param2 = paramTerms[2]
       actionTerm = string.gsub(actionTerm, '{musicalparams}', serialize(mgParams))
     end
 

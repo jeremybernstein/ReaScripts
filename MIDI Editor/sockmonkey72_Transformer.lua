@@ -4,7 +4,7 @@
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - corrections to preset read/write in new ramp implementation
+--   - add s-curve to ramp implementation
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -282,6 +282,7 @@ local function removeFindRow()
   end
 end
 
+-- TODO: move these to Lib or Extra
 local function makeDefaultMetricGrid(row, isMetric)
   row.params[1].menuEntry = isMetric and metricLastUnit or musicalLastUnit
   row.params[2].textEditorStr = '0'
@@ -1707,6 +1708,7 @@ local function windowFn()
     local paramTypes = tx.GetParamTypesForRow(row, target, operation)
     local flags = {}
 
+    if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
     for i = 1, 3, 2 do
       overrideEditorType(row, target, operation, paramTypes, i)
       local paramType = paramTypes[i]
@@ -1742,13 +1744,26 @@ local function windowFn()
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     -- TODO disabled
     if row.params[2].menuEntry == 1 then r.ImGui_BeginDisabled(ctx) end
-    if not row.params[3].mod then row.params[3].mod = 2 end
-    local rv, buf = r.ImGui_InputText(ctx, 'Exp/Log Factor', tostring(row.params[3].mod), inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
+    -- if not row.params[3].mod then row.params[3].mod = 2 end -- necessary?
+    local mod = row.params[3].mod
+    local modrange = row.params[3].modrange
+    if modrange then
+      mod = (modrange[1] and mod < modrange[1]) and modrange[1] or (modrange[2] and mod > modrange[2]) and modrange[2] or mod
+    end
+
+    local rv, buf = r.ImGui_InputText(ctx, 'Exp/Log Factor', tostring(mod), inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if row.params[2].menuEntry == 1 then r.ImGui_EndDisabled(ctx) end
 
-    local mod = tonumber(buf)
-    if mod and mod >= 0 then row.params[3].mod = mod end
+    mod = tonumber(buf)
+    if mod then
+      if modrange then
+        mod = (modrange[1] and mod < modrange[1]) and modrange[1] or (modrange[2] and mod > modrange[2]) and modrange[2] or mod
+      elseif mod < 0 then
+        mod = 0
+      end
+      row.params[3].mod = mod
+    end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
@@ -2354,8 +2369,10 @@ local function windowFn()
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i, isSpecial)
           if not isSpecial then
             currentRow.params[2].menuEntry = i
-            if operationEntries[currentRow.operationEntry].newevent then
+            if currentActionOperation.newevent then
               currentRow.nme.posmode = i
+            elseif currentActionOperation.param3 and currentActionOperation.param3.paramProc then
+              currentActionOperation.param3.paramProc(currentRow, 2, i)
             end
             tx.processAction()
           end

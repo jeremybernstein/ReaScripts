@@ -173,6 +173,35 @@ local function param3FormatLine(row)
   return rowText
 end
 
+local param3LineEntries = { -- share these with the Lib
+  { notation = '$lin', label = 'Linear', text = '0' },
+  { notation = '$exp', label = 'Exponential', text = '1' },
+  { notation = '$log', label = 'Logarithmic', text = '2' },
+  { notation = '$scurve', label = 'S-Curve', text = '3' }, -- needs tuning
+  -- { notation = '$table', label = 'Lookup Table', text = '3' },
+}
+
+local function param3Line2Range(type, mod)
+  local typeidx
+  if not type then type = '$lin' end
+  for k, v in ipairs(param3LineEntries) do
+    if v.notation == type then
+      typeidx = k
+      break
+    end
+  end
+  if not typeidx then typeidx = 1 end
+
+  local modrange = { 0, nil }
+  if typeidx >= 4 then modrange = { -1, 1 } end
+
+  if mod then
+    mod = (modrange[1] and mod < modrange[1]) and modrange[1] or (modrange[2] and mod > modrange[2]) and modrange[2] or mod
+  end
+
+  return modrange, mod
+end
+
 local function param3ParseLine(row, param1, param2, param3)
   local _, param1Tab, param2Tab, target, condOp = ActionTabsFromTarget(row)
   local p2tmp = param2
@@ -184,13 +213,8 @@ local function param3ParseLine(row, param1, param2, param3)
   end
   if isValidString(param3) then
     local fs, fe, type, mult = string.find(param3, '(.*)|(.*)')
-    if fs and fe then
-      param2 = type
-      row.params[3].mod = tonumber(mult) or 2.
-    else
-      param2 = '$lin'
-      row.params[3].mod = 2.
-    end
+    param2 = type and type or '$lin'
+    row.params[3].modrange, row.params[3].mod = param3Line2Range(param2, tonumber(mult) or 2.)
     param3 = p2tmp
   end
   if isValidString(param2) then
@@ -237,11 +261,16 @@ local function param3LineFunArg(row, target, condOp, param3Term)
   return param3Term .. ', ' .. row.params[3].mod
 end
 
+local function param3LineParamProc(row, idx, val)
+  row.params[3].modrange, row.params[3].mod = param3Line2Range(param3LineEntries[val].notation, row.params[3].mod)
+end
+
 local lineParam3Tab = {
     formatter = param3FormatLine,
     parser = param3ParseLine,
     menuLabel = param3LineMenuLabel,
     funArg = param3LineFunArg,
+    paramProc = param3LineParamProc,
 }
 
 local function makeParam3Line(row)
@@ -252,6 +281,7 @@ local function makeParam3Line(row)
   for k, v in pairs(lineParam3Tab) do row.params[3][k] = v end
   row.params[3].textEditorStr = '0'
   row.params[3].mod = 2. -- curve type mod, a param4
+  row.params[3].modrange = { 0, nil }
 end
 
 ----------------------------------------------------------------------------------------
@@ -262,6 +292,7 @@ Extra.positionScaleOffsetParam3Tab = positionScaleOffsetParam3Tab
 Extra.makeParam3PositionScaleOffset = makeParam3PositionScaleOffset
 Extra.lineParam3Tab = lineParam3Tab
 Extra.makeParam3Line = makeParam3Line
+Extra.param3LineEntries = param3LineEntries
 
 -- put these things in the global table so we can call them from anywhere
 _G['tableCopy'] = tableCopy

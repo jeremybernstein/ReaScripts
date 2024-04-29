@@ -261,7 +261,6 @@ function ActionScopeFlagsFromNotation(notation)
   return ActionScopeFlagsFromNotation('$none') -- default
 end
 
-
 local currentActionScope = ActionScopeFromNotation()
 local currentActionScopeFlags = ActionScopeFlagsFromNotation()
 
@@ -740,13 +739,13 @@ local actionAddLengthParam1Entries = {
   { notation = '$note', label = 'Per Note', text = '2'}
 }
 
-local actionLineParam2Entries = {
-  { notation = '$lin', label = 'Linear', text = '0' },
-  { notation = '$exp', label = 'Exponential', text = '1' },
-  { notation = '$log', label = 'Logarithmic', text = '2' },
-  -- { notation = '$scurve', label = 'S-Curve', text = '3' }, -- needs tuning
-  -- { notation = '$table', label = 'Lookup Table', text = '3' },
-}
+local actionLineParam2Entries = te.param3LineEntries
+-- {
+--   { notation = '$lin', label = 'Linear', text = '0' },
+--   { notation = '$exp', label = 'Exponential', text = '1' },
+--   { notation = '$log', label = 'Logarithmic', text = '2' },
+--   { notation = '$scurve', label = 'S-Curve', text = '3' }, -- needs tuning
+-- }
 
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
@@ -1499,29 +1498,22 @@ function LinearChangeOverSelection(event, property, projTime, p1, type, p2, mult
 
   if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
     local linearPos = (projTime - firstTime) / (lastTime - firstTime)
+    local newval = projTime
+    local scalePos = linearPos
     if type == 0 then
-      local newval = ((p2 - p1) * linearPos) + p1
-      return SetValue(event, property, newval)
+      -- done
     elseif type == 1 then -- exp
-      local expPos = linearPos ^ mult
-      local newval = ((p2 - p1) * expPos) + p1
-      return SetValue(event, property, newval)
+      scalePos = linearPos ^ mult
     elseif type == 2 then -- log
       local e3 = 2.718281828459045 ^ mult
       local ePos = (linearPos * (e3 - 1)) + 1 -- scale from 1 - e
-      local logPos = math.log(ePos, e3)
-      local newval = ((p2 - p1) * logPos) + p1
-      return SetValue(event, property, newval)
+      scalePos = math.log(ePos, e3)
     elseif type == 3 then -- s
-      mult = (mult / 2) - 1
       mult = mult <= -1 and -0.999999 or mult >= 1 and 0.999999 or mult
-      local sPos = ((mult - 1) * ((2 * linearPos) - 1)) / (2 * ((4 * mult) * math.abs(linearPos - 0.5) - mult - 1)) + 0.5
-
-      -- local sPos = (0.5 * (1 + math.sin((linearPos * math.pi) - (math.pi * 0.5))))
-
-      local newval = ((p2 - p1) * sPos) + p1
-      return SetValue(event, property, newval)
+      scalePos = ((mult - 1) * ((2 * linearPos) - 1)) / (2 * ((4 * mult) * math.abs(linearPos - 0.5) - mult - 1)) + 0.5
     end
+    newval = ((p2 - p1) * scalePos) + p1
+    return SetValue(event, property, newval)
   end
   return SetValue(event, property, 0)
 end

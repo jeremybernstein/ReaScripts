@@ -766,17 +766,17 @@ local actionNewEventOperationEntries = {
 }
 
 local NEWEVENT_POSITION_ATCURSOR = 1
-local NEWEVENT_POSITION_RELCURSOR = 2
-local NEWEVENT_POSITION_ITEMSTART = 3
-local NEWEVENT_POSITION_ITEMEND = 4
-local NEWEVENT_POSITION_ATPOSITION = 5
+-- local NEWEVENT_POSITION_RELCURSOR = 2
+local NEWEVENT_POSITION_ITEMSTART = 2
+local NEWEVENT_POSITION_ITEMEND = 3
+local NEWEVENT_POSITION_ATPOSITION = 4
 
 local newMIDIEventPositionEntries = {
   { notation = '$atcursor', label = 'At Edit Cursor', text = '1' },
-  { notation = '$relcursor', label = 'Rel. Edit Cursor:', text = '2' },
-  { notation = '$itemstart', label = 'Item Start', text = '3' },
-  { notation = '$itemend', label = 'Item End', text = '4' },
-  { notation = '$atposition', label = 'At Position:', text = '5' },
+  -- { notation = '$relcursor', label = 'Rel. Edit Cursor:', text = '2' },
+  { notation = '$itemstart', label = 'Item Start', text = '2' },
+  { notation = '$itemend', label = 'Item End', text = '3' },
+  { notation = '$atposition', label = 'At Position', text = '4' },
 }
 
 local actionGenericOperationEntries = {
@@ -2062,7 +2062,7 @@ function GenerateNewMIDIEventNotation(row)
   if not row.nme then return '' end
   local nme = row.nme
   local nmeStr = string.format('%02X%02X%02X', nme.chanmsg | nme.channel, nme.msg2, nme.msg3)
-  nmeStr = nmeStr .. '|' .. (nme.selected and 1 or 0) + (nme.muted and 2 or 0)
+  nmeStr = nmeStr .. '|' .. ((nme.selected and 1 or 0) | (nme.muted and 2 or 0) | (nme.relmode and 4 or 0))
   nmeStr = nmeStr .. '|' .. nme.posText
   nmeStr = nmeStr .. '|' .. (nme.chanmsg == 0x90 and nme.durText or '0')
   nmeStr = nmeStr .. '|' .. string.format('%02X', (nme.chanmsg == 0x90 and tostring(nme.relvel) or '0'))
@@ -2082,6 +2082,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
       local nflags = tonumber(flags)
       nme.selected = nflags & 0x01 ~= 0
       nme.muted = nflags & 0x02 ~= 0
+      nme.relmode = nflags & 0x04 ~= 0
       nme.posText = pos
       nme.durText = dur
       nme.relvel = tonumber(relvel:sub(1, 2), 16)
@@ -2104,9 +2105,15 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
       nme.durText = '0.1.00'
       nme.relvel = 0
       nme.posmod = NEWEVENT_POSITION_ATCURSOR
+      nme.relmode = false
     end
     row.nme = nme
   elseif index == 2 then
+    if str == '$relcursor' then -- legacy
+      str = '$atcursor'
+      row.nme.relmode = true
+    end
+
     for k, v in ipairs(paramTab) do
       if v.notation == str then
         row.params[2].menuEntry = k
@@ -2114,6 +2121,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
         break
       end
     end
+    if row.nme.posmode == NEWEVENT_POSITION_ATPOSITION then row.nme.relmode = false end -- ensure
   end
 end
 
@@ -3469,9 +3477,6 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           local pos
           if nme.posmode == NEWEVENT_POSITION_ATCURSOR then
             pos = r.GetCursorPositionEx(0)
-          elseif nme.posmode == NEWEVENT_POSITION_RELCURSOR then
-            local curpos = r.GetCursorPositionEx(0)
-            pos = curpos + LengthFormatToSeconds(nme.posText, curpos, context)
           elseif nme.posmode == NEWEVENT_POSITION_ITEMSTART then
             pos = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_POSITION')
           elseif nme.posmode == NEWEVENT_POSITION_ITEMEND then
@@ -3479,6 +3484,10 @@ function HandleCreateNewMIDIEvent(take, contextTab)
             pos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
           else
             pos = TimeFormatToSeconds(nme.posText, nil, context) - timeAdjust
+          end
+
+          if nme.posmode ~= NEWEVENT_POSITION_ATPOSITION and nme.relmode then
+            pos = pos + LengthFormatToSeconds(nme.posText, pos, context)
           end
 
           local evType = GetEventType(e)
@@ -4435,7 +4444,6 @@ TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -((1 << 7) - 1), (1 << 7) - 1 }
 TransformerLib.EDITOR_TYPE_BITFIELD = EDITOR_TYPE_BITFIELD
 
 TransformerLib.NEWEVENT_POSITION_ATCURSOR = NEWEVENT_POSITION_ATCURSOR
-TransformerLib.NEWEVENT_POSITION_RELCURSOR = NEWEVENT_POSITION_RELCURSOR
 TransformerLib.NEWEVENT_POSITION_ATPOSITION = NEWEVENT_POSITION_ATPOSITION
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end

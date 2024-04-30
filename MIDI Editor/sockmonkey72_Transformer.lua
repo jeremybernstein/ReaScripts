@@ -1249,19 +1249,20 @@ local function windowFn()
         if flags.isEveryN then
           label = (row.evn.isBitField and '(b) ' or '') .. row.evn.textEditorStr .. (row.evn.offset ~= 0 and (' [' .. row.evn.offset .. ']') or '')
         elseif flags.isNewMIDIEvent then
-          label = (index == 2
-                    and (row.params[2].menuEntry == tx.NEWEVENT_POSITION_ATPOSITION
-                      or row.params[2].menuEntry == tx.NEWEVENT_POSITION_RELCURSOR))
-              and (label .. ' ' .. row.nme.posText)
-            or index == 1
-                    and (label .. ': ' .. row.nme.msg2 ..
-                      ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0)
-                        and ''
-                        or ('/' .. row.nme.msg3)) ..
-                      (row.nme.chanmsg ~= 0x90
-                        and ''
-                        or (' [' .. row.nme.durText .. ']')))
-            or label
+          local isRel = row.nme.relmode and row.params[2].menuEntry ~= tx.NEWEVENT_POSITION_ATPOSITION
+          local isRelNeg = isRel and row.nme.posText:sub(1,1) == '-'
+          local posText = isRelNeg and row.nme.posText:sub(2) or row.nme.posText
+          if index == 2 and (row.params[2].menuEntry == tx.NEWEVENT_POSITION_ATPOSITION or row.nme.relmode) then
+             label = label .. (isRelNeg and ' - ' or isRel and ' + ' or ': ') .. posText
+          elseif index == 1 then
+            label = label .. ': ' .. row.nme.msg2 ..
+              ((row.nme.chanmsg >= 0xC0 and row.nme.chanmsg < 0xE0)
+                and ''
+                or ('/' .. row.nme.msg3)) ..
+              (row.nme.chanmsg ~= 0x90
+                and ''
+                or (' [' .. row.nme.durText .. ']'))
+          end
         elseif flags.isParam3 and row.params[3] and row.params[3].menuLabel then
           label = row.params[3].menuLabel(row, target, condOp)
         end
@@ -1641,18 +1642,30 @@ local function windowFn()
 
     r.ImGui_AlignTextToFramePadding(ctx)
 
+    local xPos = r.ImGui_GetCursorPosX(ctx)
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-    local rv
-    local isRel = nme.posmode == tx.NEWEVENT_POSITION_RELCURSOR
-    local disableNumbox = not isRel and nme.posmode ~= tx.NEWEVENT_POSITION_ATPOSITION
+    local absPos = nme.posmode == tx.NEWEVENT_POSITION_ATPOSITION
+    local isRel = nme.relmode and not absPos
+    local disableNumbox = not isRel and not absPos
     if disableNumbox then r.ImGui_BeginDisabled(ctx) end
-    local label = disableNumbox and '-' or isRel and 'Rel.' or 'Pos.'
+    local label = not absPos and 'Pos+-' or 'Pos.'
+    local rv
     rv, nme.posText = r.ImGui_InputText(ctx, label, nme.posText, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
     if rv then
       nme.posText = isRel and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
     end
     if disableNumbox then r.ImGui_EndDisabled(ctx) end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetCursorPosX(ctx, xPos + DEFAULT_ITEM_WIDTH + (currentFontWidth * 6))
+
+    local disableCheckbox = absPos
+    if disableCheckbox then r.ImGui_BeginDisabled(ctx) end
+    local relval
+    rv, relval = r.ImGui_Checkbox(ctx, 'Relative', nme.relmode)
+    if rv then nme.relmode = relval end
+    if disableCheckbox then r.ImGui_EndDisabled(ctx) end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
@@ -1751,11 +1764,16 @@ local function windowFn()
       mod = (modrange[1] and mod < modrange[1]) and modrange[1] or (modrange[2] and mod > modrange[2]) and modrange[2] or mod
     end
 
-    local rv, buf = r.ImGui_InputText(ctx, 'Exp/Log Factor', tostring(mod), inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
+    local DBL_MIN, DBL_MAX = 2.22507e-308, 1.79769e+308
+    local dmin = row.params[2].menuEntry == 4 and -1 or 0
+    local dmax = row.params[2].menuEntry == 4 and 1 or DBL_MAX
+    local rv, dmod = r.ImGui_DragDouble(ctx, 'Curve Var.', mod, 0.005, dmin, dmax, '%0.3f')
+    -- local rv, buf = r.ImGui_InputText(ctx, 'Exp/Log Factor', tostring(mod), inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
     if row.params[2].menuEntry == 1 then r.ImGui_EndDisabled(ctx) end
 
-    mod = tonumber(buf)
+    mod = dmod
+    -- mod = tonumber(buf)
     if mod then
       if modrange then
         mod = (modrange[1] and mod < modrange[1]) and modrange[1] or (modrange[2] and mod > modrange[2]) and modrange[2] or mod

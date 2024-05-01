@@ -263,6 +263,7 @@ end
 
 local function param3LineParamProc(row, idx, val)
   row.params[3].modrange, row.params[3].mod = param3Line2Range(param3LineEntries[val].notation, row.params[3].mod)
+  if val == 4 and row.params[2].menuEntry ~= 4 then row.params[3].mod = 0.5 end
 end
 
 local lineParam3Tab = {

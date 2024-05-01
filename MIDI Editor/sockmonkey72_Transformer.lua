@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.7
+-- @version 1.0-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add s-curve to ramp implementation
+--   - add s-curve to ramp implementation (curve property from -1 - 1, default 0.5)
+--   - unify new event position options (adding relative option to everything except abs. position)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.7'
+local versionStr = '1.0-beta.8'
 
 local r = reaper
 
@@ -2386,12 +2387,12 @@ local function windowFn()
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i, isSpecial)
           if not isSpecial then
-            currentRow.params[2].menuEntry = i
             if currentActionOperation.newevent then
               currentRow.nme.posmode = i
             elseif currentActionOperation.param3 and currentActionOperation.param3.paramProc then
               currentActionOperation.param3.paramProc(currentRow, 2, i)
             end
+            currentRow.params[2].menuEntry = i
             tx.processAction()
           end
         end,

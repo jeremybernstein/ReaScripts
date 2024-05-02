@@ -1,16 +1,11 @@
 -- @description MoM Toggle: Mouse Mod Toggle Action Generator
--- @version 2.0.0-beta.4
+-- @version 2.0.0-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MoM Toggle: Mouse Mod Toggle Action Generator
 --   Load/Save Mouse Maps, Generate Toggle and One-shot Actions to change them up
 -- @changelog
---   - support for Main, MIDI and Main+MIDI (legacy) contexts
---   - lots of other work, support for v7 MM contexts and more
---   - beta.2: fix crash when minimizing/expanding window (unattached Image)
---   - beta.3: - add some tooltip explanations of what 'section' means for various actions
---             - some cleanup of action generation code and Actions submenu of Gear
---   - beta.4: fix toggle action restore state for different section contexts
+--   - potential fix for fontsize-related crash
 -- @provides
 --   {MouseMaps}/*
 --   [main] sockmonkey72_MouseMapFactory.lua
@@ -152,6 +147,7 @@ local function processBaseFontUpdate(baseFontSize)
 
   FONTSIZE_LARGE = baseFontSize
   FONTSIZE_SMALL = math.floor(baseFontSize * (11/13) + 0.5)
+  if FONTSIZE_SMALL < 1 then FONTSIZE_SMALL = 1 end
   fontInfo.largeDefaultSize = FONTSIZE_LARGE
   fontInfo.smallDefaultSize = FONTSIZE_SMALL
   windowInfo.defaultWidth = 36 * FONTSIZE_LARGE
@@ -1460,6 +1456,7 @@ local function updateOneFont(name)
   if not fontInfo[name] then return end
 
   local newFontSize = math.floor((fontInfo[name..'DefaultSize'] * canvasScale) + 0.5)
+  if newFontSize < 1 then newFontSize = 1 end
   local fontSize = fontInfo[name..'Size']
 
   if newFontSize ~= fontSize then

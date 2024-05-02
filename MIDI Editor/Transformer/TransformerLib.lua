@@ -3938,6 +3938,7 @@ function ProcessAction(execute, fromScript)
   end
 
   r.Undo_BeginBlock2(0)
+  r.PreventUIRefresh(1)
 
   for _, v in ipairs(takes) do
     local take = v.take
@@ -4090,6 +4091,7 @@ function ProcessAction(execute, fromScript)
     end
   end
 
+  r.PreventUIRefresh(-1)
   r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
 end
 
@@ -4098,6 +4100,7 @@ function SavePreset(pPath, notes, scriptTab)
   local saved = false
   local wantsScript = scriptTab.script
   local ignoreSelectionInArrangeView = wantsScript and scriptTab.ignoreSelectionInArrangeView
+  local scriptPrefix = scriptTab.scriptPrefix
 
   if f then
     local fsFlags
@@ -4122,6 +4125,8 @@ function SavePreset(pPath, notes, scriptTab)
     saved = true
   end
 
+  local scriptPath
+
   if saved and wantsScript then
     saved = false
 
@@ -4129,7 +4134,8 @@ function SavePreset(pPath, notes, scriptTab)
     if fPath and fName then
       local fRoot = fName:match('(.*)%.')
       if fRoot then
-        f = io.open(fPath .. fRoot .. '.lua', 'wb')
+        scriptPath = fPath .. scriptPrefix .. fRoot .. '.lua'
+        f = io.open(scriptPath, 'wb')
         if f then
           f:write('package.path = reaper.GetResourcePath() .. "/Scripts/sockmonkey72 Scripts/MIDI Editor/Transformer/?.lua"\n')
           f:write('local tx = require("TransformerLib")\n')
@@ -4142,7 +4148,7 @@ function SavePreset(pPath, notes, scriptTab)
       end
     end
   end
-  return saved
+  return saved, scriptPath
 end
 
 function LoadPresetFromTable(presetTab)

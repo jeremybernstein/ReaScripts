@@ -1,11 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.8
+-- @version 1.0-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add s-curve to ramp implementation (curve property from -1 - 1, default 0.5)
---   - unify new event position options (adding relative option to everything except abs. position)
+--   - add PreventUIRefresh() around execution
+--   - scripts now prepended by Xform_ (with a pref to change or eliminate it if you want)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.8'
+local versionStr = '1.0-beta.9'
 
 local r = reaper
 
@@ -87,6 +87,7 @@ local presetPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
 presetPath = presetPath:gsub('(.*[/\\]).*[/\\]', '%1Transformer Presets')
 
 -- local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
+local scriptPrefix = 'Xform_'
 local presetExt = '.tfmrPreset'
 local presetSubPath
 
@@ -446,6 +447,11 @@ local function handleExtState()
     updateItemBoundsOnEdit = state == '1' and true or false
     tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
   end
+
+  if r.HasExtState(scriptID, 'scriptPrefix') then
+    state = r.GetExtState(scriptID, 'scriptPrefix')
+    scriptPrefix = state and state or ''
+  end
 end
 
 local function prepRandomShit()
@@ -732,6 +738,17 @@ local function windowFn()
         -- r.ImGui_CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
       end
 
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+
+      r.ImGui_Spacing(ctx)
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+      rv, v = r.ImGui_InputText(ctx, 'Script Prefix', scriptPrefix, r.ImGui_InputTextFlags_EnterReturnsTrue())
+      if rv then
+        scriptPrefix = v
+        r.SetExtState(scriptID, 'scriptPrefix', v, true)
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
       r.ImGui_EndPopup(ctx)
     end
     r.ImGui_PopStyleColor(ctx)
@@ -2619,15 +2636,14 @@ local function windowFn()
   end
 
   local function doSavePreset(path, fname)
-    local saved = tx.savePreset(path, presetNotesBuffer, { script = presetInputDoesScript, ignoreSelectionInArrangeView = scriptIgnoreSelectionInArrangeView })
+    local saved, scriptPath = tx.savePreset(path, presetNotesBuffer, { script = presetInputDoesScript, ignoreSelectionInArrangeView = scriptIgnoreSelectionInArrangeView, scriptPrefix = scriptPrefix })
     statusMsg = (saved and 'Saved' or 'Failed to save') .. (presetInputDoesScript and ' + export' or '') .. ' ' .. fname
     statusTime = r.time_precise()
     statusContext = 2
     if saved then
       fname = fname:gsub('%' .. presetExt .. '$', '')
       presetLabel = fname
-      if saved and presetInputDoesScript then
-        local scriptPath = path:gsub('%' .. presetExt .. '$', '.lua')
+      if saved and presetInputDoesScript and scriptPath then
         if scriptWritesMainContext then
           r.AddRemoveReaScript(true, 0, scriptPath, true)
         end

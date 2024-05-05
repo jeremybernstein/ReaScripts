@@ -1,11 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.9
+-- @version 1.0-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add PreventUIRefresh() around execution
---   - scripts now prepended by Xform_ (with a pref to change or eliminate it if you want)
+--   - minor cleanup
+--   - no export script prefix is now denoted as '<no prefix>'
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.9'
+local versionStr = '1.0-beta.10'
 
 local r = reaper
 
@@ -88,6 +88,7 @@ presetPath = presetPath:gsub('(.*[/\\]).*[/\\]', '%1Transformer Presets')
 
 -- local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
 local scriptPrefix = 'Xform_'
+local scriptPrefix_Empty = '<no prefix>'
 local presetExt = '.tfmrPreset'
 local presetSubPath
 
@@ -285,51 +286,6 @@ local function removeFindRow()
 end
 
 -- TODO: move these to Lib or Extra
-local function makeDefaultMetricGrid(row, isMetric)
-  row.params[1].menuEntry = isMetric and metricLastUnit or musicalLastUnit
-  row.params[2].textEditorStr = '0'
-  row.mg = {
-    wantsBarRestart = metricLastBarRestart,
-    preSlopPercent = 0,
-    postSlopPercent = 0,
-    modifiers = 0
-  }
-  return row.mg
-end
-
-local function makeDefaultEveryN(row)
-  row.params[1].menuEntry = 1
-  row.params[2].textEditorStr = '0'
-  row.evn = {
-    pattern = '1',
-    interval = 1,
-    offset = 0,
-    textEditorStr = '1',
-    offsetEditorStr = '0',
-    isBitField = false
-  }
-  return row.evn
-end
-
-local function makeDefaultNewMIDIEvent(row)
-  row.params[1].menuEntry = 1
-  row.params[2].menuEntry = 1
-  row.nme = {
-    chanmsg = 0x90,
-    channel = 0,
-    selected = true,
-    muted = false,
-    msg2 = 60,
-    msg3 = 64,
-    posText = tx.DEFAULT_TIMEFORMAT_STRING,
-    durText = '0.1.00', -- one beat long as a default?
-    relvel = 0,
-    projtime = 0,
-    projlen = 1,
-    posmode = tx.NEWEVENT_POSITION_ATCURSOR,
-  }
-end
-
 local function setupRowFormat(row, condOpTab)
   local isFind = row:is_a(tx.FindRow)
 
@@ -360,11 +316,16 @@ local function setupRowFormat(row, condOpTab)
   row.params[3] = nil
 
   if isMetric or isMusical then
-    makeDefaultMetricGrid(row, isFind and isMetric or false)
+    local data = {}
+    data.isMetric = isFind and isMetric or false
+    data.metricLastUnit = metricLastUnit
+    data.musicalLastUnit = musicalLastUnit
+    data.metricLastBarRestart = metricLastBarRestart
+    tx.makeDefaultMetricGrid(row, data)
   elseif isEveryN then
-    makeDefaultEveryN(row)
+    tx.makeDefaultEveryN(row)
   elseif isNewMIDIEvent then
-    makeDefaultNewMIDIEvent(row)
+    tx.makeDefaultNewMIDIEvent(row)
   elseif isParam3 then
     tx.makeParam3(row)
   end
@@ -450,7 +411,7 @@ local function handleExtState()
 
   if r.HasExtState(scriptID, 'scriptPrefix') then
     state = r.GetExtState(scriptID, 'scriptPrefix')
-    scriptPrefix = state and state or ''
+    scriptPrefix = (state and state ~= scriptPrefix_Empty) and state or ''
   end
 end
 
@@ -718,8 +679,9 @@ local function windowFn()
       r.ImGui_Spacing(ctx)
 
       r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
-      rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, r.ImGui_InputTextFlags_EnterReturnsTrue()
-                                                                     + r.ImGui_InputTextFlags_CharsDecimal())
+      rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, inputFlag
+                                                                     | r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                                                     | r.ImGui_InputTextFlags_CharsDecimal())
       if rv then
         v = processBaseFontUpdate(tonumber(v))
         r.SetExtState(scriptID, 'baseFont', tostring(v), true)
@@ -742,10 +704,11 @@ local function windowFn()
       r.ImGui_Separator(ctx)
 
       r.ImGui_Spacing(ctx)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-      rv, v = r.ImGui_InputText(ctx, 'Script Prefix', scriptPrefix, r.ImGui_InputTextFlags_EnterReturnsTrue())
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
+      local defaultText = isValidString(scriptPrefix) and scriptPrefix or scriptPrefix_Empty
+      rv, v = r.ImGui_InputText(ctx, 'Script Prefix', defaultText, inputFlag | r.ImGui_InputTextFlags_EnterReturnsTrue())
       if rv then
-        scriptPrefix = v
+        scriptPrefix = v == scriptPrefix_Empty and '' or v
         r.SetExtState(scriptID, 'scriptPrefix', v, true)
         r.ImGui_CloseCurrentPopup(ctx)
       end
@@ -1676,7 +1639,7 @@ local function windowFn()
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
 
     r.ImGui_SameLine(ctx)
-    r.ImGui_SetCursorPosX(ctx, xPos + DEFAULT_ITEM_WIDTH + (currentFontWidth * 6))
+    r.ImGui_SetCursorPosX(ctx, xPos + DEFAULT_ITEM_WIDTH + (currentFontWidth * 7))
 
     local disableCheckbox = absPos
     if disableCheckbox then r.ImGui_BeginDisabled(ctx) end

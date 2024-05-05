@@ -4411,6 +4411,56 @@ TransformerLib.getFindScopeFlagLabel = function()
   return label
 end
 
+local function makeDefaultMetricGrid(row, data)
+  local isMetric = data.isMetric
+  local metricLastUnit = data.metricLastUnit
+  local musicalLastUnit = data.musicalLastUnit
+  local metricLastBarRestart = data.metricLastBarRestart
+
+  row.params[1].menuEntry = isMetric and metricLastUnit or musicalLastUnit
+  row.params[2].textEditorStr = '0'
+  row.mg = {
+    wantsBarRestart = metricLastBarRestart,
+    preSlopPercent = 0,
+    postSlopPercent = 0,
+    modifiers = 0
+  }
+  return row.mg
+end
+
+local function makeDefaultEveryN(row)
+  row.params[1].menuEntry = 1
+  row.params[2].textEditorStr = '0'
+  row.evn = {
+    pattern = '1',
+    interval = 1,
+    offset = 0,
+    textEditorStr = '1',
+    offsetEditorStr = '0',
+    isBitField = false
+  }
+  return row.evn
+end
+
+local function makeDefaultNewMIDIEvent(row)
+  row.params[1].menuEntry = 1
+  row.params[2].menuEntry = 1
+  row.nme = {
+    chanmsg = 0x90,
+    channel = 0,
+    selected = true,
+    muted = false,
+    msg2 = 60,
+    msg3 = 64,
+    posText = tx.DEFAULT_TIMEFORMAT_STRING,
+    durText = '0.1.00', -- one beat long as a default?
+    relvel = 0,
+    projtime = 0,
+    projlen = 1,
+    posmode = tx.NEWEVENT_POSITION_ATCURSOR,
+  }
+end
+
 TransformerLib.getFindScopeFlags = function() return currentFindScopeFlags end
 TransformerLib.setFindScopeFlags = function(flags) currentFindScopeFlags = flags end
 TransformerLib.FIND_SCOPE_FLAG_NONE = FIND_SCOPE_FLAG_NONE
@@ -4454,6 +4504,9 @@ TransformerLib.NEWEVENT_POSITION_ATPOSITION = NEWEVENT_POSITION_ATPOSITION
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 
+TransformerLib.makeDefaultMetricGrid = makeDefaultMetricGrid
+TransformerLib.makeDefaultEveryN = makeDefaultEveryN
+TransformerLib.makeDefaultNewMIDIEvent = makeDefaultNewMIDIEvent
 TransformerLib.makeParam3 = function(row)
   local _, _, _, target, operation = ActionTabsFromTarget(row)
   if target.notation == '$position' and operation.notation == ':scaleoffset' then

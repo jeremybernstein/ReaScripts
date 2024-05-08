@@ -1,11 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.10
+-- @version 1.0-beta.11
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - minor cleanup
---   - no export script prefix is now denoted as '<no prefix>'
+--   - fix 'Add Length' position action (was no-op for all but the first option)
+--   - add 'Entire Selection In Take' scope for 'Add Length'
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.10'
+local versionStr = '1.0-beta.11'
 
 local r = reaper
 

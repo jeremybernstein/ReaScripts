@@ -667,7 +667,7 @@ local actionPositionOperationEntries = {
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
-  { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1})', terms = 1, menu = true },
+  { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1}, _context)', terms = 1, menu = true },
   { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 3, split = {{}, { menu = true }, {}}, param3 = te.positionScaleOffsetParam3Tab },
 }
 
@@ -736,8 +736,10 @@ local actionMoveToCursorParam1Entries = {
 local actionAddLengthParam1Entries = {
   { notation = '$alltakes', label = 'Relative Across All Takes', text = '0'},
   { notation = '$singletake', label = 'Relative To First Note In Take', text = '1'},
-  { notation = '$note', label = 'Per Note', text = '2'}
+  { notation = '$selection', label = 'Entire Selection In Take', text = '3'},
+  { notation = '$note', label = 'Per Note', text = '2'},
 }
+
 
 local actionLineParam2Entries = te.param3LineEntries
 -- {
@@ -1520,14 +1522,23 @@ end
 
 local addLengthFirstEventOffset
 local addLengthFirstEventOffset_Take
+local addLengthFirstEventStartTime
 
-function AddLength(event, property, mode)
+function AddLength(event, property, mode, context)
   if GetEventType(event) ~= NOTE_TYPE then return event.projtime end
 
-  if mode == 2 then
+  if mode == 3 then
+    local lastNoteEnd = context.lastNoteEnd
+    if not addLengthFirstEventStartTime then addLengthFirstEventStartTime = event.projtime end
+    if not lastNoteEnd then lastNoteEnd = 0 end
+    event.projtime = event.projtime + lastNoteEnd - addLengthFirstEventStartTime
+    return event.projtime + lastNoteEnd
+  elseif mode == 2 then
+    event.projtime = event.projtime + event.projlen
     return event.projtime + event.projlen
   elseif mode == 1 then
     if not addLengthFirstEventOffset_Take then addLengthFirstEventOffset_Take = event.projlen end
+    event.projtime = event.projtime + addLengthFirstEventOffset_Take
     return event.projtime + addLengthFirstEventOffset_Take
   end
   if not addLengthFirstEventOffset then addLengthFirstEventOffset = event.projlen end
@@ -2730,6 +2741,7 @@ function RunFind(findFn, params, runFn)
 
   local firstTime = 0xFFFFFFFF
   local lastTime = -0xFFFFFFFF
+  local lastNoteEnd = -0xFFFFFFFF
 
   if wantsEventPreprocessing then
     local firstNotePpq
@@ -2801,6 +2813,7 @@ function RunFind(findFn, params, runFn)
       hasTable[event.chanmsg] = true
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
+      if GetEventType(event) == NOTE_TYPE and event.projtime + event.projlen > lastNoteEnd then lastNoteEnd = event.projtime + event.projlen end
       table.insert(found, event)
       matches = true
     elseif getUnfound then
@@ -2845,6 +2858,7 @@ function RunFind(findFn, params, runFn)
   local contextTab = {
     firstTime = firstTime,
     lastTime = lastTime,
+    lastNoteEnd = lastNoteEnd,
     hasTable = hasTable,
     take = params and params.take,
     PPQ = (params and params.take) and mu.MIDI_GetPPQ(params.take) or 960,
@@ -3946,6 +3960,7 @@ function ProcessAction(execute, fromScript)
 
     moveCursorFirstEventPosition_Take = nil
     addLengthFirstEventOffset_Take = nil
+    addLengthFirstEventStartTime = nil
 
     local actionFn
     local actionFnString

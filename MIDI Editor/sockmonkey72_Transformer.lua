@@ -1,13 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.12
+-- @version 1.0-beta.13
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix crash when creating new note events
---   - fix crash when mistyping tick notation for position/length
---   - add a note class selection criteria (Value 1)
---   - new key pass-through code should improve "transparency" of the script window for key events
+--   - disable new key pass-through code (due to unexpected side effects based on context)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -21,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.12'
+local versionStr = '1.0-beta.13'
 
 local r = reaper
 
@@ -613,7 +610,7 @@ local function checkShortcuts()
 
   -- leaving this disabled for now, but this can be used to pass through all key commands,
   -- not just the ones I think to allow. just need to work out some quirks...
-  if r.JS_VKeys_GetState and r.CF_SendActionShortcut then
+  if nil and r.JS_VKeys_GetState and r.CF_SendActionShortcut then
     local keys = r.JS_VKeys_GetState(0)
     for k = 1, #keys do
       if k ~= 0xD and keys:byte(k) ~= 0 and (not cachedKeys or cachedKeys:byte(k) == 0) then

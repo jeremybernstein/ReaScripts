@@ -353,6 +353,7 @@ local OP_INRANGE = 6
 local OP_INRANGE_EXCL = 7
 local OP_EQ_SLOP = 8
 local OP_SIMILAR = 9
+local OP_EQ_NOTE = 10
 
 local findConditionEqual = { notation = '==', label = 'Equal', text = 'TestEvent1(event, {tgt}, OP_EQ, {param1})', terms = 1 }
 local findConditionGreaterThan = { notation = '>', label = 'Greater Than', text = 'TestEvent1(event, {tgt}, OP_GT, {param1})', terms = 1, notnot = true }
@@ -361,6 +362,7 @@ local findConditionLessThan = { notation = '<', label = 'Less Than', text = 'Tes
 local findConditionLessThanEqual = { notation = '<=', label = 'Less Than or Equal', text = 'TestEvent1(event, {tgt}, OP_LTE, {param1})', terms = 1, notnot = true }
 local findConditionInRange = { notation = ':inrange', label = 'Inside Range', text = 'TestEvent2(event, {tgt}, OP_INRANGE, {param1}, {param2})', terms = 2 }
 local findConditionInRangeExcl = { notation = ':inrangeexcl', label = 'Inside Range (Exclusive End)', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, {param1}, {param2})', terms = 2 }
+local findConditionEqualSlop = { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true }
 
 -- these have the same notation, should be fine since they will never be in the same menu
 local findConditionSimilar = { notation = ':similar', label = 'Similar to Selection', text = 'TestEvent2(event, {tgt}, OP_SIMILAR, 0, 0)', terms = 0, rangelabel = { 'pre-slop', 'post-slop' } }
@@ -368,7 +370,17 @@ local findConditionSimilarSlop = { notation = ':similar', label = 'Similar to Se
 
 local findGenericConditionEntries = {
   findConditionEqual,
-  { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, inteditor = true, freeterm = true },
+  findConditionEqualSlop,
+  findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
+  findConditionInRange,
+  findConditionInRangeExcl,
+  findConditionSimilarSlop,
+}
+
+local findValue1ConditionEntries = {
+  findConditionEqual,
+  findConditionEqualSlop,
+  { notation = ':eqnote', label = 'Equal (Note)', text = 'TestEvent1(event, {tgt}, OP_EQ_NOTE, {param1})', terms = 1, menu = true },
   findConditionGreaterThan, findConditionGreaterThanEqual, findConditionLessThan, findConditionLessThanEqual,
   findConditionInRange,
   findConditionInRangeExcl,
@@ -377,8 +389,8 @@ local findGenericConditionEntries = {
 
 local findLastEventConditionEntries = {
   { notation = ':everyN', label = 'Every N Event', text = 'FindEveryN(event, {everyNparams})', terms = 1, range = { 1, nil }, nooverride = true, literal = true, freeterm = true, everyn = true },
-  { notation = ':everyNnote', label = 'Every N Event (note)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { menu = true }}, nooverride = true, literal = true, freeterm = true, everyn = true },
-  { notation = ':everyNnotenum', label = 'Every N Event (note#)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { inteditor = true, range = { 0, 127 } }}, nooverride = true, literal = true, freeterm = true, everyn = true },
+  { notation = ':everyNnote', label = 'Every N Event (Note)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { menu = true }}, nooverride = true, literal = true, freeterm = true, everyn = true },
+  { notation = ':everyNnotenum', label = 'Every N Event (Note #)', text = 'FindEveryNNote(event, {everyNparams}, {param2})', terms = 2, split = {{ range = { 1, nil }, default = 1 }, { inteditor = true, range = { 0, 127 } }}, nooverride = true, literal = true, freeterm = true, everyn = true },
   { notation = ':chordhigh', label = 'Highest Note in Chord', text = 'SelectChordNote(event, \'$high\')', terms = 0 },
   { notation = ':chordlow', label = 'Lowest Note in Chord', text = 'SelectChordNote(event, \'$low\')', terms = 0 },
   { notation = ':chordpos', label = 'Position in Chord', text = 'SelectChordNote(event, {param1})', terms = 1, inteditor = true, literal = true, nooverride = true},
@@ -836,6 +848,8 @@ function TestEvent1(event, property, op, param1)
     retval = val < param1
   elseif op == OP_LTE then
     retval = val <= param1
+  elseif op == OP_EQ_NOTE then
+    retval = (GetEventType(event) == NOTE_TYPE) and (val % 12 == param1)
   end
   return retval
 end
@@ -1792,10 +1806,10 @@ function LengthFormatRebuf(buf)
     if not beats or beats == '' then beats = 0 end
     beats = TimeFormatClampPad(beats, 0, nil, '%d')
 
+    if not fraction or fraction == '' then fraction = 0 end
     if absTicks and not subfrac then -- no range check on ticks
       return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
     else
-      if not fraction or fraction == '' then fraction = 0 end
       fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
 
       if not subfrac or subfrac == '' then subfrac = nil end
@@ -1879,10 +1893,10 @@ function TimeFormatRebuf(buf)
     if not beats or beats == '' then beats = 1 end
     beats = TimeFormatClampPad(beats, 1, nil, '%d')
 
+    if not fraction or fraction == '' then fraction = 0 end
     if absTicks and not subfrac then -- no range check on ticks
       return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
     else
-      if not fraction or fraction == '' then fraction = 0 end
       fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
 
       if not subfrac or subfrac == '' then subfrac = nil end
@@ -2002,6 +2016,12 @@ function FindTabsFromTarget(row)
       if string.match(condition.notation, 'everyNnote$') then
         param2Tab = scaleRoots
       end
+    end
+  elseif notation == '$value1' then
+    condTab = findValue1ConditionEntries
+    condition = condTab[row.conditionEntry]
+    if string.match(condition.notation, ':eqnote') then
+      param1Tab = scaleRoots
     end
   else
     condTab = findGenericConditionEntries
@@ -2508,6 +2528,7 @@ context.OP_INRANGE = OP_INRANGE
 context.OP_INRANGE_EXCL = OP_INRANGE_EXCL
 context.OP_EQ_SLOP = OP_EQ_SLOP
 context.OP_SIMILAR = OP_SIMILAR
+context.OP_EQ_NOTE = OP_EQ_NOTE
 
 context.CURSOR_LT = CURSOR_LT
 context.CURSOR_GT = CURSOR_GT
@@ -4467,12 +4488,12 @@ local function makeDefaultNewMIDIEvent(row)
     muted = false,
     msg2 = 60,
     msg3 = 64,
-    posText = tx.DEFAULT_TIMEFORMAT_STRING,
+    posText = DEFAULT_TIMEFORMAT_STRING,
     durText = '0.1.00', -- one beat long as a default?
     relvel = 0,
     projtime = 0,
     projlen = 1,
-    posmode = tx.NEWEVENT_POSITION_ATCURSOR,
+    posmode = NEWEVENT_POSITION_ATCURSOR,
   }
 end
 

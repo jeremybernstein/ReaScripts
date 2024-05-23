@@ -1,11 +1,13 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.11
+-- @version 1.0-beta.12
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix 'Add Length' position action (was no-op for all but the first option)
---   - add 'Entire Selection In Take' scope for 'Add Length'
+--   - fix crash when creating new note events
+--   - fix crash when mistyping tick notation for position/length
+--   - add a note class selection criteria (Value 1)
+--   - new key pass-through code should improve "transparency" of the script window for key events
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.11'
+local versionStr = '1.0-beta.12'
 
 local r = reaper
 
@@ -600,6 +602,127 @@ local function endPresetLoad(pLabel, notes, ignoreSelectInArrange)
   scriptIgnoreSelectionInArrangeView = ignoreSelectInArrange
   tx.processAction() -- also calls processFind()
 end
+
+-----------------------------------------------------------------------------
+-------------------------------- SHORTCUTS ----------------------------------
+
+local cachedKeys
+
+local function checkShortcuts()
+  if not r.ImGui_IsWindowFocused(ctx) or r.ImGui_IsAnyItemActive(ctx) then return end
+
+  -- leaving this disabled for now, but this can be used to pass through all key commands,
+  -- not just the ones I think to allow. just need to work out some quirks...
+  if r.JS_VKeys_GetState and r.CF_SendActionShortcut then
+    local keys = r.JS_VKeys_GetState(0)
+    for k = 1, #keys do
+      if k ~= 0xD and keys:byte(k) ~= 0 and (not cachedKeys or cachedKeys:byte(k) == 0) then
+        r.CF_SendActionShortcut(r.GetMainHwnd(), 0, k)
+      end
+    end
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+      r.CF_SendActionShortcut(r.GetMainHwnd(), 0, 0xD)
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()) then
+      r.CF_SendActionShortcut(r.GetMainHwnd(), 0, 0x800D)
+    end
+    cachedKeys = keys -- don't retrigger until key is up and down again
+  else
+    local keyMods = r.ImGui_GetKeyMods(ctx)
+    local modKey = keyMods == r.ImGui_Mod_Shortcut()
+    local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
+    local noMod = keyMods == 0
+
+    local active = r.MIDIEditor_GetActive()
+    active = active and active or 0
+
+    if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
+      if active ~= 0 then
+        r.MIDIEditor_OnCommand(active, 40013)
+      else
+        r.Main_OnCommandEx(40029, -1, 0)
+      end
+    elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
+      if active ~= 0 then
+        r.MIDIEditor_OnCommand(active, 40014)
+      else
+        r.Main_OnCommandEx(40030, -1, 0)
+      end
+    elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
+      if active ~= 0 then
+        r.MIDIEditor_OnCommand(active, 40016)
+      else
+        r.Main_OnCommandEx(40073, -1, 0)
+      end
+    end
+  end
+end
+
+local function handleKeys(handledEscape)
+  -- note that the mod is only captured if the window is explicitly focused
+  -- with a click. not sure how to fix this yet. TODO
+  -- local mods = r.ImGui_GetKeyMods(ctx)
+  -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
+
+  -- current 'fix' is using the JS extension
+  -- local mods = r.JS_Mouse_GetState(24) -- shift key
+  -- local shiftdown = mods & 8 ~= 0
+  -- local optdown = mods & 16 ~= 0
+  -- local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
+
+  -- escape key kills our arrow key focus
+  if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+    if focusKeyboardHere then focusKeyboardHere = nil
+    else
+      isClosing = true
+      return
+    end
+  end
+
+  local handledKey = false
+
+  if not inTextInput
+    and not r.ImGui_IsPopupOpen(ctx, '', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel())
+    and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace())
+  then
+    handledKey = true
+    if lastSelectedRowType == 0 then removeFindRow()
+    elseif lastSelectedRowType == 1 then removeActionRow()
+    end
+  end
+
+  if not inTextInput and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Shortcut() then
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) then
+      handledKey = true
+      if lastSelectedRowType == 0 then
+        moveFindRowUp()
+      elseif lastSelectedRowType == 1 then
+        moveActionRowUp()
+      end
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) then
+      handledKey = true
+      if lastSelectedRowType == 0 then
+        moveFindRowDown()
+      elseif lastSelectedRowType == 1 then
+        moveActionRowDown()
+      end
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_K()) then
+      handledKey = true
+      if lastSelectedRowType == 0 then
+        enableDisableFindRow()
+      else
+        enableDisableActionRow()
+      end
+    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+      handledKey = true
+      tx.processAction(true)
+    end
+  end
+
+  if not handledKey then
+    checkShortcuts()
+  end
+end
+
 
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
@@ -2865,61 +2988,7 @@ local function windowFn()
     r.ImGui_EndPopup(ctx)
   end
 
-  ---------------------------------------------------------------------------
-  ------------------------------- MOD KEYS ------------------------------
-
-  -- note that the mod is only captured if the window is explicitly focused
-  -- with a click. not sure how to fix this yet. TODO
-  -- local mods = r.ImGui_GetKeyMods(ctx)
-  -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
-
-  -- current 'fix' is using the JS extension
-  -- local mods = r.JS_Mouse_GetState(24) -- shift key
-  -- local shiftdown = mods & 8 ~= 0
-  -- local optdown = mods & 16 ~= 0
-  -- local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
-
-  -- escape key kills our arrow key focus
-  if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-    if focusKeyboardHere then focusKeyboardHere = nil
-    else
-      isClosing = true
-      return
-    end
-  end
-
-  if not inTextInput
-    and not r.ImGui_IsPopupOpen(ctx, '', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel())
-    and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace())
-  then
-    if lastSelectedRowType == 0 then removeFindRow()
-    elseif lastSelectedRowType == 1 then removeActionRow()
-    end
-  end
-
-  if not inTextInput and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Shortcut() then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) then
-      if lastSelectedRowType == 0 then
-        moveFindRowUp()
-      elseif lastSelectedRowType == 1 then
-        moveActionRowUp()
-      end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) then
-      if lastSelectedRowType == 0 then
-        moveFindRowDown()
-      elseif lastSelectedRowType == 1 then
-        moveActionRowDown()
-      end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_K()) then
-      if lastSelectedRowType == 0 then
-        enableDisableFindRow()
-      else
-        enableDisableActionRow()
-      end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
-      tx.processAction(true)
-    end
-  end
+  handleKeys(handledEscape)
 
   -- if recalcEventTimes or recalcSelectionTimes then canProcess = true end
   if NewHasTable then NewHasTable = false end
@@ -3080,41 +3149,6 @@ local function openWindow()
 end
 
 -----------------------------------------------------------------------------
--------------------------------- SHORTCUTS ----------------------------------
-
-local function checkShortcuts()
-  if r.ImGui_IsAnyItemActive(ctx) then return end
-
-  local keyMods = r.ImGui_GetKeyMods(ctx)
-  local modKey = keyMods == r.ImGui_Mod_Shortcut()
-  local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
-  local noMod = keyMods == 0
-
-  local active = r.MIDIEditor_GetActive()
-  active = active and active or 0
-
-  if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
-    if active ~= 0 then
-      r.MIDIEditor_OnCommand(active, 40013)
-    else
-      r.Main_OnCommandEx(40029, -1, 0)
-    end
-  elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
-    if active ~= 0 then
-      r.MIDIEditor_OnCommand(active, 40014)
-    else
-      r.Main_OnCommandEx(40030, -1, 0)
-    end
-  elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
-    if active ~= 0 then
-      r.MIDIEditor_OnCommand(active, 40016)
-    else
-      r.Main_OnCommandEx(40073, -1, 0)
-    end
-  end
-end
-
------------------------------------------------------------------------------
 -------------------------------- MAIN LOOP ----------------------------------
 
 local prepped = false
@@ -3133,8 +3167,6 @@ local function loop()
 
   local visible, open = openWindow()
   if visible then
-    checkShortcuts()
-
     r.ImGui_PushFont(ctx, fontInfo.large)
 
     if not prepped then

@@ -608,19 +608,33 @@ local cachedKeys
 local function checkShortcuts()
   if not r.ImGui_IsWindowFocused(ctx) or r.ImGui_IsAnyItemActive(ctx) then return end
 
+  local activeME = r.MIDIEditor_GetActive()
+
   -- leaving this disabled for now, but this can be used to pass through all key commands,
   -- not just the ones I think to allow. just need to work out some quirks...
-  if nil and r.JS_VKeys_GetState and r.CF_SendActionShortcut then
+  if r.JS_VKeys_GetState and r.CF_SendActionShortcut then
+    local target = r.GetMainHwnd()
+    if activeME then
+      local parent = r.JS_Window_GetParent(r.JS_Window_GetFocus())
+      while parent do
+        if parent == activeME then
+          target = activeME
+          break
+        end
+        parent = r.JS_Window_GetParent(parent)
+      end
+    end
+
     local keys = r.JS_VKeys_GetState(0)
     for k = 1, #keys do
       if k ~= 0xD and keys:byte(k) ~= 0 and (not cachedKeys or cachedKeys:byte(k) == 0) then
-        r.CF_SendActionShortcut(r.GetMainHwnd(), 0, k)
+        r.CF_SendActionShortcut(target, 0, k)
       end
     end
     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
-      r.CF_SendActionShortcut(r.GetMainHwnd(), 0, 0xD)
+      r.CF_SendActionShortcut(FindTabsFromTarget, 0, 0xD)
     elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()) then
-      r.CF_SendActionShortcut(r.GetMainHwnd(), 0, 0x800D)
+      r.CF_SendActionShortcut(target, 0, 0x800D)
     end
     cachedKeys = keys -- don't retrigger until key is up and down again
   else

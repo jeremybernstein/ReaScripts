@@ -615,7 +615,7 @@ local function checkShortcuts()
   if r.JS_VKeys_GetState and r.CF_SendActionShortcut then
     local target = r.GetMainHwnd()
     if activeME then
-      local parent = r.JS_Window_GetParent(r.JS_Window_GetFocus())
+      local parent = r.JS_Window_GetFocus()
       while parent do
         if parent == activeME then
           target = activeME

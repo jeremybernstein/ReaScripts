@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.13
+-- @version 1.0-beta.15
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - disable new key pass-through code (due to unexpected side effects based on context)
+--   - disappear the consoles, they aren't that useful anymore
+--   - fix crash when loading 'value1' criteria presets
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.13'
+local versionStr = '1.0-beta.15'
 
 local r = reaper
 
@@ -53,8 +54,7 @@ if canStart and not fileExists(imGuiPath) then
 end
 
 -- if not r.APIExists('JS_Mouse_GetState') then
---   r.ShowConsoleMsg('MIDI Transformer requires the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
---   canStart = false
+--   r.ShowConsoleMsg('MIDI Transformer appreciates the presence of the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
 -- end
 
 local canReveal = true
@@ -79,6 +79,8 @@ if GearImage then r.ImGui_Attach(ctx, GearImage) end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
+
+local showConsoles = false
 
 local viewPort
 
@@ -603,67 +605,41 @@ end
 -----------------------------------------------------------------------------
 -------------------------------- SHORTCUTS ----------------------------------
 
-local cachedKeys
-
 local function checkShortcuts()
-  if not r.ImGui_IsWindowFocused(ctx) or r.ImGui_IsAnyItemActive(ctx) then return end
+  if not r.ImGui_IsWindowFocused(ctx, r.ImGui_FocusedFlags_RootAndChildWindows()) or r.ImGui_IsAnyItemActive(ctx) then return end
 
-  local activeME = r.MIDIEditor_GetActive()
+  -- attempts to suss out the keyboard section focus fail for various reasons
+  -- the amount of code required to check what the user clicks on when the script
+  -- is running in the background is not commensurate to the task at hand, and it
+  -- breaks if REAPER was in the background and then re-activated. anyway, to hell with it.
+  -- I've asked for a new API to get the current section focus, if that shows up, can revisit this.
 
-  -- leaving this disabled for now, but this can be used to pass through all key commands,
-  -- not just the ones I think to allow. just need to work out some quirks...
-  if r.JS_VKeys_GetState and r.CF_SendActionShortcut then
-    local target = r.GetMainHwnd()
-    if activeME then
-      local parent = r.JS_Window_GetFocus()
-      while parent do
-        if parent == activeME then
-          target = activeME
-          break
-        end
-        parent = r.JS_Window_GetParent(parent)
-      end
+  -- fallback to old style, selective passthrough and that's it
+  local keyMods = r.ImGui_GetKeyMods(ctx)
+  local modKey = keyMods == r.ImGui_Mod_Shortcut()
+  local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
+  local noMod = keyMods == 0
+
+  local active = r.MIDIEditor_GetActive()
+  active = active and active or 0
+
+  if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
+    if active ~= 0 then
+      r.MIDIEditor_OnCommand(active, 40013)
+    else
+      r.Main_OnCommandEx(40029, -1, 0)
     end
-
-    local keys = r.JS_VKeys_GetState(0)
-    for k = 1, #keys do
-      if k ~= 0xD and keys:byte(k) ~= 0 and (not cachedKeys or cachedKeys:byte(k) == 0) then
-        r.CF_SendActionShortcut(target, 0, k)
-      end
+  elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
+    if active ~= 0 then
+      r.MIDIEditor_OnCommand(active, 40014)
+    else
+      r.Main_OnCommandEx(40030, -1, 0)
     end
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
-      r.CF_SendActionShortcut(FindTabsFromTarget, 0, 0xD)
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()) then
-      r.CF_SendActionShortcut(target, 0, 0x800D)
-    end
-    cachedKeys = keys -- don't retrigger until key is up and down again
-  else
-    local keyMods = r.ImGui_GetKeyMods(ctx)
-    local modKey = keyMods == r.ImGui_Mod_Shortcut()
-    local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
-    local noMod = keyMods == 0
-
-    local active = r.MIDIEditor_GetActive()
-    active = active and active or 0
-
-    if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
-      if active ~= 0 then
-        r.MIDIEditor_OnCommand(active, 40013)
-      else
-        r.Main_OnCommandEx(40029, -1, 0)
-      end
-    elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
-      if active ~= 0 then
-        r.MIDIEditor_OnCommand(active, 40014)
-      else
-        r.Main_OnCommandEx(40030, -1, 0)
-      end
-    elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
-      if active ~= 0 then
-        r.MIDIEditor_OnCommand(active, 40016)
-      else
-        r.Main_OnCommandEx(40073, -1, 0)
-      end
+  elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
+    if active ~= 0 then
+      r.MIDIEditor_OnCommand(active, 40016)
+    else
+      r.Main_OnCommandEx(40073, -1, 0)
     end
   end
 end
@@ -1435,17 +1411,19 @@ local function windowFn()
     return rv
   end
 
-  r.ImGui_SameLine(ctx)
-  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
-  local fcrv, fcbuf = r.ImGui_InputText(ctx, '##findConsole', findConsoleText)
-  if kbdEntryIsCompleted(fcrv) then
-    findConsoleText = fcbuf
-    tx.processFindMacro(findConsoleText)
-    inTextInput = false
-  elseif fcrv then inTextInput = true
-  end
+  if showConsoles then
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
+    local fcrv, fcbuf = r.ImGui_InputText(ctx, '##findConsole', findConsoleText)
+    if kbdEntryIsCompleted(fcrv) then
+      findConsoleText = fcbuf
+      tx.processFindMacro(findConsoleText)
+      inTextInput = false
+    elseif fcrv then inTextInput = true
+    end
 
-  generateLabelOnLine('Selection Criteria Console')
+    generateLabelOnLine('Selection Criteria Console')
+  end
 
   Spacing(true)
   r.ImGui_Separator(ctx)
@@ -2310,17 +2288,19 @@ local function windowFn()
     end
   end
 
-  r.ImGui_SameLine(ctx)
-  r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
-  local acrv, acbuf = r.ImGui_InputText(ctx, '##actionConsole', actionConsoleText)
-  if kbdEntryIsCompleted(acrv) then
-    actionConsoleText = acbuf
-    tx.processActionMacro(actionConsoleText)
-    inTextInput = false
-  elseif acrv then inTextInput = true
-  end
+  if showConsoles then
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
+    local acrv, acbuf = r.ImGui_InputText(ctx, '##actionConsole', actionConsoleText)
+    if kbdEntryIsCompleted(acrv) then
+      actionConsoleText = acbuf
+      tx.processActionMacro(actionConsoleText)
+      inTextInput = false
+    elseif acrv then inTextInput = true
+    end
 
-  generateLabelOnLine('Action Console')
+    generateLabelOnLine('Action Console')
+  end
 
   Spacing(true)
   r.ImGui_Separator(ctx)

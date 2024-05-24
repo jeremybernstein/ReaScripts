@@ -2009,7 +2009,7 @@ function FindTabsFromTarget(row)
   elseif notation == '$lastevent' then
     condTab = findLastEventConditionEntries
     condition = condTab[row.conditionEntry]
-    if condition then -- this could fail if we're called too easily (before param tabs are needed)
+    if condition then -- this could fail if we're called too early (before param tabs are needed)
       if string.match(condition.notation, 'everyN') then
         param1Tab = { }
       end
@@ -2020,8 +2020,10 @@ function FindTabsFromTarget(row)
   elseif notation == '$value1' then
     condTab = findValue1ConditionEntries
     condition = condTab[row.conditionEntry]
-    if string.match(condition.notation, ':eqnote') then
-      param1Tab = scaleRoots
+    if condition then -- this could fail if we're called too early (before param tabs are needed)
+      if string.match(condition.notation, ':eqnote') then
+        param1Tab = scaleRoots
+      end
     end
   else
     condTab = findGenericConditionEntries

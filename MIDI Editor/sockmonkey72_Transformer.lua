@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0-beta.15
+-- @version 1.0.0
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - disappear the consoles, they aren't that useful anymore
---   - fix crash when loading 'value1' criteria presets
+--   - official release
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -19,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0-beta.15'
+local versionStr = '1.0.0'
 
 local r = reaper
 

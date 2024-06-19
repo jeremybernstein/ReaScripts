@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.0
+-- @version 1.0.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - official release
+--   - fix negative offset values in integer scale/offset action
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.0'
+local versionStr = '1.0.1'
 
 local r = reaper
 
@@ -491,17 +491,15 @@ end
 
 local function overrideEditorType(row, target, condOp, paramTypes, idx)
   local has14bit, hasOther = check14Bit(paramTypes[idx])
-  if condOp.bitfield
-    or (condOp.split and condOp.split[idx].bitfield)
-  then
+  if condOp.bitfield or (condOp.split and condOp.split[idx].bitfield) then
     tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_BITFIELD)
   elseif not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
-      or (condOp.norange or (condOp.split and condOp.split[idx].norange))
-      or (condOp.nooverride or (condOp.split and condOp.split[idx].nooverride))
-    then
-      tx.setEditorTypeForRow(row, idx, nil)
-  elseif target.notation == '$velocity' or  target.notation == '$relvel' then
-    if condOp.bipolar then
+    or (condOp.norange or (condOp.split and condOp.split[idx].norange))
+    or (condOp.nooverride or (condOp.split and condOp.split[idx].nooverride))
+  then
+    tx.setEditorTypeForRow(row, idx, nil)
+  elseif target.notation == '$velocity' or target.notation == '$relvel' then
+    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
     elseif target.notation == '$velocity' and not condOp.fullrange then
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
@@ -509,7 +507,7 @@ local function overrideEditorType(row, target, condOp, paramTypes, idx)
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
     end
   elseif has14bit then
-    if condOp.bipolar then
+    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
       tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT_BIPOLAR or tx.EDITOR_TYPE_PITCHBEND_BIPOLAR)
     else
       tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
@@ -518,7 +516,7 @@ local function overrideEditorType(row, target, condOp, paramTypes, idx)
     and target.notation ~= '$length'
     and target.notation ~= '$channel'
   then
-    if condOp.bipolar then
+    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
     else
       tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)

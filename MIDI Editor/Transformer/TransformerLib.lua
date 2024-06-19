@@ -2206,6 +2206,10 @@ function Check14Bit(paramType)
   return has14bit, hasOther
 end
 
+local function opIsBipolar(condOp, index)
+  return condOp.bipolar or (condOp.split and condOp.split[index].bipolar)
+end
+
 function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
   local paramType
   local paramTypes = GetParamTypesForRow(row, target, condOp)
@@ -2215,7 +2219,7 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
   if percent then
     local percentNum = tonumber(percent)
     if percentNum then
-      local min = condOp.bipolar and -100 or 0
+      local min = opIsBipolar(condOp, index) and -100 or 0
       percentNum = percentNum < min and min or percentNum > 100 and 100 or percentNum -- what about negative percents???
       row.params[index].percentVal = percentNum
       row.params[index].textEditorStr = string.format('%g', percentNum)
@@ -2262,8 +2266,8 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
     local range = condOp.range and condOp.range or target.range
     local has14bit, hasOther = Check14Bit(paramType)
     if has14bit then
-      if hasOther then range = condOp.bipolar and TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE or TransformerLib.PARAM_PERCENT_RANGE
-      else range = condOp.bipolar and TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE or TransformerLib.PARAM_PITCHBEND_RANGE
+      if hasOther then range = opIsBipolar(condOp, index) and TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE or TransformerLib.PARAM_PERCENT_RANGE
+      else range = opIsBipolar(condOp, index) and TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE or TransformerLib.PARAM_PITCHBEND_RANGE
       end
     end
     row.params[index].textEditorStr = EnsureNumString(paramStr, range)
@@ -2953,7 +2957,7 @@ function ProcessFind(take, fromHasTable)
     local paramTypes = GetParamTypesForRow(v, curTarget, condition)
     for i = 1, 2 do -- param3 for Find?
       if paramNums[i] and (paramTypes[i] == PARAM_TYPE_INTEDITOR or paramTypes[i] == PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
-        paramTerms[i] = GetParamPercentTerm(paramNums[i], curCondition.bipolar)
+        paramTerms[i] = GetParamPercentTerm(paramNums[i], opIsBipolar(curCondition, i))
       end
     end
 
@@ -3882,7 +3886,7 @@ function ProcessActionForTake(take)
     local paramTypes = GetParamTypesForRow(v, curTarget, curOperation)
     for i = 1, 3 do -- param3
       if paramNums[i] and (paramTypes[i] == PARAM_TYPE_INTEDITOR or paramTypes[i] == PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
-        paramTerms[i] = GetParamPercentTerm(paramNums[i], curOperation.bipolar)
+        paramTerms[i] = GetParamPercentTerm(paramNums[i], opIsBipolar(curOperation, i))
       end
     end
 

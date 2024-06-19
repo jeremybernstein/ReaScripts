@@ -1,25 +1,14 @@
 @description Peace_MOD
 @author sockmonkey72
-@version 1.7.4
-@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.4/Peace_MOD.ReaperThemeZip
+@version 1.7.5-beta.1
+@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.5-beta.1/Peace_MOD.ReaperThemeZip
 @about
   # Peace_MOD
 
   Fork of Peace by Ice Cold Milk
 @changelog
-  Changes since 1.7.3:
+  Changes since 1.7.4:
 
-  * add and improve graphics for 'norec' (audio monitor only) on MCP/TCP
-  * fix media item unselected color and upper/lower borders
-  * fix dual pan positioning in MCP label bottom layouts
-  * fix MCP layout problems (volume/meter/trackid)
-  * swap position of rec monitor mode and rec input mode in MCP
-  * add v7 fixed lane graphics
-  * minor color tweaks
-  * add theme adjuster option to align TCP controls
-  * improve MIDI editor colors (wrt marker visibility)
-  * update TCP fixed lane graphics for v7
-  * fix transport artifact on Windows
-  * fix some warnings
-  * lighten selected track backgrounds for better envelope visibility
-  * (versus previous beta: fix folder-aligned TCP control positioning in some cases)
+  * color and font tweaks
+  * cleanup of highlight/armed graphics
+  * add up/down-rank graphics

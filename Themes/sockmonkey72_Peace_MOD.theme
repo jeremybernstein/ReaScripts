@@ -1,7 +1,7 @@
 @description Peace_MOD
 @author sockmonkey72
-@version 1.7.5-beta.2
-@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.5-beta.2/Peace_MOD.ReaperThemeZip
+@version 1.7.5-beta.3
+@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.5-beta.3/Peace_MOD.ReaperThemeZip
 @about
   # Peace_MOD
 
@@ -12,3 +12,4 @@
   * color and font tweaks
   * cleanup of highlight/armed graphics
   * add up/down-rank graphics
+  * beta.3: fix MCP label-bottom trackidx color

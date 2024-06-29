@@ -195,13 +195,13 @@ end
 local currentFindScope = FindScopeFromNotation()
 
 local findScopeFlagsTable = {
-  { notation = '$selectedevents', label = 'Selected Events', flag = FIND_SCOPE_FLAG_SELECTED_ONLY },
+  { notation = '$selectedonly', label = 'Selected Events', flag = FIND_SCOPE_FLAG_SELECTED_ONLY },
   { notation = '$activenoterow', label = 'Active Note Row (notes only)', flag = FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW },
 }
 
 function FindScopeFlagFromNotation(notation)
   if notation then
-    for k, v in ipairs(findScopeFlagsTable) do
+    for _, v in ipairs(findScopeFlagsTable) do
       if v.notation == notation then
         return v.flag
       end

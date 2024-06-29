@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.1
+-- @version 1.0.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix negative offset values in integer scale/offset action
+--   - fix restore of Selected Events Find Scope
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.1'
+local versionStr = '1.0.2'
 
 local r = reaper
 

@@ -2722,6 +2722,10 @@ function FindRowsToNotation()
   return notationString
 end
 
+function EventToIdx(event)
+  return event.chanmsg + (event.chan and event.chan or 0)
+end
+
 function UpdateEventCount(event, counts, onlyNoteRow)
   local char
   if GetEventType(event) == NOTE_TYPE and not onlyNoteRow then
@@ -2729,7 +2733,7 @@ function UpdateEventCount(event, counts, onlyNoteRow)
     counts.noteCount = event.count
   end
   -- also get counts for specific notes so that we can do rows as an option
-  local eventIdx = event.chanmsg + event.chan
+  local eventIdx = EventToIdx(event)
   if not counts[eventIdx] then counts[eventIdx] = {} end
   local subIdx = event.msg2
   if event.chanmsg >= 0xC0 then subIdx = 0 end
@@ -2856,7 +2860,7 @@ function RunFind(findFn, params, runFn)
     local firstLastEventsByType = {}
     for _, event in ipairs(found) do
       if GetEventType(event) == CC_TYPE then
-        local eventIdx = event.chanmsg + event.chan
+        local eventIdx = EventToIdx(event)
         if not firstLastEventsByType[eventIdx] then firstLastEventsByType[eventIdx] = {} end
         if not firstLastEventsByType[eventIdx][event.msg2] then firstLastEventsByType[eventIdx][event.msg2] = {} end
         if not firstLastEventsByType[eventIdx][event.msg2].firstEvent then
@@ -3650,7 +3654,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     end
 
     if replace then
-      local eventIdx = event.chanmsg + event.chan
+      local eventIdx = EventToIdx(event)
       local replaceData = replaceTab[eventIdx]
       if not replaceData then
         replaceTab[eventIdx] = {}
@@ -3679,7 +3683,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
 
     for _, event in ipairs(replace) do
       local eventType = GetEventType(event)
-      local eventIdx = event.chanmsg + event.chan
+      local eventIdx = EventToIdx(event)
       local eventData
       local replaceData = replaceTab[eventIdx]
       if replaceData then

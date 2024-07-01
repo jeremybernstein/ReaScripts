@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.2
+-- @version 1.0.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix restore of Selected Events Find Scope
+--   - fix 'Transform and Replace' with sysex/text events present in the MIDI item
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.2'
+local versionStr = '1.0.3'
 
 local r = reaper
 

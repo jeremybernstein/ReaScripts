@@ -2097,16 +2097,13 @@ function GenerateMetricGridNotation(row)
 end
 
 function SetMetricGridModifiers(mg, mgMods, mgReaSwing)
-  P(mgMods, mgReaSwing)
   local mods = mg.modifiers & 0x7
   local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
-  P(mods, reaperSwing)
   if mg then
     mods = mgMods and (mgMods & 0x7) or mods
     if mgReaSwing ~= nil then reaperSwing = mgReaSwing end
     mg.modifiers = mods | (reaperSwing and MG_GRID_SWING_REAPER or 0)
   end
-  P(mods, reaperSwing)
   return mods, reaperSwing
 end
 

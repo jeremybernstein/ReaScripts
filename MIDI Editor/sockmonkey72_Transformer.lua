@@ -1,10 +1,16 @@
 -- @description MIDI Transformer
--- @version 1.0.3
+-- @version 1.0.4-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix 'Transform and Replace' with sysex/text events present in the MIDI item
+--   - 'Current Grid' musical time now works properly for swing grids
+--   - Add 'Swing' option for quantizing event position (and note-off position), can be switched between MPC and REAPER modes
+--     * MPC mode is centered on 50. 0 moves the event fully 1 grid unit to the left, 100 moves the event 1 grid unit to the right
+--         66 is a triplet swing to the right, 33 a triplet swing to the left, etc. This is how Roger Linn designed the MPC swing
+--         and is also what Logic uses.
+--     * REAPER mode is centered on 0. -100 moves the note 1/2 grid unit to the left, 100 moves the note 1/2 grid unit to the right.
+--         64 is a triplet swing to the right. This is the swing mode used in the REAPER quantize dialog.
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +24,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.3'
+local versionStr = '1.0.4-beta.1'
 
 local r = reaper
 
@@ -294,9 +300,15 @@ local function setupRowFormat(row, condOpTab)
   local paramTypes = tx.GetParamTypesForRow(row, target, condOp)
   local isEveryN = condOp.everyn
   local isNewMIDIEvent = condOp.newevent
-  local isMetric = condOp.metricgrid
-  local isMusical = condOp.musical
+  local isMetric = condOp.metricgrid or (condOp.split and condOp.split[1].metricgrid) -- metric/musical only allowed as param1
+  local isMusical = condOp.musical or (condOp.split and condOp.split[1].musical)
   local isParam3 = condOp.param3
+
+  -- ensure that there are no lingering tables
+  row.mg = nil
+  row.evn = nil
+  row.nme = nil
+  row.params[3] = nil
 
   for i = 1, 2 do
     if condOp.split and condOp.split[i].default then
@@ -309,12 +321,6 @@ local function setupRowFormat(row, condOpTab)
     row.params[i].menuEntry = 1
   end
 
-  -- ensure that there are no lingering tables
-  row.mg = nil
-  row.evn = nil
-  row.nme = nil
-  row.params[3] = nil
-
   if isMetric or isMusical then
     local data = {}
     data.isMetric = isFind and isMetric or false
@@ -322,6 +328,7 @@ local function setupRowFormat(row, condOpTab)
     data.musicalLastUnit = musicalLastUnit
     data.metricLastBarRestart = metricLastBarRestart
     tx.makeDefaultMetricGrid(row, data)
+    if row.mg then row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[1].showswing) end
   elseif isEveryN then
     tx.makeDefaultEveryN(row)
   elseif isNewMIDIEvent then
@@ -1355,8 +1362,10 @@ local function windowFn()
           label = row.params[3].menuLabel(row, target, condOp)
         end
         if flags.isMetricOrMusical and paramEntry.notation ~= '$grid' then
-          if row.mg.modifiers & 2 ~= 0 then label = label .. 'T'
-          elseif row.mg.modifiers & 1 ~= 0 then label = label .. '.'
+          local mgMods, mgReaSwing = tx.GetMetricGridModifiers(row.mg)
+          if mgMods == tx.MG_GRID_TRIPLET then label = label .. 'T'
+          elseif mgMods == tx.MG_GRID_DOTTED then label = label .. '.'
+          elseif mgMods == tx.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
           end
         end
         r.ImGui_Button(ctx, label)
@@ -1459,21 +1468,68 @@ local function windowFn()
 
     local mg = row.mg
     local useGrid = paramEntry.notation == '$grid'
-    local dotVal = not useGrid and mg.modifiers & 1 ~= 0 or false
-    local tripVal = not useGrid and mg.modifiers & 2 ~= 0 or false
+    local mgMods, mgReaSwing = tx.GetMetricGridModifiers(mg)
+    local newMgMods = mgMods
+    local dotVal = not useGrid and mgMods == tx.MG_GRID_DOTTED or false
+    local tripVal = not useGrid and mgMods == tx.MG_GRID_TRIPLET or false
+    local swingVal = not useGrid and mgMods == tx.MG_GRID_SWING or false
+    local showSwing = mg.showswing
 
     if useGrid then r.ImGui_BeginDisabled(ctx) end
     local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', dotVal)
     if rv then
-      mg.modifiers = sel and 1 or 0
+      newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_DOTTED or tx.MG_GRID_STRAIGHT)
       fun(1, true)
     end
 
     rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', tripVal)
     if rv then
-      mg.modifiers = sel and 2 or 0
+      newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_TRIPLET or tx.MG_GRID_STRAIGHT)
       fun(2, true)
     end
+
+    if showSwing then
+      rv, sel = r.ImGui_Checkbox(ctx, 'Swing', swingVal)
+      if rv then
+        newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_SWING or tx.MG_GRID_STRAIGHT)
+        fun(4, true)
+      end
+
+      r.ImGui_SameLine(ctx)
+      local isSwing = newMgMods == tx.MG_GRID_SWING
+
+      if not isSwing then r.ImGui_BeginDisabled(ctx) end
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+      local swbuf
+      rv, swbuf = r.ImGui_InputText(ctx, '##swing', tostring(mg.swing), r.ImGui_InputTextFlags_CharsDecimal())
+      mg.swing = tonumber(swbuf)
+
+      r.ImGui_SameLine(ctx)
+      r.ImGui_Text(ctx, '[')
+      r.ImGui_SameLine(ctx)
+      rv, sel = r.ImGui_Checkbox(ctx, 'MPC', not mgReaSwing)
+      if rv then
+        local _, newMgReaSwing = tx.SetMetricGridModifiers(mg, nil, not sel)
+        if mgReaSwing ~= newMgReaSwing then
+          if mgReaSwing then -- from REAPER to MPC
+            mg.swing = ((mg.swing + 100) / 4) + 25
+          else -- MPC to REAPER
+            mg.swing = ((mg.swing) * 4) - 200
+          end
+          mgReaSwing = newMgReaSwing
+        end
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_Text(ctx, ']')
+      if not isSwing then r.ImGui_EndDisabled(ctx) end
+
+      if mgReaSwing then
+        mg.swing = not mg.swing and 0 or mg.swing < -100 and -100 or mg.swing > 100 and 100 or mg.swing
+      else
+        mg.swing = not mg.swing and 50 or mg.swing < 0 and 0 or mg.swing > 100 and 100 or mg.swing
+      end
+    end
+
     if useGrid then r.ImGui_EndDisabled(ctx) end
 
     if addMetric then

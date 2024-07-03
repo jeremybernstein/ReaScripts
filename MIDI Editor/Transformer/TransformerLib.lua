@@ -674,7 +674,7 @@ local actionPositionOperationEntries = {
   { notation = '*', label = 'Multiply (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, nil, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   { notation = '/', label = 'Divide (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1} ~= 0 and (1 / {param1}) or 0, {param2}, nil, _context)', terms = 2, split = {{ floateditor = true }, { menu = true }}, norange = true, literal = true },
   lengthMod(actionOperationRound),
-  { notation = ':roundmusical', label = 'Quantize to Musical Value', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
+  { notation = ':roundmusical', label = 'Quantize to Musical Value', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true, showswing = true }, { floateditor = true, default = 100, percent = true }} },
   positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
@@ -693,8 +693,8 @@ local actionLengthOperationEntries = {
   { notation = '-', label = 'Subtract', text = 'SubtractDuration(event, {tgt}, \'{param1}\', event.projlen, _context)', terms = 1, timedur = true, timearg = true },
   actionOperationMult, actionOperationDivide,
   lengthMod(actionOperationRound),
-  { notation = ':roundlenmusical', label = 'Quantize Length to Musical Value', text = 'QuantizeMusicalLength(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
-  { notation = ':roundendmusical', label = 'Quantize Note-Off to Musical Value', text = 'QuantizeMusicalEndPos(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }}, musical = true },
+  { notation = ':roundlenmusical', label = 'Quantize Length to Musical Value', text = 'QuantizeMusicalLength(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true }, { floateditor = true, default = 100, percent = true }} },
+  { notation = ':roundendmusical', label = 'Quantize Note-Off to Musical Value', text = 'QuantizeMusicalEndPos(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true, showswing = true }, { floateditor = true, default = 100, percent = true }} },
   lengthMod(actionOperationFixed),
   { notation = ':quantmusical', label = 'Set to Musical Length', text = 'SetMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
@@ -821,6 +821,12 @@ local EDITOR_TYPE_7BIT_BIPOLAR = 106
 local EDITOR_TYPE_14BIT = 107
 local EDITOR_TYPE_14BIT_BIPOLAR = 108
 local EDITOR_TYPE_BITFIELD = 109
+
+local MG_GRID_STRAIGHT = 0
+local MG_GRID_DOTTED = 1
+local MG_GRID_TRIPLET = 2
+local MG_GRID_SWING = 3
+local MG_GRID_SWING_REAPER = 0x8
 
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
@@ -963,14 +969,15 @@ function FindEveryNNotePattern(event, evnParams, notenum)
 end
 
 local currentGrid = 0
-local currentSwing = 0
+local currentSwing = 0. -- -1. to 1
 
-function GetGridUnitFromSubdiv(subdiv, PPQ, modifiers)
+function GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
   local gridUnit
+  local mgMods = GetMetricGridModifiers(mgParams)
   if subdiv > 0 then
     gridUnit = PPQ * (subdiv * 4)
-    if (modifiers & 1) ~= 0 then gridUnit = gridUnit * 1.5
-    elseif (modifiers & 2) ~= 0 then gridUnit = (gridUnit * 2 / 3) end
+    if mgMods == MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
+    elseif mgMods == MG_GRID_TRIPLET then gridUnit = (gridUnit * 2 / 3) end
   else
     gridUnit = PPQ * currentGrid
   end
@@ -983,7 +990,7 @@ function EqualsMusicalLength(event, take, PPQ, mgParams)
   if GetEventType(event) ~= NOTE_TYPE then return false end
 
   local subdiv = mgParams.param1
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
   local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
@@ -1017,7 +1024,7 @@ function SetMusicalLength(event, take, PPQ, mgParams)
   if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
 
   local subdiv = mgParams.param1
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
   local newppqpos = oldppqpos + gridUnit
@@ -1034,7 +1041,8 @@ function QuantizeMusicalPosition(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local useGridSwing = subdiv < 0 and currentSwing ~= 0
 
   if gridUnit == 0 then return event.projtime end
 
@@ -1044,6 +1052,24 @@ function QuantizeMusicalPosition(event, take, PPQ, mgParams)
 
   local ppqinmeasure = oldppqpos - som -- get the position from the start of the measure
   local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
+
+  local mgMods, mgReaSwing = GetMetricGridModifiers(mgParams)
+
+  if useGridSwing or (mgMods == MG_GRID_SWING and mgReaSwing) then
+    local scale = useGridSwing and currentSwing or (mgParams.swing * 0.01)
+    local half = gridUnit * 0.5
+    local localpos = ppqinmeasure % (gridUnit * 2)
+    if localpos >= gridUnit - half and localpos < gridUnit + half then
+      newppqpos = newppqpos + (gridUnit * 0.5 * scale)
+    end
+  elseif mgMods == MG_GRID_SWING then
+    local localpos = ppqinmeasure % (gridUnit * 2)
+    if localpos >= gridUnit then
+      local scale = ((mgParams.swing - 50) * 2) * 0.01 -- convert to -1. - 1. for scaling
+      newppqpos = newppqpos + (gridUnit * scale)
+    end
+  end
+
   if strength and strength ~= 100 then
     local distance = newppqpos - oldppqpos
     local scaledDistance = distance * (strength / 100)
@@ -1061,7 +1087,7 @@ function QuantizeMusicalLength(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   if gridUnit == 0 then return event.projtime end
 
@@ -1090,7 +1116,8 @@ function QuantizeMusicalEndPos(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local useGridSwing = subdiv < 0 and currentSwing ~= 0
 
   if gridUnit == 0 then return event.projtime end
 
@@ -1109,6 +1136,25 @@ function QuantizeMusicalEndPos(event, take, PPQ, mgParams)
   if newppqlen < ppqlen * 0.5 then
     newendppqpos = som + quant + gridUnit
     newppqlen = newendppqpos - ppqpos
+  end
+
+  local mgMods, mgReaSwing = GetMetricGridModifiers(mgParams)
+
+  if useGridSwing or (mgMods == MG_GRID_SWING and mgReaSwing) then
+    local scale = useGridSwing and currentSwing or (mgParams.swing * 0.01)
+    local half = gridUnit * 0.5
+    local localpos = ppqinmeasure % (gridUnit * 2)
+    if localpos >= gridUnit - half and localpos < gridUnit + half then
+      newendppqpos = newendppqpos + (gridUnit * 0.5 * scale)
+      newppqlen = newendppqpos - ppqpos
+    end
+  elseif mgMods == MG_GRID_SWING then
+    local localpos = ppqinmeasure % (gridUnit * 2)
+    if localpos >= gridUnit then
+      local scale = ((mgParams.swing - 50) * 2) * 0.01 -- convert to -1. - 1. for scaling
+      newendppqpos = newendppqpos + (gridUnit * scale)
+      newppqlen = newendppqpos - ppqpos
+    end
   end
 
   if strength and strength ~= 100 then
@@ -1341,7 +1387,7 @@ function OnMetricGrid(take, PPQ, ppqpos, mgParams)
   local gridStr = mgParams.param2
 
   local gridLen = #gridStr
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams.modifiers)
+  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local cycleLength = gridUnit * gridLen
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
@@ -2037,20 +2083,65 @@ end
 function GenerateMetricGridNotation(row)
   if not row.mg then return '' end
   local mgStr = '|'
-  mgStr = mgStr .. (((row.mg.modifiers & 2) ~= 0) and 't' or ((row.mg.modifiers & 1) ~= 0) and 'd' or '-')
+  local mgMods, mgReaSwing = GetMetricGridModifiers(row.mg)
+  mgStr = mgStr .. (mgMods == MG_GRID_SWING and (mgReaSwing and 'r' or 'm')
+                    or mgMods == MG_GRID_TRIPLET and 't'
+                    or mgMods == MG_GRID_DOTTED and 'd'
+                    or '-')
   mgStr = mgStr .. (row.mg.wantsBarRestart and 'b' or '-')
   mgStr = mgStr .. string.format('|%0.2f|%0.2f', row.mg.preSlopPercent, row.mg.postSlopPercent)
+  if mgMods == MG_GRID_SWING then
+    mgStr = mgStr .. '|sw(' .. string.format('%0.2f', row.mg.swing) .. ')'
+  end
   return mgStr
+end
+
+function SetMetricGridModifiers(mg, mgMods, mgReaSwing)
+  P(mgMods, mgReaSwing)
+  local mods = mg.modifiers & 0x7
+  local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+  P(mods, reaperSwing)
+  if mg then
+    mods = mgMods and (mgMods & 0x7) or mods
+    if mgReaSwing ~= nil then reaperSwing = mgReaSwing end
+    mg.modifiers = mods | (reaperSwing and MG_GRID_SWING_REAPER or 0)
+  end
+  P(mods, reaperSwing)
+  return mods, reaperSwing
+end
+
+function GetMetricGridModifiers(mg)
+  local mods = mg.modifiers & 0x7
+  local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+  return mods, reaperSwing
 end
 
 function ParseMetricGridNotation(str)
   local mg = {}
-  local fs, fe, mod, rst, pre, post = string.find(str, '|([td%-])([b-])|(.-)|(.-)$')
+
+  local fs, fe, mod, rst, pre, post, swing = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)|sw%((.-)%)$')
+  if not (fs and fe) then
+    fs, fe, mod, rst, pre, post = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)$')
+  end
   if fs and fe then
-    mg.modifiers = mod == 't' and 2 or mod == 'd' and 1 or 0
+    mg.modifiers =
+      mod == 'r' and (MG_GRID_SWING | MG_GRID_SWING_REAPER) -- reaper
+      or mod == 'm' and MG_GRID_SWING -- mpc
+      or mod == 't' and MG_GRID_TRIPLET
+      or mod == 'd' and MG_GRID_DOTTED
+      or MG_GRID_STRAIGHT
     mg.wantsBarRestart = rst == 'b' and true or false
     mg.preSlopPercent = tonumber(pre)
     mg.postSlopPercent = tonumber(post)
+
+    local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+    mg.swing = swing and tonumber(swing)
+    if not mg.swing then mg.swing = reaperSwing and 0 or 50 end
+    if reaperSwing then
+      mg.swing = mg.swing < -100 and -100 or mg.swing > 100 and 100 or mg.swing
+    else
+      mg.swing = mg.swing < 0 and 0 or mg.swing > 100 and 100 or mg.swing
+    end
   end
   return mg
 end
@@ -2252,6 +2343,7 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
         row.params[index].menuEntry = kk
         if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
           row.mg = ParseMetricGridNotation(paramStr:sub(pb))
+          row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[index].showswing)
         end
         break
       end
@@ -4464,7 +4556,7 @@ local function makeDefaultMetricGrid(row, data)
   local metricLastBarRestart = data.metricLastBarRestart
 
   row.params[1].menuEntry = isMetric and metricLastUnit or musicalLastUnit
-  row.params[2].textEditorStr = '0'
+  -- row.params[2].textEditorStr = '0' -- don't overwrite defaults
   row.mg = {
     wantsBarRestart = metricLastBarRestart,
     preSlopPercent = 0,
@@ -4476,7 +4568,7 @@ end
 
 local function makeDefaultEveryN(row)
   row.params[1].menuEntry = 1
-  row.params[2].textEditorStr = '0'
+  -- row.params[2].textEditorStr = '0' -- don't overwrite defaults
   row.evn = {
     pattern = '1',
     interval = 1,
@@ -4573,6 +4665,13 @@ TransformerLib.isANote = function(target, condOp)
   end
   return isNote
 end
+
+TransformerLib.MG_GRID_STRAIGHT = MG_GRID_STRAIGHT
+TransformerLib.MG_GRID_DOTTED = MG_GRID_DOTTED
+TransformerLib.MG_GRID_TRIPLET = MG_GRID_TRIPLET
+TransformerLib.MG_GRID_SWING = MG_GRID_SWING
+TransformerLib.GetMetricGridModifiers = GetMetricGridModifiers
+TransformerLib.SetMetricGridModifiers = SetMetricGridModifiers
 
 return TransformerLib
 

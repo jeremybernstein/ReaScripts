@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="c57d75ac9ff2903d87bc93254b0b98b34e1d82bd">
+<index version="1" name="sockmonkey72 Scripts" commit="690fbad0ced1304cae0dace9953c08610e79d4cd">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -784,6 +784,27 @@ some refactoring]]></changelog>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_NudgeMIDI.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_NudgeMIDIForwardUsingLastSetting.lua</source>
         <source main="midi_inlineeditor midi_eventlisteditor midi_editor" file="sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua">https://github.com/jeremybernstein/ReaScripts/raw/ef19320d9c4e5e681294c46fcb5119bae930f738/MIDI%20Editor/sockmonkey72_NudgeMIDIBackwardUsingLastSetting.lua</source>
+      </version>
+    </reapack>
+    <reapack name="sockmonkey72_TempoMapMIDINoteToBeatPrompt.lua" type="script" desc="Tempo-Map MIDI Note to Beat">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Tempo-Map MIDI Note to Beat\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Assign a beat time to the first selected note found in the selected items. A tempo change will be inserted (or adjusted) to ensure that the note falls at precisely that beat time. If the item is not properly timebased (the item must have timebase = time; the media must have 'Ignore Project Tempo' enabled) these adjustments will also be made, along with a split at the previous tempo marker, if necessary.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.0.1" author="sockmonkey72" time="2024-07-29T14:26:48Z">
+        <changelog><![CDATA[- initial]]></changelog>
+        <source file="TempoMap/TempoMapUtils.lua">https://github.com/jeremybernstein/ReaScripts/raw/690fbad0ced1304cae0dace9953c08610e79d4cd/MIDI%20Editor/TempoMap/TempoMapUtils.lua</source>
+        <source main="midi_eventlisteditor midi_inlineeditor midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/690fbad0ced1304cae0dace9953c08610e79d4cd/MIDI%20Editor/sockmonkey72_TempoMapMIDINoteToBeatPrompt.lua</source>
+        <source main="midi_eventlisteditor midi_inlineeditor midi_editor" file="sockmonkey72_TempoMapMIDINoteToPrevBeat.lua">https://github.com/jeremybernstein/ReaScripts/raw/690fbad0ced1304cae0dace9953c08610e79d4cd/MIDI%20Editor/sockmonkey72_TempoMapMIDINoteToPrevBeat.lua</source>
+        <source main="midi_eventlisteditor midi_inlineeditor midi_editor" file="sockmonkey72_TempoMapMIDINoteToNextBeat.lua">https://github.com/jeremybernstein/ReaScripts/raw/690fbad0ced1304cae0dace9953c08610e79d4cd/MIDI%20Editor/sockmonkey72_TempoMapMIDINoteToNextBeat.lua</source>
+        <source main="midi_eventlisteditor midi_inlineeditor midi_editor" file="sockmonkey72_TempoMapMIDINoteToPrevMeasure.lua">https://github.com/jeremybernstein/ReaScripts/raw/690fbad0ced1304cae0dace9953c08610e79d4cd/MIDI%20Editor/sockmonkey72_TempoMapMIDINoteToPrevMeasure.lua</source>
+        <source main="midi_eventlisteditor midi_inlineeditor midi_editor" file="sockmonkey72_TempoMapMIDINoteToNextMeasure.lua">https://github.com/jeremybernstein/ReaScripts/raw/690fbad0ced1304cae0dace9953c08610e79d4cd/MIDI%20Editor/sockmonkey72_TempoMapMIDINoteToNextMeasure.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_Thin_CCs_Selected.lua" type="script" desc="Thin MIDI CC Events">

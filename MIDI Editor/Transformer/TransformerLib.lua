@@ -247,6 +247,7 @@ local actionScopeFlagsTable = {
   { notation = '$none', label = 'Do Nothing' },
   { notation = '$addselect', label = 'Add To Existing Selection' },
   { notation = '$exclusiveselect', label = 'Exclusive Select' },
+  { notation = '$unselect', label = 'Deselect Transformed Events' }
   -- { notation = '$invertselect', label = 'Deselect Transformed Events (Selecting Others)' }, -- not so useful
 }
 
@@ -3706,7 +3707,7 @@ end
 
 function PreProcessSelection(take)
   local notation = actionScopeFlagsTable[currentActionScopeFlags].notation
-  if notation == '$invertselect' then
+  if notation == '$invertselect' then -- doesn't exist anymore
     mu.MIDI_SelectAll(take, true) -- select all
   elseif notation == '$exclusiveselect' then
     mu.MIDI_SelectAll(take, false) -- deselect all
@@ -3719,7 +3720,9 @@ function PostProcessSelection(event)
     or notation == '$exclusiveselect'
   then
     event.selected = true
-  elseif notation == '$invertselect' then
+  elseif notation == '$invertselect' -- doesn't exist anymore
+    or notation == '$unselect' -- but this one does
+  then
     event.selected = false
   else
     event.selected = (event.flags & 1) ~= 0

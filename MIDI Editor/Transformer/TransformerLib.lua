@@ -4037,12 +4037,19 @@ function ProcessAction(execute, fromScript)
   mediaItemIndex = nil
 
   if fromScript
-    and scriptIgnoreSelectionInArrangeView
     and findScopeTable[currentFindScope].notation == '$midieditor'
-    and currentFindScopeFlags ~= 0
   then
     local _, _, sectionID = r.get_action_context()
-    if sectionID == 0 then currentFindScopeFlags = FIND_SCOPE_FLAG_NONE end -- eliminate all find scope flags
+    if scriptIgnoreSelectionInArrangeView
+      and currentFindScopeFlags ~= 0
+    then
+      if sectionID == 0 then currentFindScopeFlags = FIND_SCOPE_FLAG_NONE end -- eliminate all find scope flags
+    end
+    -- We're in the Main context, an open MIDI Editor isn't relevant.
+    -- This can be a little confusing if we're in the Main context
+    -- and there _is_ an open MIDI Edtor, but I think that this is
+    -- more consistent and easier to explain overall.
+    if sectionID == 0 then currentFindScope = 2 end -- '$selected'
   end
 
   local takes = GrabAllTakes()

@@ -1,17 +1,13 @@
 -- @description MIDI Transformer
--- @version 1.0.4
+-- @version 1.0.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - 'Current Grid' musical time now works properly for swing grids
---   - Add 'Swing' option for quantizing event position (and note-off position), can be switched between MPC and REAPER modes
---     * MPC mode is centered on 50. 0 moves the event fully 1 grid unit to the left, 100 moves the event 1 grid unit to the right
---         66 is a triplet swing to the right, 33 a triplet swing to the left, etc. This is how Roger Linn designed the MPC swing
---         and is also what Logic uses.
---     * REAPER mode is centered on 0. -100 moves the note 1/2 grid unit to the left, 100 moves the note 1/2 grid unit to the right.
---         64 is a triplet swing to the right. This is the swing mode used in the REAPER quantize dialog.
---   - add an explicit 'Deselect Transformed Events' post-processor to assist with Custom Action composition
+--   - when triggering a 'MIDI Editor'-scoped, exported script from the
+--     Arrange view, use the 'Selected Items' scope for acquiring takes
+--     on which to operate, rather than only operating on items with open
+--     MIDI Editors.
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -25,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.4'
+local versionStr = '1.0.5'
 
 local r = reaper
 

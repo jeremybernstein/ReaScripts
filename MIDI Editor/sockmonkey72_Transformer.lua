@@ -1,13 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0.5
+-- @version 1.0.6-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - when triggering a 'MIDI Editor'-scoped, exported script from the
---     Arrange view, use the 'Selected Items' scope for acquiring takes
---     on which to operate, rather than only operating on items with open
---     MIDI Editors.
+--   - if there's one item selected in the arrange view (Main context), and
+--     that item's take is open in the active MIDI Editor (standalone or docked),
+--     then behave as in the MIDI Editor context (respecting selection if requested).
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -21,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.5'
+local versionStr = '1.0.6-beta.1'
 
 local r = reaper
 

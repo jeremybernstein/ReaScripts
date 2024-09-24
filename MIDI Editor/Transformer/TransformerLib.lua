@@ -4040,16 +4040,42 @@ function ProcessAction(execute, fromScript)
     and findScopeTable[currentFindScope].notation == '$midieditor'
   then
     local _, _, sectionID = r.get_action_context()
-    if scriptIgnoreSelectionInArrangeView
-      and currentFindScopeFlags ~= 0
-    then
-      if sectionID == 0 then currentFindScopeFlags = FIND_SCOPE_FLAG_NONE end -- eliminate all find scope flags
+    local canOverride = true
+
+    -- experimental support for main-context selection consideration
+    -- IF the active MIDI Editor
+    if sectionID == 0 then
+      local found = false
+      local selCount = r.CountSelectedMediaItems(0)
+      if selCount == 1 then
+        local me = r.MIDIEditor_GetActive()
+        if me then
+          local take = r.MIDIEditor_GetTake(me)
+          if take then
+            local item = r.GetSelectedMediaItem(0, 0)
+            if item then
+              local itake = r.GetActiveTake(item)
+              if itake and itake == take then
+                found = true
+              end
+            end
+          end
+        end
+      end
+      if not found then
+        currentFindScope = 2 -- '$selected'
+      else
+        canOverride = false
+      end
     end
-    -- We're in the Main context, an open MIDI Editor isn't relevant.
-    -- This can be a little confusing if we're in the Main context
-    -- and there _is_ an open MIDI Edtor, but I think that this is
-    -- more consistent and easier to explain overall.
-    if sectionID == 0 then currentFindScope = 2 end -- '$selected'
+
+    if sectionID == 0
+      and scriptIgnoreSelectionInArrangeView
+      and currentFindScopeFlags ~= FIND_SCOPE_FLAG_NONE
+      and canOverride
+    then
+      currentFindScopeFlags = FIND_SCOPE_FLAG_NONE -- eliminate all find scope flags
+    end
   end
 
   local takes = GrabAllTakes()

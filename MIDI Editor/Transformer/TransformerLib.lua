@@ -3390,11 +3390,25 @@ local mediaItemCount
 local mediaItemIndex
 
 function GetNextTake()
-  local take
+  local take = nil
   local notation = findScopeTable[currentFindScope].notation
-  if notation == '$midieditor' and not mediaItemCount then
-    mediaItemCount = 1
-    take = r.MIDIEditor_GetTake(r.MIDIEditor_GetActive())
+  if notation == '$midieditor' then
+    local me = r.MIDIEditor_GetActive()
+    if me then
+      if not mediaItemCount then
+        mediaItemCount = 0
+        while me do
+          local t = r.MIDIEditor_EnumTakes(me, mediaItemCount, false)
+          if not t then break end
+          mediaItemCount = mediaItemCount + 1 -- we probably don't really need this iteration, but whatever
+        end
+        mediaItemIndex = 0
+      end
+      if mediaItemIndex < mediaItemCount then
+        take = r.MIDIEditor_EnumTakes(me, mediaItemIndex, false)
+        mediaItemIndex = mediaItemIndex + 1
+      end
+    end
     return take
   elseif notation == '$selected' then
     if not mediaItemCount then
@@ -4032,6 +4046,13 @@ function ProcessActionForTake(take)
   return fnString
 end
 
+function ItemInTable(it, t)
+  for i = 1, #t do
+    if it == t[i] then return true end
+  end
+  return false
+end
+
 function ProcessAction(execute, fromScript)
   mediaItemCount = nil
   mediaItemIndex = nil
@@ -4046,17 +4067,28 @@ function ProcessAction(execute, fromScript)
     -- IF the active MIDI Editor
     if sectionID == 0 then
       local found = false
-      local selCount = r.CountSelectedMediaItems(0)
-      if selCount == 1 then
-        local me = r.MIDIEditor_GetActive()
-        if me then
-          local take = r.MIDIEditor_GetTake(me)
-          if take then
-            local item = r.GetSelectedMediaItem(0, 0)
-            if item then
-              local itake = r.GetActiveTake(item)
-              if itake and itake == take then
-                found = true
+      local meTakes = {}
+      local me = r.MIDIEditor_GetActive()
+      if me then
+        local selCount = r.CountSelectedMediaItems(0)
+        if selCount > 0 then
+          local ec = 0
+          while true do
+            local etake = r.MIDIEditor_EnumTakes(me, ec, false)
+            if not etake then break end
+            table.insert(meTakes, etake)
+            ec = ec + 1
+          end
+          if #meTakes ~= 0 then
+            found = true -- assume it works
+            for i = 0, selCount - 1 do
+              local item = r.GetSelectedMediaItem(0, i)
+              if item then
+                local itake = r.GetActiveTake(item)
+                if not ItemInTable(itake, meTakes) then
+                  found = false
+                  break
+                end
               end
             end
           end

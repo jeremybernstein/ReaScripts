@@ -1,12 +1,13 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.1
+-- @version 1.0.6-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - if there's one item selected in the arrange view (Main context), and
---     that item's take is open in the active MIDI Editor (standalone or docked),
+--   - if there are items selected in the arrange view (Main context), and
+--     those items' takes are open in the active MIDI Editor (standalone or docked),
 --     then behave as in the MIDI Editor context (respecting selection if requested).
+--   - MIDI Editor scope now respects multiple takes
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -20,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.1'
+local versionStr = '1.0.6-beta.2'
 
 local r = reaper
 

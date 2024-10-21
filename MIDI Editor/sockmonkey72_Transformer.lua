@@ -1,13 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.2
+-- @version 1.0.6-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - if there are items selected in the arrange view (Main context), and
---     those items' takes are open in the active MIDI Editor (standalone or docked),
---     then behave as in the MIDI Editor context (respecting selection if requested).
---   - MIDI Editor scope now respects multiple takes
+--   - add Is Near Event position selection criteria
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -21,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.2'
+local versionStr = '1.0.6-beta.3'
 
 local r = reaper
 
@@ -300,11 +297,13 @@ local function setupRowFormat(row, condOpTab)
   local isMetric = condOp.metricgrid or (condOp.split and condOp.split[1].metricgrid) -- metric/musical only allowed as param1
   local isMusical = condOp.musical or (condOp.split and condOp.split[1].musical)
   local isParam3 = condOp.param3
+  local isEventSelector = condOp.eventselector or (condOp.split and condOp.split[1].eventselector)
 
   -- ensure that there are no lingering tables
   row.mg = nil
   row.evn = nil
   row.nme = nil
+  row.evsel = nil
   row.params[3] = nil
 
   for i = 1, 2 do
@@ -332,6 +331,8 @@ local function setupRowFormat(row, condOpTab)
     tx.makeDefaultNewMIDIEvent(row)
   elseif isParam3 then
     tx.makeParam3(row)
+  elseif isEventSelector then
+    tx.makeDefaultEventSelector(row)
   end
 
   local p1 = tx.DEFAULT_TIMEFORMAT_STRING
@@ -1105,6 +1106,8 @@ local function windowFn()
     return label
   end
 
+  local dontCloseXPos
+
   local function createPopup(row, name, source, selEntry, fun, special, dontClose)
     if r.ImGui_BeginPopup(ctx, name, r.ImGui_WindowFlags_NoMove()) then
       if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
@@ -1126,6 +1129,11 @@ local function windowFn()
 
       local listed = false
       if dontClose then
+        if type(dontClose) == 'string' then
+          r.ImGui_Text(ctx, dontClose)
+          r.ImGui_SameLine(ctx)
+          dontCloseXPos = r.ImGui_GetCursorPosX(ctx)
+        end
         listed = r.ImGui_BeginListBox(ctx, '##wrapperBox', nil, currentFrameHeightEx * #source)
       end
 
@@ -1242,6 +1250,18 @@ local function windowFn()
     return buf
   end
 
+  local function chanMsgToName(chanmsg)
+    return chanmsg == 0x00 and 'Any'
+      or chanmsg == 0x90 and 'Note'
+      or chanmsg == 0xA0 and 'Poly Pressure'
+      or chanmsg == 0xB0 and 'Controller'
+      or chanmsg == 0xC0 and 'Program Change'
+      or chanmsg == 0xD0 and 'Aftertouch'
+      or chanmsg == 0xE0 and 'Pitch Bend'
+      or chanmsg == 0xF0 and 'System Exclusive'
+      or 'Unknown'
+  end
+
   local function doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
     local isNote = tx.isANote(target, condOp)
     local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
@@ -1324,18 +1344,23 @@ local function windowFn()
     flags.isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
     flags.isNewMIDIEvent = paramType == tx.PARAM_TYPE_NEWMIDIEVENT
     flags.isParam3 = condOp.param3 and paramType ~= tx.PARAM_TYPE_MENU -- param3 exception -- make this nicer
+    flags.isEventSelector = paramType == tx.PARAM_TYPE_EVENTSELECTOR
 
-    if flags.isMetricOrMusical and index == 1 then paramType = tx.PARAM_TYPE_MENU end -- special case, sorry
-    if flags.isEveryN and index == 1 then paramType = tx.PARAM_TYPE_MENU end
-    if flags.isNewMIDIEvent then paramType = tx.PARAM_TYPE_MENU end
-    if flags.isParam3 then paramType = tx.PARAM_TYPE_MENU end
+    if (flags.isMetricOrMusical and index == 1) -- special case, sorry
+      or (flags.isEveryN and index == 1)
+      or flags.isNewMIDIEvent
+      or flags.isParam3
+      or flags.isEventSelector
+    then
+      paramType = tx.PARAM_TYPE_MENU
+    end
 
     if condOp.terms >= index then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
       local target = targetTab[row.targetEntry]
 
       if paramType == tx.PARAM_TYPE_MENU then
-        local canOpen = (flags.isEveryN or flags.isParam3) and true or #paramTab ~= 0
+        local canOpen = (flags.isEveryN or flags.isParam3 or flags.isEventSelector) and true or #paramTab ~= 0
         local paramEntry = paramTab[row.params[index].menuEntry]
         local label =  #paramTab ~= 0 and paramEntry.label or '---'
         if flags.isEveryN then
@@ -1357,6 +1382,10 @@ local function windowFn()
           end
         elseif flags.isParam3 and row.params[3] and row.params[3].menuLabel then
           label = row.params[3].menuLabel(row, target, condOp)
+        elseif flags.isEventSelector then
+          label = chanMsgToName(row.evsel.chanmsg) .. ' [' .. (row.evsel.channel == -1 and 'Any' or tostring(row.evsel.channel + 1)) .. ']'
+          local useVal1 = row.evsel.chanmsg ~= 0x00 and row.evsel.chanmsg < 0xD0 and row.evsel.useval1
+          if useVal1 then label = label .. ' (' .. tostring(row.evsel.msg2) .. ')' end
         end
         if flags.isMetricOrMusical and paramEntry.notation ~= '$grid' then
           local mgMods, mgReaSwing = tx.GetMetricGridModifiers(row.mg)
@@ -1774,6 +1803,144 @@ local function windowFn()
     newMIDIEventActionParam1Special(fun, row)
   end
 
+  local function eventSelectorActionParam1Special(fun, row) -- type list is main menu
+    local evsel = row.evsel
+    local deactivated = false
+    local rv
+
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_AlignTextToFramePadding(ctx)
+
+    r.ImGui_Text(ctx, 'Chan.')
+    r.ImGui_SameLine(ctx)
+
+    if dontCloseXPos then r.ImGui_SetCursorPosX(ctx, dontCloseXPos) end
+
+    if r.ImGui_BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
+      rv = r.ImGui_MenuItem(ctx, tostring('Any'), nil, evsel.channel == -1)
+      if rv then
+        if evsel.channel == -1 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.channel = -1
+      end
+
+      for i = 1, 16 do
+        rv = r.ImGui_MenuItem(ctx, tostring(i), nil, evsel.channel == i - 1)
+        if rv then
+          if evsel.channel == i - 1 then r.ImGui_CloseCurrentPopup(ctx) end
+          evsel.channel = i - 1
+        end
+      end
+      r.ImGui_EndListBox(ctx)
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    r.ImGui_SameLine(ctx)
+
+    local disableUseVal1 = evsel.chanmsg == 0x00 or evsel.chanmsg >= 0xD0
+
+    if disableUseVal1 then
+      r.ImGui_BeginDisabled(ctx)
+    end
+    local sel
+    rv, sel = r.ImGui_Checkbox(ctx, 'Use Val1?', evsel.useval1)
+    if rv then
+      evsel.useval1 = sel
+    end
+    if disableUseVal1 then
+      r.ImGui_EndDisabled(ctx)
+    end
+
+    r.ImGui_SameLine(ctx)
+
+    local disableVal1 = disableUseVal1 or not evsel.useval1
+    if disableVal1 then
+      r.ImGui_BeginDisabled(ctx)
+    end
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local byte1Txt = tostring(evsel.msg2)
+    rv, byte1Txt = r.ImGui_InputText(ctx, '##Val1', byte1Txt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if rv then
+      local nummy = tonumber(byte1Txt) or 0
+      evsel.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if disableVal1 then
+      r.ImGui_EndDisabled(ctx)
+    end
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_Text(ctx, 'Sel.')
+    r.ImGui_SameLine(ctx)
+
+    if dontCloseXPos then r.ImGui_SetCursorPosX(ctx, dontCloseXPos) end
+
+    if r.ImGui_BeginListBox(ctx, '##selList', currentFontWidth * 14, currentFrameHeight * 3) then
+      rv = r.ImGui_MenuItem(ctx, tostring('Any'), nil, evsel.selected == -1)
+      if rv then
+        if evsel.selected == -1 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.selected = -1
+      end
+
+      rv = r.ImGui_MenuItem(ctx, tostring('Unselected'), nil, evsel.selected == 0)
+      if rv then
+        if evsel.selected == 0 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.selected = 0
+      end
+
+      rv = r.ImGui_MenuItem(ctx, tostring('Selected'), nil, evsel.selected == 1)
+      if rv then
+        if evsel.selected == 1 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.selected = 1
+      end
+      r.ImGui_EndListBox(ctx)
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_Text(ctx, 'Muted')
+    r.ImGui_SameLine(ctx)
+
+    if r.ImGui_BeginListBox(ctx, '##muteList', currentFontWidth * 12, currentFrameHeight * 3) then
+      rv = r.ImGui_MenuItem(ctx, tostring('Any'), nil, evsel.muted == -1)
+      if rv then
+        if evsel.muted == -1 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.muted = -1
+      end
+
+      rv = r.ImGui_MenuItem(ctx, tostring('Unmuted'), nil, evsel.muted == 0)
+      if rv then
+        if evsel.muted == 0 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.muted = 0
+      end
+
+      rv = r.ImGui_MenuItem(ctx, tostring('Muted'), nil, evsel.muted == 1)
+      if rv then
+        if evsel.muted == 1 then r.ImGui_CloseCurrentPopup(ctx) end
+        evsel.muted = 1
+      end
+      r.ImGui_EndListBox(ctx)
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if completionKeyPress() then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 2)
+  end
+
+  local function eventSelectorParam1Special(fun, row)
+    eventSelectorActionParam1Special(fun, row)
+  end
+
   local function newMIDIEventActionParam2Special(fun, row) -- type list is main menu
     local nme = row.nme
     local deactivated = false
@@ -2178,6 +2345,9 @@ local function windowFn()
 
       createPopup(currentRow, 'param1Menu', param1Entries, currentRow.params[1].menuEntry, function(i, isSpecial)
           if not isSpecial then
+            if paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR then
+              currentRow.evsel.chanmsg = tonumber(param1Entries[i].text)
+            end
             currentRow.params[1].menuEntry = i
           end
           tx.processFind()
@@ -2188,7 +2358,10 @@ local function windowFn()
             and musicalParam1Special
           or paramTypes[1] == tx.PARAM_TYPE_EVERYN
             and everyNParam1Special
-          or nil)
+          or paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR
+            and eventSelectorParam1Special
+          or nil,
+        paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR and 'Type' or false)
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i)
           currentRow.params[2].menuEntry = i

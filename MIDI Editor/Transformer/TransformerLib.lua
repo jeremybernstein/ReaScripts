@@ -422,6 +422,7 @@ local findPositionConditionEntries = {
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
+  { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { floateditor = true, percent = true, default = 20 }}, freeterm = true },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -460,6 +461,10 @@ local typeEntries = {
 
 local findTypeParam1Entries = tableCopy(typeEntries)
 table.insert(findTypeParam1Entries, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
+
+local typeEntriesForEventSelector = tableCopy(typeEntries)
+table.insert(typeEntriesForEventSelector, 1, { notation = '$any', label = 'Any', text = '0x00' })
+table.insert(typeEntriesForEventSelector, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
 
 local findChannelParam1Entries = {
   { notation = '1', label = '1', text = '0' },
@@ -811,6 +816,7 @@ local PARAM_TYPE_MUSICAL = 7
 local PARAM_TYPE_EVERYN = 8
 local PARAM_TYPE_NEWMIDIEVENT = 9
 local PARAM_TYPE_PARAM3 = 10
+local PARAM_TYPE_EVENTSELECTOR = 11
 
 local EDITOR_TYPE_PITCHBEND = 100
 local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
@@ -1375,6 +1381,69 @@ function InRazorArea(event, take)
             return true
           end
         end
+      end
+    end
+  end
+  return false
+end
+
+function IsNearEvent(event, take, PPQ, evSelParams, percent)
+  local PPQPercent = PPQ * (percent / 100)
+  local minRange = event.ppqpos - PPQPercent
+  local maxRange = event.ppqpos + PPQPercent
+
+  for k, ev in ipairs(allEvents) do
+    local sameEvent = false
+    local ppqMatch = false
+    local typeMatch = false
+    local selMatch = false
+    local muteMatch = false
+
+    if ev.chanmsg == event.chanmsg
+      and ev.idx == event.idx
+    then
+      sameEvent = true
+    end
+
+    if not sameEvent then
+      if ev.ppqpos >= minRange
+        and ev.ppqpos < maxRange
+      then
+        ppqMatch = true -- can we bail early once we're outside of a certain range?
+      end
+    end
+
+    if ppqMatch then
+      if evSelParams.chanmsg == 0x00
+        or ev.chanmsg == evSelParams.chanmsg
+      then
+        typeMatch = true
+      end
+    end
+
+    if typeMatch then
+      if evSelParams.selected == -1
+        or evSelParams.selected == 0 and not ev.selected
+        or evSelParams.selected == 1 and ev.selected
+      then
+        selMatch = true
+      end
+    end
+
+    if selMatch then
+      if evSelParams.muted == -1
+        or evSelParams.muted == 0 and not ev.muted
+        or evSelParams.muted == 1 and ev.muted
+      then
+        muteMatch = true
+      end
+    end
+
+    if muteMatch then
+      if not evSelParams.useval1
+        or ev.msg2 == evSelParams.msg2
+      then
+        return true
       end
     end
   end
@@ -2023,6 +2092,8 @@ function FindTabsFromTarget(row)
         param1Tab = findMusicalParam1Entries
       elseif condition.notation == ':cursorpos' then
         param1Tab = findCursorParam1Entries
+      elseif condition.notation == ':nearevent' then
+        param1Tab = typeEntriesForEventSelector
       end
     end
   elseif notation == '$length' then
@@ -2180,6 +2251,46 @@ function ParseEveryNNotation(str)
   return evn
 end
 
+function GenerateEventSelectorNotation(row)
+  if not row.evsel then return '' end
+  local evsel = row.evsel
+  local evSelStr = string.format('%02X', evsel.chanmsg)
+  evSelStr = evSelStr .. '|' .. evsel.channel
+  evSelStr = evSelStr .. '|' .. evsel.selected
+  evSelStr = evSelStr .. '|' .. evsel.muted
+  if evsel.useval1 then
+    evSelStr = evSelStr .. string.format('|%02X', evsel.msg2)
+  end
+  return evSelStr
+end
+
+function ParseEventSelectorNotation(str, row, paramTab)
+  local evsel = {}
+  local fs, fe, chanmsg, channel, selected, muted = string.find(str, '([0-9A-Fa-f]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)')
+  local msg2
+  if fs and fe then
+    evsel.chanmsg = tonumber(chanmsg:sub(1, 2), 16)
+    evsel.channel = tonumber(channel)
+    evsel.selected = tonumber(selected)
+    evsel.muted = tonumber(muted)
+    evsel.useval1 = false
+    evsel.msg2 = 60
+    fs, fe, msg2 = string.find(str, '|([0-9A-Fa-f]+)', fe)
+    if fs and fe then
+      evsel.useval1 = true
+      evsel.msg2 = tonumber(msg2:sub(1, 2), 16)
+    end
+    for k, v in ipairs(paramTab) do
+      if tonumber(v.text) == evsel.chanmsg then
+        row.params[1].menuEntry = k
+        break
+      end
+    end
+    return evsel
+  end
+  return nil
+end
+
 function GenerateNewMIDIEventNotation(row)
   if not row.nme then return '' end
   local nme = row.nme
@@ -2259,6 +2370,7 @@ function GetParamType(src)
     or src.everyn and PARAM_TYPE_EVERYN
     or src.newevent and PARAM_TYPE_NEWMIDIEVENT
     or src.param3 and PARAM_TYPE_PARAM3
+    or src.eventselector and PARAM_TYPE_EVENTSELECTOR
     or PARAM_TYPE_UNKNOWN
 end
 
@@ -2320,7 +2432,9 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
 
   local isEveryN = paramType == PARAM_TYPE_EVERYN
   local isNewEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
-  if not (isEveryN or isNewEvent) and #paramTab ~= 0 then
+  local isEventSelector = paramType == PARAM_TYPE_EVENTSELECTOR
+
+  if not (isEveryN or isNewEvent or isEventSelector) and #paramTab ~= 0 then
     for kk, vv in ipairs(paramTab) do
       local pa, pb
       if paramStr == vv.notation then
@@ -2350,6 +2464,8 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
     row.evn = ParseEveryNNotation(paramStr)
   elseif isNewEvent then
     ParseNewMIDIEventNotation(paramStr, row, paramTab, index)
+  elseif isEventSelector then
+    row.evsel = ParseEventSelectorNotation(paramStr, row, paramTab)
   elseif condOp.bitfield or (condOp.split and condOp.split[index] and condOp.split[index].bitfield) then
     row.params[index].textEditorStr = paramStr
   elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
@@ -2649,6 +2765,7 @@ context.OnMetricGrid = OnMetricGrid
 context.OnGrid = OnGrid
 context.InBarRange = InBarRange
 context.InRazorArea = InRazorArea
+context.IsNearEvent = IsNearEvent
 context.CCHasCurve = CCHasCurve
 context.CCSetCurve = CCSetCurve
 context.LinearChangeOverSelection = LinearChangeOverSelection
@@ -2678,11 +2795,13 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
   local addEveryNNotation = false
   local addNewMIDIEventNotation = false
   local isParam3 = paramType == PARAM_TYPE_PARAM3
+  local addEventSelectorNotation = false
 
   if paramType == PARAM_TYPE_METRICGRID
     or paramType == PARAM_TYPE_MUSICAL
     or paramType == PARAM_TYPE_EVERYN
     or paramType == PARAM_TYPE_NEWMIDIEVENT
+    or paramType == PARAM_TYPE_EVENTSELECTOR
   then
     if index == 1 then
       if notation then
@@ -2690,6 +2809,8 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
           addEveryNNotation = true
         elseif paramType == PARAM_TYPE_NEWMIDIEVENT then
           addNewMIDIEventNotation = true
+        elseif paramType == PARAM_TYPE_EVENTSELECTOR then
+          addEventSelectorNotation = true
         else
           addMetricGridNotation = true
         end
@@ -2744,6 +2865,8 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
     paramVal = GenerateEveryNNotation(row)
   elseif addNewMIDIEventNotation then
     paramVal = GenerateNewMIDIEventNotation(row)
+  elseif addEventSelectorNotation then
+    paramVal = GenerateEventSelectorNotation(row)
   end
 
   return paramVal
@@ -3104,6 +3227,7 @@ function ProcessFind(take, fromHasTable)
     local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
     local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
     local isEveryN = paramTypes[1] == PARAM_TYPE_EVERYN and true or false
+    local isEventSelector = paramTypes[1] == PARAM_TYPE_EVENTSELECTOR and true or false
 
     if isMetricGrid or isMusical then
       local mgParams = tableCopy(row.mg)
@@ -3113,6 +3237,9 @@ function ProcessFind(take, fromHasTable)
     elseif isEveryN then
       local evnParams = tableCopy(row.evn)
       findTerm = string.gsub(findTerm, '{everyNparams}', serialize(evnParams))
+    elseif isEventSelector then
+      local evSelParams = tableCopy(row.evsel)
+      findTerm = string.gsub(findTerm, '{eventselectorparams}', serialize(evSelParams))
     end
 
     if curTarget.cond then
@@ -4664,6 +4791,19 @@ local function makeDefaultNewMIDIEvent(row)
   }
 end
 
+local function makeDefaultEventSelector(row)
+  row.params[1].menuEntry = 1
+  -- row.params[2].menuEntry = 1
+  row.evsel = {
+    chanmsg = 0x00,
+    channel = -1,
+    selected = -1,
+    muted = -1,
+    useval1 = false,
+    msg2 = 60,
+  }
+end
+
 TransformerLib.getFindScopeFlags = function() return currentFindScopeFlags end
 TransformerLib.setFindScopeFlags = function(flags) currentFindScopeFlags = flags end
 TransformerLib.FIND_SCOPE_FLAG_NONE = FIND_SCOPE_FLAG_NONE
@@ -4681,6 +4821,7 @@ TransformerLib.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
 TransformerLib.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
 TransformerLib.PARAM_TYPE_NEWMIDIEVENT = PARAM_TYPE_NEWMIDIEVENT
 TransformerLib.PARAM_TYPE_PARAM3 = PARAM_TYPE_PARAM3
+TransformerLib.PARAM_TYPE_EVENTSELECTOR = PARAM_TYPE_EVENTSELECTOR
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }
@@ -4718,6 +4859,7 @@ TransformerLib.makeParam3 = function(row)
     te.makeParam3Line(row)
   end
 end
+TransformerLib.makeDefaultEventSelector = makeDefaultEventSelector
 
 TransformerLib.startup = startup
 TransformerLib.mu = mu
@@ -4737,6 +4879,8 @@ TransformerLib.MG_GRID_TRIPLET = MG_GRID_TRIPLET
 TransformerLib.MG_GRID_SWING = MG_GRID_SWING
 TransformerLib.GetMetricGridModifiers = GetMetricGridModifiers
 TransformerLib.SetMetricGridModifiers = SetMetricGridModifiers
+
+TransformerLib.typeEntriesForEventSelector = typeEntriesForEventSelector
 
 return TransformerLib
 

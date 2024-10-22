@@ -88,6 +88,27 @@ local function serialize(val, name, skipnewlines, depth)
   return tmp
 end
 
+-- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
+--- Check if a file or directory exists in this path
+local function filePathExists(file)
+  if not file then return false end
+  local ok, err, code = os.rename(file, file)
+  if not ok then
+    if code == 13 then
+    -- Permission denied, but it exists
+      return true
+    end
+  end
+  return ok, err
+end
+
+  --- Check if a directory exists in this path
+local function dirExists(path)
+  if not path then return false end
+  -- '/' works on both Unix and Windows
+  return filePathExists(path:match('/$') and path or path..'/')
+end
+
 -- param3Formatter
 local function param3FormatPositionScaleOffset(row)
   -- reverse p2 and p3, another param3 user might need to do weirder stuff
@@ -285,6 +306,42 @@ local function makeParam3Line(row)
   row.params[3].modrange = { 0, nil }
 end
 
+----------------------------------------------------------
+--------- BASE64 LIB from http://lua-users.org/wiki/BaseSixtyFour
+
+-- character table string
+local bt='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+-- encoding
+local function b64enc(data)
+    return ((data:gsub('.', function(x)
+        local r,b='',x:byte()
+        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if (#x < 6) then return '' end
+        local c=0
+        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
+        return bt:sub(c+1,c+1)
+    end)..({ '', '==', '=' })[#data%3+1])
+end
+
+-- decoding
+local function b64dec(data)
+    data = string.gsub(data, '[^'..bt..'=]', '')
+    return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r,f='',(bt:find(x)-1)
+        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+        if (#x ~= 8) then return '' end
+        local c=0
+        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+        return string.char(c)
+    end))
+end
+
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
 
@@ -301,5 +358,9 @@ _G['isValidString'] = isValidString
 _G['spairs'] = spairs
 _G['serialize'] = serialize
 _G['deserialize'] = deserialize
+_G['base64encode'] = b64enc
+_G['base64decode'] = b64dec
+_G['filePathExists'] = filePathExists
+_G['dirExists'] = dirExists
 
 return Extra

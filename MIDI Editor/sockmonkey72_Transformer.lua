@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.4
+-- @version 1.0.6-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add note name display to Is Near Event (notes), some visual cleanup
+--   - reload last-loaded preset as an option
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.4'
+local versionStr = '1.0.6-beta.5'
 
 local r = reaper
 
@@ -91,6 +91,7 @@ local scriptPrefix = 'Xform_'
 local scriptPrefix_Empty = '<no prefix>'
 local presetExt = '.tfmrPreset'
 local presetSubPath
+local restoreLastState = false
 
 local CANONICAL_FONTSIZE_LARGE = 13
 local FONTSIZE_LARGE = 13
@@ -198,6 +199,26 @@ NewHasTable = false
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL FUNS -----------------------------------
 
+local function doUpdate(action)
+  local updateState = tx.update(action, restoreLastState)
+  if updateState then
+    local lastState = {
+      state = updateState,
+      presetSubPath = presetSubPath,
+      presetName = presetNameTextBuffer
+    }
+    r.SetExtState(scriptID, 'lastState', base64encode(serialize(lastState)), true)
+  end
+end
+
+local function doFindUpdate()
+  doUpdate()
+end
+
+local function doActionUpdate(action)
+  doUpdate(true)
+end
+
 local bitFieldCallback = r.ImGui_CreateFunctionFromEEL([[
   (EventChar < '0' || EventChar > '9') ? EventChar = 0
     : EventChar != '0' ? EventChar = '1'
@@ -273,7 +294,7 @@ local function addFindRow(idx, row)
   table.insert(findRowTable, idx, row)
   selectedFindRow = idx
   lastSelectedRowType = 0 -- Find
-  tx.processFind()
+  doFindUpdate()
 end
 
 local function removeFindRow()
@@ -281,7 +302,7 @@ local function removeFindRow()
   if selectedFindRow ~= 0 then
     table.remove(findRowTable, selectedFindRow) -- shifts
     selectedFindRow = selectedFindRow <= #findRowTable and selectedFindRow or #findRowTable
-    tx.processFind()
+    doFindUpdate()
   end
 end
 
@@ -291,7 +312,7 @@ local function setupRowFormat(row, condOpTab)
 
   local target = isFind and tx.findTargetEntries[row.targetEntry] or tx.actionTargetEntries[row.targetEntry]
   local condOp = condOpTab[isFind and row.conditionEntry or row.operationEntry]
-  local paramTypes = tx.GetParamTypesForRow(row, target, condOp)
+  local paramTypes = tx.getParamTypesForRow(row, target, condOp)
   local isEveryN = condOp.everyn
   local isNewMIDIEvent = condOp.newevent
   local isMetric = condOp.metricgrid or (condOp.split and condOp.split[1].metricgrid) -- metric/musical only allowed as param1
@@ -372,7 +393,7 @@ local function addActionRow(idx, row)
   table.insert(actionRowTable, idx, row)
   selectedActionRow = idx
   lastSelectedRowType = 1
-  tx.processAction()
+  doActionUpdate()
 end
 
 local function removeActionRow()
@@ -381,7 +402,7 @@ local function removeActionRow()
     table.remove(actionRowTable, selectedActionRow) -- shifts
     selectedActionRow = selectedActionRow <= #actionRowTable and selectedActionRow or #actionRowTable
     lastSelectedRowType = 1
-    tx.processAction()
+    doActionUpdate()
   end
 end
 
@@ -417,6 +438,28 @@ local function handleExtState()
   if r.HasExtState(scriptID, 'scriptPrefix') then
     state = r.GetExtState(scriptID, 'scriptPrefix')
     scriptPrefix = (state and state ~= scriptPrefix_Empty) and state or ''
+  end
+
+  state = r.GetExtState(scriptID, 'restoreLastState')
+  if isValidString(state) then
+    restoreLastState = tonumber(state) == 1 and true or false
+    if restoreLastState then
+      state = r.GetExtState(scriptID, 'lastState')
+      if isValidString(state) then
+        local presetStateStr = base64decode(state)
+        if isValidString(presetStateStr) then
+          local lastState = deserialize(presetStateStr)
+          if lastState then
+            if lastState.state then
+              presetNameTextBuffer = lastState.presetName
+              if dirExists(lastState.presetSubPath) then presetSubPath = lastState.presetSubPath end
+              presetNotesBuffer = tx.loadPresetFromTable(lastState.state)
+            end
+            -- doFindUpdate() ??
+          end
+        end
+      end
+    end
   end
 end
 
@@ -539,7 +582,7 @@ local function moveFindRowUp()
     rows[index - 1] = rows[index]
     rows[index] = tmp
     selectedFindRow = index - 1
-    ProcessFind()
+    doFindUpdate()
   end
 end
 
@@ -551,7 +594,7 @@ local function moveFindRowDown()
     rows[index + 1] = rows[index]
     rows[index] = tmp
     selectedFindRow = index + 1
-    ProcessFind()
+    doFindUpdate()
   end
 end
 
@@ -563,7 +606,7 @@ local function moveActionRowUp()
     rows[index - 1] = rows[index]
     rows[index] = tmp
     selectedActionRow = index - 1
-    ProcessAction()
+    doActionUpdate()
   end
 end
 
@@ -575,7 +618,7 @@ local function moveActionRowDown()
     rows[index + 1] = rows[index]
     rows[index] = tmp
     selectedActionRow = index + 1
-    ProcessAction()
+    doActionUpdate()
   end
 end
 
@@ -584,7 +627,7 @@ local function enableDisableFindRow()
   local rows = tx.findRowTable()
   if index > 0 and index <= #rows then
     rows[index].disabled = not rows[index].disabled and true or false
-    ProcessFind()
+    doFindUpdate()
   end
 end
 
@@ -593,15 +636,20 @@ local function enableDisableActionRow()
   local rows = tx.actionRowTable()
   if index > 0 and index <= #rows then
     rows[index].disabled = not rows[index].disabled and true or false
-    ProcessAction()
+    doActionUpdate()
   end
+end
+
+local function setPresetNotesBuffer(buf)
+  presetNotesBuffer = buf
+  tx.setPresetNotesBuffer(presetNotesBuffer)
 end
 
 local function endPresetLoad(pLabel, notes, ignoreSelectInArrange)
   presetNameTextBuffer = pLabel
-  presetNotesBuffer = notes and notes or ''
+  setPresetNotesBuffer(notes and notes or '')
   scriptIgnoreSelectionInArrangeView = ignoreSelectInArrange
-  tx.processAction() -- also calls processFind()
+  doActionUpdate()
 end
 
 -----------------------------------------------------------------------------
@@ -824,6 +872,22 @@ local function windowFn()
         r.SetExtState(scriptID, 'scriptPrefix', v, true)
         r.ImGui_CloseCurrentPopup(ctx)
       end
+
+      r.ImGui_Spacing(ctx)
+      r.ImGui_Separator(ctx)
+
+      r.ImGui_Spacing(ctx)
+      rv, v = r.ImGui_Checkbox(ctx, 'Restore Previous State on Startup', restoreLastState)
+      if rv then
+        restoreLastState = v
+        r.SetExtState(scriptID, 'restoreLastState', v and '1' or '0', true)
+        if restoreLastState then
+          doFindUpdate()
+        else
+          r.DeleteExtState(scriptID, 'lastState', true)
+        end
+        -- r.ImGui_CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
+      end
       r.ImGui_EndPopup(ctx)
     end
     r.ImGui_PopStyleColor(ctx)
@@ -897,25 +961,6 @@ local function windowFn()
 
   ---------------------------------------------------------------------------
   --------------------------------- UTILITIES -------------------------------
-
-  -- https://stackoverflow.com/questions/1340230/check-if-directory-exists-in-lua
-  --- Check if a file or directory exists in this path
-  local function filePathExists(file)
-    local ok, err, code = os.rename(file, file)
-    if not ok then
-      if code == 13 then
-      -- Permission denied, but it exists
-        return true
-      end
-    end
-    return ok, err
-  end
-
-    --- Check if a directory exists in this path
-  local function dirExists(path)
-    -- '/' works on both Unix and Windows
-    return filePathExists(path:match('/$') and path or path..'/')
-  end
 
   local function ensureNumString(str, range, floor)
     local num = tonumber(str)
@@ -1042,6 +1087,7 @@ local function windowFn()
       local rv, selected = r.ImGui_Selectable(ctx, 'Save presets here...', false)
       if rv and selected then
         presetSubPath = path ~= presetPath and path or nil
+        doFindUpdate()
       end
 
       rv, selected = r.ImGui_Selectable(ctx, 'New folder here...', false)
@@ -1484,8 +1530,8 @@ local function windowFn()
       subtypeValueLabel = 'Databyte 1'
       mainValueLabel = 'Databyte 2'
     elseif numTypes == 1 then
-      subtypeValueLabel = tx.GetSubtypeValueLabel((foundType >> 4) - 8)
-      mainValueLabel = tx.GetMainValueLabel((foundType >> 4) - 8)
+      subtypeValueLabel = tx.getSubtypeValueLabel((foundType >> 4) - 8)
+      mainValueLabel = tx.getMainValueLabel((foundType >> 4) - 8)
     else
       subtypeValueLabel = 'Multiple (Databyte 1)'
       mainValueLabel = 'Multiple (Databyte 2)'
@@ -2049,7 +2095,7 @@ local function windowFn()
     r.ImGui_AlignTextToFramePadding(ctx)
 
     local _, _, _, target, operation = tx.actionTabsFromTarget(row)
-    local paramTypes = tx.GetParamTypesForRow(row, target, operation)
+    local paramTypes = tx.getParamTypesForRow(row, target, operation)
     local flags = {}
 
     if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
@@ -2063,7 +2109,7 @@ local function windowFn()
       r.ImGui_SameLine(ctx)
       r.ImGui_SetCursorPosX(ctx, currentFontWidth * 4)
       r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-      if doHandleTableParam(row, target, operation, paramType, editorType, i, flags, tx.processAction) then deactivated = true end
+      if doHandleTableParam(row, target, operation, paramType, editorType, i, flags, doActionUpdate) then deactivated = true end
     end
 
     if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
@@ -2203,12 +2249,12 @@ local function windowFn()
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
         currentRow.except = true
-        tx.processFind()
+        doFindUpdate()
         r.ImGui_OpenPopup(ctx, 'targetMenu')
       end
       if not r.ImGui_IsPopupOpen(ctx, 'targetMenu') and currentRow.except then
         currentRow.except = nil
-        tx.processFind()
+        doFindUpdate()
       end
 
       colIdx = colIdx + 1
@@ -2235,12 +2281,12 @@ local function windowFn()
         r.ImGui_OpenPopup(ctx, 'conditionMenu')
       end
 
-      local paramTypes = tx.GetParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
+      local paramTypes = tx.getParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
 
       colIdx = colIdx + 1
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
       overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
-      if handleTableParam(currentRow, currentFindCondition, param1Entries, paramTypes[1], 1, tx.processFind) then
+      if handleTableParam(currentRow, currentFindCondition, param1Entries, paramTypes[1], 1, doFindUpdate) then
         selectedFindRow = k
         lastSelectedRowType = 0
       end
@@ -2248,7 +2294,7 @@ local function windowFn()
       colIdx = colIdx + 1
       r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
       overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
-      if handleTableParam(currentRow, currentFindCondition, param2Entries, paramTypes[2], 2, tx.processFind) then
+      if handleTableParam(currentRow, currentFindCondition, param2Entries, paramTypes[2], 2, doFindUpdate) then
         selectedFindRow = k
         lastSelectedRowType = 0
       end
@@ -2288,7 +2334,7 @@ local function windowFn()
           currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
           selectedFindRow = k
           lastSelectedRowType = 0
-          tx.processFind()
+          doFindUpdate()
         end
       end
 
@@ -2337,12 +2383,12 @@ local function windowFn()
 
       createPopup(currentRow, 'startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
           currentRow.startParenEntry = i
-          tx.processFind()
+          doFindUpdate()
         end)
 
       createPopup(currentRow, 'endParenMenu', tx.endParenEntries, currentRow.endParenEntry, function(i)
           currentRow.endParenEntry = i
-          tx.processFind()
+          doFindUpdate()
         end)
 
       createPopup(currentRow, 'targetMenu', tx.findTargetEntries, currentRow.targetEntry, function(i)
@@ -2354,14 +2400,14 @@ local function windowFn()
             if vv.notation == oldNotation then currentRow.conditionEntry = kk break end
           end
           setupRowFormat(currentRow, conditionEntries)
-          tx.processFind()
+          doFindUpdate()
         end)
 
       createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
           currentRow.conditionEntry = i
           local condNotation = conditionEntries[i].notation
           setupRowFormat(currentRow, conditionEntries)
-          tx.processFind()
+          doFindUpdate()
         end)
 
       createPopup(currentRow, 'param1Menu', param1Entries, currentRow.params[1].menuEntry, function(i, isSpecial)
@@ -2371,7 +2417,7 @@ local function windowFn()
             end
             currentRow.params[1].menuEntry = i
           end
-          tx.processFind()
+          doFindUpdate()
         end,
         paramTypes[1] == tx.PARAM_TYPE_METRICGRID
             and metricParam1Special
@@ -2386,13 +2432,13 @@ local function windowFn()
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i)
           currentRow.params[2].menuEntry = i
-          tx.processFind()
+          doFindUpdate()
         end)
 
       if showTimeFormatColumn then
         createPopup(currentRow, 'timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
             currentRow.timeFormatEntry = i
-            tx.processFind()
+            doFindUpdate()
           end)
       end
 
@@ -2613,18 +2659,18 @@ local function windowFn()
         r.ImGui_OpenPopup(ctx, 'operationMenu')
       end
 
-      local paramTypes = tx.GetParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
+      local paramTypes = tx.getParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
 
       r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
       overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
-      if handleTableParam(currentRow, currentActionOperation, param1Entries, paramTypes[1], 1, tx.processAction) then
+      if handleTableParam(currentRow, currentActionOperation, param1Entries, paramTypes[1], 1, doActionUpdate) then
         selectedActionRow = k
         lastSelectedRowType = 1
       end
 
       r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
       overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
-      if handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, tx.processAction) then
+      if handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, doActionUpdate) then
         selectedActionRow = k
         lastSelectedRowType = 1
       end
@@ -2690,13 +2736,13 @@ local function windowFn()
             if vv.notation == oldNotation then currentRow.operationEntry = kk break end
           end
           setupRowFormat(currentRow, operationEntries)
-          tx.processAction()
+          doActionUpdate()
         end)
 
       createPopup(currentRow, 'operationMenu', operationEntries, currentRow.operationEntry, function(i)
           currentRow.operationEntry = i
           setupRowFormat(currentRow, operationEntries)
-          tx.processAction()
+          doActionUpdate()
         end)
 
       local isLineOp = currentActionOperation.param3
@@ -2710,7 +2756,7 @@ local function windowFn()
             elseif operationEntries[currentRow.operationEntry].newevent then
               currentRow.nme.chanmsg = tonumber(param1Entries[i].text)
             end
-            tx.processAction()
+            doActionUpdate()
           end
         end,
         paramTypes[1] == tx.PARAM_TYPE_MUSICAL
@@ -2731,7 +2777,7 @@ local function windowFn()
               currentActionOperation.param3.paramProc(currentRow, 2, i)
             end
             currentRow.params[2].menuEntry = i
-            tx.processAction()
+            doActionUpdate()
           end
         end,
         paramTypes[2] == tx.PARAM_TYPE_NEWMIDIEVENT
@@ -2877,6 +2923,7 @@ local function windowFn()
     local newPath = newFolderParentPath .. '/' .. folderName
     if r.RecursiveCreateDirectory(newPath, 0) ~= 0 then
       presetSubPath = newPath ~= presetPath and newPath or nil
+      doFindUpdate()
     else
       -- some kind of status message
     end
@@ -2957,7 +3004,7 @@ local function windowFn()
   end
 
   local function doSavePreset(path, fname)
-    local saved, scriptPath = tx.savePreset(path, presetNotesBuffer, { script = presetInputDoesScript, ignoreSelectionInArrangeView = scriptIgnoreSelectionInArrangeView, scriptPrefix = scriptPrefix })
+    local saved, scriptPath = tx.savePreset(path, { script = presetInputDoesScript, ignoreSelectionInArrangeView = scriptIgnoreSelectionInArrangeView, scriptPrefix = scriptPrefix })
     statusMsg = (saved and 'Saved' or 'Failed to save') .. (presetInputDoesScript and ' + export' or '') .. ' ' .. fname
     statusTime = r.time_precise()
     statusContext = 2
@@ -2974,6 +3021,7 @@ local function windowFn()
           r.AddRemoveReaScript(true, 32062, scriptPath, false)
         end
       end
+      doFindUpdate()
     else
       presetLabel = ''
     end
@@ -3129,14 +3177,14 @@ local function windowFn()
         handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
       else
         if buf:gsub('%s+', '') == '' then buf = '' end
-        presetNotesBuffer = buf
+        setPresetNotesBuffer(buf)
       end
       presetNotesViewEditor = false
       inTextInput = false
     else
       if retval then inTextInput = true end
       if buf:gsub('%s+', '') == '' then buf = '' end
-      presetNotesBuffer = buf
+      setPresetNotesBuffer(buf)
     end
     updateCurrentRect()
   end

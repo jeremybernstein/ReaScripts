@@ -86,6 +86,8 @@ local wantsTab = {}
 local allEvents = {}
 local selectedEvents = {}
 
+local libPresetNotesBuffer = ''
+
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
 
@@ -4425,7 +4427,32 @@ function ProcessAction(execute, fromScript)
   r.Undo_EndBlock2(0, 'Transformer: ' .. actionScopeTable[currentActionScope].label, -1)
 end
 
-function SavePreset(pPath, notes, scriptTab)
+function SetPresetNotesBuffer(buf)
+  libPresetNotesBuffer = buf
+end
+
+function GetCurrentPresetState()
+  local fsFlags
+  if findScopeTable[currentFindScope].notation == '$midieditor' then
+     fsFlags = {} -- not pretty
+    if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then table.insert(fsFlags, '$selectedonly') end
+    if currentFindScopeFlags & FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0 then table.insert(fsFlags, '$activenoterow') end
+  end
+
+  local presetTab = {
+    findScope = findScopeTable[currentFindScope].notation,
+    findScopeFlags = fsFlags,
+    findMacro = FindRowsToNotation(),
+    actionScope = actionScopeTable[currentActionScope].notation,
+    actionMacro = ActionRowsToNotation(),
+    actionScopeFlags = actionScopeFlagsTable[currentActionScopeFlags].notation,
+    notes = libPresetNotesBuffer,
+    scriptIgnoreSelectionInArrangeView = false
+  }
+  return presetTab
+end
+
+function SavePreset(pPath, scriptTab)
   local f = io.open(pPath, 'wb')
   local saved = false
   local wantsScript = scriptTab.script
@@ -4433,23 +4460,8 @@ function SavePreset(pPath, notes, scriptTab)
   local scriptPrefix = scriptTab.scriptPrefix
 
   if f then
-    local fsFlags
-    if findScopeTable[currentFindScope].notation == '$midieditor' then
-       fsFlags = {} -- not pretty
-      if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then table.insert(fsFlags, '$selectedonly') end
-      if currentFindScopeFlags & FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0 then table.insert(fsFlags, '$activenoterow') end
-    end
-
-    local presetTab = {
-      findScope = findScopeTable[currentFindScope].notation,
-      findScopeFlags = fsFlags,
-      findMacro = FindRowsToNotation(),
-      actionScope = actionScopeTable[currentActionScope].notation,
-      actionMacro = ActionRowsToNotation(),
-      actionScopeFlags = actionScopeFlagsTable[currentActionScopeFlags].notation,
-      notes = notes,
-      scriptIgnoreSelectionInArrangeView = ignoreSelectionInArrangeView
-    }
+    local presetTab = GetCurrentPresetState()
+    presetTab.scriptIgnoreSelectionInArrangeView = ignoreSelectionInArrangeView
     f:write(serialize(presetTab) .. '\n')
     f:close()
     saved = true
@@ -4618,6 +4630,15 @@ function HandlePercentString(strVal, row, target, condOp, paramType, editorType,
   return strVal
 end
 
+function Update(action, wantsState)
+  if not action then
+    ProcessFind()
+  else
+    ProcessAction()
+  end
+  return wantsState and GetCurrentPresetState() or nil
+end
+
 local lastHasTable = {}
 
 function GetHasTable()
@@ -4673,13 +4694,27 @@ end
 
 TransformerLib.findScopeTable = findScopeTable
 TransformerLib.currentFindScope = function() return currentFindScope end
-TransformerLib.setCurrentFindScope = function(val) currentFindScope = val < 1 and 1 or val > #findScopeTable and #findScopeTable or val end
+TransformerLib.setCurrentFindScope = function(val)
+  currentFindScope = val < 1 and 1 or val > #findScopeTable and #findScopeTable or val
+  Update()
+end
+TransformerLib.getFindScopeFlags = function() return currentFindScopeFlags end
+TransformerLib.setFindScopeFlags = function(flags)
+  currentFindScopeFlags = flags
+  Update()
+end
 TransformerLib.actionScopeTable = actionScopeTable
 TransformerLib.currentActionScope = function() return currentActionScope end
-TransformerLib.setCurrentActionScope = function(val) currentActionScope = val < 1 and 1 or val > #actionScopeTable and #actionScopeTable or val end
+TransformerLib.setCurrentActionScope = function(val)
+  currentActionScope = val < 1 and 1 or val > #actionScopeTable and #actionScopeTable or val
+  Update()
+end
 TransformerLib.actionScopeFlagsTable = actionScopeFlagsTable
 TransformerLib.currentActionScopeFlags = function() return currentActionScopeFlags end
-TransformerLib.setCurrentActionScopeFlags = function(val) currentActionScopeFlags = val < 1 and 1 or val > #actionScopeFlagsTable and #actionScopeFlagsTable or val end
+TransformerLib.setCurrentActionScopeFlags = function(val)
+  currentActionScopeFlags = val < 1 and 1 or val > #actionScopeFlagsTable and #actionScopeFlagsTable or val
+  Update()
+end
 
 TransformerLib.ParamInfo = ParamInfo
 
@@ -4699,8 +4734,8 @@ TransformerLib.clearActionRows = function() actionRowTable = {} end
 TransformerLib.findTargetEntries = findTargetEntries
 TransformerLib.actionTargetEntries = actionTargetEntries
 
-TransformerLib.GetSubtypeValueLabel = GetSubtypeValueLabel
-TransformerLib.GetMainValueLabel = GetMainValueLabel
+TransformerLib.getSubtypeValueLabel = GetSubtypeValueLabel
+TransformerLib.getMainValueLabel = GetMainValueLabel
 
 TransformerLib.processFindMacro = ProcessFindMacro
 TransformerLib.processActionMacro = ProcessActionMacro
@@ -4714,7 +4749,7 @@ TransformerLib.loadPreset = LoadPreset
 TransformerLib.timeFormatRebuf = TimeFormatRebuf
 TransformerLib.lengthFormatRebuf = LengthFormatRebuf
 
-TransformerLib.GetParamTypesForRow = GetParamTypesForRow
+TransformerLib.getParamTypesForRow = GetParamTypesForRow
 TransformerLib.findTabsFromTarget = FindTabsFromTarget
 TransformerLib.actionTabsFromTarget = ActionTabsFromTarget
 TransformerLib.findRowToNotation = FindRowToNotation
@@ -4804,8 +4839,6 @@ local function makeDefaultEventSelector(row)
   }
 end
 
-TransformerLib.getFindScopeFlags = function() return currentFindScopeFlags end
-TransformerLib.setFindScopeFlags = function(flags) currentFindScopeFlags = flags end
 TransformerLib.FIND_SCOPE_FLAG_NONE = FIND_SCOPE_FLAG_NONE
 TransformerLib.FIND_SCOPE_FLAG_SELECTED_ONLY = FIND_SCOPE_FLAG_SELECTED_ONLY
 TransformerLib.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW = FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW
@@ -4881,6 +4914,9 @@ TransformerLib.GetMetricGridModifiers = GetMetricGridModifiers
 TransformerLib.SetMetricGridModifiers = SetMetricGridModifiers
 
 TransformerLib.typeEntriesForEventSelector = typeEntriesForEventSelector
+TransformerLib.setPresetNotesBuffer = SetPresetNotesBuffer
+TransformerLib.update = Update
+TransformerLib.loadPresetFromTable = LoadPresetFromTable
 
 return TransformerLib
 

@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.3
+-- @version 1.0.6-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add Is Near Event position selection criteria
+--   - add note name display to Is Near Event (notes), some visual cleanup
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.3'
+local versionStr = '1.0.6-beta.4'
 
 local r = reaper
 
@@ -1385,7 +1385,11 @@ local function windowFn()
         elseif flags.isEventSelector then
           label = chanMsgToName(row.evsel.chanmsg) .. ' [' .. (row.evsel.channel == -1 and 'Any' or tostring(row.evsel.channel + 1)) .. ']'
           local useVal1 = row.evsel.chanmsg ~= 0x00 and row.evsel.chanmsg < 0xD0 and row.evsel.useval1
-          if useVal1 then label = label .. ' (' .. tostring(row.evsel.msg2) .. ')' end
+          if useVal1 then
+            label = label .. ' ('
+            .. (row.evsel.chanmsg == 0x90 and mu.MIDI_NoteNumberToNoteName(row.evsel.msg2) or tostring(row.evsel.msg2))
+            .. ')'
+          end
         end
         if flags.isMetricOrMusical and paramEntry.notation ~= '$grid' then
           local mgMods, mgReaSwing = tx.GetMetricGridModifiers(row.mg)
@@ -1838,10 +1842,12 @@ local function windowFn()
     end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
 
+    local saveNextLineY = r.ImGui_GetCursorPosY(ctx)
+
     r.ImGui_SameLine(ctx)
 
     local disableUseVal1 = evsel.chanmsg == 0x00 or evsel.chanmsg >= 0xD0
-
+    local saveX, saveY = r.ImGui_GetCursorPos(ctx)
     if disableUseVal1 then
       r.ImGui_BeginDisabled(ctx)
     end
@@ -1854,23 +1860,38 @@ local function windowFn()
       r.ImGui_EndDisabled(ctx)
     end
 
-    r.ImGui_SameLine(ctx)
-
+    local isNote = evsel.chanmsg == 0x90
     local disableVal1 = disableUseVal1 or not evsel.useval1
     if disableVal1 then
       r.ImGui_BeginDisabled(ctx)
     end
+    r.ImGui_SetCursorPos(ctx, saveX, saveY + currentFrameHeight * 1.5)
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte1Txt = tostring(evsel.msg2)
-    rv, byte1Txt = r.ImGui_InputText(ctx, '##Val1', byte1Txt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte1Txt = r.ImGui_InputText(ctx, '##Val1', byte1Txt,
+      inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(),
+      isNote and numbersOrNoteNameCallback or numbersOnlyCallback)
     if rv then
+      if isNote then
+        byte1Txt = rewriteNoteName(byte1Txt)
+      end
       local nummy = tonumber(byte1Txt) or 0
       evsel.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
     end
     if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if isNote then
+      local noteName = mu.MIDI_NoteNumberToNoteName(evsel.msg2)
+      if noteName then
+        r.ImGui_SameLine(ctx)
+        r.ImGui_AlignTextToFramePadding(ctx)
+        r.ImGui_TextColored(ctx, 0x7FFFFFCF, '[' .. noteName .. ']')
+      end
+    end
     if disableVal1 then
       r.ImGui_EndDisabled(ctx)
     end
+
+    r.ImGui_SetCursorPosY(ctx, saveNextLineY)
 
     r.ImGui_Separator(ctx)
 

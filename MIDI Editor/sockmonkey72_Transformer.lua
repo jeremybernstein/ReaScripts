@@ -1,10 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.5
+-- @version 1.0.6-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - reload last-loaded preset as an option
+--   - added clear all button to get a clean slate
+--   - added undo/redo (might be some edge cases here...)
+--   - position criteria Is Near Event: now musical time-based (old presets will be busted, sorry!)
 -- @provides
 --   {Transformer}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -18,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.5'
+local versionStr = '1.0.6-beta.6'
 
 local r = reaper
 
@@ -73,8 +75,12 @@ local ctx = r.ImGui_CreateContext(scriptID)
 r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1)
 
 local IMAGEBUTTON_SIZE = 13
-local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/' .. 'gear_40031.png')
+local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'gear_40031.png')
 if GearImage then r.ImGui_Attach(ctx, GearImage) end
+local UndoImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'left-arrow_9144323.png')
+if UndoImage then r.ImGui_Attach(ctx, UndoImage) end
+local RedoImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'right-arrow_9144322.png')
+if RedoImage then r.ImGui_Attach(ctx, RedoImage) end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -215,7 +221,7 @@ local function doFindUpdate()
   doUpdate()
 end
 
-local function doActionUpdate(action)
+local function doActionUpdate()
   doUpdate(true)
 end
 
@@ -454,6 +460,7 @@ local function handleExtState()
               presetNameTextBuffer = lastState.presetName
               if dirExists(lastState.presetSubPath) then presetSubPath = lastState.presetSubPath end
               presetNotesBuffer = tx.loadPresetFromTable(lastState.state)
+              tx.createUndoStep()
             end
             -- doFindUpdate() ??
           end
@@ -800,6 +807,69 @@ local function windowFn()
 
   local currentRect = {}
 
+  local gearPopupLeft
+
+  local function MakeClearAll()
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 2) - (10 * canvasScale))
+    r.ImGui_Button(ctx, 'Clear All', DEFAULT_ITEM_WIDTH * 1.5)
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+        tx.suspendUndo()
+        tx.clearFindRows()
+        selectedFindRow = 0
+        tx.setCurrentFindScope(3)
+        tx.setFindScopeFlags(0)
+        tx.clearActionRows()
+        selectedActionRow = 0
+        tx.setCurrentActionScope(1)
+        tx.setCurrentActionScopeFlags(1)
+        presetLabel = ''
+        presetNotesBuffer = ''
+        tx.resumeUndo()
+        doActionUpdate()
+    end
+  end
+
+  local function MakeUndoRedo()
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 1) - (10 * canvasScale))
+
+    local ibSize = FONTSIZE_LARGE * canvasScale
+
+    gearPopupLeft = r.ImGui_GetCursorPosX(ctx)
+
+    local hasUndo = tx.hasUndoSteps()
+    local hasRedo = tx.hasRedoSteps()
+
+    if not hasUndo then
+      r.ImGui_BeginDisabled(ctx)
+    end
+    if r.ImGui_ImageButton(ctx, 'undo', UndoImage, ibSize, ibSize) then
+      local undoState = tx.popUndo()
+      if undoState then
+        presetNotesBuffer = tx.loadPresetFromTable(undoState)
+      end
+    end
+    if not hasUndo then
+      r.ImGui_EndDisabled(ctx)
+    end
+
+    r.ImGui_SameLine(ctx)
+
+    if not hasRedo then
+      r.ImGui_BeginDisabled(ctx)
+    end
+    if r.ImGui_ImageButton(ctx, 'redo', RedoImage, ibSize, ibSize) then
+      local redoState = tx.popRedo()
+      if redoState then
+        presetNotesBuffer = tx.loadPresetFromTable(redoState)
+      end
+    end
+    if not hasRedo then
+      r.ImGui_EndDisabled(ctx)
+    end
+  end
+
   local function MakeGearPopup()
     r.ImGui_SameLine(ctx)
 
@@ -812,6 +882,7 @@ local function windowFn()
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
 
     local wantsPop = false
+    gearPopupLeft = r.ImGui_GetCursorPosX(ctx)
     if r.ImGui_ImageButton(ctx, 'gear', GearImage, ibSize, ibSize) then
       wantsPop = true
     end
@@ -1248,7 +1319,8 @@ local function windowFn()
   ----------------------------------- GEAR ----------------------------------
 
   MakeGearPopup()
-
+  MakeUndoRedo()
+  MakeClearAll()
   ---------------------------------------------------------------------------
   --------------------------------- FIND ROWS -------------------------------
 
@@ -1284,6 +1356,7 @@ local function windowFn()
     if optDown then
       tx.clearFindRows()
       selectedFindRow = 0
+      doFindUpdate()
     else
       removeFindRow()
     end
@@ -2008,6 +2081,41 @@ local function windowFn()
     eventSelectorActionParam1Special(fun, row)
   end
 
+  local function eventSelectorParam2Special(fun, row)
+    local deactivated = false
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+
+    r.ImGui_Separator(ctx)
+
+    r.ImGui_AlignTextToFramePadding(ctx)
+
+    r.ImGui_Text(ctx, '+- % of unit')
+    r.ImGui_SameLine(ctx)
+
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local retval, buf = r.ImGui_InputText(ctx, '##eventSelectorParam2',
+      row.evsel.scaleStr,
+      r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+    local scale = tonumber(buf)
+    scale = scale == nil and 100 or scale < 0 and 0 or scale > 100 and 100 or scale
+    row.evsel.scaleStr = tostring(scale)
+    if kbdEntryIsCompleted(retval) then
+      row.evsel.scale = scale
+      inTextInput = false
+    elseif retval then inTextInput = true
+    end
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if completionKeyPress() then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
+
+    r.ImGui_PopStyleColor(ctx, 2)
+  end
+
   local function newMIDIEventActionParam2Special(fun, row) -- type list is main menu
     local nme = row.nme
     local deactivated = false
@@ -2433,7 +2541,10 @@ local function windowFn()
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i)
           currentRow.params[2].menuEntry = i
           doFindUpdate()
-        end)
+        end,
+        paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR
+          and eventSelectorParam2Special
+        or nil)
 
       if showTimeFormatColumn then
         createPopup(currentRow, 'timeFormatMenu', tx.findTimeFormatEntries, currentRow.timeFormatEntry, function(i)
@@ -2573,6 +2684,7 @@ local function windowFn()
     if optDown then
       tx.clearActionRows()
       selectedActionRow = 0
+      doActionUpdate()
     else
       removeActionRow()
     end

@@ -424,7 +424,7 @@ local findPositionConditionEntries = {
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
-  { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { floateditor = true, percent = true, default = 20 }}, freeterm = true },
+  { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { menu = true, default = 3 }}, freeterm = true },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -522,6 +522,8 @@ local findMusicalParam1Entries = {
   { notation = '$4/1', label = '4/1', text = '4' },
   { notation = '$grid', label = 'Current Grid', text = '-1' },
 }
+
+local findPositionNearEventEntries = tableCopy(findMusicalParam1Entries)
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
   { notation = '&&', label = 'And', text = 'and'},
@@ -1389,8 +1391,8 @@ function InRazorArea(event, take)
   return false
 end
 
-function IsNearEvent(event, take, PPQ, evSelParams, percent)
-  local PPQPercent = PPQ * (percent / 100)
+function IsNearEvent(event, take, PPQ, evSelParams, param2)
+  local PPQPercent = (param2 * PPQ) * (evSelParams.scale / 100)
   local minRange = event.ppqpos - PPQPercent
   local maxRange = event.ppqpos + PPQPercent
 
@@ -2096,6 +2098,7 @@ function FindTabsFromTarget(row)
         param1Tab = findCursorParam1Entries
       elseif condition.notation == ':nearevent' then
         param1Tab = typeEntriesForEventSelector
+        param2Tab = findPositionNearEventEntries
       end
     end
   elseif notation == '$length' then
@@ -2263,25 +2266,40 @@ function GenerateEventSelectorNotation(row)
   if evsel.useval1 then
     evSelStr = evSelStr .. string.format('|%02X', evsel.msg2)
   end
+  if not evsel.scale or evsel.scale ~= 100 then
+    evSelStr = evSelStr .. string.format('|%0.4f', evsel.scale):gsub("%.?0+$", "")
+  end
   return evSelStr
 end
 
 function ParseEventSelectorNotation(str, row, paramTab)
   local evsel = {}
   local fs, fe, chanmsg, channel, selected, muted = string.find(str, '([0-9A-Fa-f]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)')
-  local msg2
+  local msg2, scale, savefe
   if fs and fe then
+    savefe = fe
     evsel.chanmsg = tonumber(chanmsg:sub(1, 2), 16)
     evsel.channel = tonumber(channel)
     evsel.selected = tonumber(selected)
     evsel.muted = tonumber(muted)
     evsel.useval1 = false
     evsel.msg2 = 60
+    evsel.scale = 100
+    evsel.scaleStr = '100'
+
     fs, fe, msg2 = string.find(str, '|([0-9A-Fa-f]+)', fe)
     if fs and fe then
       evsel.useval1 = true
       evsel.msg2 = tonumber(msg2:sub(1, 2), 16)
     end
+
+    if not fe then fe = savefe end
+    fs, fe, scale = string.find(str, '|([0-9.]+)', fe)
+    if fs and fe then
+      evsel.scaleStr = scale
+      evsel.scale = tonumber(scale)
+    end
+
     for k, v in ipairs(paramTab) do
       if tonumber(v.text) == evsel.chanmsg then
         row.params[1].menuEntry = k
@@ -2831,16 +2849,16 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
     if override == EDITOR_TYPE_BITFIELD then
       paramVal = row.params[index].textEditorStr
     elseif (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row.params[index].textEditorStr))
+      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row.params[index].textEditorStr)):gsub("%.?0+$", "")
     elseif (override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) + (1 << 13)) / ((1 << 14) - 1) * 100)
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) + (1 << 13)) / ((1 << 14) - 1) * 100):gsub("%.?0+$", "")
     elseif ((override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_BIPOLAR)) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 14) - 1)) * 100)
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 14) - 1)) * 100):gsub("%.?0+$", "")
     elseif ((override == EDITOR_TYPE_7BIT
         or override == EDITOR_TYPE_7BIT_NOZERO
         or override == EDITOR_TYPE_7BIT_BIPOLAR))
       then
-        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 7) - 1)) * 100)
+        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 7) - 1)) * 100):gsub("%.?0+$", "")
     else
       mu.post('unknown override: ' .. override)
     end
@@ -4493,6 +4511,28 @@ function SavePreset(pPath, scriptTab)
   return saved, scriptPath
 end
 
+local undoTable = {}
+local undoPointer = 0
+local undoSuspended = false
+
+function SuspendUndo()
+  undoSuspended = true
+end
+
+function ResumeUndo()
+  undoSuspended = false
+end
+
+function CreateUndoStep(state)
+  if undoSuspended then return end
+  while undoPointer > 1 do
+    table.remove(undoTable, 1)
+    undoPointer = undoPointer - 1
+  end
+  table.insert(undoTable, 1, state and state or GetCurrentPresetState())
+  undoPointer = 1
+end
+
 function LoadPresetFromTable(presetTab)
   currentFindScopeFlags = FIND_SCOPE_FLAG_NONE -- do this first (FindScopeFromNotation() may populate it)
   currentFindScope = FindScopeFromNotation(presetTab.findScope)
@@ -4636,7 +4676,10 @@ function Update(action, wantsState)
   else
     ProcessAction()
   end
-  return wantsState and GetCurrentPresetState() or nil
+
+  local nowState = GetCurrentPresetState()
+  CreateUndoStep(nowState)
+  return wantsState and nowState or nil
 end
 
 local lastHasTable = {}
@@ -4828,7 +4871,7 @@ end
 
 local function makeDefaultEventSelector(row)
   row.params[1].menuEntry = 1
-  -- row.params[2].menuEntry = 1
+  row.params[2].menuEntry = 3 -- $1/16
   row.evsel = {
     chanmsg = 0x00,
     channel = -1,
@@ -4836,6 +4879,8 @@ local function makeDefaultEventSelector(row)
     muted = -1,
     useval1 = false,
     msg2 = 60,
+    scale = 100,
+    scaleStr = '100'
   }
 end
 
@@ -4917,6 +4962,50 @@ TransformerLib.typeEntriesForEventSelector = typeEntriesForEventSelector
 TransformerLib.setPresetNotesBuffer = SetPresetNotesBuffer
 TransformerLib.update = Update
 TransformerLib.loadPresetFromTable = LoadPresetFromTable
+
+TransformerLib.hasUndoSteps = function()
+  local undoStackLen = #undoTable
+  if undoStackLen > 1 and undoPointer < undoStackLen then
+    return true
+  end
+  return false
+end
+
+TransformerLib.hasRedoSteps = function()
+  local undoStackLen = #undoTable
+  if undoStackLen > 1 and undoPointer > 1 then
+    return true
+  end
+  return false
+end
+
+TransformerLib.popUndo = function()
+  local undoStackLen = #undoTable
+  if undoStackLen > 1 and undoPointer < undoStackLen then
+    undoPointer = undoPointer + 1
+    return undoTable[undoPointer]
+  end
+  return nil
+end
+
+TransformerLib.popRedo = function()
+  local undoStackLen = #undoTable
+  if undoStackLen > 1 and undoPointer > 1 then
+    undoPointer = undoPointer - 1
+    return undoTable[undoPointer]
+  end
+  return nil
+end
+
+TransformerLib.createUndoStep = CreateUndoStep
+TransformerLib.clearUndo = function()
+  undoTable = {}
+  undoPointer = 0
+  CreateUndoStep()
+end
+
+TransformerLib.suspendUndo = SuspendUndo
+TransformerLib.resumeUndo = ResumeUndo
 
 return TransformerLib
 

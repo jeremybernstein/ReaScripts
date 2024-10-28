@@ -1,14 +1,13 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.6
+-- @version 1.0.6-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - added clear all button to get a clean slate
---   - added undo/redo (might be some edge cases here...)
---   - position criteria Is Near Event: now musical time-based (old presets will be busted, sorry!)
+--   - fix icon location
 -- @provides
 --   {Transformer}/*
+--   Transformer/icons/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
 --   Transformer Presets/Factory Presets/**/*.tfmrPreset > ../$path
 --   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Transformer.lua
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.6'
+local versionStr = '1.0.6-beta.7'
 
 local r = reaper
 

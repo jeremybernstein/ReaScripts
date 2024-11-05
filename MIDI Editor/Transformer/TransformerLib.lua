@@ -422,6 +422,7 @@ local findPositionConditionEntries = {
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0', rangelabel = 'bitfield' }}, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
+  { notation = ':undereditcursor', label = 'Under Edit Cursor (Slop)', text = 'UnderEditCursor(event, take, PPQ, r.GetCursorPositionEx(0), {param1}, {param2})', terms = 2, split = { { menu = true, default = 3 }, { hidden = true, literal = true } }, freetern = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { menu = true, default = 3 }}, freeterm = true },
@@ -523,7 +524,7 @@ local findMusicalParam1Entries = {
   { notation = '$grid', label = 'Current Grid', text = '-1' },
 }
 
-local findPositionNearEventEntries = tableCopy(findMusicalParam1Entries)
+local findPositionMusicalSlopEntries = tableCopy(findMusicalParam1Entries)
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
   { notation = '&&', label = 'And', text = 'and'},
@@ -821,6 +822,7 @@ local PARAM_TYPE_EVERYN = 8
 local PARAM_TYPE_NEWMIDIEVENT = 9
 local PARAM_TYPE_PARAM3 = 10
 local PARAM_TYPE_EVENTSELECTOR = 11
+local PARAM_TYPE_HIDDEN = 12
 
 local EDITOR_TYPE_PITCHBEND = 100
 local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
@@ -1193,12 +1195,27 @@ function CursorPosition(event, property, cursorPosProj, which)
   elseif which == CURSOR_GTE then -- after/at
     return time >= cursorPosProj
   elseif which == CURSOR_UNDER then
-    local endtime = time + event.projlen
     if GetEventType(event) == NOTE_TYPE then
+      local endtime = time + event.projlen
       return cursorPosProj >= time and cursorPosProj < endtime
     else
       return time == cursorPosProj
     end
+  end
+  return false
+end
+
+function UnderEditCursor(event, take, PPQ, cursorPosProj, param1, param2)
+  local PPQPercent = ((param1 * 4) * PPQ) * (param2 / 100)
+  local cursorPPQPos = r.MIDI_GetPPQPosFromProjTime(take, cursorPosProj)
+  local minRange = cursorPPQPos - PPQPercent
+  local maxRange = cursorPPQPos + PPQPercent
+
+  local time = event.ppqpos
+  if time >= minRange and time < maxRange then return true end
+  if GetEventType(event) == NOTE_TYPE then
+    local endtime = event.endppqpos
+    if time <= minRange and endtime > minRange then return true end
   end
   return false
 end
@@ -1392,7 +1409,8 @@ function InRazorArea(event, take)
 end
 
 function IsNearEvent(event, take, PPQ, evSelParams, param2)
-  local PPQPercent = (param2 * PPQ) * (evSelParams.scale / 100)
+  local scale = tonumber(evSelParams.scaleStr)
+  local PPQPercent = ((param2 * 4) * PPQ) * (scale / 100)
   local minRange = event.ppqpos - PPQPercent
   local maxRange = event.ppqpos + PPQPercent
 
@@ -2098,7 +2116,9 @@ function FindTabsFromTarget(row)
         param1Tab = findCursorParam1Entries
       elseif condition.notation == ':nearevent' then
         param1Tab = typeEntriesForEventSelector
-        param2Tab = findPositionNearEventEntries
+        param2Tab = findPositionMusicalSlopEntries
+      elseif condition.notation == ':undereditcursor' then
+        param1Tab = findPositionMusicalSlopEntries
       end
     end
   elseif notation == '$length' then
@@ -2266,8 +2286,10 @@ function GenerateEventSelectorNotation(row)
   if evsel.useval1 then
     evSelStr = evSelStr .. string.format('|%02X', evsel.msg2)
   end
-  if not evsel.scale or evsel.scale ~= 100 then
-    evSelStr = evSelStr .. string.format('|%0.4f', evsel.scale):gsub("%.?0+$", "")
+  local scale = tonumber(evsel.scaleStr)
+  if not scale then scale = 100 end
+  if scale ~= 100 then
+    evSelStr = evSelStr .. string.format('|%0.4f', scale):gsub("%.?0+$", "")
   end
   return evSelStr
 end
@@ -2284,7 +2306,6 @@ function ParseEventSelectorNotation(str, row, paramTab)
     evsel.muted = tonumber(muted)
     evsel.useval1 = false
     evsel.msg2 = 60
-    evsel.scale = 100
     evsel.scaleStr = '100'
 
     fs, fe, msg2 = string.find(str, '|([0-9A-Fa-f]+)', fe)
@@ -2297,7 +2318,6 @@ function ParseEventSelectorNotation(str, row, paramTab)
     fs, fe, scale = string.find(str, '|([0-9.]+)', fe)
     if fs and fe then
       evsel.scaleStr = scale
-      evsel.scale = tonumber(scale)
     end
 
     for k, v in ipairs(paramTab) do
@@ -2391,6 +2411,7 @@ function GetParamType(src)
     or src.newevent and PARAM_TYPE_NEWMIDIEVENT
     or src.param3 and PARAM_TYPE_PARAM3
     or src.eventselector and PARAM_TYPE_EVENTSELECTOR
+    or src.hidden and PARAM_TYPE_HIDDEN
     or PARAM_TYPE_UNKNOWN
 end
 
@@ -2506,6 +2527,7 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
     or paramType == PARAM_TYPE_EVERYN
     or paramType == PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
     or paramType == PARAM_TYPE_PARAM3
+    or paramType == PARAM_TYPE_HIDDEN
   then
     row.params[index].textEditorStr = paramStr
   end
@@ -2584,12 +2606,12 @@ function ProcessFindMacroRow(buf, boolstr)
         condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
         if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
         if isValidString(param1) then
-          -- mu.post('param1', param1)
           param1 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
+          -- mu.post('param1', param1)
         end
         if isValidString(param2) then
-          -- mu.post('param2', param2)
           param2 = HandleMacroParam(row, findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
+          -- mu.post('param2', param2)
         end
         break
       -- else -- still not found, maybe an old thing (can be removed post-release)
@@ -2749,6 +2771,7 @@ context.FindEveryNPattern = FindEveryNPattern
 context.FindEveryNNote = FindEveryNNote
 context.EqualsMusicalLength = EqualsMusicalLength
 context.CursorPosition = CursorPosition
+context.UnderEditCursor = UnderEditCursor
 context.SelectChordNote = SelectChordNote
 
 context.OP_EQ = OP_EQ
@@ -2873,6 +2896,7 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
     or paramType == PARAM_TYPE_EVERYN
     or paramType == PARAM_TYPE_PARAM3
     or override == EDITOR_TYPE_BITFIELD
+    or paramType == PARAM_TYPE_HIDDEN
   then
     paramVal = row.params[index].textEditorStr
   elseif #paramTab ~= 0 then
@@ -4900,6 +4924,7 @@ TransformerLib.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
 TransformerLib.PARAM_TYPE_NEWMIDIEVENT = PARAM_TYPE_NEWMIDIEVENT
 TransformerLib.PARAM_TYPE_PARAM3 = PARAM_TYPE_PARAM3
 TransformerLib.PARAM_TYPE_EVENTSELECTOR = PARAM_TYPE_EVENTSELECTOR
+TransformerLib.PARAM_TYPE_HIDDEN = PARAM_TYPE_HIDDEN
 
 TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
 TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }

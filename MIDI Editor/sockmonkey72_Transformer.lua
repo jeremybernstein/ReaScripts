@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.7
+-- @version 1.0.6-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix icon location
+--   - add Under Edit Cursor (Position criteria with metric slop)
+--   - fix metric slop calculation for Near Event criteria
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.7'
+local versionStr = '1.0.6-beta.8'
 
 local r = reaper
 
@@ -1454,6 +1455,9 @@ local function windowFn()
 
   local function handleTableParam(row, condOp, paramTab, paramType, index, procFn)
     local rv = false
+
+    if paramType == tx.PARAM_TYPE_HIDDEN then return end
+
     local editorType = row.params[index].editorType
     local flags = {}
     flags.isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
@@ -2080,7 +2084,7 @@ local function windowFn()
     eventSelectorActionParam1Special(fun, row)
   end
 
-  local function eventSelectorParam2Special(fun, row)
+  local function musicalSlopParamSpecial(fun, row, underEditCursor)
     local deactivated = false
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
@@ -2094,13 +2098,16 @@ local function windowFn()
 
     r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local retval, buf = r.ImGui_InputText(ctx, '##eventSelectorParam2',
-      row.evsel.scaleStr,
+      underEditCursor and row.params[2].textEditorStr or row.evsel.scaleStr,
       r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
     local scale = tonumber(buf)
     scale = scale == nil and 100 or scale < 0 and 0 or scale > 100 and 100 or scale
-    row.evsel.scaleStr = tostring(scale)
+    if underEditCursor then
+      row.params[2].textEditorStr = tostring(scale)
+    else
+      row.evsel.scaleStr = tostring(scale)
+    end
     if kbdEntryIsCompleted(retval) then
-      row.evsel.scale = scale
       inTextInput = false
     elseif retval then inTextInput = true
     end
@@ -2113,6 +2120,14 @@ local function windowFn()
     end
 
     r.ImGui_PopStyleColor(ctx, 2)
+  end
+
+  local function eventSelectorParam2Special(fun, row)
+    musicalSlopParamSpecial(fun, row, false)
+  end
+
+  local function underEditCursorParam1Special(fun, row)
+    musicalSlopParamSpecial(fun, row, true)
   end
 
   local function newMIDIEventActionParam2Special(fun, row) -- type list is main menu
@@ -2534,6 +2549,8 @@ local function windowFn()
             and everyNParam1Special
           or paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR
             and eventSelectorParam1Special
+          or conditionEntries[currentRow.conditionEntry].notation == ':undereditcursor'
+            and underEditCursorParam1Special
           or nil,
         paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR and 'Type' or false)
 

@@ -422,10 +422,10 @@ local findPositionConditionEntries = {
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0', rangelabel = 'bitfield' }}, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
-  { notation = ':undereditcursor', label = 'Under Edit Cursor (Slop)', text = 'UnderEditCursor(event, take, PPQ, r.GetCursorPositionEx(0), {param1}, {param2})', terms = 2, split = { { menu = true, default = 3 }, { hidden = true, literal = true } }, freetern = true },
+  { notation = ':undereditcursor', label = 'Under Edit Cursor (Slop)', text = 'UnderEditCursor(event, take, PPQ, r.GetCursorPositionEx(0), {param1}, {param2})', terms = 2, split = { { menu = true, default = 4 }, { hidden = true, literal = true } }, freeterm = true },
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
-  { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { menu = true, default = 3 }}, freeterm = true },
+  { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { menu = true, default = 4 }}, freeterm = true },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -525,6 +525,7 @@ local findMusicalParam1Entries = {
 }
 
 local findPositionMusicalSlopEntries = tableCopy(findMusicalParam1Entries)
+table.insert(findPositionMusicalSlopEntries, 1, { notation = '$none', label = '<none>', text = '0' })
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea
   { notation = '&&', label = 'And', text = 'and'},
@@ -987,7 +988,7 @@ local currentSwing = 0. -- -1. to 1
 function GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
   local gridUnit
   local mgMods = GetMetricGridModifiers(mgParams)
-  if subdiv > 0 then
+  if subdiv >= 0 then
     gridUnit = PPQ * (subdiv * 4)
     if mgMods == MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
     elseif mgMods == MG_GRID_TRIPLET then gridUnit = (gridUnit * 2 / 3) end
@@ -1206,7 +1207,8 @@ function CursorPosition(event, property, cursorPosProj, which)
 end
 
 function UnderEditCursor(event, take, PPQ, cursorPosProj, param1, param2)
-  local PPQPercent = ((param1 * 4) * PPQ) * (param2 / 100)
+  local gridUnit = GetGridUnitFromSubdiv(param1, PPQ)
+  local PPQPercent = gridUnit + (gridUnit * (param2 / 100))
   local cursorPPQPos = r.MIDI_GetPPQPosFromProjTime(take, cursorPosProj)
   local minRange = cursorPPQPos - PPQPercent
   local maxRange = cursorPPQPos + PPQPercent
@@ -1410,7 +1412,8 @@ end
 
 function IsNearEvent(event, take, PPQ, evSelParams, param2)
   local scale = tonumber(evSelParams.scaleStr)
-  local PPQPercent = ((param2 * 4) * PPQ) * (scale / 100)
+  local gridUnit = GetGridUnitFromSubdiv(param2, PPQ)
+  local PPQPercent = gridUnit + (gridUnit * (scale / 100))
   local minRange = event.ppqpos - PPQPercent
   local maxRange = event.ppqpos + PPQPercent
 
@@ -2205,9 +2208,12 @@ function SetMetricGridModifiers(mg, mgMods, mgReaSwing)
 end
 
 function GetMetricGridModifiers(mg)
-  local mods = mg.modifiers & 0x7
-  local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
-  return mods, reaperSwing
+  if mg then
+    local mods = mg.modifiers & 0x7
+    local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+    return mods, reaperSwing
+  end
+  return MG_GRID_STRAIGHT, false
 end
 
 function ParseMetricGridNotation(str)
@@ -4895,7 +4901,7 @@ end
 
 local function makeDefaultEventSelector(row)
   row.params[1].menuEntry = 1
-  row.params[2].menuEntry = 3 -- $1/16
+  row.params[2].menuEntry = 4 -- $1/16
   row.evsel = {
     chanmsg = 0x00,
     channel = -1,

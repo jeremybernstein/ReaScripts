@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.8
+-- @version 1.0.6-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add Under Edit Cursor (Position criteria with metric slop)
---   - fix metric slop calculation for Near Event criteria
+--   - Under Edit Cursor & Near Event criteria now calculate musical slop as (unit +- (unit * slop%)), previously it was (+- (unit * slot%))
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.8'
+local versionStr = '1.0.6-beta.9'
 
 local r = reaper
 
@@ -335,13 +334,18 @@ local function setupRowFormat(row, condOpTab)
 
   for i = 1, 2 do
     if condOp.split and condOp.split[i].default then
+      local menuEntry
       row.params[i].textEditorStr = tostring(condOp.split[i].default) -- hack
+      if paramTypes[i] == tx.PARAM_TYPE_MENU then
+        menuEntry = tonumber(row.params[i].textEditorStr)
+      end
+      row.params[i].menuEntry = menuEntry and menuEntry or 1
     else
       row.params[i].textEditorStr = '0'
+      row.params[i].menuEntry = 1
     end
     row.params[i].percentVal = nil
     row.params[i].editorType = nil
-    row.params[i].menuEntry = 1
   end
 
   if isMetric or isMusical then

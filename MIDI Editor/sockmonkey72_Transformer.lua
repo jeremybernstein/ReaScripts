@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.6-beta.9
+-- @version 1.0.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - Under Edit Cursor & Near Event criteria now calculate musical slop as (unit +- (unit * slop%)), previously it was (+- (unit * slot%))
+--   - 1.0.6 release (no changes from beta.9)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6-beta.9'
+local versionStr = '1.0.6'
 
 local r = reaper
 

@@ -1,11 +1,11 @@
--- @description Thin MIDI CC Events
--- @version 1.7.4
+-- @description Thin MIDI CC Events (Reduce)
+-- @version 1.7.5
 -- @author sockmonkey72
 -- @about
---   # Thin MIDI CC Events
+--   # Thin MIDI CC Events (Reduce)
 --   Reduce density of MIDI CC events
 -- @changelog
---   - fix deletion of non-thinnable lanes (too few points)
+--   - fix non-deletion of first point (would lead to strange effects at certain thin levels)
 -- @provides
 --   {ThinCCs}/*
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Thin_CCs_Selected.lua

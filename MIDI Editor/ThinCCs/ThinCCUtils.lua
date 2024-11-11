@@ -200,7 +200,7 @@ function PerformReduction(eventlist, take)
   reaper.MIDI_DisableSort(take)
 
   -- reverse iterate, delete points
-  for i = eventlist.todelete.maxidx, 1, -1 do
+  for i = eventlist.todelete.maxidx, 0, -1 do
     if eventlist.todelete[i] then
       reaper.MIDI_DeleteCC(take, i)
     end

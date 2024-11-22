@@ -2351,7 +2351,7 @@ end
 function ParseNewMIDIEventNotation(str, row, paramTab, index)
   if index == 1 then
     local nme = {}
-    local fs, fe, msg, flags, pos, dur, relvel = string.find(str, '([0-9A-Fa-f]+)|(%d)|([0-9%.:t]+)|([0-9%.:t]+)|([0-9A-Fa-f]+)')
+    local fs, fe, msg, flags, pos, dur, relvel = string.find(str, '([0-9A-Fa-f]+)|(%d)|([0-9%.%-:t]+)|([0-9%.:t]+)|([0-9A-Fa-f]+)')
     if fs and fe then
       local status = tonumber(msg:sub(1, 2), 16)
       nme.chanmsg = status & 0xF0

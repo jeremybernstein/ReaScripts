@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.6
+-- @version 1.0.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - 1.0.6 release (no changes from beta.9)
+--   - fix new MIDI event parsing with negative relative offset
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.6'
+local versionStr = '1.0.7'
 
 local r = reaper
 

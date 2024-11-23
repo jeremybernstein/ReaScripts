@@ -3096,6 +3096,8 @@ function RunFind(findFn, params, runFn)
     if runFn then runFn(event, matches) end
   end
 
+  found, unfound = HandleFindPostProcessing(found, unfound)
+
   -- it was a time selection, add a final event to make behavior predictable
   if params.addRangeEvents and params.findRange.frStart and params.findRange.frEnd then
     local frStart = params.findRange.frStart
@@ -3140,8 +3142,6 @@ function RunFind(findFn, params, runFn)
     findFnString = params and params.findFnString,
     actionFnString = params and params.actionFnString,
   }
-
-  found = HandleFindPostProcessing(found)
 
   return found, contextTab, getUnfound and unfound or nil
 end
@@ -3752,7 +3752,7 @@ function DeleteEventsInTake(take, eventTab, doTx)
   end
 end
 
-function DoFindPostProcessing(found)
+function DoFindPostProcessing(found, unfound)
   local wantsFront = currentFindPostProcessingInfo.flags & FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0
   local wantsBack = currentFindPostProcessingInfo.flags & FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0
   local newfound = {}
@@ -3762,26 +3762,36 @@ function DoFindPostProcessing(found)
     local offset = currentFindPostProcessingInfo.front.offset + 1
     for i = 1, #found do
       local f = found[i]
-      if i >= offset and (i - offset) < num then table.insert(newfound, f) end
+      if i >= offset and (i - offset) < num then
+        table.insert(newfound, f)
+      else
+        table.insert(unfound, f)
+      end
     end
   end
   if wantsBack then
     local num = currentFindPostProcessingInfo.back.count
     local offset = currentFindPostProcessingInfo.back.offset + 1
+    local ii = 1
     for i = #found, 1, -1 do
       local f = found[i]
-      if i >= offset and (i - offset) < num then table.insert(newfound, f) end
+      if ii >= offset and (ii - offset) < num then
+        table.insert(newfound, f)
+      else
+        table.insert(unfound, f)
+      end
+      ii = ii + 1
     end
   end
-  if #newfound ~= 0 then return newfound end
+  if #newfound ~= 0 then found = newfound end
   return found
 end
 
-function HandleFindPostProcessing(found)
+function HandleFindPostProcessing(found, unfound)
   if currentFindPostProcessingInfo.flags ~= FIND_POSTPROCESSING_FLAG_NONE then
-    return DoFindPostProcessing(found)
+    return DoFindPostProcessing(found, unfound)
   end
-  return found
+  return found, unfound
 end
 
 local CreateNewMIDIEvent_Once

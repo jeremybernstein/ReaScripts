@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.8-beta.3
+-- @version 1.0.8-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - improve Post-Processing pop-up behavior
+--   - fix post-processing Last Event behavior
+--   - improve post-processing pop-up behavior (too much updating)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.8-beta.3'
+local versionStr = '1.0.8-beta.4'
 
 local r = reaper
 
@@ -1135,6 +1136,87 @@ local function windowFn()
     inNewFolderDialog = false
 
     return rv, folderNameTextBuffer
+  end
+
+  local function generateFindPostProcessingPopup()
+    if r.ImGui_BeginPopup(ctx, 'findPostPocessingMenu', r.ImGui_WindowFlags_NoMove()) then
+      local deactivated
+      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+        r.ImGui_CloseCurrentPopup(ctx)
+        handledEscape = true
+      end
+      local ppInfo = tx.getFindPostProcessingInfo()
+      local ppFlags = ppInfo.flags
+      local rv, sel, buf
+      local changed
+
+      rv, sel = r.ImGui_Checkbox(ctx, 'Retain first', ppFlags & tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0)
+      if rv then
+        ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT)
+        changed = true
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##frontcount', ppInfo.front.count,
+        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      if kbdEntryIsCompleted(rv) then
+        ppInfo.front.count = tonumber(buf)
+        if not ppInfo.front.count or ppInfo.front.count < 1 then ppInfo.front.count = 0 end
+        changed = true
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = r.ImGui_InputText(ctx, 'from front##frontoffset', ppInfo.front.offset,
+        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      if kbdEntryIsCompleted(rv) then
+        ppInfo.front.offset = tonumber(buf)
+        if not ppInfo.front.offset then ppInfo.front.offset = 0 end
+        changed = true
+      end
+
+      rv, sel = r.ImGui_Checkbox(ctx, 'Retain last', ppFlags & tx.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0)
+      if rv then
+        ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_LASTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_LASTEVENT)
+        changed = true
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##backcount', ppInfo.back.count,
+        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      if kbdEntryIsCompleted(rv) then
+        ppInfo.back.count = tonumber(buf)
+        if not ppInfo.back.count or ppInfo.back.count < 1 then ppInfo.back.count = 1 end
+        changed = true
+      end
+      r.ImGui_SameLine(ctx)
+      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = r.ImGui_InputText(ctx, 'from end##backoffset', ppInfo.back.offset,
+        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      if kbdEntryIsCompleted(rv) then
+        ppInfo.back.offset = tonumber(buf)
+        if not ppInfo.back.offset then ppInfo.back.offset = 0 end
+        changed = true
+      end
+
+      if changed then
+        ppInfo.flags = ppFlags
+        tx.setFindPostProcessingInfo(ppInfo)
+      end
+
+      if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+        if completionKeyPress() then
+          r.ImGui_CloseCurrentPopup(ctx)
+        end
+      end
+
+      r.ImGui_EndPopup(ctx)
+    end
+
+    generateLabelOnLine('Post-Processing', true)
   end
 
   local function generatePresetMenu(source, path, lab, filter, onlyFolders)
@@ -2687,76 +2769,7 @@ local function windowFn()
     r.ImGui_OpenPopup(ctx, 'findPostPocessingMenu')
   end
 
-  if r.ImGui_BeginPopup(ctx, 'findPostPocessingMenu', r.ImGui_WindowFlags_NoMove()) then
-    local deactivated
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      r.ImGui_CloseCurrentPopup(ctx)
-      handledEscape = true
-    end
-    local ppInfo = tx.getFindPostProcessingInfo()
-    local ppFlags = ppInfo.flags
-    local rv, sel, buf
-
-    rv, sel = r.ImGui_Checkbox(ctx, 'Retain first', ppFlags & tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0)
-    if rv then
-      ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT)
-    end
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##frontcount', ppInfo.front.count,
-      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if kbdEntryIsCompleted(rv) then
-      ppInfo.front.count = tonumber(buf)
-      if not ppInfo.front.count or ppInfo.front.count < 1 then ppInfo.front.count = 0 end
-    end
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = r.ImGui_InputText(ctx, 'from front##frontoffset', ppInfo.front.offset,
-      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if kbdEntryIsCompleted(rv) then
-      ppInfo.front.offset = tonumber(buf)
-      if not ppInfo.front.offset then ppInfo.front.offset = 0 end
-    end
-
-    rv, sel = r.ImGui_Checkbox(ctx, 'Retain last', ppFlags & tx.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0)
-    if rv then
-      ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_LASTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_LASTEVENT)
-    end
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##backcount', ppInfo.back.count,
-      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if kbdEntryIsCompleted(rv) then
-      ppInfo.back.count = tonumber(buf)
-      if not ppInfo.back.count or ppInfo.back.count < 1 then ppInfo.back.count = 1 end
-    end
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = r.ImGui_InputText(ctx, 'from end##backoffset', ppInfo.back.offset,
-      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if kbdEntryIsCompleted(rv) then
-      ppInfo.back.offset = tonumber(buf)
-      if not ppInfo.back.offset then ppInfo.back.offset = 0 end
-    end
-
-    ppInfo.flags = ppFlags
-
-    tx.setFindPostProcessingInfo(ppInfo)
-
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
-      if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
-      end
-    end
-
-    r.ImGui_EndPopup(ctx)
-  end
-
-  generateLabelOnLine('Post-Processing', true)
+  generateFindPostProcessingPopup()
 
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, findParserError)

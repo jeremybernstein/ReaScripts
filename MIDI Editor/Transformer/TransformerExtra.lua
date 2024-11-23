@@ -12,6 +12,83 @@ local function initExtra(txlib)
   tx = txlib
 end
 
+-----------------------------------------------------------------------------
+----------------------------------- OOP -------------------------------------
+
+local DEBUG_CLASS = false -- enable to check whether we're using known object properties
+
+local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaClasses
+  local c = {}    -- a new class instance
+  if not init and type(base) == 'function' then
+    init = base
+    base = nil
+  elseif type(base) == 'table' then
+   -- our new class is a shallow copy of the base class!
+    for i, v in pairs(base) do
+      c[i] = v
+    end
+    c._base = base
+  end
+  if DEBUG_CLASS then
+    c._names = {}
+    if setup then
+      for i, v in pairs(setup) do
+        c._names[i] = true
+      end
+    end
+
+    c.__newindex = function(table, key, value)
+      local found = false
+      if table._names and table._names[key] then found = true
+      else
+        local m = getmetatable(table)
+        while (m) do
+          if m._names[key] then found = true break end
+          m = m._base
+        end
+      end
+      if not found then
+        error('unknown property: '..key, 3)
+      else rawset(table, key, value)
+      end
+    end
+  end
+
+  -- the class will be the metatable for all its objects,
+  -- and they will look up their methods in it.
+  c.__index = c
+
+  -- expose a constructor which can be called by <classname>(<args>)
+  local mt = {}
+  mt.__call = function(class_tbl, ...)
+    local obj = {}
+    setmetatable(obj, c)
+    if class_tbl.init then
+      class_tbl.init(obj,...)
+    else
+      -- make sure that any stuff from the base class is initialized!
+      if base and base.init then
+        base.init(obj, ...)
+      end
+    end
+    return obj
+  end
+  c.init = init
+  c.is_a = function(self, klass)
+    local m = getmetatable(self)
+    while m do
+      if m == klass then return true end
+      m = m._base
+    end
+    return false
+  end
+  setmetatable(c, mt)
+  return c
+end
+
+-----------------------------------------------------------------------------
+---------------------------------- UTILS ------------------------------------
+
 local function tableCopy(obj, seen)
   if type(obj) ~= 'table' then return obj end
   if seen and seen[obj] then return seen[obj] end
@@ -353,6 +430,7 @@ Extra.makeParam3Line = makeParam3Line
 Extra.param3LineEntries = param3LineEntries
 
 -- put these things in the global table so we can call them from anywhere
+_G['class'] = class
 _G['tableCopy'] = tableCopy
 _G['isValidString'] = isValidString
 _G['spairs'] = spairs

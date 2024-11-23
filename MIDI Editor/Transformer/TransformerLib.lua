@@ -89,80 +89,6 @@ local selectedEvents = {}
 local libPresetNotesBuffer = ''
 
 -----------------------------------------------------------------------------
------------------------------------ OOP -------------------------------------
-
-local DEBUG_CLASS = false -- enable to check whether we're using known object properties
-
-local function class(base, setup, init) -- http://lua-users.org/wiki/SimpleLuaClasses
-  local c = {}    -- a new class instance
-  if not init and type(base) == 'function' then
-    init = base
-    base = nil
-  elseif type(base) == 'table' then
-   -- our new class is a shallow copy of the base class!
-    for i, v in pairs(base) do
-      c[i] = v
-    end
-    c._base = base
-  end
-  if DEBUG_CLASS then
-    c._names = {}
-    if setup then
-      for i, v in pairs(setup) do
-        c._names[i] = true
-      end
-    end
-
-    c.__newindex = function(table, key, value)
-      local found = false
-      if table._names and table._names[key] then found = true
-      else
-        local m = getmetatable(table)
-        while (m) do
-          if m._names[key] then found = true break end
-          m = m._base
-        end
-      end
-      if not found then
-        error('unknown property: '..key, 3)
-      else rawset(table, key, value)
-      end
-    end
-  end
-
-  -- the class will be the metatable for all its objects,
-  -- and they will look up their methods in it.
-  c.__index = c
-
-  -- expose a constructor which can be called by <classname>(<args>)
-  local mt = {}
-  mt.__call = function(class_tbl, ...)
-    local obj = {}
-    setmetatable(obj, c)
-    if class_tbl.init then
-      class_tbl.init(obj,...)
-    else
-      -- make sure that any stuff from the base class is initialized!
-      if base and base.init then
-        base.init(obj, ...)
-      end
-    end
-    return obj
-  end
-  c.init = init
-  c.is_a = function(self, klass)
-    local m = getmetatable(self)
-    while m do
-      if m == klass then return true end
-      m = m._base
-    end
-    return false
-  end
-  setmetatable(c, mt)
-  return c
-end
-
------------------------------------------------------------------------------
 ------------------------------- TRANSFORMER ---------------------------------
 
 local findScopeTable = {
@@ -209,7 +135,38 @@ function FindScopeFlagFromNotation(notation)
       end
     end
   end
-  return 0x00 -- default
+  return FIND_SCOPE_FLAG_NONE -- default
+end
+
+local FIND_POSTPROCESSING_FLAG_NONE = 0x00
+local FIND_POSTPROCESSING_FLAG_FIRSTEVENT = 0x01
+local FIND_POSTPROCESSING_FLAG_LASTEVENT = 0x02
+
+local currentFindPostProcessingInfo
+
+function ClearFindPostProcessingInfo()
+  currentFindPostProcessingInfo = {
+    flags = FIND_POSTPROCESSING_FLAG_NONE,
+    front = { count = 1, offset = 0 },
+    back = { count = 1, offset = 0 },
+  }
+end
+ClearFindPostProcessingInfo()
+
+local findPostProcessingTable = {
+  { notation = '$firstevent', flag = FIND_POSTPROCESSING_FLAG_FIRSTEVENT },
+  { notation = '$lastevent', flag = FIND_POSTPROCESSING_FLAG_LASTEVENT },
+}
+
+function FindPostProcessingFlagFromNotation(notation)
+  if notation then
+    for _, v in ipairs(findPostProcessingTable) do
+      if v.notation == notation then
+        return v.flag
+      end
+    end
+  end
+  return FIND_POSTPROCESSING_FLAG_NONE -- default
 end
 
 local function isREAPER7()
@@ -3160,6 +3117,9 @@ function RunFind(findFn, params, runFn)
     findFnString = params and params.findFnString,
     actionFnString = params and params.actionFnString,
   }
+
+  found = HandleFindPostProcessing(found)
+
   return found, contextTab, getUnfound and unfound or nil
 end
 
@@ -3767,6 +3727,38 @@ function DeleteEventsInTake(take, eventTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_CommitWriteTransaction(take, false, true)
   end
+end
+
+function DoFindPostProcessing(found)
+  local wantsFront = currentFindPostProcessingInfo.flags & FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0
+  local wantsBack = currentFindPostProcessingInfo.flags & FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0
+  local newfound = {}
+
+  if wantsFront then
+    local num = currentFindPostProcessingInfo.front.count
+    local offset = currentFindPostProcessingInfo.front.offset + 1
+    for i = 1, #found do
+      local f = found[i]
+      if i >= offset and (i - offset) < num then table.insert(newfound, f) end
+    end
+  end
+  if wantsBack then
+    local num = currentFindPostProcessingInfo.back.count
+    local offset = currentFindPostProcessingInfo.back.offset + 1
+    for i = #found, 1, -1 do
+      local f = found[i]
+      if i >= offset and (i - offset) < num then table.insert(newfound, f) end
+    end
+  end
+  if #newfound ~= 0 then return newfound end
+  return found
+end
+
+function HandleFindPostProcessing(found)
+  if currentFindPostProcessingInfo.flags ~= FIND_POSTPROCESSING_FLAG_NONE then
+    return DoFindPostProcessing(found)
+  end
+  return found
 end
 
 local CreateNewMIDIEvent_Once
@@ -4482,15 +4474,25 @@ end
 function GetCurrentPresetState()
   local fsFlags
   if findScopeTable[currentFindScope].notation == '$midieditor' then
-     fsFlags = {} -- not pretty
+    fsFlags = {} -- not pretty
     if currentFindScopeFlags & FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0 then table.insert(fsFlags, '$selectedonly') end
     if currentFindScopeFlags & FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0 then table.insert(fsFlags, '$activenoterow') end
+  end
+
+  local ppInfo
+  if currentFindPostProcessingInfo.flags ~= FIND_POSTPROCESSING_FLAG_NONE then
+    local ppFlags = currentFindPostProcessingInfo.flags
+    ppInfo = tableCopy(currentFindPostProcessingInfo)
+    ppInfo.flags = {}
+    if ppFlags & FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0 then table.insert(ppInfo.flags, '$firstevent') end
+    if ppFlags & FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0 then table.insert(ppInfo.flags, '$lastevent') end
   end
 
   local presetTab = {
     findScope = findScopeTable[currentFindScope].notation,
     findScopeFlags = fsFlags,
     findMacro = FindRowsToNotation(),
+    findPostProcessing = ppInfo,
     actionScope = actionScopeTable[currentActionScope].notation,
     actionMacro = ActionRowsToNotation(),
     actionScopeFlags = actionScopeFlagsTable[currentActionScopeFlags].notation,
@@ -4570,6 +4572,16 @@ function LoadPresetFromTable(presetTab)
   if fsFlags then
     for _, v in ipairs(fsFlags) do
       currentFindScopeFlags = currentFindScopeFlags | FindScopeFlagFromNotation(v)
+    end
+  end
+  if presetTab.findPostProcessing then
+    local ppFlags = presetTab.findPostProcessing.flags
+    currentFindPostProcessingInfo = tableCopy(presetTab.findPostProcessing)
+    currentFindPostProcessingInfo.flags = FIND_POSTPROCESSING_FLAG_NONE
+    if ppFlags then
+      for _, v in ipairs(ppFlags) do
+        currentFindPostProcessingInfo.flags = currentFindPostProcessingInfo.flags | FindPostProcessingFlagFromNotation(v)
+      end
     end
   end
   currentActionScope = ActionScopeFromNotation(presetTab.actionScope)
@@ -4776,6 +4788,12 @@ TransformerLib.setFindScopeFlags = function(flags)
   currentFindScopeFlags = flags
   Update()
 end
+TransformerLib.getFindPostProcessingInfo = function() return currentFindPostProcessingInfo end
+TransformerLib.setFindPostProcessingInfo = function(info)
+  currentFindPostProcessingInfo = info -- could add error checking, but nope
+  Update()
+end
+TransformerLib.clearFindPostProcessingInfo = ClearFindPostProcessingInfo
 TransformerLib.actionScopeTable = actionScopeTable
 TransformerLib.currentActionScope = function() return currentActionScope end
 TransformerLib.setCurrentActionScope = function(val)
@@ -4849,6 +4867,19 @@ TransformerLib.getFindScopeFlagLabel = function()
   return label
 end
 
+TransformerLib.getFindPostProcessingLabel = function()
+  local label = ''
+  local flags = currentFindPostProcessingInfo.flags
+  if flags & FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0 then
+    label = label .. (label ~= '' and ' + ' or '') .. 'First'
+  end
+  if flags & FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0 then
+    label = label .. (label ~= '' and ' + ' or '') .. 'Last'
+  end
+  if label == '' then label = 'None' end
+  return label
+end
+
 local function makeDefaultMetricGrid(row, data)
   local isMetric = data.isMetric
   local metricLastUnit = data.metricLastUnit
@@ -4917,6 +4948,10 @@ end
 TransformerLib.FIND_SCOPE_FLAG_NONE = FIND_SCOPE_FLAG_NONE
 TransformerLib.FIND_SCOPE_FLAG_SELECTED_ONLY = FIND_SCOPE_FLAG_SELECTED_ONLY
 TransformerLib.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW = FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW
+
+TransformerLib.FIND_POSTPROCESSING_FLAG_NONE = FIND_POSTPROCESSING_FLAG_NONE
+TransformerLib.FIND_POSTPROCESSING_FLAG_FIRSTEVENT = FIND_POSTPROCESSING_FLAG_FIRSTEVENT
+TransformerLib.FIND_POSTPROCESSING_FLAG_LASTEVENT = FIND_POSTPROCESSING_FLAG_LASTEVENT
 
 TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
 TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU

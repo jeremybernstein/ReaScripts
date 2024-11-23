@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.7
+-- @version 1.0.8-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
 --   - fix new MIDI event parsing with negative relative offset
+--   - some undo/redo cleanup
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.7'
+local versionStr = '1.0.8-beta.1'
 
 local r = reaper
 
@@ -416,6 +417,78 @@ local function removeActionRow()
   end
 end
 
+local function check14Bit(paramType)
+  local has14bit = false
+  local hasOther = false
+  if paramType == tx.PARAM_TYPE_INTEDITOR then
+    local hasTable, fresh = tx.getHasTable()
+    has14bit = hasTable[0xE0] and true or false
+    hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
+    if fresh then NewHasTable = true end
+  end
+  return has14bit, hasOther
+end
+
+local function overrideEditorType(row, target, condOp, paramTypes, idx)
+  local has14bit, hasOther = check14Bit(paramTypes[idx])
+  if condOp.bitfield or (condOp.split and condOp.split[idx].bitfield) then
+    tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_BITFIELD)
+  elseif not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
+    or (condOp.norange or (condOp.split and condOp.split[idx].norange))
+    or (condOp.nooverride or (condOp.split and condOp.split[idx].nooverride))
+  then
+    tx.setEditorTypeForRow(row, idx, nil)
+  elseif target.notation == '$velocity' or target.notation == '$relvel' then
+    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
+    elseif target.notation == '$velocity' and not condOp.fullrange then
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
+    else
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+    end
+  elseif has14bit then
+    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
+      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT_BIPOLAR or tx.EDITOR_TYPE_PITCHBEND_BIPOLAR)
+    else
+      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
+    end
+  elseif target.notation ~= '$position'
+    and target.notation ~= '$length'
+    and target.notation ~= '$channel'
+  then
+    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
+    else
+      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+    end
+  else
+    tx.setEditorTypeForRow(row, idx, nil)
+  end
+end
+
+local function overrideEditorTypeForAllRows()
+  local rows = tx.findRowTable()
+  for _, row in ipairs(rows) do
+    local _, _, _, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(row)
+    local paramTypes = tx.getParamTypesForRow(row, currentFindTarget, currentFindCondition)
+    overrideEditorType(row, currentFindTarget, currentFindCondition, paramTypes, 1)
+    overrideEditorType(row, currentFindTarget, currentFindCondition, paramTypes, 2)
+    if currentFindCondition.param3 then
+      overrideEditorType(row, currentFindTarget, currentFindCondition, paramTypes, 3)
+    end
+  end
+  rows = tx.actionRowTable()
+  for _, row in ipairs(rows) do
+    local _, _, _, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(row)
+    local paramTypes = tx.getParamTypesForRow(row, currentActionTarget, currentActionOperation)
+    overrideEditorType(row, currentActionTarget, currentActionOperation, paramTypes, 1)
+    overrideEditorType(row, currentActionTarget, currentActionOperation, paramTypes, 2)
+    if currentActionOperation.param3 then
+      overrideEditorType(row, currentActionTarget, currentActionOperation, paramTypes, 3)
+    end
+  end
+end
+
 local function handleExtState()
   local state
 
@@ -464,9 +537,9 @@ local function handleExtState()
               presetNameTextBuffer = lastState.presetName
               if dirExists(lastState.presetSubPath) then presetSubPath = lastState.presetSubPath end
               presetNotesBuffer = tx.loadPresetFromTable(lastState.state)
-              tx.createUndoStep()
+              overrideEditorTypeForAllRows()
+              doActionUpdate()
             end
-            -- doFindUpdate() ??
           end
         end
       end
@@ -534,55 +607,6 @@ local function prepWindowAndFont()
   r.ImGui_Attach(ctx, fontInfo.smaller)
 
   processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
-end
-
-local function check14Bit(paramType)
-  local has14bit = false
-  local hasOther = false
-  if paramType == tx.PARAM_TYPE_INTEDITOR then
-    local hasTable, fresh = tx.getHasTable()
-    has14bit = hasTable[0xE0] and true or false
-    hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
-    if fresh then NewHasTable = true end
-  end
-  return has14bit, hasOther
-end
-
-local function overrideEditorType(row, target, condOp, paramTypes, idx)
-  local has14bit, hasOther = check14Bit(paramTypes[idx])
-  if condOp.bitfield or (condOp.split and condOp.split[idx].bitfield) then
-    tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_BITFIELD)
-  elseif not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
-    or (condOp.norange or (condOp.split and condOp.split[idx].norange))
-    or (condOp.nooverride or (condOp.split and condOp.split[idx].nooverride))
-  then
-    tx.setEditorTypeForRow(row, idx, nil)
-  elseif target.notation == '$velocity' or target.notation == '$relvel' then
-    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
-    elseif target.notation == '$velocity' and not condOp.fullrange then
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
-    else
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
-    end
-  elseif has14bit then
-    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
-      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT_BIPOLAR or tx.EDITOR_TYPE_PITCHBEND_BIPOLAR)
-    else
-      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
-    end
-  elseif target.notation ~= '$position'
-    and target.notation ~= '$length'
-    and target.notation ~= '$channel'
-  then
-    if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
-    else
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
-    end
-  else
-    tx.setEditorTypeForRow(row, idx, nil)
-  end
 end
 
 local function moveFindRowUp()
@@ -657,6 +681,7 @@ local function setPresetNotesBuffer(buf)
 end
 
 local function endPresetLoad(pLabel, notes, ignoreSelectInArrange)
+  overrideEditorTypeForAllRows()
   presetNameTextBuffer = pLabel
   setPresetNotesBuffer(notes and notes or '')
   scriptIgnoreSelectionInArrangeView = ignoreSelectInArrange
@@ -823,6 +848,7 @@ local function windowFn()
         selectedFindRow = 0
         tx.setCurrentFindScope(3)
         tx.setFindScopeFlags(0)
+        tx.clearFindPostProcessingInfo()
         tx.clearActionRows()
         selectedActionRow = 0
         tx.setCurrentActionScope(1)
@@ -852,6 +878,8 @@ local function windowFn()
       local undoState = tx.popUndo()
       if undoState then
         presetNotesBuffer = tx.loadPresetFromTable(undoState)
+        overrideEditorTypeForAllRows()
+        doActionUpdate()
       end
     end
     if not hasUndo then
@@ -867,6 +895,8 @@ local function windowFn()
       local redoState = tx.popRedo()
       if redoState then
         presetNotesBuffer = tx.loadPresetFromTable(redoState)
+        overrideEditorTypeForAllRows()
+        doActionUpdate()
       end
     end
     if not hasRedo then
@@ -2643,9 +2673,85 @@ local function windowFn()
     r.ImGui_EndPopup(ctx)
   end
 
+  r.ImGui_SameLine(ctx)
+
+  saveX, saveY = r.ImGui_GetCursorPos(ctx)
+
   generateLabelOnLine('Scope Mods', true)
 
   if not isActiveEditorScope then r.ImGui_EndDisabled(ctx) end
+
+  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+
+  r.ImGui_Button(ctx, tx.getFindPostProcessingLabel(), DEFAULT_ITEM_WIDTH * 1.7)
+  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+    r.ImGui_OpenPopup(ctx, 'findPostPocessingMenu')
+  end
+
+  if r.ImGui_BeginPopup(ctx, 'findPostPocessingMenu', r.ImGui_WindowFlags_NoMove()) then
+    local deactivated
+    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      r.ImGui_CloseCurrentPopup(ctx)
+      handledEscape = true
+    end
+    local ppInfo = tx.getFindPostProcessingInfo()
+    local ppFlags = ppInfo.flags
+    local rv, sel, buf
+
+    rv, sel = r.ImGui_Checkbox(ctx, 'Retain first', ppFlags & tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0)
+    if rv then
+      ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT)
+    end
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##frontcount', ppInfo.front.count,
+      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if kbdEntryIsCompleted(rv) then
+      ppInfo.front.count = tonumber(buf)
+      if not ppInfo.front.count or ppInfo.front.count < 1 then ppInfo.front.count = 0 end
+    end
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    rv, buf = r.ImGui_InputText(ctx, 'from front##frontoffset', ppInfo.front.offset,
+      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if kbdEntryIsCompleted(rv) then
+      ppInfo.front.offset = tonumber(buf)
+      if not ppInfo.front.offset then ppInfo.front.offset = 0 end
+    end
+
+    rv, sel = r.ImGui_Checkbox(ctx, 'Retain last', ppFlags & tx.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0)
+    if rv then
+      ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_LASTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_LASTEVENT)
+    end
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##backcount', ppInfo.back.count,
+      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if kbdEntryIsCompleted(rv) then
+      ppInfo.back.count = tonumber(buf)
+      if not ppInfo.back.count or ppInfo.back.count < 1 then ppInfo.back.count = 1 end
+    end
+    r.ImGui_SameLine(ctx)
+    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    rv, buf = r.ImGui_InputText(ctx, 'from end##backoffset', ppInfo.back.offset,
+      r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if kbdEntryIsCompleted(rv) then
+      ppInfo.back.offset = tonumber(buf)
+      if not ppInfo.back.offset then ppInfo.back.offset = 0 end
+    end
+
+    ppInfo.flags = ppFlags
+
+    tx.setFindPostProcessingInfo(ppInfo)
+
+    r.ImGui_EndPopup(ctx)
+  end
+
+  generateLabelOnLine('Post-Processing', true)
 
   r.ImGui_AlignTextToFramePadding(ctx)
   r.ImGui_Text(ctx, findParserError)

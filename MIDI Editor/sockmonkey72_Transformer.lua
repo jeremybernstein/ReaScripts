@@ -1,12 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.8-beta.2
+-- @version 1.0.8-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add Find post-processing (in beta.1) to retain first/last events from set of found events, discarding others
---   - add Position Operations to move to :atitemstart and :atitemend
---   - add Length Operation to extend to :itemend
+--   - improve Post-Processing pop-up behavior
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -21,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.8-beta.2'
+local versionStr = '1.0.8-beta.3'
 
 local r = reaper
 
@@ -2748,6 +2746,12 @@ local function windowFn()
     ppInfo.flags = ppFlags
 
     tx.setFindPostProcessingInfo(ppInfo)
+
+    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if completionKeyPress() then
+        r.ImGui_CloseCurrentPopup(ctx)
+      end
+    end
 
     r.ImGui_EndPopup(ctx)
   end

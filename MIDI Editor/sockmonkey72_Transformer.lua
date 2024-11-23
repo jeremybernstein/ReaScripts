@@ -1,11 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0.8-beta.1
+-- @version 1.0.8-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix new MIDI event parsing with negative relative offset
---   - some undo/redo cleanup
+--   - add Find post-processing (in beta.1) to retain first/last events from set of found events, discarding others
+--   - add Position Operations to move to :atitemstart and :atitemend
+--   - add Length Operation to extend to :itemend
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.8-beta.1'
+local versionStr = '1.0.8-beta.2'
 
 local r = reaper
 

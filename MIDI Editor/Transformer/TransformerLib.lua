@@ -647,9 +647,10 @@ local actionPositionOperationEntries = {
   positionMod(actionOperationFixed),
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
-  -- { notation = ':endtocursor', label = 'Move Note-Off to Cursor', text = '= MoveNoteOffToCursor(event, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1}, _context)', terms = 1, menu = true },
   { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 3, split = {{}, { menu = true }, {}}, param3 = te.positionScaleOffsetParam3Tab },
+  { notation = ':toitemstart', label = 'Move to Item Start', text = 'MoveToItemPos(event, {tgt}, 0, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
+  { notation = ':toitemend', label = 'Move to Item End', text = 'MoveToItemPos(event, {tgt}, 1, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
 }
 
 local actionPositionMultParam2Menu = {
@@ -669,6 +670,7 @@ local actionLengthOperationEntries = {
   lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
   { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, _context, true))', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
+  { notation = ':toitemend', label = 'Extend to Item End', text = 'MoveToItemPos(event, {tgt}, 2, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
 }
 
 local function channelMod(op)
@@ -1694,6 +1696,26 @@ function MoveLengthToCursor(event)
 
   event.projlen = cursorPos - event.projtime
   return event.projlen
+end
+
+function MoveToItemPos(event, property, way, offset, context)
+  local take = context.take
+  if not take then return event[property] end
+
+  if GetEventType(event) ~= NOTE_TYPE and way == 2 then return event[property] end
+  local item = r.GetMediaItemTake_Item(take)
+  if item then
+    if way == 0 then
+      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
+      local offsetTime = offset and LengthFormatToSeconds(offset, targetPos, context) or 0
+      event[property] = targetPos + offsetTime
+    elseif way == 1 or way == 2 then
+      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset() + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+      local offsetTime = offset and LengthFormatToSeconds(offset, targetPos, context) or 0
+      event[property] = way == 1 and (targetPos + offsetTime) or ((targetPos - event.projtime) + offsetTime)
+    end
+  end
+  return event[property]
 end
 
 -----------------------------------------------------------------------------
@@ -2788,6 +2810,7 @@ context.SetMusicalLength = SetMusicalLength
 context.QuantizeMusicalPosition = QuantizeMusicalPosition
 context.QuantizeMusicalLength = QuantizeMusicalLength
 context.QuantizeMusicalEndPos = QuantizeMusicalEndPos
+context.MoveToItemPos = MoveToItemPos
 
 context.OP_ADD = OP_ADD
 context.OP_SUB = OP_SUB

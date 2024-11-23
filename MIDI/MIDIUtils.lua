@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.1.28
+-- @version 0.1.29
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - add MIDI_NoteNameToNoteNumber utility
+--   - fix correct extents for the case that the event list is unsorted
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -861,7 +861,7 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     if item then
       -- find the first and last _touched_ events
       for _, event in ipairs(MIDIEvents) do
-        if event.ppqpos > itemStartPPQ then break end
+        -- if event.ppqpos > itemStartPPQ then break end -- this list is unsorted, can't break early
         if not event.delete and event.recalcMIDI then
           if event.ppqpos < itemStartPPQ then
             firstEventPPQ = event.ppqpos
@@ -871,7 +871,7 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
       end
       for i = #MIDIEvents, 1, -1 do
         local event = MIDIEvents[i]
-        if event.ppqpos < itemEndPPQ then break end
+        -- if event.ppqpos < itemEndPPQ then break end -- this list is unsorted, can't break early
         if not event.delete and event.recalcMIDI then
           if event.ppqpos > itemEndPPQ then
             lastEventPPQ = event.ppqpos

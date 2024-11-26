@@ -1,11 +1,14 @@
 -- @description MIDI Transformer
--- @version 1.0.8-beta.4
+-- @version 1.0.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix post-processing Last Event behavior
---   - improve post-processing pop-up behavior (too much updating)
+--   - add new post-processing stage to Selection Criteria, currently supports first/last event retention
+--   - some undo/redo cleanup
+--   - add Position Operations to move to :atitemstart and :atitemend
+--   - add Length Operation to extend to :itemend
+--   - improve take enumeration
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +23,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.8-beta.4'
+local versionStr = '1.0.8'
 
 local r = reaper
 

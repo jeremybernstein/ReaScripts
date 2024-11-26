@@ -169,12 +169,6 @@ function FindPostProcessingFlagFromNotation(notation)
   return FIND_POSTPROCESSING_FLAG_NONE -- default
 end
 
-local function isREAPER7()
-  local v = r.GetAppVersion()
-  if v and v:sub(1, 1) == '7' then return true end
-  return false
-end
-
 local actionScopeTable = {
   { notation = '$select', label = 'Select', selectonly = true },
   { notation = '$selectadd', label = 'Add To Selection', selectonly = true },
@@ -183,11 +177,11 @@ local actionScopeTable = {
   { notation = '$transform', label = 'Transform' },
   { notation = '$replace', label = 'Transform & Replace' },
   { notation = '$copy', label = 'Transform to Track' },
-  { notation = '$copylane', label = 'Transform to Lane', disable = not isREAPER7() },
+  { notation = '$copylane', label = 'Transform to Lane', disable = not te.isREAPER7() },
   { notation = '$insert', label = 'Insert' },
   { notation = '$insertexclusive', label = 'Insert Exclusive' },
   { notation = '$extracttrack', label = 'Extract to Track' },
-  { notation = '$extractlane', label = 'Extract to Lane', disable = not isREAPER7() },
+  { notation = '$extractlane', label = 'Extract to Lane', disable = not te.isREAPER7() },
   { notation = '$delete', label = 'Delete' },
 }
 
@@ -3548,6 +3542,19 @@ end
 
 local mediaItemCount
 local mediaItemIndex
+local enumTakesMode
+
+function GetEnumTakesMode()
+  if not enumTakesMode then
+    enumTakesMode = 0
+    local rv, mevars = r.get_config_var_string('midieditor')
+    if mevars then
+      local mevarsVal = tonumber(mevars)
+      enumTakesMode = mevarsVal & 1 ~= 0 and 0 or 1 -- project mode, set to 0 (false)
+    end
+  end
+  return enumTakesMode
+end
 
 function GetNextTake()
   local take = nil
@@ -3558,14 +3565,14 @@ function GetNextTake()
       if not mediaItemCount then
         mediaItemCount = 0
         while me do
-          local t = r.MIDIEditor_EnumTakes(me, mediaItemCount, false)
+          local t = r.MIDIEditor_EnumTakes(me, mediaItemCount, GetEnumTakesMode())
           if not t then break end
           mediaItemCount = mediaItemCount + 1 -- we probably don't really need this iteration, but whatever
         end
         mediaItemIndex = 0
       end
       if mediaItemIndex < mediaItemCount then
-        take = r.MIDIEditor_EnumTakes(me, mediaItemIndex, false)
+        take = r.MIDIEditor_EnumTakes(me, mediaItemIndex, GetEnumTakesMode())
         mediaItemIndex = mediaItemIndex + 1
       end
     end
@@ -4132,6 +4139,8 @@ function NewTakeInNewLane(take)
 end
 
 function GrabAllTakes()
+  enumTakesMode = nil -- refresh
+
   local take = GetNextTake()
   if not take then return {} end
 
@@ -4276,7 +4285,7 @@ function ProcessAction(execute, fromScript)
         if selCount > 0 then
           local ec = 0
           while true do
-            local etake = r.MIDIEditor_EnumTakes(me, ec, false)
+            local etake = r.MIDIEditor_EnumTakes(me, ec, GetEnumTakesMode())
             if not etake then break end
             table.insert(meTakes, etake)
             ec = ec + 1
@@ -4440,7 +4449,7 @@ function ProcessAction(execute, fromScript)
           end
         end
       elseif notation == '$copylane' then
-        if isREAPER7() then
+        if te.isREAPER7() then
           local found, contextTab = RunFind(findFn, defParams)
           if canProcess(found) then
             local newtake = NewTakeInNewLane(take)
@@ -4476,7 +4485,7 @@ function ProcessAction(execute, fromScript)
           DeleteEventsInTake(take, found)
         end
       elseif notation == '$extractlane' then
-        if isREAPER7() then
+        if te.isREAPER7() then
           local found, contextTab = RunFind(findFn, defParams)
           if canProcess(found) then
             local newtake = NewTakeInNewLane(take)

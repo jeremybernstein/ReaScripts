@@ -89,6 +89,12 @@ end
 -----------------------------------------------------------------------------
 ---------------------------------- UTILS ------------------------------------
 
+local function isREAPER7()
+  local v = reaper.GetAppVersion()
+  if v and v:sub(1, 1) == '7' then return true end
+  return false
+end
+
 local function tableCopy(obj, seen)
   if type(obj) ~= 'table' then return obj end
   if seen and seen[obj] then return seen[obj] end
@@ -428,6 +434,7 @@ Extra.makeParam3PositionScaleOffset = makeParam3PositionScaleOffset
 Extra.lineParam3Tab = lineParam3Tab
 Extra.makeParam3Line = makeParam3Line
 Extra.param3LineEntries = param3LineEntries
+Extra.isREAPER7 = isREAPER7
 
 -- put these things in the global table so we can call them from anywhere
 _G['class'] = class

@@ -1,14 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.8
+-- @version 1.0.9-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add new post-processing stage to Selection Criteria, currently supports first/last event retention
---   - some undo/redo cleanup
---   - add Position Operations to move to :atitemstart and :atitemend
---   - add Length Operation to extend to :itemend
---   - improve take enumeration
+--   - take enumeration now respects editability in all cases (users might need to adjust their Editing Behavior > MIDI Editor editability prefs to make this work as desired)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -23,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.8'
+local versionStr = '1.0.9-beta.1'
 
 local r = reaper
 

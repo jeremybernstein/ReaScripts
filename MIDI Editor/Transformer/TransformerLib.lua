@@ -3545,15 +3545,16 @@ local mediaItemIndex
 local enumTakesMode
 
 function GetEnumTakesMode()
-  if not enumTakesMode then
-    enumTakesMode = 0
-    local rv, mevars = r.get_config_var_string('midieditor')
-    if mevars then
-      local mevarsVal = tonumber(mevars)
-      enumTakesMode = mevarsVal & 1 ~= 0 and 0 or 1 -- project mode, set to 0 (false)
-    end
-  end
-  return enumTakesMode
+  return 1
+  -- if not enumTakesMode then
+  --   enumTakesMode = 0
+  --   local rv, mevars = r.get_config_var_string('midieditor')
+  --   if mevars then
+  --     local mevarsVal = tonumber(mevars)
+  --     enumTakesMode = mevarsVal & 1 ~= 0 and 0 or 1 -- project mode, set to 0 (false)
+  --   end
+  -- end
+  -- return enumTakesMode
 end
 
 function GetNextTake()

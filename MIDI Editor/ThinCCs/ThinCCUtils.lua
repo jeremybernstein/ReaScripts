@@ -13,6 +13,9 @@ local reduce = require 'RamerDouglasPeucker'
 local lastMIDIMessage = ''
 local MIDIEvents = {}
 
+local defaultReduction = 5
+local defaultPbscale = 10
+
 function GenerateEventListFromAllEvents(take, fun)
   local events = {}
   local stringPos = 1 -- Position inside MIDIString while parsing
@@ -64,7 +67,7 @@ function GenerateEventListFromFilteredEvents(take, fun)
     if fun(event) == true then
       for _, v in pairs(wants) do
         if ((v.status & 0xF0) == event.chanmsg)
-          and ((event.chanmsg == 0xB0 or event.chanmsg == 0xA0) and (v.which == event.msg2) or true)
+          and ((event.chanmsg == 0xB0 and v.which == event.msg2) or true)
         then
           AddPointToList(eventlist, event, pbSnap)
           break
@@ -73,6 +76,16 @@ function GenerateEventListFromFilteredEvents(take, fun)
     end
   end
   return eventlist
+end
+
+function GetReduction()
+  if not reduction then
+    if reaper.HasExtState('sockmonkey72_ThinCCs', 'level') then
+      reduction = tonumber(reaper.GetExtState('sockmonkey72_ThinCCs', 'level'))
+    end
+    if not reduction then reduction = defaultReduction end
+  end
+  return reduction
 end
 
 function AddPointToList(eventlist, event, pbSnap)
@@ -102,10 +115,11 @@ function AddPointToList(eventlist, event, pbSnap)
   end
 
   if curlist then
+    local value = is2byte and event.msg2 or event.msg3
     if #curlist > 0 and (isSnapped or curlist[#curlist].shape == 0) then -- previous was square, add a point
       curlist[#curlist + 1] = { ppqpos = event.ppqpos - 1, value = curlist[#curlist].value, idx = -1, selected = curlist[#curlist].selected, muted = curlist[#curlist].muted, shape = event.shape, src = event.src }
     end
-    curlist[#curlist + 1] = { ppqpos = event.ppqpos, value = is2byte and event.msg2 or event.msg3, idx = event.idx, selected = event.selected, muted = event.muted, shape = event.shape, src = event.src }
+    curlist[#curlist + 1] = { ppqpos = event.ppqpos, value = value, idx = event.idx, selected = event.selected, muted = event.muted, shape = event.shape, src = event.src }
     if isPB then
       curlist[#curlist].value = event.msg2 | (event.msg3 << 7)
     end
@@ -148,15 +162,8 @@ end
 function DoReduction(events, take)
   local newevents = {}
 
-  local defaultReduction = 10
-  local reduction
-  local defaultPbscale = 10
+  local reduction = GetReduction()
   local pbscale
-
-  if reaper.HasExtState('sockmonkey72_ThinCCs', 'level') then
-    reduction = tonumber(reaper.GetExtState('sockmonkey72_ThinCCs', 'level'))
-  end
-  if not reduction then reduction = defaultReduction end
 
   if reaper.HasExtState('sockmonkey72_ThinCCs', 'pbscale') then
     pbscale = tonumber(reaper.GetExtState('sockmonkey72_ThinCCs', 'pbscale'))
@@ -265,6 +272,7 @@ function GetVisibleCCs(take)
       local index, _, idx = string.find(str, 'VELLANE (%d+)', i + 1)
       if index == nil then break end
       i = index
+      -- reaper.ShowConsoleMsg('idx: '..idx..'\n')
       table.insert(lanes, tonumber(idx))
     end
 
@@ -285,6 +293,8 @@ function GetVisibleCCs(take)
       if v >= 0 and v <= 127 then
         status = 0xB0 -- CC
         which = v
+      elseif v == 168 then
+        status = 0xA0 -- poly aftertouch
       elseif v == 128 then status = 0xE0 -- pitch bend
       elseif v == 129 then status = 0xC0 -- program change
       elseif v == 130 then status = 0xD0 -- channel pressure

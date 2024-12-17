@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.9-beta.1
+-- @version 1.0.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
 --   - take enumeration now respects editability in all cases (users might need to adjust their Editing Behavior > MIDI Editor editability prefs to make this work as desired)
+--   - add a single value variant to the random operations (apply a single random value to all selected events)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.9-beta.1'
+local versionStr = '1.0.9'
 
 local r = reaper
 

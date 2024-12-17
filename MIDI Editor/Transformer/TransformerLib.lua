@@ -67,10 +67,10 @@ local SYXTEXT_TYPE = 2
 local OTHER_TYPE = 7
 
 local CC_CURVE_SQUARE = 0
-local CC_CURVE_LINEAR = 1
-local CC_CURVE_SLOW_START_END = 2
-local CC_CURVE_FAST_START = 3
-local CC_CURVE_FAST_END = 4
+-- local CC_CURVE_LINEAR = 1
+-- local CC_CURVE_SLOW_START_END = 2
+-- local CC_CURVE_FAST_START = 3
+-- local CC_CURVE_FAST_END = 4
 local CC_CURVE_BEZIER = 5
 
 local SELECT_TIME_SHEBANG = 0
@@ -601,8 +601,9 @@ local actionOperationMult = { notation = '*', label = 'Multiply', text = 'Operat
 local actionOperationDivide = { notation = '/', label = 'Divide By', text = 'OperateEvent1(event, {tgt}, OP_DIV, {param1})', terms = 1, floateditor = true, norange = true, literal = true, nixnote = true }
 local actionOperationRound = { notation = ':round', label = 'Round By', text = 'QuantizeTo(event, {tgt}, {param1})', terms = 1, inteditor = true, literal = true }
 local actionOperationClamp = { notation = ':clamp', label = 'Clamp Between', text = 'ClampValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
-local actionOperationRandom = { notation = ':random', label = 'Random Values Between', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
-local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Between', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true }
+local actionOperationRandom = { notation = ':random', label = 'Random Values Btw', text = 'RandomValue(event, {tgt}, {param1}, {param2})', terms = 2, inteditor = true }
+local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Btw', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true, nixnote = true }
+local actionOperationRelRandomSingle = { notation = ':relrandomsingle', label = 'Single Relative Random Value Btw', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}, {randomsingle}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true, nixnote = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1})', terms = 1 }
 local actionOperationLine = { notation = ':line', label = 'Ramp in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, {param3}, _context)', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, param3 = te.lineParam3Tab }
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Ramp in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, {param3}, _context))', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, fullrange = true, bipolar = true, param3 = te.lineParam3Tab }
@@ -639,7 +640,7 @@ local actionPositionOperationEntries = {
   lengthMod(actionOperationRound),
   { notation = ':roundmusical', label = 'Quantize to Musical Value', text = 'QuantizeMusicalPosition(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true, showswing = true }, { floateditor = true, default = 100, percent = true }} },
   positionMod(actionOperationFixed),
-  positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
+  positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom), lengthMod(actionOperationRelRandomSingle),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1}, _context)', terms = 1, menu = true },
   { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 3, split = {{}, { menu = true }, {}}, param3 = te.positionScaleOffsetParam3Tab },
@@ -661,7 +662,7 @@ local actionLengthOperationEntries = {
   { notation = ':roundendmusical', label = 'Quantize Note-Off to Musical Value', text = 'QuantizeMusicalEndPos(event, take, PPQ, {musicalparams})', terms = 2, split = {{ musical = true, showswing = true }, { floateditor = true, default = 100, percent = true }} },
   lengthMod(actionOperationFixed),
   { notation = ':quantmusical', label = 'Set to Musical Length', text = 'SetMusicalLength(event, take, PPQ, {musicalparams})', terms = 1, musical = true },
-  lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom),
+  lengthMod(actionOperationRandom), lengthMod(actionOperationRelRandom), lengthMod(actionOperationRelRandomSingle),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
   { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, _context, true))', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
   { notation = ':toitemend', label = 'Extend to Item End', text = 'MoveToItemPos(event, {tgt}, 2, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
@@ -677,7 +678,7 @@ end
 local actionChannelOperationEntries = {
   channelMod(actionOperationPlus), channelMod(actionOperationMinus),
   actionOperationFixed,
-  channelMod(actionOperationRandom), channelMod(actionOperationRelRandom),
+  channelMod(actionOperationRandom), channelMod(actionOperationRelRandom), channelMod(actionOperationRelRandomSingle),
   channelMod(actionOperationLine), channelMod(actionOperationRelLine)
 }
 
@@ -728,14 +729,14 @@ local actionLineParam2Entries = te.param3LineEntries
 
 local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
+  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   { notation = ':getvalue2', label = 'Use Value 2', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetMainValue(event))', terms = 0 }, -- note that this is different for AT and PB
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom,
+  actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   { notation = ':getvalue1', label = 'Use Value 1', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetSubtypeValue(event))', terms = 0 }, -- ?? note that this is different for AT and PB
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
@@ -760,7 +761,7 @@ local newMIDIEventPositionEntries = {
 
 local actionGenericOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
-  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom,
+  actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
@@ -1567,19 +1568,16 @@ end
 function CreateNewMIDIEvent()
 end
 
-function RandomValue(event, property, min, max)
+function RandomValue(event, property, min, max, single)
   local oldval = GetValue(event, property)
   if event.firstlastevent then return oldval end
 
   local newval = oldval
 
-  if math.type(min) == 'integer' and math.type(max) == 'integer' then
-    newval = math.random(min, max)
-    return SetValue(event, property, newval)
-  end
-  local rnd = math.random()
-  newval = (rnd * (max - min)) + min
+  local rnd = single and single or math.random()
 
+  newval = (rnd * (max - min)) + min
+  if math.type(min) == 'integer' and math.type(max) == 'integer' then newval = math.floor(newval) end
   return SetValue(event, property, newval)
 end
 
@@ -4217,6 +4215,9 @@ function ProcessActionForTake(take)
     actionTerm = string.gsub(actionTerm, '{tgt}', targetTerm)
     actionTerm = string.gsub(actionTerm, '{param1}', tostring(paramTerms[1]))
     actionTerm = string.gsub(actionTerm, '{param2}', tostring(paramTerms[2]))
+    if curOperation.notation == ':relrandomsingle' then
+      actionTerm = string.gsub(actionTerm, '{randomsingle}', tostring(math.random()))
+    end
     if row.params[3] and isValidString(row.params[3].textEditorStr) then
       actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation, paramTerms[3]) or row.params[3].textEditorStr)
     end

@@ -415,6 +415,7 @@ local typeEntries = {
 
 local findTypeParam1Entries = tableCopy(typeEntries)
 table.insert(findTypeParam1Entries, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
+table.insert(findTypeParam1Entries, { notation = '$txt', label = 'Text', text = '0x100' }) -- special case; these need a new chanmsg
 
 local typeEntriesForEventSelector = tableCopy(typeEntries)
 table.insert(typeEntriesForEventSelector, 1, { notation = '$any', label = 'Any', text = '0x00' })
@@ -1202,7 +1203,7 @@ end
 
 function ChanMsgToType(chanmsg)
   if chanmsg == 0x90 then return NOTE_TYPE
-  elseif chanmsg == 0xF0 then return SYXTEXT_TYPE
+  elseif chanmsg == 0xF0 or chanmsg == 0x100 then return SYXTEXT_TYPE
   elseif chanmsg >= 0xA0 and chanmsg <= 0xEF then return CC_TYPE
   else return OTHER_TYPE
   end
@@ -2970,7 +2971,7 @@ function UpdateEventCount(event, counts, onlyNoteRow)
   -- also get counts for specific notes so that we can do rows as an option
   local eventIdx = EventToIdx(event)
   if not counts[eventIdx] then counts[eventIdx] = {} end
-  local subIdx = event.msg2
+  local subIdx = event.msg2 and event.msg2 or 0 -- sysex/text
   if event.chanmsg >= 0xC0 then subIdx = 0 end
   if not counts[eventIdx][subIdx] then counts[eventIdx][subIdx] = 0 end
   local cname = GetEventType(event) == NOTE_TYPE and 'ncount' or 'count'
@@ -3687,6 +3688,10 @@ function InitializeTake(take)
     local e = { type = SYXTEXT_TYPE, idx = syxidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.textmsg = mu.MIDI_GetTextSysexEvt(take, syxidx)
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
+    if e.chanmsg ~- 0xF0 then
+      e.msg2 = e.chanmsg
+      e.chanmsg = 0x100
+    end
     CalcMIDITime(take, e)
     table.insert(allEvents, e)
     if e.selected then table.insert(selectedEvents, e) end
@@ -3901,7 +3906,7 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
         mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
       end
     elseif GetEventType(event) == SYXTEXT_TYPE then
-      mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
+      mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
     end
   end
   HandleCreateNewMIDIEvent(take, contextTab)
@@ -4066,7 +4071,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
       end
     elseif eventType == SYXTEXT_TYPE then
       if not event.orig_type or event.orig_type == SYXTEXT_TYPE then
-        mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.textmsg)
+        mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
       else
         if event.orig_type == NOTE_TYPE then
           mu.MIDI_DeleteNote(take, event.idx)
@@ -4825,30 +4830,25 @@ TransformerLib.findScopeTable = findScopeTable
 TransformerLib.currentFindScope = function() return currentFindScope end
 TransformerLib.setCurrentFindScope = function(val)
   currentFindScope = val < 1 and 1 or val > #findScopeTable and #findScopeTable or val
-  Update()
 end
 TransformerLib.getFindScopeFlags = function() return currentFindScopeFlags end
 TransformerLib.setFindScopeFlags = function(flags)
   currentFindScopeFlags = flags
-  Update()
 end
 TransformerLib.getFindPostProcessingInfo = function() return currentFindPostProcessingInfo end
 TransformerLib.setFindPostProcessingInfo = function(info)
   currentFindPostProcessingInfo = info -- could add error checking, but nope
-  Update()
 end
 TransformerLib.clearFindPostProcessingInfo = ClearFindPostProcessingInfo
 TransformerLib.actionScopeTable = actionScopeTable
 TransformerLib.currentActionScope = function() return currentActionScope end
 TransformerLib.setCurrentActionScope = function(val)
   currentActionScope = val < 1 and 1 or val > #actionScopeTable and #actionScopeTable or val
-  Update()
 end
 TransformerLib.actionScopeFlagsTable = actionScopeFlagsTable
 TransformerLib.currentActionScopeFlags = function() return currentActionScopeFlags end
 TransformerLib.setCurrentActionScopeFlags = function(val)
   currentActionScopeFlags = val < 1 and 1 or val > #actionScopeFlagsTable and #actionScopeFlagsTable or val
-  Update()
 end
 
 TransformerLib.ParamInfo = ParamInfo

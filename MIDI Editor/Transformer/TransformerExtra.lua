@@ -318,19 +318,23 @@ local function param3ParseLine(row, param1, param2, param3)
   if isValidString(param3) then
     local fs, fe, type, mult = string.find(param3, '(.*)|(.*)')
     param2 = type and type or '$lin'
-    row.params[3].modrange, row.params[3].mod = param3Line2Range(param2, tonumber(mult) or 2.)
-    param3 = p2tmp
+  else
+    param2 = '$lin'
   end
+  row.params[3].modrange, row.params[3].mod = param3Line2Range(param2, tonumber(mult) or 2.)
+  param3 = p2tmp
+
   if isValidString(param2) then
     param2 = HandleMacroParam(row, target, condOp, param2Tab, param2, 2)
   else
     param2 = DefaultValueIfAny(row, condOp, 2)
   end
   param3 = HandleMacroParam(row, target, condOp, {}, param3, 3)
-
   row.params[1].textEditorStr = param1
   row.params[2].textEditorStr = param2
-  row.params[3].textEditorStr = param3
+  if isValidString(param3) then
+    row.params[3].textEditorStr = param3
+  end
 end
 
 local function param3LineMenuLabel(row, target, condOp)

@@ -1,11 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0.9
+-- @version 1.0.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - take enumeration now respects editability in all cases (users might need to adjust their Editing Behavior > MIDI Editor editability prefs to make this work as desired)
---   - add a single value variant to the random operations (apply a single random value to all selected events)
+--   - fix crash when reading in old linear ramp presets
+--   - add (and accommodate) 'text' type
+--   - fix state restoration of scope & mods
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +21,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.9'
+local versionStr = '1.0.10'
 
 local r = reaper
 
@@ -1205,6 +1206,7 @@ local function windowFn()
       if changed then
         ppInfo.flags = ppFlags
         tx.setFindPostProcessingInfo(ppInfo)
+        doUpdate()
       end
 
       if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
@@ -1493,6 +1495,7 @@ local function windowFn()
       or chanmsg == 0xD0 and 'Aftertouch'
       or chanmsg == 0xE0 and 'Pitch Bend'
       or chanmsg == 0xF0 and 'System Exclusive'
+      or chanmsg == 0x100 and 'Text'
       or 'Unknown'
   end
 
@@ -2719,6 +2722,7 @@ local function windowFn()
 
   createPopup(nil, 'findScopeMenu', tx.findScopeTable, tx.currentFindScope(), function(i)
     tx.setCurrentFindScope(i)
+    doUpdate()
   end)
 
   r.ImGui_SetCursorPos(ctx, saveX, saveY)
@@ -2743,6 +2747,7 @@ local function windowFn()
       local oldflags = tx.getFindScopeFlags()
       local newflags = sel and (oldflags | tx.FIND_SCOPE_FLAG_SELECTED_ONLY) or (oldflags & ~tx.FIND_SCOPE_FLAG_SELECTED_ONLY)
       tx.setFindScopeFlags(newflags)
+      doUpdate()
     end
 
     rv, sel = r.ImGui_Checkbox(ctx, 'Active Note Row (+ notes only)', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0)
@@ -2750,6 +2755,7 @@ local function windowFn()
       local oldflags = tx.getFindScopeFlags()
       local newflags = sel and (oldflags | tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW) or (oldflags & ~tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW)
       tx.setFindScopeFlags(newflags)
+      doUpdate()
     end
     r.ImGui_EndPopup(ctx)
   end
@@ -2808,6 +2814,7 @@ local function windowFn()
         for k, v in ipairs(tx.actionScopeTable) do
           if v.notation == '$transform' then
             tx.setCurrentActionScope(k)
+            doUpdate()
           end
         end
       end
@@ -3089,6 +3096,7 @@ local function windowFn()
 
   createPopup(nil, 'actionScopeMenu', tx.actionScopeTable, tx.currentActionScope(), function(i)
       tx.setCurrentActionScope(i)
+      doUpdate()
     end)
 
   r.ImGui_SameLine(ctx)
@@ -3115,6 +3123,7 @@ local function windowFn()
 
   createPopup(nil, 'actionScopeFlagsMenu', tx.actionScopeFlagsTable, tx.currentActionScopeFlags(), function(i)
       tx.setCurrentActionScopeFlags(i)
+      doUpdate()
     end)
 
   r.ImGui_PopStyleColor(ctx, 4)

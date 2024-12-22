@@ -1,12 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.10
+-- @version 1.0.11-alpha.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix crash when reading in old linear ramp presets
---   - add (and accommodate) 'text' type
---   - fix state restoration of scope & mods
+--   - some major refactoring to make it easier to do some more refactoring later
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -21,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.10'
+local versionStr = '1.0.11-alpha.1'
 
 local r = reaper
 
@@ -1621,7 +1619,7 @@ local function windowFn()
                 or (' [' .. row.nme.durText .. ']'))
           end
         elseif flags.isParam3 and row.params[3] and row.params[3].menuLabel then
-          label = row.params[3].menuLabel(row, target, condOp)
+          label = row.params[3].menuLabel(row, target, condOp, NewHasTable)
         elseif flags.isEventSelector then
           label = chanMsgToName(row.evsel.chanmsg) .. ' [' .. (row.evsel.channel == -1 and 'Any' or tostring(row.evsel.channel + 1)) .. ']'
           local useVal1 = row.evsel.chanmsg ~= 0x00 and row.evsel.chanmsg < 0xD0 and row.evsel.useval1

@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.1
+-- @version 1.0.11-alpha.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - some major refactoring to make it easier to do some more refactoring later
+--   - update ReaImGui to v0.9.3
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.1'
+local versionStr = '1.0.11-alpha.2'
 
 local r = reaper
 
@@ -31,6 +31,15 @@ local tx = require 'TransformerLib'
 local mu = tx.mu
 
 local canStart = true
+
+local isValidString = _G['isValidString']
+local spairs = _G['spairs']
+local serialize = _G['serialize']
+local deserialize = _G['deserialize']
+local base64encode = _G['base64encode']
+local base64decode = _G['base64decode']
+local filePathExists = _G['filePathExists']
+local dirExists = _G['dirExists']
 
 local function fileExists(name)
   local f = io.open(name,'r')
@@ -47,11 +56,18 @@ if canStart and not tx.startup() then
   canStart = false
 end
 
-local imGuiPath = r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua'
-if canStart and not fileExists(imGuiPath) then
-  r.ShowConsoleMsg('MIDI Transformer requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
+package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
+local ImGui = require 'imgui' '0.9.3'
+if canStart and not ImGui then
+  r.ShowConsoleMsg('MIDI Transformer requires \'ReaImGui\' 0.9.3+ (install from ReaPack)\n')
   canStart = false
 end
+
+-- local imGuiPath = r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua'
+-- if canStart and not fileExists(imGuiPath) then
+--   r.ShowConsoleMsg('MIDI Transformer requires \'ReaImGui\' 0.8+ (install from ReaPack)\n')
+--   canStart = false
+-- end
 
 -- if not r.APIExists('JS_Mouse_GetState') then
 --   r.ShowConsoleMsg('MIDI Transformer appreciates the presence of the \'js_ReaScriptAPI\' extension (install from ReaPack)\n')
@@ -66,20 +82,18 @@ end
 
 if not canStart then return end
 
-dofile(r.GetResourcePath()..'/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8.5')
-
 local scriptID = 'sockmonkey72_Transformer'
 
-local ctx = r.ImGui_CreateContext(scriptID)
-r.ImGui_SetConfigVar(ctx, r.ImGui_ConfigVar_DockingWithShift(), 1)
+local ctx = ImGui.CreateContext(scriptID)
+ImGui.SetConfigVar(ctx, ImGui.ConfigVar_DockingWithShift, 1)
 
 local IMAGEBUTTON_SIZE = 13
-local GearImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'gear_40031.png')
-if GearImage then r.ImGui_Attach(ctx, GearImage) end
-local UndoImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'left-arrow_9144323.png')
-if UndoImage then r.ImGui_Attach(ctx, UndoImage) end
-local RedoImage = r.ImGui_CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'right-arrow_9144322.png')
-if RedoImage then r.ImGui_Attach(ctx, RedoImage) end
+local GearImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'gear_40031.png')
+if GearImage then ImGui.Attach(ctx, GearImage) end
+local UndoImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'left-arrow_9144323.png')
+if UndoImage then ImGui.Attach(ctx, UndoImage) end
+local RedoImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'right-arrow_9144322.png')
+if RedoImage then ImGui.Attach(ctx, RedoImage) end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -108,10 +122,10 @@ local DEFAULT_ITEM_WIDTH = 70
 
 local winHeight
 
-local canonicalFont = r.ImGui_CreateFont(fontStyle, CANONICAL_FONTSIZE_LARGE)
-r.ImGui_Attach(ctx, canonicalFont)
+local canonicalFont = ImGui.CreateFont(fontStyle, CANONICAL_FONTSIZE_LARGE)
+ImGui.Attach(ctx, canonicalFont)
 
-local inputFlag = r.ImGui_InputTextFlags_AutoSelectAll()
+local inputFlag = ImGui.InputTextFlags_AutoSelectAll
 
 local PAREN_COLUMN_WIDTH = 20
 
@@ -224,17 +238,17 @@ local function doActionUpdate()
   doUpdate(true)
 end
 
-local bitFieldCallback = r.ImGui_CreateFunctionFromEEL([[
+local bitFieldCallback = ImGui.CreateFunctionFromEEL([[
   (EventChar < '0' || EventChar > '9') ? EventChar = 0
     : EventChar != '0' ? EventChar = '1'
     : EventChar = '0';
 ]])
 
-local numbersOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+local numbersOnlyCallback = ImGui.CreateFunctionFromEEL([[
   (EventChar < '0' || EventChar > '9') && EventChar != '-' ? EventChar = 0;
 ]])
 
-local numbersOrNoteNameCallback = r.ImGui_CreateFunctionFromEEL([[
+local numbersOrNoteNameCallback = ImGui.CreateFunctionFromEEL([[
   (EventChar < '0' || EventChar > '9')
   && EventChar != '-'
   && !(EventChar >= 'A' && EventChar <= 'G')
@@ -243,7 +257,7 @@ local numbersOrNoteNameCallback = r.ImGui_CreateFunctionFromEEL([[
   ? EventChar = 0;
 ]])
 
-local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
+local timeFormatOnlyCallback = ImGui.CreateFunctionFromEEL([[
   (EventChar < '0' || EventChar > '9')
     && EventChar != '-'
     && EventChar != ':'
@@ -252,24 +266,24 @@ local timeFormatOnlyCallback = r.ImGui_CreateFunctionFromEEL([[
   ? EventChar = 0;
 ]])
 
-r.ImGui_Attach(ctx, bitFieldCallback)
-r.ImGui_Attach(ctx, numbersOnlyCallback)
-r.ImGui_Attach(ctx, numbersOrNoteNameCallback)
-r.ImGui_Attach(ctx, timeFormatOnlyCallback)
+ImGui.Attach(ctx, bitFieldCallback)
+ImGui.Attach(ctx, numbersOnlyCallback)
+ImGui.Attach(ctx, numbersOrNoteNameCallback)
+ImGui.Attach(ctx, timeFormatOnlyCallback)
 
 local function positionModalWindow(yOff, yScale)
   local winWid = 4 * DEFAULT_ITEM_WIDTH * canvasScale
   local winHgt = currentFrameHeight * (5 * (yScale and yScale or 1))
-  r.ImGui_SetNextWindowSize(ctx, winWid, winHgt)
-  local winPosX, winPosY = r.ImGui_Viewport_GetPos(viewPort)
-  local winSizeX, winSizeY = r.ImGui_Viewport_GetSize(viewPort)
+  ImGui.SetNextWindowSize(ctx, winWid, winHgt)
+  local winPosX, winPosY = ImGui.Viewport_GetPos(viewPort)
+  local winSizeX, winSizeY = ImGui.Viewport_GetSize(viewPort)
   local okPosX = winPosX + (winSizeX / 2.) - (winWid / 2.)
   local okPosY = winPosY + (winSizeY / 2.) - (winHgt / 2.) + (yOff and yOff or 0)
   if okPosY + winHgt > windowInfo.top + windowInfo.height then
     okPosY = okPosY - ((windowInfo.top + windowInfo.height) - (okPosY + winHgt))
   end
-  r.ImGui_SetNextWindowPos(ctx, okPosX, okPosY)
-  --r.ImGui_SetNextWindowPos(ctx, r.ImGui_GetMousePos(ctx))
+  ImGui.SetNextWindowPos(ctx, okPosX, okPosY)
+  --ImGui.SetNextWindowPos(ctx, ImGui.GetMousePos(ctx))
 end
 
 local function addFindRow(idx, row)
@@ -597,13 +611,13 @@ local function prepWindowAndFont()
   }
 
   fontInfo = {
-    large = r.ImGui_CreateFont(fontStyle, FONTSIZE_LARGE), largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
-    small = r.ImGui_CreateFont(fontStyle, FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL,
-    smaller = r.ImGui_CreateFont(fontStyle, FONTSIZE_SMALLER), smallerSize = FONTSIZE_SMALLER, smallerDefaultSize = FONTSIZE_SMALLER
+    large = ImGui.CreateFont(fontStyle, FONTSIZE_LARGE), largeSize = FONTSIZE_LARGE, largeDefaultSize = FONTSIZE_LARGE,
+    small = ImGui.CreateFont(fontStyle, FONTSIZE_SMALL), smallSize = FONTSIZE_SMALL, smallDefaultSize = FONTSIZE_SMALL,
+    smaller = ImGui.CreateFont(fontStyle, FONTSIZE_SMALLER), smallerSize = FONTSIZE_SMALLER, smallerDefaultSize = FONTSIZE_SMALLER
   }
-  r.ImGui_Attach(ctx, fontInfo.large)
-  r.ImGui_Attach(ctx, fontInfo.small)
-  r.ImGui_Attach(ctx, fontInfo.smaller)
+  ImGui.Attach(ctx, fontInfo.large)
+  ImGui.Attach(ctx, fontInfo.small)
+  ImGui.Attach(ctx, fontInfo.smaller)
 
   processBaseFontUpdate(tonumber(r.GetExtState(scriptID, 'baseFont')))
 end
@@ -691,7 +705,7 @@ end
 -------------------------------- SHORTCUTS ----------------------------------
 
 local function checkShortcuts()
-  if not r.ImGui_IsWindowFocused(ctx, r.ImGui_FocusedFlags_RootAndChildWindows()) or r.ImGui_IsAnyItemActive(ctx) then return end
+  if not ImGui.IsWindowFocused(ctx, ImGui.FocusedFlags_RootAndChildWindows) or ImGui.IsAnyItemActive(ctx) then return end
 
   -- attempts to suss out the keyboard section focus fail for various reasons
   -- the amount of code required to check what the user clicks on when the script
@@ -700,27 +714,27 @@ local function checkShortcuts()
   -- I've asked for a new API to get the current section focus, if that shows up, can revisit this.
 
   -- fallback to old style, selective passthrough and that's it
-  local keyMods = r.ImGui_GetKeyMods(ctx)
-  local modKey = keyMods == r.ImGui_Mod_Shortcut()
-  local modShiftKey = keyMods == r.ImGui_Mod_Shortcut() + r.ImGui_Mod_Shift()
+  local keyMods = ImGui.GetKeyMods(ctx)
+  local modKey = keyMods == ImGui.Mod_Super
+  local modShiftKey = keyMods == ImGui.Mod_Super + ImGui.Mod_Shift
   local noMod = keyMods == 0
 
   local active = r.MIDIEditor_GetActive()
   active = active and active or 0
 
-  if modKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- undo
+  if modKey and ImGui.IsKeyPressed(ctx, ImGui.Key_Z) then -- undo
     if active ~= 0 then
       r.MIDIEditor_OnCommand(active, 40013)
     else
       r.Main_OnCommandEx(40029, -1, 0)
     end
-  elseif modShiftKey and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Z()) then -- redo
+  elseif modShiftKey and ImGui.IsKeyPressed(ctx, ImGui.Key_Z) then -- redo
     if active ~= 0 then
       r.MIDIEditor_OnCommand(active, 40014)
     else
       r.Main_OnCommandEx(40030, -1, 0)
     end
-  elseif noMod and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Space()) then -- play/pause
+  elseif noMod and ImGui.IsKeyPressed(ctx, ImGui.Key_Space) then -- play/pause
     if active ~= 0 then
       r.MIDIEditor_OnCommand(active, 40016)
     else
@@ -732,8 +746,8 @@ end
 local function handleKeys(handledEscape)
   -- note that the mod is only captured if the window is explicitly focused
   -- with a click. not sure how to fix this yet. TODO
-  -- local mods = r.ImGui_GetKeyMods(ctx)
-  -- local shiftdown = mods & r.ImGui_Mod_Shift() ~= 0
+  -- local mods = ImGui.GetKeyMods(ctx)
+  -- local shiftdown = mods & ImGui.Mod_Shift ~= 0
 
   -- current 'fix' is using the JS extension
   -- local mods = r.JS_Mouse_GetState(24) -- shift key
@@ -742,7 +756,7 @@ local function handleKeys(handledEscape)
   -- local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
 
   -- escape key kills our arrow key focus
-  if not handledEscape and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+  if not handledEscape and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
     if focusKeyboardHere then focusKeyboardHere = nil
     else
       isClosing = true
@@ -753,8 +767,8 @@ local function handleKeys(handledEscape)
   local handledKey = false
 
   if not inTextInput
-    and not r.ImGui_IsPopupOpen(ctx, '', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel())
-    and r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Backspace())
+    and not ImGui.IsPopupOpen(ctx, '', ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel)
+    and ImGui.IsKeyPressed(ctx, ImGui.Key_Backspace)
   then
     handledKey = true
     if lastSelectedRowType == 0 then removeFindRow()
@@ -762,29 +776,29 @@ local function handleKeys(handledEscape)
     end
   end
 
-  if not inTextInput and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Shortcut() then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_UpArrow()) then
+  if not inTextInput and ImGui.GetKeyMods(ctx) == ImGui.Mod_Super then
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) then
       handledKey = true
       if lastSelectedRowType == 0 then
         moveFindRowUp()
       elseif lastSelectedRowType == 1 then
         moveActionRowUp()
       end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_DownArrow()) then
+    elseif ImGui.IsKeyPressed(ctx, ImGui.Key_DownArrow) then
       handledKey = true
       if lastSelectedRowType == 0 then
         moveFindRowDown()
       elseif lastSelectedRowType == 1 then
         moveActionRowDown()
       end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_K()) then
+    elseif ImGui.IsKeyPressed(ctx, ImGui.Key_K) then
       handledKey = true
       if lastSelectedRowType == 0 then
         enableDisableFindRow()
       else
         enableDisableActionRow()
       end
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()) then
+    elseif ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
       handledKey = true
       tx.processAction(true)
     end
@@ -811,7 +825,7 @@ local function windowFn()
   --   end
   -- end
 
-  -- if r.ImGui_IsMouseHoveringRect(ctx, windowInfo.left, windowInfo.top, windowInfo.left + windowInfo.width, windowInfo.top + windowInfo.height) then
+  -- if ImGui.IsMouseHoveringRect(ctx, windowInfo.left, windowInfo.top, windowInfo.left + windowInfo.width, windowInfo.top + windowInfo.height) then
   --   reFocus()
   -- else
   --   if not focuswait then focuswait = 5 end
@@ -820,15 +834,15 @@ local function windowFn()
   ---------------------------------------------------------------------------
   --------------------------- BUNCH OF VARIABLES ----------------------------
 
-  local vx, vy = r.ImGui_GetWindowPos(ctx)
+  local vx, vy = ImGui.GetWindowPos(ctx)
   local handledEscape = false
 
-  local hoverCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderHovered())
+  local hoverCol = ImGui.GetStyleColor(ctx, ImGui.Col_HeaderHovered)
   local hoverAlphaCol = (hoverCol &~ 0xFF) | 0x3F
-  local activeCol = r.ImGui_GetStyleColor(ctx, r.ImGui_Col_HeaderActive())
+  local activeCol = ImGui.GetStyleColor(ctx, ImGui.Col_HeaderActive)
   local activeAlphaCol = (activeCol &~ 0xFF) | 0x7F
 
-  framePaddingX, framePaddingY = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
+  framePaddingX, framePaddingY = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
 
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE FUNS -----------------------------
@@ -838,10 +852,10 @@ local function windowFn()
   local gearPopupLeft
 
   local function MakeClearAll()
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 2) - (10 * canvasScale))
-    r.ImGui_Button(ctx, 'Clear All', DEFAULT_ITEM_WIDTH * 1.5)
-    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+    ImGui.SameLine(ctx)
+    ImGui.SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 2) - (10 * canvasScale))
+    ImGui.Button(ctx, 'Clear All', DEFAULT_ITEM_WIDTH * 1.5)
+    if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
         tx.suspendUndo()
         tx.clearFindRows()
         selectedFindRow = 0
@@ -860,20 +874,20 @@ local function windowFn()
   end
 
   local function MakeUndoRedo()
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 1) - (10 * canvasScale))
+    ImGui.SameLine(ctx)
+    ImGui.SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 1) - (10 * canvasScale))
 
     local ibSize = FONTSIZE_LARGE * canvasScale
 
-    gearPopupLeft = r.ImGui_GetCursorPosX(ctx)
+    gearPopupLeft = ImGui.GetCursorPosX(ctx)
 
     local hasUndo = tx.hasUndoSteps()
     local hasRedo = tx.hasRedoSteps()
 
     if not hasUndo then
-      r.ImGui_BeginDisabled(ctx)
+      ImGui.BeginDisabled(ctx)
     end
-    if r.ImGui_ImageButton(ctx, 'undo', UndoImage, ibSize, ibSize) then
+    if ImGui.ImageButton(ctx, 'undo', UndoImage, ibSize, ibSize) then
       local undoState = tx.popUndo()
       if undoState then
         presetNotesBuffer = tx.loadPresetFromTable(undoState)
@@ -882,15 +896,15 @@ local function windowFn()
       end
     end
     if not hasUndo then
-      r.ImGui_EndDisabled(ctx)
+      ImGui.EndDisabled(ctx)
     end
 
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
     if not hasRedo then
-      r.ImGui_BeginDisabled(ctx)
+      ImGui.BeginDisabled(ctx)
     end
-    if r.ImGui_ImageButton(ctx, 'redo', RedoImage, ibSize, ibSize) then
+    if ImGui.ImageButton(ctx, 'redo', RedoImage, ibSize, ibSize) then
       local redoState = tx.popRedo()
       if redoState then
         presetNotesBuffer = tx.loadPresetFromTable(redoState)
@@ -899,89 +913,89 @@ local function windowFn()
       end
     end
     if not hasRedo then
-      r.ImGui_EndDisabled(ctx)
+      ImGui.EndDisabled(ctx)
     end
   end
 
   local function MakeGearPopup()
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
     local ibSize = FONTSIZE_LARGE * canvasScale
 
-    local x = r.ImGui_GetContentRegionMax(ctx)
-    local frame_padding_x = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding())
-    r.ImGui_SetCursorPosX(ctx, x - ibSize - (frame_padding_x * 2))
+    local x = ImGui.GetContentRegionMax(ctx)
+    local frame_padding_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
+    ImGui.SetCursorPosX(ctx, x - ibSize - (frame_padding_x * 2))
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+    ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, 0x333355FF)
 
     local wantsPop = false
-    gearPopupLeft = r.ImGui_GetCursorPosX(ctx)
-    if r.ImGui_ImageButton(ctx, 'gear', GearImage, ibSize, ibSize) then
+    gearPopupLeft = ImGui.GetCursorPosX(ctx)
+    if ImGui.ImageButton(ctx, 'gear', GearImage, ibSize, ibSize) then
       wantsPop = true
     end
 
     if wantsPop then
-      r.ImGui_OpenPopup(ctx, 'gear menu')
+      ImGui.OpenPopup(ctx, 'gear menu')
     end
 
-    if r.ImGui_BeginPopup(ctx, 'gear menu', r.ImGui_WindowFlags_NoMove()) then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then -- and not IsOKDialogOpen() then
-        r.ImGui_CloseCurrentPopup(ctx)
+    if ImGui.BeginPopup(ctx, 'gear menu', ImGui.WindowFlags_NoMove) then
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then -- and not IsOKDialogOpen() then
+        ImGui.CloseCurrentPopup(ctx)
         handledEscape = true
       end
       local rv, selected, v
 
-      r.ImGui_BeginDisabled(ctx)
-      r.ImGui_Text(ctx, 'Version ' .. versionStr)
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_EndDisabled(ctx)
+      ImGui.BeginDisabled(ctx)
+      ImGui.Text(ctx, 'Version ' .. versionStr)
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.EndDisabled(ctx)
 
       -----------------------------------------------------------------------------
       ---------------------------------- BASE FONT --------------------------------
 
-      r.ImGui_Spacing(ctx)
+      ImGui.Spacing(ctx)
 
-      r.ImGui_SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
-      rv, v = r.ImGui_InputText(ctx, 'Base Font Size', FONTSIZE_LARGE, inputFlag
-                                                                     | r.ImGui_InputTextFlags_EnterReturnsTrue()
-                                                                     | r.ImGui_InputTextFlags_CharsDecimal())
+      ImGui.SetNextItemWidth(ctx, (DEFAULT_ITEM_WIDTH / 2) * canvasScale)
+      rv, v = ImGui.InputText(ctx, 'Base Font Size', tostring(FONTSIZE_LARGE), inputFlag
+                                                                     | ImGui.InputTextFlags_EnterReturnsTrue
+                                                                     | ImGui.InputTextFlags_CharsDecimal)
       if rv then
         v = processBaseFontUpdate(tonumber(v))
         r.SetExtState(scriptID, 'baseFont', tostring(v), true)
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
 
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
 
-      r.ImGui_Spacing(ctx)
-      rv, v = r.ImGui_Checkbox(ctx, 'Update item bounds on edit', updateItemBoundsOnEdit)
+      ImGui.Spacing(ctx)
+      rv, v = ImGui.Checkbox(ctx, 'Update item bounds on edit', updateItemBoundsOnEdit)
       if rv then
         updateItemBoundsOnEdit = v
         r.SetExtState(scriptID, 'updateItemBoundsOnEdit', v and '1' or '0', true)
         tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
-        -- r.ImGui_CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
+        -- ImGui.CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
       end
 
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
 
-      r.ImGui_Spacing(ctx)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
+      ImGui.Spacing(ctx)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
       local defaultText = isValidString(scriptPrefix) and scriptPrefix or scriptPrefix_Empty
-      rv, v = r.ImGui_InputText(ctx, 'Script Prefix', defaultText, inputFlag | r.ImGui_InputTextFlags_EnterReturnsTrue())
+      rv, v = ImGui.InputText(ctx, 'Script Prefix', defaultText, inputFlag | ImGui.InputTextFlags_EnterReturnsTrue)
       if rv then
         scriptPrefix = v == scriptPrefix_Empty and '' or v
         r.SetExtState(scriptID, 'scriptPrefix', v, true)
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
 
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
 
-      r.ImGui_Spacing(ctx)
-      rv, v = r.ImGui_Checkbox(ctx, 'Restore Previous State on Startup', restoreLastState)
+      ImGui.Spacing(ctx)
+      rv, v = ImGui.Checkbox(ctx, 'Restore Previous State on Startup', restoreLastState)
       if rv then
         restoreLastState = v
         r.SetExtState(scriptID, 'restoreLastState', v and '1' or '0', true)
@@ -990,54 +1004,54 @@ local function windowFn()
         else
           r.DeleteExtState(scriptID, 'lastState', true)
         end
-        -- r.ImGui_CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
+        -- ImGui.CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
       end
-      r.ImGui_EndPopup(ctx)
+      ImGui.EndPopup(ctx)
     end
-    r.ImGui_PopStyleColor(ctx)
+    ImGui.PopStyleColor(ctx)
   end
 
   local function updateCurrentRect()
     -- cache the positions to generate next box position
-    currentRect.left, currentRect.top = r.ImGui_GetItemRectMin(ctx)
-    currentRect.right, currentRect.bottom = r.ImGui_GetItemRectMax(ctx)
+    currentRect.left, currentRect.top = ImGui.GetItemRectMin(ctx)
+    currentRect.right, currentRect.bottom = ImGui.GetItemRectMax(ctx)
     currentRect.right = currentRect.right + scaled(20) -- add some spacing after the button
   end
 
   local function generateLabel(label)
     local ix, iy = currentRect.left, currentRect.top
-    r.ImGui_PushFont(ctx, fontInfo.small)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFEF)
-    local tw, th = r.ImGui_CalcTextSize(ctx, label)
-    local fp = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_FramePadding()) / 2
+    ImGui.PushFont(ctx, fontInfo.small)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFFFFEF)
+    local tw, th = ImGui.CalcTextSize(ctx, label)
+    local fp = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding) / 2
     local minx = ix + 2
-    local miny = iy - r.ImGui_GetTextLineHeight(ctx) - 3
-    r.ImGui_DrawList_AddRectFilled(r.ImGui_GetWindowDrawList(ctx), minx - fp, miny - fp, minx + tw + fp + 2, miny + th + fp + 1, 0xFFFFFF2F)
+    local miny = iy - ImGui.GetTextLineHeight(ctx) - 3
+    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx), minx - fp, miny - fp, minx + tw + fp + 2, miny + th + fp + 1, 0xFFFFFF2F)
     minx = minx - vx
     miny = miny - vy
-    r.ImGui_AlignTextToFramePadding(ctx)
-    r.ImGui_SetCursorPos(ctx, minx + 1, miny - scaled(1.5))
-    r.ImGui_Text(ctx, label)
-    r.ImGui_PopStyleColor(ctx)
-    r.ImGui_PopFont(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.SetCursorPos(ctx, minx + 1, miny - scaled(1.5))
+    ImGui.Text(ctx, label)
+    ImGui.PopStyleColor(ctx)
+    ImGui.PopFont(ctx)
   end
 
   local function generateLabelOnLine(label, advance)
-    local restoreY = r.ImGui_GetCursorPosY(ctx)
+    local restoreY = ImGui.GetCursorPosY(ctx)
     if not advance then
-      r.ImGui_SameLine(ctx)
+      ImGui.SameLine(ctx)
     end
     updateCurrentRect()
-    local oldX, oldY = r.ImGui_GetCursorPos(ctx)
+    local oldX, oldY = ImGui.GetCursorPos(ctx)
     generateLabel(label)
-    r.ImGui_SetCursorPosY(ctx, restoreY)
+    ImGui.SetCursorPosY(ctx, restoreY)
   end
 
   local function completionKeyPress()
-    return r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None()
-      and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Tab())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()))
+    return ImGui.GetKeyMods(ctx) == ImGui.Mod_None
+      and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+        or ImGui.IsKeyPressed(ctx, ImGui.Key_Tab)
+        or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
   end
 
   local function kbdEntryIsCompleted(retval)
@@ -1049,7 +1063,7 @@ local function windowFn()
         withKey = true
       end
     end
-    if not complete and not refocusField and r.ImGui_IsItemDeactivated(ctx) then
+    if not complete and not refocusField and ImGui.IsItemDeactivated(ctx) then
       complete = true
       if completionKeyPress() then
         withKey = true
@@ -1081,32 +1095,32 @@ local function windowFn()
     local rv = false
     local doOK = false
 
-    r.ImGui_PushFont(ctx, fontInfo.large)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+    ImGui.PushFont(ctx, fontInfo.large)
+    ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, 0x333355FF)
 
     if inNewFolderDialog then
-      positionModalWindow(r.ImGui_GetFrameHeight(ctx) / 2, 1.2)
-      r.ImGui_OpenPopup(ctx, title)
+      positionModalWindow(ImGui.GetFrameHeight(ctx) / 2, 1.2)
+      ImGui.OpenPopup(ctx, title)
     elseif folderNameTextBuffer:len() ~= 0
-      and (r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter())
-        or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter()))
+      and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+        or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
     then
       rv = true
       doOK = true
     end
 
-    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost() | r.ImGui_WindowFlags_NoMove()) then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        r.ImGui_CloseCurrentPopup(ctx)
+    if ImGui.BeginPopupModal(ctx, title, true, ImGui.WindowFlags_TopMost | ImGui.WindowFlags_NoMove) then
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+        ImGui.CloseCurrentPopup(ctx)
         handledEscape = true
         refocusInput = true
       end
-      if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Text(ctx, text)
-      r.ImGui_Spacing(ctx)
+      if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
+      ImGui.Spacing(ctx)
+      ImGui.Text(ctx, text)
+      ImGui.Spacing(ctx)
 
-      local retval, buf = r.ImGui_InputText(ctx, '##newfoldername', folderNameTextBuffer)
+      local retval, buf = ImGui.InputText(ctx, '##newfoldername', folderNameTextBuffer)
       folderNameTextBuffer = buf
       local complete, withKeys = kbdEntryIsCompleted(retval)
       if complete and withKeys then
@@ -1115,22 +1129,22 @@ local function windowFn()
         end
       end
 
-      r.ImGui_Spacing(ctx)
-      if r.ImGui_Button(ctx, 'Cancel') then
-        r.ImGui_CloseCurrentPopup(ctx)
+      ImGui.Spacing(ctx)
+      if ImGui.Button(ctx, 'Cancel') then
+        ImGui.CloseCurrentPopup(ctx)
       end
 
-      r.ImGui_SameLine(ctx)
-      if r.ImGui_Button(ctx, 'OK') or doOK then
+      ImGui.SameLine(ctx)
+      if ImGui.Button(ctx, 'OK') or doOK then
         rv = true
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
-      r.ImGui_SetItemDefaultFocus(ctx)
+      ImGui.SetItemDefaultFocus(ctx)
 
-      r.ImGui_EndPopup(ctx)
+      ImGui.EndPopup(ctx)
     end
-    r.ImGui_PopFont(ctx)
-    r.ImGui_PopStyleColor(ctx)
+    ImGui.PopFont(ctx)
+    ImGui.PopStyleColor(ctx)
 
     inNewFolderDialog = false
 
@@ -1138,10 +1152,10 @@ local function windowFn()
   end
 
   local function generateFindPostProcessingPopup()
-    if r.ImGui_BeginPopup(ctx, 'findPostPocessingMenu', r.ImGui_WindowFlags_NoMove()) then
+    if ImGui.BeginPopup(ctx, 'findPostPocessingMenu', ImGui.WindowFlags_NoMove) then
       local deactivated
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        r.ImGui_CloseCurrentPopup(ctx)
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+        ImGui.CloseCurrentPopup(ctx)
         handledEscape = true
       end
       local ppInfo = tx.getFindPostProcessingInfo()
@@ -1149,52 +1163,52 @@ local function windowFn()
       local rv, sel, buf
       local changed
 
-      rv, sel = r.ImGui_Checkbox(ctx, 'Retain first', ppFlags & tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0)
+      rv, sel = ImGui.Checkbox(ctx, 'Retain first', ppFlags & tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0)
       if rv then
         ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_FIRSTEVENT)
         changed = true
       end
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-      rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##frontcount', ppInfo.front.count,
-        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = ImGui.InputText(ctx, 'events beginning at offset##frontcount', tostring(ppInfo.front.count),
+        ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
+      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
       if kbdEntryIsCompleted(rv) then
         ppInfo.front.count = tonumber(buf)
         if not ppInfo.front.count or ppInfo.front.count < 1 then ppInfo.front.count = 0 end
         changed = true
       end
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-      rv, buf = r.ImGui_InputText(ctx, 'from front##frontoffset', ppInfo.front.offset,
-        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = ImGui.InputText(ctx, 'from front##frontoffset', tostring(ppInfo.front.offset),
+        ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
+      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
       if kbdEntryIsCompleted(rv) then
         ppInfo.front.offset = tonumber(buf)
         if not ppInfo.front.offset then ppInfo.front.offset = 0 end
         changed = true
       end
 
-      rv, sel = r.ImGui_Checkbox(ctx, 'Retain last', ppFlags & tx.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0)
+      rv, sel = ImGui.Checkbox(ctx, 'Retain last', ppFlags & tx.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0)
       if rv then
         ppFlags = sel and (ppFlags | tx.FIND_POSTPROCESSING_FLAG_LASTEVENT) or (ppFlags & ~tx.FIND_POSTPROCESSING_FLAG_LASTEVENT)
         changed = true
       end
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-      rv, buf = r.ImGui_InputText(ctx, 'events beginning at offset##backcount', ppInfo.back.count,
-        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = ImGui.InputText(ctx, 'events beginning at offset##backcount', tostring(ppInfo.back.count),
+        ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
+      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
       if kbdEntryIsCompleted(rv) then
         ppInfo.back.count = tonumber(buf)
         if not ppInfo.back.count or ppInfo.back.count < 1 then ppInfo.back.count = 1 end
         changed = true
       end
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-      rv, buf = r.ImGui_InputText(ctx, 'from end##backoffset', ppInfo.back.offset,
-        r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      rv, buf = ImGui.InputText(ctx, 'from end##backoffset', tostring(ppInfo.back.offset),
+        ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
+      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
       if kbdEntryIsCompleted(rv) then
         ppInfo.back.offset = tonumber(buf)
         if not ppInfo.back.offset then ppInfo.back.offset = 0 end
@@ -1207,13 +1221,13 @@ local function windowFn()
         doUpdate()
       end
 
-      if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+      if not ImGui.IsAnyItemActive(ctx) and not deactivated then
         if completionKeyPress() then
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
       end
 
-      r.ImGui_EndPopup(ctx)
+      ImGui.EndPopup(ctx)
     end
 
     generateLabelOnLine('Post-Processing', true)
@@ -1221,39 +1235,39 @@ local function windowFn()
 
   local function generatePresetMenu(source, path, lab, filter, onlyFolders)
     local mousePos = {}
-    mousePos.x, mousePos.y = r.ImGui_GetMousePos(ctx)
+    mousePos.x, mousePos.y = ImGui.GetMousePos(ctx)
     local windowRect = {}
-    windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
-    windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+    windowRect.left, windowRect.top = ImGui.GetWindowPos(ctx)
+    windowRect.right, windowRect.bottom = ImGui.GetWindowSize(ctx)
     windowRect.right = windowRect.right + windowRect.left
     windowRect.bottom = windowRect.bottom + windowRect.top
 
     for i = 1, #source do
       local selectText = source[i].label
       if PresetMatches(source[i], filter, onlyFolders) then
-        local saveX = r.ImGui_GetCursorPosX(ctx)
-        r.ImGui_BeginGroup(ctx)
+        local saveX = ImGui.GetCursorPosX(ctx)
+        ImGui.BeginGroup(ctx)
 
         local rv, selected
 
         if source[i].sub then
-          if r.ImGui_BeginMenu(ctx, selectText) then
+          if ImGui.BeginMenu(ctx, selectText) then
             generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter, onlyFolders)
-            r.ImGui_EndMenu(ctx)
+            ImGui.EndMenu(ctx)
           end
         else
-          rv, selected = r.ImGui_Selectable(ctx, selectText, false)
+          rv, selected = ImGui.Selectable(ctx, selectText, false)
         end
 
-        r.ImGui_SameLine(ctx)
-        r.ImGui_SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
+        ImGui.SameLine(ctx)
+        ImGui.SetCursorPosX(ctx, saveX) -- ugly, but the selectable needs info from the checkbox
 
-        local _, itemTop = r.ImGui_GetItemRectMin(ctx)
-        local _, itemBottom = r.ImGui_GetItemRectMax(ctx)
+        local _, itemTop = ImGui.GetItemRectMin(ctx)
+        local _, itemBottom = ImGui.GetItemRectMax(ctx)
         local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-        local srv = r.ImGui_Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, r.ImGui_SelectableFlags_AllowItemOverlap())
+        local srv = ImGui.Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, ImGui.SelectableFlags_AllowOverlap)
 
-        r.ImGui_EndGroup(ctx)
+        ImGui.EndGroup(ctx)
 
         if rv or srv then
           if selected or srv then
@@ -1264,25 +1278,25 @@ local function windowFn()
               endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
             end
           end
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
       end
     end
     if onlyFolders then
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xCCCCFFCC)
-      local rv, selected = r.ImGui_Selectable(ctx, 'Save presets here...', false)
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xCCCCFFCC)
+      local rv, selected = ImGui.Selectable(ctx, 'Save presets here...', false)
       if rv and selected then
         presetSubPath = path ~= presetPath and path or nil
         doFindUpdate()
       end
 
-      rv, selected = r.ImGui_Selectable(ctx, 'New folder here...', false)
+      rv, selected = ImGui.Selectable(ctx, 'New folder here...', false)
       if rv and selected then
         inNewFolderDialog = true
         newFolderParentPath = path
       end
 
-      r.ImGui_PopStyleColor(ctx)
+      ImGui.PopStyleColor(ctx)
     end
   end
 
@@ -1341,39 +1355,39 @@ local function windowFn()
   local dontCloseXPos
 
   local function createPopup(row, name, source, selEntry, fun, special, dontClose)
-    if r.ImGui_BeginPopup(ctx, name, r.ImGui_WindowFlags_NoMove()) then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        if r.ImGui_IsPopupOpen(ctx, name, r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-          r.ImGui_CloseCurrentPopup(ctx)
+    if ImGui.BeginPopup(ctx, name, ImGui.WindowFlags_NoMove) then
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+        if ImGui.IsPopupOpen(ctx, name, ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel) then
+          ImGui.CloseCurrentPopup(ctx)
           handledEscape = true
         end
       end
 
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+      ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+      ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
       local numStyleCol = 2
 
       local windowRect = {}
-      windowRect.left, windowRect.top = r.ImGui_GetWindowPos(ctx)
-      windowRect.right, windowRect.bottom = r.ImGui_GetWindowSize(ctx)
+      windowRect.left, windowRect.top = ImGui.GetWindowPos(ctx)
+      windowRect.right, windowRect.bottom = ImGui.GetWindowSize(ctx)
       windowRect.right = windowRect.right + windowRect.left
       windowRect.bottom = windowRect.bottom + windowRect.top
 
       local listed = false
       if dontClose then
         if type(dontClose) == 'string' then
-          r.ImGui_Text(ctx, dontClose)
-          r.ImGui_SameLine(ctx)
-          dontCloseXPos = r.ImGui_GetCursorPosX(ctx)
+          ImGui.Text(ctx, dontClose)
+          ImGui.SameLine(ctx)
+          dontCloseXPos = ImGui.GetCursorPosX(ctx)
         end
-        listed = r.ImGui_BeginListBox(ctx, '##wrapperBox', nil, currentFrameHeightEx * #source)
+        listed = ImGui.BeginListBox(ctx, '##wrapperBox', nil, currentFrameHeightEx * #source)
       end
 
       for i = 1, #source do
         local selectText = source[i].label
         local disabled = source[i].disable
 
-        if disabled then r.ImGui_BeginDisabled(ctx) end
+        if disabled then ImGui.BeginDisabled(ctx) end
 
         if source.targetTable then
           selectText = decorateTargetLabel(selectText)
@@ -1382,31 +1396,31 @@ local function windowFn()
         local selectable = selEntry == -1
         local rv
         if selectable then
-          rv = r.ImGui_Selectable(ctx, selectText, selEntry == i and true or false)
+          rv = ImGui.Selectable(ctx, selectText, selEntry == i and true or false)
         else
-          rv = r.ImGui_MenuItem(ctx, selectText, nil, selEntry == i)
+          rv = ImGui.MenuItem(ctx, selectText, nil, selEntry == i)
         end
 
-        if disabled then r.ImGui_EndDisabled(ctx) end
+        if disabled then ImGui.EndDisabled(ctx) end
 
-        r.ImGui_Spacing(ctx)
+        ImGui.Spacing(ctx)
 
         if rv then
           fun(i)
           if not dontClose or selEntry == i then
-            r.ImGui_CloseCurrentPopup(ctx)
+            ImGui.CloseCurrentPopup(ctx)
           end
         end
       end
 
       if listed then
-        r.ImGui_EndListBox(ctx)
+        ImGui.EndListBox(ctx)
       end
 
-      r.ImGui_PopStyleColor(ctx, numStyleCol)
+      ImGui.PopStyleColor(ctx, numStyleCol)
 
       if special then special(fun, row, source, selEntry) end
-      r.ImGui_EndPopup(ctx)
+      ImGui.EndPopup(ctx)
     end
   end
 
@@ -1414,21 +1428,21 @@ local function windowFn()
   ------------------------------- PRESET RECALL -----------------------------
 
   local function Spacing(half)
-    local posy = r.ImGui_GetCursorPosY(ctx)
-    r.ImGui_SetCursorPosY(ctx, posy + (currentFrameHeight / (half and 4 or 2)))
+    local posy = ImGui.GetCursorPosY(ctx)
+    ImGui.SetCursorPosY(ctx, posy + (currentFrameHeight / (half and 4 or 2)))
   end
 
   Spacing(true)
-  r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetTable = enumerateTransformerPresets(presetPath)
-    r.ImGui_OpenPopup(ctx, 'openPresetMenu') -- defined far below
+    ImGui.OpenPopup(ctx, 'openPresetMenu') -- defined far below
   end
 
-  r.ImGui_SameLine(ctx)
-  r.ImGui_TextColored(ctx, 0x00AAFFFF, presetLabel)
+  ImGui.SameLine(ctx)
+  ImGui.TextColored(ctx, 0x00AAFFFF, presetLabel)
 
   ---------------------------------------------------------------------------
   ----------------------------------- GEAR ----------------------------------
@@ -1439,35 +1453,35 @@ local function windowFn()
   ---------------------------------------------------------------------------
   --------------------------------- FIND ROWS -------------------------------
 
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x006655FF)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x008877FF)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x007766FF)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x006655FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0x006655FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0x008877FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0x007766FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x006655FF)
 
   Spacing()
-  r.ImGui_AlignTextToFramePadding(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
 
   local optDown = false
-  if r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_Alt() then
+  if ImGui.GetKeyMods(ctx) == ImGui.Mod_Alt then
     optDown = true
   end
 
-  r.ImGui_Button(ctx, 'Insert Criteria', DEFAULT_ITEM_WIDTH * 2)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  ImGui.Button(ctx, 'Insert Criteria', DEFAULT_ITEM_WIDTH * 2)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     addFindRow()
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
   local findButDisabled = (optDown and #tx.findRowTable() == 0) or (not optDown and selectedFindRow == 0)
   if findButDisabled then
-    r.ImGui_BeginDisabled(ctx)
+    ImGui.BeginDisabled(ctx)
   end
-  r.ImGui_Button(ctx, optDown and 'Clear All Criteria' or 'Remove Criteria', DEFAULT_ITEM_WIDTH * 2)
+  ImGui.Button(ctx, optDown and 'Clear All Criteria' or 'Remove Criteria', DEFAULT_ITEM_WIDTH * 2)
   if findButDisabled then
-    r.ImGui_EndDisabled(ctx)
+    ImGui.EndDisabled(ctx)
   end
 
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     if optDown then
       tx.clearFindRows()
       selectedFindRow = 0
@@ -1499,7 +1513,7 @@ local function windowFn()
 
   local function doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
     local isNote = tx.isANote(target, condOp)
-    local floatFlags = r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank()
+    local floatFlags = ImGui.InputTextFlags_CharsDecimal + ImGui.InputTextFlags_CharsNoBlank
 
     -- TODO: cleanup these attributes & combinations
     local range, bipolar = tx.getRowParamRange(row, target, condOp, paramType, editorType, index)
@@ -1512,10 +1526,10 @@ local function windowFn()
       row.params[index].textEditorStr = strVal
     end
 
-    if isNote then r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75) end
-    local retval, buf = r.ImGui_InputText(ctx, '##' .. 'param' .. index .. 'Edit',
+    if isNote then ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75) end
+    local retval, buf = ImGui.InputText(ctx, '##' .. 'param' .. index .. 'Edit',
       row.params[index].textEditorStr,
-      flags.isFloat and floatFlags or r.ImGui_InputTextFlags_CallbackCharFilter(),
+      flags.isFloat and floatFlags or ImGui.InputTextFlags_CallbackCharFilter,
       flags.isFloat and nil or isNote and numbersOrNoteNameCallback or flags.isBitField and bitFieldCallback or numbersOnlyCallback)
 
     if kbdEntryIsCompleted(retval) then
@@ -1529,7 +1543,7 @@ local function windowFn()
     elseif retval then inTextInput = true
     end
 
-    local deactivated = r.ImGui_IsItemDeactivated(ctx)
+    local deactivated = ImGui.IsItemDeactivated(ctx)
 
     -- note name support
     if isNote then
@@ -1539,9 +1553,9 @@ local function windowFn()
           row.params[index].noteName = mu.MIDI_NoteNumberToNoteName(noteNum)
         end
       else
-        r.ImGui_SameLine(ctx)
-        r.ImGui_AlignTextToFramePadding(ctx)
-        r.ImGui_TextColored(ctx, 0x7FFFFFCF, '[' .. row.params[index].noteName .. ']')
+        ImGui.SameLine(ctx)
+        ImGui.AlignTextToFramePadding(ctx)
+        ImGui.TextColored(ctx, 0x7FFFFFCF, '[' .. row.params[index].noteName .. ']')
       end
     else
       row.params[index].noteName = nil
@@ -1549,21 +1563,21 @@ local function windowFn()
 
     local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
     if rangelabel then
-      r.ImGui_SameLine(ctx)
-      r.ImGui_AlignTextToFramePadding(ctx)
-      r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. rangelabel .. ')')
+      ImGui.SameLine(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. rangelabel .. ')')
     elseif range then
-      r.ImGui_SameLine(ctx)
-      r.ImGui_AlignTextToFramePadding(ctx)
-      r.ImGui_PushFont(ctx, fontInfo.small)
+      ImGui.SameLine(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.PushFont(ctx, fontInfo.small)
       if editorType == tx.EDITOR_TYPE_PERCENT
         or condOp.percent or (condOp.split and condOp.split[index].percent) -- hack
       then
-        r.ImGui_TextColored(ctx, 0xFFFFFF7F, '%')
+        ImGui.TextColored(ctx, 0xFFFFFF7F, '%')
       elseif range and range[1] and range[2] then
-        r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. range[1] .. ' - ' .. range[2] .. ')')
+        ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. range[1] .. ' - ' .. range[2] .. ')')
       end
-      r.ImGui_PopFont(ctx)
+      ImGui.PopFont(ctx)
     end
 
     return deactivated
@@ -1636,10 +1650,10 @@ local function windowFn()
           elseif mgMods == tx.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
           end
         end
-        r.ImGui_Button(ctx, label)
-        if canOpen and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+        ImGui.Button(ctx, label)
+        if canOpen and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
           rv = true
-          r.ImGui_OpenPopup(ctx, 'param' .. index .. 'Menu')
+          ImGui.OpenPopup(ctx, 'param' .. index .. 'Menu')
         end
       elseif paramType == tx.PARAM_TYPE_INTEDITOR
         or flags.isFloat
@@ -1647,19 +1661,19 @@ local function windowFn()
         or editorType == tx.EDITOR_TYPE_PITCHBEND
         or editorType == tx.EDITOR_TYPE_PERCENT
       then
-        r.ImGui_BeginGroup(ctx)
+        ImGui.BeginGroup(ctx)
 
         doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
 
-        r.ImGui_EndGroup(ctx)
-        if r.ImGui_IsItemHovered(ctx) then
-          if r.ImGui_IsMouseClicked(ctx, 0) then
+        ImGui.EndGroup(ctx)
+        if ImGui.IsItemHovered(ctx) then
+          if ImGui.IsMouseClicked(ctx, 0) then
             rv = true
           end
         end
       elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
-        r.ImGui_BeginGroup(ctx)
-        local retval, buf = r.ImGui_InputText(ctx, '##' .. 'param' .. index .. 'Edit', row.params[index].timeFormatStr, r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+        ImGui.BeginGroup(ctx)
+        local retval, buf = ImGui.InputText(ctx, '##' .. 'param' .. index .. 'Edit', row.params[index].timeFormatStr, ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
         if kbdEntryIsCompleted(retval) then
           row.params[index].timeFormatStr = paramType == tx.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
           procFn()
@@ -1668,15 +1682,15 @@ local function windowFn()
         end
         local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
         if rangelabel then
-          r.ImGui_SameLine(ctx)
-          r.ImGui_AlignTextToFramePadding(ctx)
-          r.ImGui_PushFont(ctx, fontInfo.small)
-          r.ImGui_TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
-          r.ImGui_PopFont(ctx)
+          ImGui.SameLine(ctx)
+          ImGui.AlignTextToFramePadding(ctx)
+          ImGui.PushFont(ctx, fontInfo.small)
+          ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
+          ImGui.PopFont(ctx)
         end
-        r.ImGui_EndGroup(ctx)
-        if r.ImGui_IsItemHovered(ctx) then
-          if r.ImGui_IsMouseClicked(ctx, 0) then
+        ImGui.EndGroup(ctx)
+        if ImGui.IsItemHovered(ctx) then
+          if ImGui.IsMouseClicked(ctx, 0) then
             rv = true
           end
         end
@@ -1686,9 +1700,9 @@ local function windowFn()
   end
 
   if showConsoles then
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
-    local fcrv, fcbuf = r.ImGui_InputText(ctx, '##findConsole', findConsoleText)
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
+    local fcrv, fcbuf = ImGui.InputText(ctx, '##findConsole', findConsoleText)
     if kbdEntryIsCompleted(fcrv) then
       findConsoleText = fcbuf
       tx.processFindMacro(findConsoleText)
@@ -1700,9 +1714,9 @@ local function windowFn()
   end
 
   Spacing(true)
-  r.ImGui_Separator(ctx)
+  ImGui.Separator(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
+  ImGui.SetCursorPosY(ctx, ImGui.GetCursorPosY(ctx) + currentFrameHeight)
 
   ---------------------------------------------------------------------------
   ------------------------------ INTERFACE GEN ------------------------------
@@ -1732,7 +1746,7 @@ local function windowFn()
   end
 
   local function musicalActionParam1Special(fun, row, addMetric, addSlop, paramEntry)
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
     local mg = row.mg
     local useGrid = paramEntry.notation == '$grid'
@@ -1743,39 +1757,39 @@ local function windowFn()
     local swingVal = not useGrid and mgMods == tx.MG_GRID_SWING or false
     local showSwing = mg.showswing
 
-    if useGrid then r.ImGui_BeginDisabled(ctx) end
-    local rv, sel = r.ImGui_Checkbox(ctx, 'Dotted', dotVal)
+    if useGrid then ImGui.BeginDisabled(ctx) end
+    local rv, sel = ImGui.Checkbox(ctx, 'Dotted', dotVal)
     if rv then
       newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_DOTTED or tx.MG_GRID_STRAIGHT)
       fun(1, true)
     end
 
-    rv, sel = r.ImGui_Checkbox(ctx, 'Triplet', tripVal)
+    rv, sel = ImGui.Checkbox(ctx, 'Triplet', tripVal)
     if rv then
       newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_TRIPLET or tx.MG_GRID_STRAIGHT)
       fun(2, true)
     end
 
     if showSwing then
-      rv, sel = r.ImGui_Checkbox(ctx, 'Swing', swingVal)
+      rv, sel = ImGui.Checkbox(ctx, 'Swing', swingVal)
       if rv then
         newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_SWING or tx.MG_GRID_STRAIGHT)
         fun(4, true)
       end
 
-      r.ImGui_SameLine(ctx)
+      ImGui.SameLine(ctx)
       local isSwing = newMgMods == tx.MG_GRID_SWING
 
-      if not isSwing then r.ImGui_BeginDisabled(ctx) end
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+      if not isSwing then ImGui.BeginDisabled(ctx) end
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
       local swbuf
-      rv, swbuf = r.ImGui_InputText(ctx, '##swing', tostring(mg.swing), r.ImGui_InputTextFlags_CharsDecimal())
+      rv, swbuf = ImGui.InputText(ctx, '##swing', tostring(mg.swing), ImGui.InputTextFlags_CharsDecimal)
       mg.swing = tonumber(swbuf)
 
-      r.ImGui_SameLine(ctx)
-      r.ImGui_Text(ctx, '[')
-      r.ImGui_SameLine(ctx)
-      rv, sel = r.ImGui_Checkbox(ctx, 'MPC', not mgReaSwing)
+      ImGui.SameLine(ctx)
+      ImGui.Text(ctx, '[')
+      ImGui.SameLine(ctx)
+      rv, sel = ImGui.Checkbox(ctx, 'MPC', not mgReaSwing)
       if rv then
         local _, newMgReaSwing = tx.SetMetricGridModifiers(mg, nil, not sel)
         if mgReaSwing ~= newMgReaSwing then
@@ -1787,9 +1801,9 @@ local function windowFn()
           mgReaSwing = newMgReaSwing
         end
       end
-      r.ImGui_SameLine(ctx)
-      r.ImGui_Text(ctx, ']')
-      if not isSwing then r.ImGui_EndDisabled(ctx) end
+      ImGui.SameLine(ctx)
+      ImGui.Text(ctx, ']')
+      if not isSwing then ImGui.EndDisabled(ctx) end
 
       if mgReaSwing then
         mg.swing = not mg.swing and 0 or mg.swing < -100 and -100 or mg.swing > 100 and 100 or mg.swing
@@ -1798,11 +1812,11 @@ local function windowFn()
       end
     end
 
-    if useGrid then r.ImGui_EndDisabled(ctx) end
+    if useGrid then ImGui.EndDisabled(ctx) end
 
     if addMetric then
-      r.ImGui_Separator(ctx)
-      rv, sel = r.ImGui_Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
+      ImGui.Separator(ctx)
+      rv, sel = ImGui.Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
       if rv then
         mg.wantsBarRestart = sel
         fun(3, true)
@@ -1810,20 +1824,20 @@ local function windowFn()
     end
 
     if addSlop then
-      r.ImGui_Separator(ctx)
-      r.ImGui_AlignTextToFramePadding(ctx)
-      r.ImGui_Text(ctx, 'Slop (% of unit)')
-      r.ImGui_SameLine(ctx)
+      ImGui.Separator(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, 'Slop (% of unit)')
+      ImGui.SameLine(ctx)
       local tbuf
-      r.ImGui_SetNextItemWidth(ctx, scaled(50))
-      rv, tbuf = r.ImGui_InputDouble(ctx, 'Pre', mg.preSlopPercent, nil, nil, '%0.2f')
+      ImGui.SetNextItemWidth(ctx, scaled(50))
+      rv, tbuf = ImGui.InputDouble(ctx, 'Pre', mg.preSlopPercent, nil, nil, '%0.2f')
       if kbdEntryIsCompleted(rv) then
         mg.preSlopPercent = tbuf
         fun(4, true)
       end
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetNextItemWidth(ctx, scaled(50))
-      rv, tbuf = r.ImGui_InputDouble(ctx, 'Post', mg.postSlopPercent, nil, nil, '%0.2f')
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, scaled(50))
+      rv, tbuf = ImGui.InputDouble(ctx, 'Post', mg.postSlopPercent, nil, nil, '%0.2f')
       if kbdEntryIsCompleted(rv) then
         mg.postSlopPercent = tbuf
         fun(5, true)
@@ -1847,24 +1861,24 @@ local function windowFn()
     local evn = row.evn
     local deactivated = false
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    r.ImGui_Text(ctx, evn.isBitField and 'Pattern' or 'Interval')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, evn.isBitField and 'Pattern' or 'Interval')
+    ImGui.SameLine(ctx)
 
-    local saveX = r.ImGui_GetCursorPosX(ctx)
-    if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
+    local saveX = ImGui.GetCursorPosX(ctx)
+    if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
     if evn.isBitField then evn.textEditorStr = evn.textEditorStr:gsub('[2-9]', '1')
     else evn.textEditorStr = tostring(tonumber(evn.textEditorStr))
     end
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
-    local rv, buf = r.ImGui_InputText(ctx, '##everyNentry', evn.textEditorStr,
-      inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(),
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
+    local rv, buf = ImGui.InputText(ctx, '##everyNentry', evn.textEditorStr,
+      inputFlag | ImGui.InputTextFlags_CallbackCharFilter,
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
       if isValidString(buf) then
         evn.textEditorStr = buf
@@ -1877,29 +1891,29 @@ local function windowFn()
       end
     end
 
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
-    r.ImGui_PushFont(ctx, fontInfo.smaller)
-    local yCache = r.ImGui_GetCursorPosY(ctx)
-    local _, smallerHeight = r.ImGui_CalcTextSize(ctx, '0') -- could make this global if it is expensive
-    r.ImGui_SetCursorPosY(ctx, yCache + ((r.ImGui_GetFrameHeight(ctx) - smallerHeight) / 2))
+    ImGui.PushFont(ctx, fontInfo.smaller)
+    local yCache = ImGui.GetCursorPosY(ctx)
+    local _, smallerHeight = ImGui.CalcTextSize(ctx, '0') -- could make this global if it is expensive
+    ImGui.SetCursorPosY(ctx, yCache + ((ImGui.GetFrameHeight(ctx) - smallerHeight) / 2))
     local selected
-    rv, selected = r.ImGui_Checkbox(ctx, 'Bitfield', evn.isBitField)
+    rv, selected = ImGui.Checkbox(ctx, 'Bitfield', evn.isBitField)
     if rv then
       evn.isBitField = selected
       fun(1, true)
     end
-    r.ImGui_PopFont(ctx)
+    ImGui.PopFont(ctx)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_Text(ctx, 'Offset')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, 'Offset')
+    ImGui.SameLine(ctx)
 
-    r.ImGui_SetCursorPosX(ctx, saveX)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
-    rv, buf = r.ImGui_InputText(ctx, '##everyNoffset', evn.offsetEditorStr, r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    ImGui.SetCursorPosX(ctx, saveX)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
+    rv, buf = ImGui.InputText(ctx, '##everyNoffset', evn.offsetEditorStr, ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
       if isValidString(buf) then
         evn.offsetEditorStr = buf
@@ -1908,13 +1922,13 @@ local function windowFn()
       end
     end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function everyNParam1Special(fun, row)
@@ -1925,59 +1939,59 @@ local function windowFn()
     local nme = row.nme
     local deactivated = false
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    r.ImGui_Text(ctx, 'Channel')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, 'Channel')
+    ImGui.SameLine(ctx)
 
-    if r.ImGui_BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
+    if ImGui.BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
       for i = 1, 16 do
-        local rv = r.ImGui_MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
+        local rv = ImGui.MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
         if rv then
-          if nme.channel == i - 1 then r.ImGui_CloseCurrentPopup(ctx) end
+          if nme.channel == i - 1 then ImGui.CloseCurrentPopup(ctx) end
           nme.channel = i - 1
         end
       end
-      r.ImGui_EndListBox(ctx)
+      ImGui.EndListBox(ctx)
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
-    local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+    local saveX, saveY = ImGui.GetCursorPos(ctx)
     saveX = saveX + scaled(20)
     saveY = saveY + currentFrameHeight * 0.5
 
-    r.ImGui_SetCursorPos(ctx, saveX, saveY)
+    ImGui.SetCursorPos(ctx, saveX, saveY)
 
-    local rv, sel = r.ImGui_Checkbox(ctx, 'Sel?', nme.selected)
+    local rv, sel = ImGui.Checkbox(ctx, 'Sel?', nme.selected)
     if rv then
       nme.selected = sel
     end
 
-    r.ImGui_SetCursorPos(ctx, saveX, saveY + (currentFrameHeight * 1.1))
+    ImGui.SetCursorPos(ctx, saveX, saveY + (currentFrameHeight * 1.1))
 
-    rv, sel = r.ImGui_Checkbox(ctx, 'Mute?', nme.muted)
+    rv, sel = ImGui.Checkbox(ctx, 'Mute?', nme.muted)
     if rv then
       nme.muted = sel
     end
 
-    r.ImGui_SetCursorPosY(ctx, saveY + (currentFrameHeight * 2.7))
+    ImGui.SetCursorPosY(ctx, saveY + (currentFrameHeight * 2.7))
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
     local isNote = nme.chanmsg == 0x90
 
     local twobyte = nme.chanmsg >= 0xC0
     local is14 = nme.chanmsg == 0xE0
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte1Txt = is14 and tostring((nme.msg3 << 7 | nme.msg2) - (1 << 13)) or tostring(nme.msg2)
-    rv, byte1Txt = r.ImGui_InputText(ctx, 'Val1', byte1Txt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte1Txt = ImGui.InputText(ctx, 'Val1', byte1Txt, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
     if rv then
       local nummy = tonumber(byte1Txt) or 0
       if is14 then
@@ -1989,16 +2003,16 @@ local function windowFn()
         nme.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
       end
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
-    r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + DEFAULT_ITEM_WIDTH * 0.25)
+    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + DEFAULT_ITEM_WIDTH * 0.25)
 
-    if is14 or twobyte then r.ImGui_BeginDisabled(ctx) end
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    if is14 or twobyte then ImGui.BeginDisabled(ctx) end
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte2Txt = (is14 or twobyte) and '0' or tostring(nme.msg3)
-    rv, byte2Txt = r.ImGui_InputText(ctx, 'Val2', byte2Txt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+    rv, byte2Txt = ImGui.InputText(ctx, 'Val2', byte2Txt, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
     if rv then
       local nummy = tonumber(byte2Txt) or 0
       if is14 or twobyte then
@@ -2007,38 +2021,38 @@ local function windowFn()
         nme.msg3 = nummy < min and min or nummy > 127 and 127 or nummy
       end
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if is14 or twobyte then r.ImGui_EndDisabled(ctx) end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
+    if is14 or twobyte then ImGui.EndDisabled(ctx) end
 
     if nme.chanmsg == 0x90 then
-      r.ImGui_Separator(ctx)
+      ImGui.Separator(ctx)
 
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-      rv, nme.durText = r.ImGui_InputText(ctx, 'Dur.', nme.durText, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+      rv, nme.durText = ImGui.InputText(ctx, 'Dur.', nme.durText, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
       if rv then
         nme.durText = tx.lengthFormatRebuf(nme.durText)
       end
-      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-      r.ImGui_SameLine(ctx)
+      ImGui.SameLine(ctx)
 
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
       local relVelTxt = tostring(nme.relvel)
-      rv, relVelTxt = r.ImGui_InputText(ctx, 'RelVel', relVelTxt, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), numbersOnlyCallback)
+      rv, relVelTxt = ImGui.InputText(ctx, 'RelVel', relVelTxt, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
       if rv then
         nme.relvel = tonumber(relVelTxt) or 0
         nme.relvel = nme.relvel < 0 and 0 or nme.relvel > 127 and 127 or nme.relvel
       end
-      if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function newMIDIEventParam1Special(fun, row)
@@ -2050,64 +2064,64 @@ local function windowFn()
     local deactivated = false
     local rv
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    r.ImGui_Text(ctx, 'Chan.')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, 'Chan.')
+    ImGui.SameLine(ctx)
 
-    if dontCloseXPos then r.ImGui_SetCursorPosX(ctx, dontCloseXPos) end
+    if dontCloseXPos then ImGui.SetCursorPosX(ctx, dontCloseXPos) end
 
-    if r.ImGui_BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
-      rv = r.ImGui_MenuItem(ctx, tostring('Any'), nil, evsel.channel == -1)
+    if ImGui.BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
+      rv = ImGui.MenuItem(ctx, tostring('Any'), nil, evsel.channel == -1)
       if rv then
-        if evsel.channel == -1 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.channel == -1 then ImGui.CloseCurrentPopup(ctx) end
         evsel.channel = -1
       end
 
       for i = 1, 16 do
-        rv = r.ImGui_MenuItem(ctx, tostring(i), nil, evsel.channel == i - 1)
+        rv = ImGui.MenuItem(ctx, tostring(i), nil, evsel.channel == i - 1)
         if rv then
-          if evsel.channel == i - 1 then r.ImGui_CloseCurrentPopup(ctx) end
+          if evsel.channel == i - 1 then ImGui.CloseCurrentPopup(ctx) end
           evsel.channel = i - 1
         end
       end
-      r.ImGui_EndListBox(ctx)
+      ImGui.EndListBox(ctx)
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    local saveNextLineY = r.ImGui_GetCursorPosY(ctx)
+    local saveNextLineY = ImGui.GetCursorPosY(ctx)
 
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
     local disableUseVal1 = evsel.chanmsg == 0x00 or evsel.chanmsg >= 0xD0
-    local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+    local saveX, saveY = ImGui.GetCursorPos(ctx)
     if disableUseVal1 then
-      r.ImGui_BeginDisabled(ctx)
+      ImGui.BeginDisabled(ctx)
     end
     local sel
-    rv, sel = r.ImGui_Checkbox(ctx, 'Use Val1?', evsel.useval1)
+    rv, sel = ImGui.Checkbox(ctx, 'Use Val1?', evsel.useval1)
     if rv then
       evsel.useval1 = sel
     end
     if disableUseVal1 then
-      r.ImGui_EndDisabled(ctx)
+      ImGui.EndDisabled(ctx)
     end
 
     local isNote = evsel.chanmsg == 0x90
     local disableVal1 = disableUseVal1 or not evsel.useval1
     if disableVal1 then
-      r.ImGui_BeginDisabled(ctx)
+      ImGui.BeginDisabled(ctx)
     end
-    r.ImGui_SetCursorPos(ctx, saveX, saveY + currentFrameHeight * 1.5)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    ImGui.SetCursorPos(ctx, saveX, saveY + currentFrameHeight * 1.5)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local byte1Txt = tostring(evsel.msg2)
-    rv, byte1Txt = r.ImGui_InputText(ctx, '##Val1', byte1Txt,
-      inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(),
+    rv, byte1Txt = ImGui.InputText(ctx, '##Val1', byte1Txt,
+      inputFlag | ImGui.InputTextFlags_CallbackCharFilter,
       isNote and numbersOrNoteNameCallback or numbersOnlyCallback)
     if rv then
       if isNote then
@@ -2116,84 +2130,84 @@ local function windowFn()
       local nummy = tonumber(byte1Txt) or 0
       evsel.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     if isNote then
       local noteName = mu.MIDI_NoteNumberToNoteName(evsel.msg2)
       if noteName then
-        r.ImGui_SameLine(ctx)
-        r.ImGui_AlignTextToFramePadding(ctx)
-        r.ImGui_TextColored(ctx, 0x7FFFFFCF, '[' .. noteName .. ']')
+        ImGui.SameLine(ctx)
+        ImGui.AlignTextToFramePadding(ctx)
+        ImGui.TextColored(ctx, 0x7FFFFFCF, '[' .. noteName .. ']')
       end
     end
     if disableVal1 then
-      r.ImGui_EndDisabled(ctx)
+      ImGui.EndDisabled(ctx)
     end
 
-    r.ImGui_SetCursorPosY(ctx, saveNextLineY)
+    ImGui.SetCursorPosY(ctx, saveNextLineY)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_Text(ctx, 'Sel.')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, 'Sel.')
+    ImGui.SameLine(ctx)
 
-    if dontCloseXPos then r.ImGui_SetCursorPosX(ctx, dontCloseXPos) end
+    if dontCloseXPos then ImGui.SetCursorPosX(ctx, dontCloseXPos) end
 
-    if r.ImGui_BeginListBox(ctx, '##selList', currentFontWidth * 14, currentFrameHeight * 3) then
-      rv = r.ImGui_MenuItem(ctx, tostring('Any'), nil, evsel.selected == -1)
+    if ImGui.BeginListBox(ctx, '##selList', currentFontWidth * 14, currentFrameHeight * 3) then
+      rv = ImGui.MenuItem(ctx, tostring('Any'), nil, evsel.selected == -1)
       if rv then
-        if evsel.selected == -1 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.selected == -1 then ImGui.CloseCurrentPopup(ctx) end
         evsel.selected = -1
       end
 
-      rv = r.ImGui_MenuItem(ctx, tostring('Unselected'), nil, evsel.selected == 0)
+      rv = ImGui.MenuItem(ctx, tostring('Unselected'), nil, evsel.selected == 0)
       if rv then
-        if evsel.selected == 0 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.selected == 0 then ImGui.CloseCurrentPopup(ctx) end
         evsel.selected = 0
       end
 
-      rv = r.ImGui_MenuItem(ctx, tostring('Selected'), nil, evsel.selected == 1)
+      rv = ImGui.MenuItem(ctx, tostring('Selected'), nil, evsel.selected == 1)
       if rv then
-        if evsel.selected == 1 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.selected == 1 then ImGui.CloseCurrentPopup(ctx) end
         evsel.selected = 1
       end
-      r.ImGui_EndListBox(ctx)
+      ImGui.EndListBox(ctx)
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    r.ImGui_SameLine(ctx)
+    ImGui.SameLine(ctx)
 
-    r.ImGui_Text(ctx, 'Muted')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, 'Muted')
+    ImGui.SameLine(ctx)
 
-    if r.ImGui_BeginListBox(ctx, '##muteList', currentFontWidth * 12, currentFrameHeight * 3) then
-      rv = r.ImGui_MenuItem(ctx, tostring('Any'), nil, evsel.muted == -1)
+    if ImGui.BeginListBox(ctx, '##muteList', currentFontWidth * 12, currentFrameHeight * 3) then
+      rv = ImGui.MenuItem(ctx, tostring('Any'), nil, evsel.muted == -1)
       if rv then
-        if evsel.muted == -1 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.muted == -1 then ImGui.CloseCurrentPopup(ctx) end
         evsel.muted = -1
       end
 
-      rv = r.ImGui_MenuItem(ctx, tostring('Unmuted'), nil, evsel.muted == 0)
+      rv = ImGui.MenuItem(ctx, tostring('Unmuted'), nil, evsel.muted == 0)
       if rv then
-        if evsel.muted == 0 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.muted == 0 then ImGui.CloseCurrentPopup(ctx) end
         evsel.muted = 0
       end
 
-      rv = r.ImGui_MenuItem(ctx, tostring('Muted'), nil, evsel.muted == 1)
+      rv = ImGui.MenuItem(ctx, tostring('Muted'), nil, evsel.muted == 1)
       if rv then
-        if evsel.muted == 1 then r.ImGui_CloseCurrentPopup(ctx) end
+        if evsel.muted == 1 then ImGui.CloseCurrentPopup(ctx) end
         evsel.muted = 1
       end
-      r.ImGui_EndListBox(ctx)
+      ImGui.EndListBox(ctx)
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function eventSelectorParam1Special(fun, row)
@@ -2202,20 +2216,20 @@ local function windowFn()
 
   local function musicalSlopParamSpecial(fun, row, underEditCursor)
     local deactivated = false
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    r.ImGui_Text(ctx, '+- % of unit')
-    r.ImGui_SameLine(ctx)
+    ImGui.Text(ctx, '+- % of unit')
+    ImGui.SameLine(ctx)
 
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local retval, buf = r.ImGui_InputText(ctx, '##eventSelectorParam2',
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local retval, buf = ImGui.InputText(ctx, '##eventSelectorParam2',
       underEditCursor and row.params[2].textEditorStr or row.evsel.scaleStr,
-      r.ImGui_InputTextFlags_CharsDecimal() + r.ImGui_InputTextFlags_CharsNoBlank())
+      ImGui.InputTextFlags_CharsDecimal + ImGui.InputTextFlags_CharsNoBlank)
     local scale = tonumber(buf)
     scale = scale == nil and 100 or scale < 0 and 0 or scale > 100 and 100 or scale
     if underEditCursor then
@@ -2227,15 +2241,15 @@ local function windowFn()
       inTextInput = false
     elseif retval then inTextInput = true
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function eventSelectorParam2Special(fun, row)
@@ -2250,45 +2264,45 @@ local function windowFn()
     local nme = row.nme
     local deactivated = false
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    local xPos = r.ImGui_GetCursorPosX(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+    local xPos = ImGui.GetCursorPosX(ctx)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
     local absPos = nme.posmode == tx.NEWEVENT_POSITION_ATPOSITION
     local isRel = nme.relmode and not absPos
     local disableNumbox = not isRel and not absPos
-    if disableNumbox then r.ImGui_BeginDisabled(ctx) end
+    if disableNumbox then ImGui.BeginDisabled(ctx) end
     local label = not absPos and 'Pos+-' or 'Pos.'
     local rv
-    rv, nme.posText = r.ImGui_InputText(ctx, label, nme.posText, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    rv, nme.posText = ImGui.InputText(ctx, label, nme.posText, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
     if rv then
       nme.posText = isRel and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
     end
-    if disableNumbox then r.ImGui_EndDisabled(ctx) end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if disableNumbox then ImGui.EndDisabled(ctx) end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetCursorPosX(ctx, xPos + DEFAULT_ITEM_WIDTH + (currentFontWidth * 7))
+    ImGui.SameLine(ctx)
+    ImGui.SetCursorPosX(ctx, xPos + DEFAULT_ITEM_WIDTH + (currentFontWidth * 7))
 
     local disableCheckbox = absPos
-    if disableCheckbox then r.ImGui_BeginDisabled(ctx) end
+    if disableCheckbox then ImGui.BeginDisabled(ctx) end
     local relval
-    rv, relval = r.ImGui_Checkbox(ctx, 'Relative', nme.relmode)
+    rv, relval = ImGui.Checkbox(ctx, 'Relative', nme.relmode)
     if rv then nme.relmode = relval end
-    if disableCheckbox then r.ImGui_EndDisabled(ctx) end
+    if disableCheckbox then ImGui.EndDisabled(ctx) end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function newMIDIEventParam2Special(fun, row)
@@ -2298,80 +2312,80 @@ local function windowFn()
   local function positionScaleOffsetParam1Special(fun, row)
     local deactivated = false
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local rv, buf = r.ImGui_InputText(ctx, 'Scale', row.params[1].textEditorStr, inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local rv, buf = ImGui.InputText(ctx, 'Scale', row.params[1].textEditorStr, inputFlag | ImGui.InputTextFlags_CharsDecimal | ImGui.InputTextFlags_CharsNoBlank)
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     tx.setRowParam(row, 1, tx.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
 
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = r.ImGui_InputText(ctx, 'Offset', (row.params[3] and row.params[3].textEditorStr) and row.params[3].textEditorStr or tx.DEFAULT_LENGTHFORMAT_STRING, inputFlag | r.ImGui_InputTextFlags_CallbackCharFilter(), timeFormatOnlyCallback)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    rv, buf = ImGui.InputText(ctx, 'Offset', (row.params[3] and row.params[3].textEditorStr) and row.params[3].textEditorStr or tx.DEFAULT_LENGTHFORMAT_STRING, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
     if rv then
       row.params[3].textEditorStr = tx.lengthFormatRebuf(buf)
     end
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function LineParam1Special(fun, row)
     local deactivated = false
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
     local _, _, _, target, operation = tx.actionTabsFromTarget(row)
     local paramTypes = tx.getParamTypesForRow(row, target, operation)
     local flags = {}
 
-    if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
+    if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
     for i = 1, 3, 2 do
       overrideEditorType(row, target, operation, paramTypes, i)
       local paramType = paramTypes[i]
       local editorType = row.params[i].editorType
       flags.isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
-      r.ImGui_AlignTextToFramePadding(ctx)
-      r.ImGui_Text(ctx, i == 1 and 'Lo:' or 'Hi:')
-      r.ImGui_SameLine(ctx)
-      r.ImGui_SetCursorPosX(ctx, currentFontWidth * 4)
-      r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, i == 1 and 'Lo:' or 'Hi:')
+      ImGui.SameLine(ctx)
+      ImGui.SetCursorPosX(ctx, currentFontWidth * 4)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
       if doHandleTableParam(row, target, operation, paramType, editorType, i, flags, doActionUpdate) then deactivated = true end
     end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   local function LineParam2Special(fun, row)
     local deactivated = false
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
-    r.ImGui_Separator(ctx)
+    ImGui.Separator(ctx)
 
-    r.ImGui_AlignTextToFramePadding(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
 
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     -- TODO disabled
-    if row.params[2].menuEntry == 1 then r.ImGui_BeginDisabled(ctx) end
+    if row.params[2].menuEntry == 1 then ImGui.BeginDisabled(ctx) end
     -- if not row.params[3].mod then row.params[3].mod = 2 end -- necessary?
     local mod = row.params[3].mod
     local modrange = row.params[3].modrange
@@ -2382,10 +2396,10 @@ local function windowFn()
     local DBL_MIN, DBL_MAX = 2.22507e-308, 1.79769e+308
     local dmin = row.params[2].menuEntry == 4 and -1 or 0
     local dmax = row.params[2].menuEntry == 4 and 1 or DBL_MAX
-    local rv, dmod = r.ImGui_DragDouble(ctx, 'Curve Var.', mod, 0.005, dmin, dmax, '%0.3f')
-    -- local rv, buf = r.ImGui_InputText(ctx, 'Exp/Log Factor', tostring(mod), inputFlag | r.ImGui_InputTextFlags_CharsDecimal() | r.ImGui_InputTextFlags_CharsNoBlank())
-    if r.ImGui_IsItemDeactivated(ctx) then deactivated = true end
-    if row.params[2].menuEntry == 1 then r.ImGui_EndDisabled(ctx) end
+    local rv, dmod = ImGui.DragDouble(ctx, 'Curve Var.', mod, 0.005, dmin, dmax, '%0.3f')
+    -- local rv, buf = ImGui.InputText(ctx, 'Exp/Log Factor', tostring(mod), inputFlag | ImGui.InputTextFlags_CharsDecimal | ImGui.InputTextFlags_CharsNoBlank)
+    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
+    if row.params[2].menuEntry == 1 then ImGui.EndDisabled(ctx) end
 
     mod = dmod
     -- mod = tonumber(buf)
@@ -2398,13 +2412,13 @@ local function windowFn()
       row.params[3].mod = mod
     end
 
-    if not r.ImGui_IsAnyItemActive(ctx) and not deactivated then
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
       if completionKeyPress() then
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 2)
+    ImGui.PopStyleColor(ctx, 2)
   end
 
   ----------------------------------------------
@@ -2426,27 +2440,27 @@ local function windowFn()
   }
 
   local tableHeight = currentFrameHeight * 6.2
-  local restoreY = r.ImGui_GetCursorPosY(ctx) + tableHeight
-  if r.ImGui_BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight) then
+  local restoreY = ImGui.GetCursorPosY(ctx) + tableHeight
+  if ImGui.BeginTable(ctx, 'Selection Criteria', #findColumns - (showTimeFormatColumn == false and 1 or 0), ImGui.TableFlags_ScrollY + ImGui.TableFlags_BordersInnerH, 0, tableHeight) then
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, 0x00000000)
     for _, label in ipairs(findColumns) do
       if showTimeFormatColumn or label ~= timeFormatColumnName then
         local narrow = (label == '(' or label == ')' or label == 'Not' or label == 'Boolean')
-        local flags = narrow and r.ImGui_TableColumnFlags_WidthFixed() or r.ImGui_TableColumnFlags_WidthStretch()
+        local flags = narrow and ImGui.TableColumnFlags_WidthFixed or ImGui.TableColumnFlags_WidthStretch
         local colwid = narrow and (label == 'Boolean' and scaled(70) or scaled(PAREN_COLUMN_WIDTH)) or nil
-        r.ImGui_TableSetupColumn(ctx, label, flags, colwid)
+        ImGui.TableSetupColumn(ctx, label, flags, colwid)
       end
     end
-    r.ImGui_TableHeadersRow(ctx)
-    r.ImGui_PopStyleColor(ctx)
-    r.ImGui_PopStyleColor(ctx)
+    ImGui.TableHeadersRow(ctx)
+    ImGui.PopStyleColor(ctx)
+    ImGui.PopStyleColor(ctx)
 
     handleValueLabels()
 
     for k, v in ipairs(tx.findRowTable()) do
-      r.ImGui_PushID(ctx, tostring(k))
+      ImGui.PushID(ctx, tostring(k))
       local currentRow = v
       local currentFindTarget = {}
       local currentFindCondition = {}
@@ -2455,74 +2469,74 @@ local function windowFn()
       local param2Entries = {}
 
       currentRow.dirty = false
-      if v.disabled then r.ImGui_BeginDisabled(ctx) end
+      if v.disabled then ImGui.BeginDisabled(ctx) end
 
       conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
 
-      r.ImGui_TableNextRow(ctx)
+      ImGui.TableNextRow(ctx)
 
       if k == selectedFindRow then
-        r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0x77FFFF1F)
+        ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, 0x77FFFF1F)
       end
 
       local colIdx = 0
 
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- '('
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- '('
       if currentRow.startParenEntry < 2 then
-        r.ImGui_InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
+        ImGui.InvisibleButton(ctx, '##startParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
       else
-        r.ImGui_Button(ctx, tx.startParenEntries[currentRow.startParenEntry].label)
+        ImGui.Button(ctx, tx.startParenEntries[currentRow.startParenEntry].label)
       end
-      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-        r.ImGui_OpenPopup(ctx, 'startParenMenu')
+      if currentRow.targetEntry > 0 and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+        ImGui.OpenPopup(ctx, 'startParenMenu')
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
       end
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Target'
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- 'Target'
       local targetText = currentRow.targetEntry > 0 and currentFindTarget.label or '---'
-      r.ImGui_Button(ctx, decorateTargetLabel(targetText))
-      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+      ImGui.Button(ctx, decorateTargetLabel(targetText))
+      if currentRow.targetEntry > 0 and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
         currentRow.except = true
         doFindUpdate()
-        r.ImGui_OpenPopup(ctx, 'targetMenu')
+        ImGui.OpenPopup(ctx, 'targetMenu')
       end
-      if not r.ImGui_IsPopupOpen(ctx, 'targetMenu') and currentRow.except then
+      if not ImGui.IsPopupOpen(ctx, 'targetMenu') and currentRow.except then
         currentRow.except = nil
         doFindUpdate()
       end
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Not'
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- 'Not'
       if not currentFindCondition.notnot then
-        r.ImGui_PushFont(ctx, fontInfo.smaller)
-        local yCache = r.ImGui_GetCursorPosY(ctx)
-        local _, smallerHeight = r.ImGui_CalcTextSize(ctx, '0') -- could make this global if it is expensive
-        r.ImGui_SetCursorPosY(ctx, yCache + ((r.ImGui_GetFrameHeight(ctx) - smallerHeight) / 2))
-        local rv, selected = r.ImGui_Checkbox(ctx, '##notBox', currentRow.isNot)
+        ImGui.PushFont(ctx, fontInfo.smaller)
+        local yCache = ImGui.GetCursorPosY(ctx)
+        local _, smallerHeight = ImGui.CalcTextSize(ctx, '0') -- could make this global if it is expensive
+        ImGui.SetCursorPosY(ctx, yCache + ((ImGui.GetFrameHeight(ctx) - smallerHeight) / 2))
+        local rv, selected = ImGui.Checkbox(ctx, '##notBox', currentRow.isNot)
         if rv then
           currentRow.isNot = selected
         end
-        r.ImGui_SetCursorPosY(ctx, yCache)
-        r.ImGui_PopFont(ctx)
+        ImGui.SetCursorPosY(ctx, yCache)
+        ImGui.PopFont(ctx)
       end
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Condition'
-      r.ImGui_Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
-      if #conditionEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- 'Condition'
+      ImGui.Button(ctx, #conditionEntries ~= 0 and currentFindCondition.label or '---')
+      if #conditionEntries ~= 0 and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
         selectedFindRow = k
         lastSelectedRowType = 0 -- Find
-        r.ImGui_OpenPopup(ctx, 'conditionMenu')
+        ImGui.OpenPopup(ctx, 'conditionMenu')
       end
 
       local paramTypes = tx.getParamTypesForRow(currentRow, currentFindTarget, currentFindCondition)
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- 'Parameter 1'
       overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 1)
       if handleTableParam(currentRow, currentFindCondition, param1Entries, paramTypes[1], 1, doFindUpdate) then
         selectedFindRow = k
@@ -2530,7 +2544,7 @@ local function windowFn()
       end
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- 'Parameter 2'
       overrideEditorType(currentRow, currentFindTarget, currentFindCondition, paramTypes, 2)
       if handleTableParam(currentRow, currentFindCondition, param2Entries, paramTypes[2], 2, doFindUpdate) then
         selectedFindRow = k
@@ -2540,35 +2554,35 @@ local function windowFn()
       -- unused currently
       if showTimeFormatColumn then
         colIdx = colIdx + 1
-        r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Time format
+        ImGui.TableSetColumnIndex(ctx, colIdx) -- Time format
         if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
-          r.ImGui_Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
-          if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+          ImGui.Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
+          if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
             selectedFindRow = k
             lastSelectedRowType = 0
-            r.ImGui_OpenPopup(ctx, 'timeFormatMenu')
+            ImGui.OpenPopup(ctx, 'timeFormatMenu')
           end
         end
       end
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- End Paren
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- End Paren
       if currentRow.endParenEntry < 2 then
-        r.ImGui_InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
+        ImGui.InvisibleButton(ctx, '##endParen', scaled(PAREN_COLUMN_WIDTH), currentFrameHeight) -- or we can't test hover/click properly
       else
-        r.ImGui_Button(ctx, tx.endParenEntries[currentRow.endParenEntry].label)
+        ImGui.Button(ctx, tx.endParenEntries[currentRow.endParenEntry].label)
       end
-      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-        r.ImGui_OpenPopup(ctx, 'endParenMenu')
+      if currentRow.targetEntry > 0 and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+        ImGui.OpenPopup(ctx, 'endParenMenu')
         selectedFindRow = k
         lastSelectedRowType = 0
       end
 
       colIdx = colIdx + 1
-      r.ImGui_TableSetColumnIndex(ctx, colIdx) -- Boolean
+      ImGui.TableSetColumnIndex(ctx, colIdx) -- Boolean
       if k ~= #tx.findRowTable() then
-        r.ImGui_Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
-        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+        ImGui.Button(ctx, tx.findBooleanEntries[currentRow.booleanEntry].label or '---', 50)
+        if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
           currentRow.booleanEntry = currentRow.booleanEntry == 1 and 2 or 1
           selectedFindRow = k
           lastSelectedRowType = 0
@@ -2576,47 +2590,47 @@ local function windowFn()
         end
       end
 
-      if v.disabled then r.ImGui_EndDisabled(ctx) end
+      if v.disabled then ImGui.EndDisabled(ctx) end
 
-      r.ImGui_SameLine(ctx)
+      ImGui.SameLine(ctx)
 
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-      if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
+      ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, 0x00000000)
+      ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, 0x00000000)
+      if ImGui.Selectable(ctx, '##rowGroup', false, ImGui.SelectableFlags_SpanAllColumns | ImGui.SelectableFlags_AllowOverlap) then
         selectedFindRow = k
         lastSelectedRowType = 0
       end
-      r.ImGui_PopStyleColor(ctx)
-      r.ImGui_PopStyleColor(ctx)
+      ImGui.PopStyleColor(ctx)
+      ImGui.PopStyleColor(ctx)
 
-      if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+      if ImGui.IsItemHovered(ctx) and ImGui.GetKeyMods(ctx) == ImGui.Mod_None and ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Right) then
         selectedFindRow = k
         lastSelectedRowType = 0
-        r.ImGui_OpenPopup(ctx, 'defaultFindRow')
+        ImGui.OpenPopup(ctx, 'defaultFindRow')
       end
 
-      if r.ImGui_BeginPopup(ctx, 'defaultFindRow', r.ImGui_WindowFlags_NoMove()) then
-        if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-          if r.ImGui_IsPopupOpen(ctx, 'defaultFindRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-            r.ImGui_CloseCurrentPopup(ctx)
+      if ImGui.BeginPopup(ctx, 'defaultFindRow', ImGui.WindowFlags_NoMove) then
+        if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+          if ImGui.IsPopupOpen(ctx, 'defaultFindRow', ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel) then
+            ImGui.CloseCurrentPopup(ctx)
             handledEscape = true
           end
         end
-        r.ImGui_Separator(ctx)
-        if r.ImGui_Selectable(ctx, 'Make This Row Default For New Criteria', false) then
+        ImGui.Separator(ctx)
+        if ImGui.Selectable(ctx, 'Make This Row Default For New Criteria', false) then
           defaultFindRow = tx.findRowToNotation(tx.findRowTable()[selectedFindRow])
           r.SetExtState(scriptID, 'defaultFindRow', defaultFindRow, true)
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
-        r.ImGui_Spacing(ctx)
-        r.ImGui_Separator(ctx)
-        r.ImGui_Spacing(ctx)
-        if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+        if ImGui.Selectable(ctx, 'Clear Row Default', false) then
           r.DeleteExtState(scriptID, 'defaultFindRow', true)
           defaultFindRow = nil
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
-        r.ImGui_EndPopup(ctx)
+        ImGui.EndPopup(ctx)
       end
 
       createPopup(currentRow, 'startParenMenu', tx.startParenEntries, currentRow.startParenEntry, function(i)
@@ -2685,10 +2699,10 @@ local function windowFn()
           end)
       end
 
-      r.ImGui_PopID(ctx)
+      ImGui.PopID(ctx)
     end
 
-    r.ImGui_EndTable(ctx)
+    ImGui.EndTable(ctx)
   end
 
   generateLabelOnLine('Selection Criteria', true)
@@ -2696,25 +2710,25 @@ local function windowFn()
   ---------------------------------------------------------------------------
   ------------------------------- FIND BUTTONS ------------------------------
 
-  r.ImGui_SetCursorPosY(ctx, restoreY)
+  ImGui.SetCursorPosY(ctx, restoreY)
 
   Spacing(true)
-  local saveSeparatorX = r.ImGui_GetCursorPosX(ctx)
+  local saveSeparatorX = ImGui.GetCursorPosX(ctx)
 
-  r.ImGui_Separator(ctx)
+  ImGui.Separator(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
+  ImGui.SetCursorPosY(ctx, ImGui.GetCursorPosY(ctx) + currentFrameHeight)
 
-  r.ImGui_AlignTextToFramePadding(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
 
-  r.ImGui_Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 2)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-    r.ImGui_OpenPopup(ctx, 'findScopeMenu')
+  ImGui.Button(ctx, tx.findScopeTable[tx.currentFindScope()].label, DEFAULT_ITEM_WIDTH * 2)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+    ImGui.OpenPopup(ctx, 'findScopeMenu')
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
 
-  local saveX, saveY = r.ImGui_GetCursorPos(ctx)
+  local saveX, saveY = ImGui.GetCursorPos(ctx)
 
   generateLabelOnLine('Selection Scope', true)
 
@@ -2723,24 +2737,24 @@ local function windowFn()
     doUpdate()
   end)
 
-  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+  ImGui.SetCursorPos(ctx, saveX, saveY)
 
   local findScopeNotation = tx.findScopeTable[tx.currentFindScope()].notation
   local isActiveEditorScope = findScopeNotation == '$midieditor'
 
-  if not isActiveEditorScope then r.ImGui_BeginDisabled(ctx) end
+  if not isActiveEditorScope then ImGui.BeginDisabled(ctx) end
 
-  r.ImGui_Button(ctx, tx.getFindScopeFlagLabel(), DEFAULT_ITEM_WIDTH * 1.7)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-    r.ImGui_OpenPopup(ctx, 'findScopeFlagMenu')
+  ImGui.Button(ctx, tx.getFindScopeFlagLabel(), DEFAULT_ITEM_WIDTH * 1.7)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+    ImGui.OpenPopup(ctx, 'findScopeFlagMenu')
   end
 
-  if r.ImGui_BeginPopup(ctx, 'findScopeFlagMenu', r.ImGui_WindowFlags_NoMove()) then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      r.ImGui_CloseCurrentPopup(ctx)
+  if ImGui.BeginPopup(ctx, 'findScopeFlagMenu', ImGui.WindowFlags_NoMove) then
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+      ImGui.CloseCurrentPopup(ctx)
       handledEscape = true
     end
-    local rv, sel = r.ImGui_Checkbox(ctx, 'Selected Events', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0)
+    local rv, sel = ImGui.Checkbox(ctx, 'Selected Events', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_SELECTED_ONLY ~= 0)
     if rv then
       local oldflags = tx.getFindScopeFlags()
       local newflags = sel and (oldflags | tx.FIND_SCOPE_FLAG_SELECTED_ONLY) or (oldflags & ~tx.FIND_SCOPE_FLAG_SELECTED_ONLY)
@@ -2748,61 +2762,61 @@ local function windowFn()
       doUpdate()
     end
 
-    rv, sel = r.ImGui_Checkbox(ctx, 'Active Note Row (+ notes only)', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0)
+    rv, sel = ImGui.Checkbox(ctx, 'Active Note Row (+ notes only)', tx.getFindScopeFlags() & tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW ~= 0)
     if rv then
       local oldflags = tx.getFindScopeFlags()
       local newflags = sel and (oldflags | tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW) or (oldflags & ~tx.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW)
       tx.setFindScopeFlags(newflags)
       doUpdate()
     end
-    r.ImGui_EndPopup(ctx)
+    ImGui.EndPopup(ctx)
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
 
-  saveX, saveY = r.ImGui_GetCursorPos(ctx)
+  saveX, saveY = ImGui.GetCursorPos(ctx)
 
   generateLabelOnLine('Scope Mods', true)
 
-  if not isActiveEditorScope then r.ImGui_EndDisabled(ctx) end
+  if not isActiveEditorScope then ImGui.EndDisabled(ctx) end
 
-  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+  ImGui.SetCursorPos(ctx, saveX, saveY)
 
-  r.ImGui_Button(ctx, tx.getFindPostProcessingLabel(), DEFAULT_ITEM_WIDTH * 1.7)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-    r.ImGui_OpenPopup(ctx, 'findPostPocessingMenu')
+  ImGui.Button(ctx, tx.getFindPostProcessingLabel(), DEFAULT_ITEM_WIDTH * 1.7)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+    ImGui.OpenPopup(ctx, 'findPostPocessingMenu')
   end
 
   generateFindPostProcessingPopup()
 
-  r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Text(ctx, findParserError)
-  r.ImGui_SameLine(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, findParserError)
+  ImGui.SameLine(ctx)
 
-  r.ImGui_PopStyleColor(ctx, 4)
+  ImGui.PopStyleColor(ctx, 4)
 
-  r.ImGui_SetCursorPosX(ctx, saveSeparatorX)
+  ImGui.SetCursorPosX(ctx, saveSeparatorX)
 
   Spacing(true)
-  r.ImGui_Separator(ctx)
-  r.ImGui_SameLine(ctx)
-  r.ImGui_SetCursorPos(ctx, saveSeparatorX, r.ImGui_GetCursorPosY(ctx) + 15)
-  r.ImGui_Separator(ctx)
+  ImGui.Separator(ctx)
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPos(ctx, saveSeparatorX, ImGui.GetCursorPosY(ctx) + 15)
+  ImGui.Separator(ctx)
 
   ---------------------------------------------------------------------------
   -------------------------------- ACTION ROWS ------------------------------
 
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x550077FF)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x770099FF)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x660088FF)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x440066FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0x550077FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0x770099FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0x660088FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x440066FF)
 
-  r.ImGui_AlignTextToFramePadding(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight * 0.75)
+  ImGui.SetCursorPosY(ctx, ImGui.GetCursorPosY(ctx) + currentFrameHeight * 0.75)
 
-  r.ImGui_Button(ctx, 'Insert Action', DEFAULT_ITEM_WIDTH * 2)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  ImGui.Button(ctx, 'Insert Action', DEFAULT_ITEM_WIDTH * 2)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     local numRows = #tx.actionRowTable()
     addActionRow()
 
@@ -2819,17 +2833,17 @@ local function windowFn()
     end
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
   local actButDisabled = (optDown and #tx.actionRowTable() == 0) or (not optDown and selectedActionRow == 0)
   if actButDisabled then
-    r.ImGui_BeginDisabled(ctx)
+    ImGui.BeginDisabled(ctx)
   end
-  r.ImGui_Button(ctx, optDown and 'Clear All Actions' or 'Remove Action', DEFAULT_ITEM_WIDTH * 2)
+  ImGui.Button(ctx, optDown and 'Clear All Actions' or 'Remove Action', DEFAULT_ITEM_WIDTH * 2)
   if actButDisabled then
-    r.ImGui_EndDisabled(ctx)
+    ImGui.EndDisabled(ctx)
   end
 
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     if optDown then
       tx.clearActionRows()
       selectedActionRow = 0
@@ -2840,9 +2854,9 @@ local function windowFn()
   end
 
   if showConsoles then
-    r.ImGui_SameLine(ctx)
-    r.ImGui_SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
-    local acrv, acbuf = r.ImGui_InputText(ctx, '##actionConsole', actionConsoleText)
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 6)
+    local acrv, acbuf = ImGui.InputText(ctx, '##actionConsole', actionConsoleText)
     if kbdEntryIsCompleted(acrv) then
       actionConsoleText = acbuf
       tx.processActionMacro(actionConsoleText)
@@ -2854,9 +2868,9 @@ local function windowFn()
   end
 
   Spacing(true)
-  r.ImGui_Separator(ctx)
+  ImGui.Separator(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
+  ImGui.SetCursorPosY(ctx, ImGui.GetCursorPosY(ctx) + currentFrameHeight)
 
   ----------------------------------------------
   ---------------- ACTIONS TABLE ---------------
@@ -2869,22 +2883,22 @@ local function windowFn()
     'Parameter 2'
   }
 
-  restoreY = r.ImGui_GetCursorPosY(ctx) + tableHeight
+  restoreY = ImGui.GetCursorPosY(ctx) + tableHeight
 
-  if r.ImGui_BeginTable(ctx, 'Actions', #actionColumns, r.ImGui_TableFlags_ScrollY() + r.ImGui_TableFlags_BordersInnerH(), 0, tableHeight) then
+  if ImGui.BeginTable(ctx, 'Actions', #actionColumns, ImGui.TableFlags_ScrollY + ImGui.TableFlags_BordersInnerH, 0, tableHeight) then
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, 0x00000000)
     for _, label in ipairs(actionColumns) do
-      local flags = r.ImGui_TableColumnFlags_None()
-      r.ImGui_TableSetupColumn(ctx, label, flags)
+      local flags = ImGui.TableColumnFlags_None
+      ImGui.TableSetupColumn(ctx, label, flags)
     end
-    r.ImGui_TableHeadersRow(ctx)
-    r.ImGui_PopStyleColor(ctx)
-    r.ImGui_PopStyleColor(ctx)
+    ImGui.TableHeadersRow(ctx)
+    ImGui.PopStyleColor(ctx)
+    ImGui.PopStyleColor(ctx)
 
     for k, v in ipairs(tx.actionRowTable()) do
-      r.ImGui_PushID(ctx, tostring(k))
+      ImGui.PushID(ctx, tostring(k))
       local currentRow = v
       local currentActionTarget = {}
       local currentActionOperation = {}
@@ -2893,43 +2907,43 @@ local function windowFn()
       local param2Entries = {}
 
       currentRow.dirty = false
-      if v.disabled then r.ImGui_BeginDisabled(ctx) end
+      if v.disabled then ImGui.BeginDisabled(ctx) end
 
       operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)
 
-      r.ImGui_TableNextRow(ctx)
+      ImGui.TableNextRow(ctx)
 
       if k == selectedActionRow then
-        r.ImGui_TableSetBgColor(ctx, r.ImGui_TableBgTarget_RowBg0(), 0xFF77FF1F)
+        ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, 0xFF77FF1F)
       end
 
-      r.ImGui_TableSetColumnIndex(ctx, 0) -- 'Target'
+      ImGui.TableSetColumnIndex(ctx, 0) -- 'Target'
       local targetText = currentRow.targetEntry > 0 and currentActionTarget.label or '---'
-      r.ImGui_Button(ctx, decorateTargetLabel(targetText))
-      if currentRow.targetEntry > 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+      ImGui.Button(ctx, decorateTargetLabel(targetText))
+      if currentRow.targetEntry > 0 and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
         selectedActionRow = k
         lastSelectedRowType = 1
-        r.ImGui_OpenPopup(ctx, 'targetMenu')
+        ImGui.OpenPopup(ctx, 'targetMenu')
       end
 
-      r.ImGui_TableSetColumnIndex(ctx, 1) -- 'Operation'
-      r.ImGui_Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---')
-      if #operationEntries ~= 0 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+      ImGui.TableSetColumnIndex(ctx, 1) -- 'Operation'
+      ImGui.Button(ctx, #operationEntries ~= 0 and currentActionOperation.label or '---')
+      if #operationEntries ~= 0 and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
         selectedActionRow = k
         lastSelectedRowType = 1
-        r.ImGui_OpenPopup(ctx, 'operationMenu')
+        ImGui.OpenPopup(ctx, 'operationMenu')
       end
 
       local paramTypes = tx.getParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
 
-      r.ImGui_TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
+      ImGui.TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
       overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
       if handleTableParam(currentRow, currentActionOperation, param1Entries, paramTypes[1], 1, doActionUpdate) then
         selectedActionRow = k
         lastSelectedRowType = 1
       end
 
-      r.ImGui_TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
+      ImGui.TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
       overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
       if handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, doActionUpdate) then
         selectedActionRow = k
@@ -2940,52 +2954,52 @@ local function windowFn()
         overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 3)
       end
 
-      if v.disabled then r.ImGui_EndDisabled(ctx) end
+      if v.disabled then ImGui.EndDisabled(ctx) end
 
-      r.ImGui_SameLine(ctx)
+      ImGui.SameLine(ctx)
 
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), 0x00000000)
-      r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), 0x00000000)
-      if r.ImGui_Selectable(ctx, '##rowGroup', false, r.ImGui_SelectableFlags_SpanAllColumns() | r.ImGui_SelectableFlags_AllowItemOverlap()) then
+      ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, 0x00000000)
+      ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, 0x00000000)
+      if ImGui.Selectable(ctx, '##rowGroup', false, ImGui.SelectableFlags_SpanAllColumns | ImGui.SelectableFlags_AllowOverlap) then
         selectedActionRow = k
         lastSelectedRowType = 1
       end
-      r.ImGui_PopStyleColor(ctx)
-      r.ImGui_PopStyleColor(ctx)
+      ImGui.PopStyleColor(ctx)
+      ImGui.PopStyleColor(ctx)
 
-      if r.ImGui_IsItemHovered(ctx) and r.ImGui_GetKeyMods(ctx) == r.ImGui_Mod_None() and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Right()) then
+      if ImGui.IsItemHovered(ctx) and ImGui.GetKeyMods(ctx) == ImGui.Mod_None and ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Right) then
         selectedActionRow = k
         lastSelectedRowType = 1
-        r.ImGui_OpenPopup(ctx, 'defaultActionRow')
+        ImGui.OpenPopup(ctx, 'defaultActionRow')
       end
 
       -- TODO: row drag/drop
-      -- if r.ImGui_BeginDragDropSource(ctx) then
-      --   r.ImGui_SetDragDropPayload(ctx, 'row', 'somedata')
-      --   r.ImGui_EndDragDropSource(ctx)
+      -- if ImGui.BeginDragDropSource(ctx) then
+      --   ImGui.SetDragDropPayload(ctx, 'row', 'somedata')
+      --   ImGui.EndDragDropSource(ctx)
       -- end
 
-      if r.ImGui_BeginPopup(ctx, 'defaultActionRow', r.ImGui_WindowFlags_NoMove()) then
-        if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-          if r.ImGui_IsPopupOpen(ctx, 'defaultActionRow', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-            r.ImGui_CloseCurrentPopup(ctx)
+      if ImGui.BeginPopup(ctx, 'defaultActionRow', ImGui.WindowFlags_NoMove) then
+        if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+          if ImGui.IsPopupOpen(ctx, 'defaultActionRow', ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel) then
+            ImGui.CloseCurrentPopup(ctx)
             handledEscape = true
           end
         end
-        if r.ImGui_Selectable(ctx, 'Make This Row Default For New Actions', false) then
+        if ImGui.Selectable(ctx, 'Make This Row Default For New Actions', false) then
           defaultActionRow = tx.actionRowToNotation(tx.actionRowTable()[selectedActionRow])
           r.SetExtState(scriptID, 'defaultActionRow', defaultActionRow, true)
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
-        r.ImGui_Spacing(ctx)
-        r.ImGui_Separator(ctx)
-        r.ImGui_Spacing(ctx)
-        if r.ImGui_Selectable(ctx, 'Clear Row Default', false) then
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+        if ImGui.Selectable(ctx, 'Clear Row Default', false) then
           r.DeleteExtState(scriptID, 'defaultActionRow', true)
           defaultActionRow = nil
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
-        r.ImGui_EndPopup(ctx)
+        ImGui.EndPopup(ctx)
       end
 
       createPopup(currentRow, 'targetMenu', tx.actionTargetEntries, currentRow.targetEntry, function(i)
@@ -3048,13 +3062,13 @@ local function windowFn()
           or nil,
           isLineOp or paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT)
 
-      r.ImGui_PopID(ctx)
+      ImGui.PopID(ctx)
     end
 
-    r.ImGui_EndTable(ctx)
+    ImGui.EndTable(ctx)
   end
 
-  r.ImGui_SetCursorPosY(ctx, restoreY)
+  ImGui.SetCursorPosY(ctx, restoreY)
 
   generateLabelOnLine('Actions', true)
 
@@ -3062,32 +3076,32 @@ local function windowFn()
   ------------------------------ ACTION BUTTONS -----------------------------
 
   Spacing(true)
-  r.ImGui_Separator(ctx)
+  ImGui.Separator(ctx)
 
-  r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + currentFrameHeight)
+  ImGui.SetCursorPosY(ctx, ImGui.GetCursorPosY(ctx) + currentFrameHeight)
 
-  r.ImGui_AlignTextToFramePadding(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
 
   local restoreX
-  restoreX, restoreY = r.ImGui_GetCursorPos(ctx)
+  restoreX, restoreY = ImGui.GetCursorPos(ctx)
 
-  r.ImGui_Button(ctx, 'Apply', DEFAULT_ITEM_WIDTH / 1.25)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  ImGui.Button(ctx, 'Apply', DEFAULT_ITEM_WIDTH / 1.25)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     tx.processAction(true)
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
 
-  r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + scaled(5))
+  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + scaled(5))
 
-  r.ImGui_Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, DEFAULT_ITEM_WIDTH * 2)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-    r.ImGui_OpenPopup(ctx, 'actionScopeMenu')
+  ImGui.Button(ctx, tx.actionScopeTable[tx.currentActionScope()].label, DEFAULT_ITEM_WIDTH * 2)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+    ImGui.OpenPopup(ctx, 'actionScopeMenu')
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
 
-  saveX = r.ImGui_GetCursorPosX(ctx)
+  saveX = ImGui.GetCursorPosX(ctx)
 
   updateCurrentRect()
   generateLabel('Action Scope')
@@ -3097,88 +3111,88 @@ local function windowFn()
       doUpdate()
     end)
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
 
-  r.ImGui_SetCursorPosX(ctx, saveX + scaled(5))
+  ImGui.SetCursorPosX(ctx, saveX + scaled(5))
 
   local scopeNotation = tx.actionScopeTable[tx.currentActionScope()].notation
   local isSelectScope = scopeNotation:match('select') or scopeNotation:match('delete')
 
-  if isSelectScope then r.ImGui_BeginDisabled(ctx) end
+  if isSelectScope then ImGui.BeginDisabled(ctx) end
 
-  r.ImGui_Button(ctx, tx.actionScopeFlagsTable[tx.currentActionScopeFlags()].label, DEFAULT_ITEM_WIDTH * 2.5)
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
-    r.ImGui_OpenPopup(ctx, 'actionScopeFlagsMenu')
+  ImGui.Button(ctx, tx.actionScopeFlagsTable[tx.currentActionScopeFlags()].label, DEFAULT_ITEM_WIDTH * 2.5)
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+    ImGui.OpenPopup(ctx, 'actionScopeFlagsMenu')
   end
 
-  r.ImGui_SameLine(ctx)
+  ImGui.SameLine(ctx)
 
   updateCurrentRect()
 
   generateLabel('Post-Action')
 
-  if isSelectScope then r.ImGui_EndDisabled(ctx) end
+  if isSelectScope then ImGui.EndDisabled(ctx) end
 
   createPopup(nil, 'actionScopeFlagsMenu', tx.actionScopeFlagsTable, tx.currentActionScopeFlags(), function(i)
       tx.setCurrentActionScopeFlags(i)
       doUpdate()
     end)
 
-  r.ImGui_PopStyleColor(ctx, 4)
+  ImGui.PopStyleColor(ctx, 4)
 
-  r.ImGui_NewLine(ctx)
+  ImGui.NewLine(ctx)
   Spacing()
   Spacing(true)
 
-  local presetButtonBottom = r.ImGui_GetCursorPosY(ctx)
-  r.ImGui_Button(ctx, '...', currentFontWidth + scaled(10))
-  local _, presetButtonHeight = r.ImGui_GetItemRectSize(ctx)
+  local presetButtonBottom = ImGui.GetCursorPosY(ctx)
+  ImGui.Button(ctx, '...', currentFontWidth + scaled(10))
+  local _, presetButtonHeight = ImGui.GetItemRectSize(ctx)
   presetButtonBottom = presetButtonBottom + presetButtonHeight
-  if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+  if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetFolders = enumerateTransformerPresets(presetPath, true)
-    r.ImGui_OpenPopup(ctx, '##presetfolderselect')
+    ImGui.OpenPopup(ctx, '##presetfolderselect')
   end
 
-  r.ImGui_SameLine(ctx)
-  saveX, saveY = r.ImGui_GetCursorPos(ctx)
+  ImGui.SameLine(ctx)
+  saveX, saveY = ImGui.GetCursorPos(ctx)
 
   if presetSubPath then
-    r.ImGui_NewLine(ctx)
-    r.ImGui_Indent(ctx)
+    ImGui.NewLine(ctx)
+    ImGui.Indent(ctx)
     local str = string.gsub(presetSubPath, presetPath, '')
-    r.ImGui_TextColored(ctx, 0x00AAFFFF, '-> ' .. str)
+    ImGui.TextColored(ctx, 0x00AAFFFF, '-> ' .. str)
   end
 
-  if r.ImGui_BeginPopup(ctx, '##presetfolderselect', r.ImGui_WindowFlags_NoMove()) then
-    r.ImGui_TextDisabled(ctx, 'Select destination folder...')
+  if ImGui.BeginPopup(ctx, '##presetfolderselect', ImGui.WindowFlags_NoMove) then
+    ImGui.TextDisabled(ctx, 'Select destination folder...')
 
-    r.ImGui_Spacing(ctx)
-    r.ImGui_Separator(ctx)
-    r.ImGui_Spacing(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_FrameBgHovered, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_FrameBgActive, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
     generatePresetMenu(presetFolders, presetPath, nil, nil, true)
 
     if canReveal then
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_Spacing(ctx)
-      local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+      local rv = ImGui.Selectable(ctx, 'Manage Presets...', false)
       if rv then
         r.CF_ShellExecute(presetPath) -- try this until it breaks
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 5)
+    ImGui.PopStyleColor(ctx, 5)
 
-    r.ImGui_EndPopup(ctx)
+    ImGui.EndPopup(ctx)
   end
 
   local createNewFolder, folderName = handleNewFolderCreationDialog('Create New Folder', 'New Folder Name')
@@ -3194,14 +3208,14 @@ local function windowFn()
 
   local buttonClickSave = false
 
-  r.ImGui_SetCursorPos(ctx, saveX, saveY)
-  r.ImGui_Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', DEFAULT_ITEM_WIDTH * 1.5)
-  if (not presetInputVisible and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0)) or refocusInput then
+  ImGui.SetCursorPos(ctx, saveX, saveY)
+  ImGui.Button(ctx, (optDown or presetInputDoesScript) and 'Export Script...' or 'Save Preset...', DEFAULT_ITEM_WIDTH * 1.5)
+  if (not presetInputVisible and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0)) or refocusInput then
     presetInputVisible = true
     presetInputDoesScript = optDown
     refocusInput = false
-    r.ImGui_SetKeyboardFocusHere(ctx)
-  elseif presetInputVisible and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 0) then
+    ImGui.SetKeyboardFocusHere(ctx)
+  elseif presetInputVisible and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     buttonClickSave = true
   end
 
@@ -3210,45 +3224,45 @@ local function windowFn()
     local retval = 0
     local doOK = false
 
-    r.ImGui_PushFont(ctx, fontInfo.large)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), 0x333355FF)
+    ImGui.PushFont(ctx, fontInfo.large)
+    ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, 0x333355FF)
 
     if inOKDialog then
-      positionModalWindow(r.ImGui_GetFrameHeight(ctx) / 2)
-      r.ImGui_OpenPopup(ctx, title)
-    elseif r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Enter()
-      or r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_KeypadEnter())) then
+      positionModalWindow(ImGui.GetFrameHeight(ctx) / 2)
+      ImGui.OpenPopup(ctx, title)
+    elseif ImGui.IsKeyPressed(ctx, ImGui.Key_Enter
+      or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
         doOK = true
     end
 
-    if r.ImGui_BeginPopupModal(ctx, title, true, r.ImGui_WindowFlags_TopMost() | r.ImGui_WindowFlags_NoMove()) then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-        r.ImGui_CloseCurrentPopup(ctx)
+    if ImGui.BeginPopupModal(ctx, title, true, ImGui.WindowFlags_TopMost | ImGui.WindowFlags_NoMove) then
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+        ImGui.CloseCurrentPopup(ctx)
         handledEscape = true
         refocusInput = true
       end
-      if r.ImGui_IsWindowAppearing(ctx) then r.ImGui_SetKeyboardFocusHere(ctx) end
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Text(ctx, text)
-      r.ImGui_Spacing(ctx)
-      if r.ImGui_Button(ctx, 'Cancel') then
+      if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
+      ImGui.Spacing(ctx)
+      ImGui.Text(ctx, text)
+      ImGui.Spacing(ctx)
+      if ImGui.Button(ctx, 'Cancel') then
         rv = true
         retval = 0
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
 
-      r.ImGui_SameLine(ctx)
-      if r.ImGui_Button(ctx, 'OK') or doOK then
+      ImGui.SameLine(ctx)
+      if ImGui.Button(ctx, 'OK') or doOK then
         rv = true
         retval = 1
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
-      r.ImGui_SetItemDefaultFocus(ctx)
+      ImGui.SetItemDefaultFocus(ctx)
 
-      r.ImGui_EndPopup(ctx)
+      ImGui.EndPopup(ctx)
     end
-    r.ImGui_PopFont(ctx)
-    r.ImGui_PopStyleColor(ctx)
+    ImGui.PopFont(ctx)
+    ImGui.PopStyleColor(ctx)
 
     inOKDialog = false
 
@@ -3316,7 +3330,7 @@ local function windowFn()
         if okval == 1 then
           local path, fname = pathFn()
           saveFn(path, fname)
-          r.ImGui_CloseCurrentPopup(ctx)
+          ImGui.CloseCurrentPopup(ctx)
         end
       end
     end
@@ -3327,26 +3341,26 @@ local function windowFn()
     presetInputDoesScript = false
   end
 
-  r.ImGui_SameLine(ctx)
-  saveX, saveY = r.ImGui_GetCursorPos(ctx)
+  ImGui.SameLine(ctx)
+  saveX, saveY = ImGui.GetCursorPos(ctx)
 
   if presetInputVisible then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
       presetInputVisible = false
       presetInputDoesScript = false
       handledEscape = true
     end
 
-    r.ImGui_SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
+    ImGui.SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
     if refocusOnNextIteration then
-      r.ImGui_SetKeyboardFocusHere(ctx)
+      ImGui.SetKeyboardFocusHere(ctx)
       refocusOnNextIteration = false
     end
-    local retval, buf = r.ImGui_InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, inputFlag)
-    local deactivated = r.ImGui_IsItemDeactivated(ctx)
+    local retval, buf = ImGui.InputTextWithHint(ctx, '##presetname', 'Untitled', presetNameTextBuffer, inputFlag)
+    local deactivated = ImGui.IsItemDeactivated(ctx)
     if deactivated and (not refocusField or buttonClickSave) then
       local complete = buttonClickSave or completionKeyPress()
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape())
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape)
         or not complete
       then
         presetInputVisible = false
@@ -3368,38 +3382,38 @@ local function windowFn()
     end
 
     if presetInputDoesScript then
-      r.ImGui_SameLine(ctx)
-      local saveXPos = r.ImGui_GetCursorPosX(ctx)
-      local rv, sel = r.ImGui_Checkbox(ctx, 'Main', scriptWritesMainContext)
+      ImGui.SameLine(ctx)
+      local saveXPos = ImGui.GetCursorPosX(ctx)
+      local rv, sel = ImGui.Checkbox(ctx, 'Main', scriptWritesMainContext)
       if rv then
         scriptWritesMainContext = sel
         r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
         refocusOnNextIteration = true
       end
-      if r.ImGui_IsItemHovered(ctx) then
+      if ImGui.IsItemHovered(ctx) then
         refocusField = true
         inOKDialog = false
       end
 
-      r.ImGui_SameLine(ctx)
-      rv, sel = r.ImGui_Checkbox(ctx, 'MIDI', scriptWritesMIDIContexts)
+      ImGui.SameLine(ctx)
+      rv, sel = ImGui.Checkbox(ctx, 'MIDI', scriptWritesMIDIContexts)
       if rv then
         scriptWritesMIDIContexts = sel
         r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
         refocusOnNextIteration = true
       end
-      if r.ImGui_IsItemHovered(ctx) then
+      if ImGui.IsItemHovered(ctx) then
         refocusField = true
         inOKDialog = false
       end
 
-      r.ImGui_SetCursorPosX(ctx, saveXPos)
-      rv, sel = r.ImGui_Checkbox(ctx, 'Ignore Selection in Arrange View', scriptIgnoreSelectionInArrangeView)
+      ImGui.SetCursorPosX(ctx, saveXPos)
+      rv, sel = ImGui.Checkbox(ctx, 'Ignore Selection in Arrange View', scriptIgnoreSelectionInArrangeView)
       if rv then
         scriptIgnoreSelectionInArrangeView = sel -- not persistent
         refocusOnNextIteration = true
       end
-      if r.ImGui_IsItemHovered(ctx) then
+      if ImGui.IsItemHovered(ctx) then
         refocusField = true
         inOKDialog = false
       end
@@ -3408,35 +3422,35 @@ local function windowFn()
   end
 
   restoreX = restoreX + 60 * currentFontWidth
-  r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
+  ImGui.SetCursorPos(ctx, restoreX, restoreY)
 
-  local windowSizeX = r.ImGui_GetWindowSize(ctx)
+  local windowSizeX = ImGui.GetWindowSize(ctx)
 
   if not presetNotesViewEditor then
-    r.ImGui_BeginGroup(ctx)
+    ImGui.BeginGroup(ctx)
     local noBuf = false
     if presetNotesBuffer == '' then noBuf = true end
-    if noBuf then r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFF7F) end
-    r.ImGui_SetCursorPos(ctx, restoreX + (framePaddingX / 2), restoreY + (framePaddingY / 2))
-    r.ImGui_AlignTextToFramePadding(ctx)
-    r.ImGui_TextWrapped(ctx, presetNotesBuffer == '' and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
-    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, 0) then
+    if noBuf then ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFFFF7F) end
+    ImGui.SetCursorPos(ctx, restoreX + (framePaddingX / 2), restoreY + (framePaddingY / 2))
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.TextWrapped(ctx, presetNotesBuffer == '' and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
+    if ImGui.IsItemHovered(ctx) and ImGui.IsMouseDoubleClicked(ctx, 0) then
       presetNotesViewEditor = true
       justChanged = true
     end
-    if noBuf then r.ImGui_PopStyleColor(ctx) end
-    r.ImGui_SetCursorPos(ctx, restoreX, restoreY)
-    r.ImGui_EndGroup(ctx)
+    if noBuf then ImGui.PopStyleColor(ctx) end
+    ImGui.SetCursorPos(ctx, restoreX, restoreY)
+    ImGui.EndGroup(ctx)
     updateCurrentRect()
   else
-    if justChanged then r.ImGui_SetKeyboardFocusHere(ctx) end
-    local retval, buf = r.ImGui_InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, inputFlag)
-    if justChanged and r.ImGui_IsItemActivated(ctx) then
+    if justChanged then ImGui.SetKeyboardFocusHere(ctx) end
+    local retval, buf = ImGui.InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, inputFlag)
+    if justChanged and ImGui.IsItemActivated(ctx) then
       justChanged = false
     end
-    local deactivated = r.ImGui_IsItemDeactivated(ctx)
+    local deactivated = ImGui.IsItemDeactivated(ctx)
     if deactivated and not completionKeyPress() then
-      if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
         handledEscape = true -- don't revert the buffer if escape was pressed, use whatever's in there. causes a momentary flicker
       else
         if buf:gsub('%s+', '') == '' then buf = '' end
@@ -3452,7 +3466,7 @@ local function windowFn()
     updateCurrentRect()
   end
 
-  restoreY = r.ImGui_GetCursorPosY(ctx) - 10 * canvasScale
+  restoreY = ImGui.GetCursorPosY(ctx) - 10 * canvasScale
 
   generateLabel('Preset Notes')
 
@@ -3460,13 +3474,13 @@ local function windowFn()
     if statusMsg ~= '' and statusTime then
       if r.time_precise() - statusTime > 3 then statusTime = nil statusMsg = '' statusContext = 0
       else
-        r.ImGui_AlignTextToFramePadding(ctx)
-        r.ImGui_Text(ctx, statusMsg)
+        ImGui.AlignTextToFramePadding(ctx)
+        ImGui.Text(ctx, statusMsg)
       end
     end
   end
 
-  r.ImGui_SetCursorPos(ctx, saveX, saveY)
+  ImGui.SetCursorPos(ctx, saveX, saveY)
   handleStatus()
 
   function PresetMatches(sourceEntry, filter, onlyFolders)
@@ -3490,48 +3504,48 @@ local function windowFn()
     return false
   end
 
-  if r.ImGui_BeginPopup(ctx, 'openPresetMenu', r.ImGui_WindowFlags_NoMove()) then
-    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
-      if r.ImGui_IsPopupOpen(ctx, 'openPresetMenu', r.ImGui_PopupFlags_AnyPopupId() + r.ImGui_PopupFlags_AnyPopupLevel()) then
-        r.ImGui_CloseCurrentPopup(ctx)
+  if ImGui.BeginPopup(ctx, 'openPresetMenu', ImGui.WindowFlags_NoMove) then
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+      if ImGui.IsPopupOpen(ctx, 'openPresetMenu', ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel) then
+        ImGui.CloseCurrentPopup(ctx)
         handledEscape = true
       end
     end
 
-    if r.ImGui_IsWindowAppearing(ctx) then
-      r.ImGui_SetKeyboardFocusHere(ctx)
+    if ImGui.IsWindowAppearing(ctx) then
+      ImGui.SetKeyboardFocusHere(ctx)
     end
-    local rv, buf = r.ImGui_InputTextWithHint(ctx, '##presetFilter', 'Filter...', filterPresetsBuffer)
+    local rv, buf = ImGui.InputTextWithHint(ctx, '##presetFilter', 'Filter...', filterPresetsBuffer)
     if rv then
       filterPresetsBuffer = buf
     end
 
-    r.ImGui_Spacing(ctx)
-    r.ImGui_Separator(ctx)
-    r.ImGui_Spacing(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
 
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), hoverAlphaCol)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), activeAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_FrameBgHovered, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_FrameBgActive, 0x00000000)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
 
     generatePresetMenu(presetTable, presetPath, nil, string.lower(filterPresetsBuffer))
 
     if canReveal then
-      r.ImGui_Spacing(ctx)
-      r.ImGui_Separator(ctx)
-      r.ImGui_Spacing(ctx)
-      local rv = r.ImGui_Selectable(ctx, 'Manage Presets...', false)
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+      local rv = ImGui.Selectable(ctx, 'Manage Presets...', false)
       if rv then
         r.CF_ShellExecute(presetPath) -- try this until it breaks
-        r.ImGui_CloseCurrentPopup(ctx)
+        ImGui.CloseCurrentPopup(ctx)
       end
     end
 
-    r.ImGui_PopStyleColor(ctx, 5)
+    ImGui.PopStyleColor(ctx, 5)
 
-    r.ImGui_EndPopup(ctx)
+    ImGui.EndPopup(ctx)
   end
 
   handleKeys(handledEscape)
@@ -3544,12 +3558,10 @@ end
 --------------------------------- CLEANUP -----------------------------------
 
 local function doClose()
-  r.ImGui_Detach(ctx, fontInfo.large)
-  r.ImGui_Detach(ctx, fontInfo.small)
-  r.ImGui_Detach(ctx, fontInfo.smaller)
-  r.ImGui_Detach(ctx, canonicalFont)
-  r.ImGui_DestroyContext(ctx)
-  ctx = nil
+  ImGui.Detach(ctx, fontInfo.large)
+  ImGui.Detach(ctx, fontInfo.small)
+  ImGui.Detach(ctx, fontInfo.smaller)
+  ImGui.Detach(ctx, canonicalFont)
   if disabledAutoOverlap then
     gooseAutoOverlap()
   end
@@ -3566,11 +3578,11 @@ end
 ----------------------------- WSIZE/FONTS JUNK ------------------------------
 
 local function updateWindowPosition()
-  local curWindowWidth, curWindowHeight = r.ImGui_GetWindowSize(ctx)
-  local curWindowLeft, curWindowTop = r.ImGui_GetWindowPos(ctx)
+  local curWindowWidth, curWindowHeight = ImGui.GetWindowSize(ctx)
+  local curWindowLeft, curWindowTop = ImGui.GetWindowPos(ctx)
 
   if dockID ~= 0 then
-    local styleWidth, styleHeight = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_WindowMinSize())
+    local styleWidth, styleHeight = ImGui.GetStyleVar(ctx, ImGui.StyleVar_WindowMinSize)
     if curWindowWidth == styleWidth and curWindowHeight == styleHeight then
       curWindowWidth = windowInfo.width
       curWindowHeight = windowInfo.height
@@ -3591,9 +3603,9 @@ local function updateWindowPosition()
     windowInfo.wantsResizeUpdate = false
   end
 
-  local isDocked = r.ImGui_IsWindowDocked(ctx)
+  local isDocked = ImGui.IsWindowDocked(ctx)
   if isDocked then
-    local curDockID = r.ImGui_GetWindowDockID(ctx)
+    local curDockID = ImGui.GetWindowDockID(ctx)
     if dockID ~= curDockID then
       dockID = curDockID
       r.SetExtState(scriptID, 'dockID', tostring(math.floor(dockID)), true)
@@ -3631,9 +3643,9 @@ local function updateOneFont(name)
   local fontSize = fontInfo[name..'Size']
 
   if newFontSize ~= fontSize then
-    r.ImGui_Detach(ctx, fontInfo[name])
-    fontInfo[name] = r.ImGui_CreateFont(fontStyle, newFontSize)
-    r.ImGui_Attach(ctx, fontInfo[name])
+    ImGui.Detach(ctx, fontInfo[name])
+    fontInfo[name] = ImGui.CreateFont(fontStyle, newFontSize)
+    ImGui.Attach(ctx, fontInfo[name])
     fontInfo[name..'Size'] = newFontSize
     winHeight = nil
   end
@@ -3646,49 +3658,49 @@ local function updateFonts()
 end
 
 local function openWindow()
-  local windowSizeFlag = r.ImGui_Cond_Appearing()
+  local windowSizeFlag = ImGui.Cond_Appearing
   if windowInfo.wantsResize then
-    windowSizeFlag = nil
+    windowSizeFlag = 0
   end
   if dockID == 0 then
-    r.ImGui_SetNextWindowSize(ctx, windowInfo.width, windowInfo.height, windowSizeFlag)
-    r.ImGui_SetNextWindowPos(ctx, windowInfo.left, windowInfo.top, windowSizeFlag)
+    ImGui.SetNextWindowSize(ctx, windowInfo.width, windowInfo.height, windowSizeFlag)
+    ImGui.SetNextWindowPos(ctx, windowInfo.left, windowInfo.top, windowSizeFlag)
   end
   if windowInfo.wantsResize then
     windowInfo.wantsResize = false
     windowInfo.wantsResizeUpdate = true
   end
 
-  r.ImGui_SetNextWindowBgAlpha(ctx, 1.0)
+  ImGui.SetNextWindowBgAlpha(ctx, 1.0)
 
   if not winHeight then
-    r.ImGui_PushFont(ctx, fontInfo.large)
-    winHeight = r.ImGui_GetFrameHeightWithSpacing(ctx) * 19
-    r.ImGui_PushFont(ctx, fontInfo.small)
-    winHeight = winHeight + (r.ImGui_GetFrameHeightWithSpacing(ctx) * 9)
-    r.ImGui_PopFont(ctx)
+    ImGui.PushFont(ctx, fontInfo.large)
+    winHeight = ImGui.GetFrameHeightWithSpacing(ctx) * 19
+    ImGui.PushFont(ctx, fontInfo.small)
+    winHeight = winHeight + (ImGui.GetFrameHeightWithSpacing(ctx) * 9)
+    ImGui.PopFont(ctx)
     winHeight = winHeight + ((fontInfo.largeSize - CANONICAL_FONTSIZE_LARGE) * 5)
-    r.ImGui_PopFont(ctx)
+    ImGui.PopFont(ctx)
   end
 
-  r.ImGui_SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winHeight, windowInfo.defaultWidth * 3, winHeight)
+  ImGui.SetNextWindowSizeConstraints(ctx, windowInfo.defaultWidth, winHeight, windowInfo.defaultWidth * 3, winHeight)
 
-  r.ImGui_PushFont(ctx, fontInfo.small)
-  r.ImGui_SetNextWindowDockID(ctx, ~0, r.ImGui_Cond_Appearing()) --, r.ImGui_Cond_Appearing()) -- TODO docking
-  local visible, open = r.ImGui_Begin(ctx, titleBarText .. '###' .. scriptID, true,
-                                        r.ImGui_WindowFlags_TopMost()
-                                      + r.ImGui_WindowFlags_NoScrollWithMouse()
-                                      + r.ImGui_WindowFlags_NoScrollbar()
-                                      + r.ImGui_WindowFlags_NoSavedSettings())
+  ImGui.PushFont(ctx, fontInfo.small)
+  ImGui.SetNextWindowDockID(ctx, ~0, ImGui.Cond_Appearing) --, ImGui.Cond_Appearing) -- TODO docking
+  local visible, open = ImGui.Begin(ctx, titleBarText .. '###' .. scriptID, true,
+                                        ImGui.WindowFlags_TopMost
+                                      + ImGui.WindowFlags_NoScrollWithMouse
+                                      + ImGui.WindowFlags_NoScrollbar
+                                      + ImGui.WindowFlags_NoSavedSettings)
 
-  if r.ImGui_IsWindowDocked(ctx) then
-    r.ImGui_Text(ctx, titleBarText)
-    r.ImGui_Separator(ctx)
+  if ImGui.IsWindowDocked(ctx) then
+    ImGui.Text(ctx, titleBarText)
+    ImGui.Separator(ctx)
   end
-  r.ImGui_PopFont(ctx)
+  ImGui.PopFont(ctx)
 
-  if r.ImGui_IsWindowAppearing(ctx) then
-    viewPort = r.ImGui_GetWindowViewport(ctx)
+  if ImGui.IsWindowAppearing(ctx) then
+    viewPort = ImGui.GetWindowViewport(ctx)
   end
 
   return visible, open
@@ -3713,37 +3725,37 @@ local function loop()
 
   local visible, open = openWindow()
   if visible then
-    r.ImGui_PushFont(ctx, fontInfo.large)
+    ImGui.PushFont(ctx, fontInfo.large)
 
     if not prepped then
-      r.ImGui_PushFont(ctx, canonicalFont)
-      canonicalFontWidth = r.ImGui_CalcTextSize(ctx, '0', nil, nil)
+      ImGui.PushFont(ctx, canonicalFont)
+      canonicalFontWidth = ImGui.CalcTextSize(ctx, '0', nil, nil)
       currentFontWidth = canonicalFontWidth
-      currentFrameHeight = r.ImGui_GetFrameHeight(ctx)
-      currentFrameHeightEx = r.ImGui_GetFrameHeightWithSpacing(ctx)
+      currentFrameHeight = ImGui.GetFrameHeight(ctx)
+      currentFrameHeightEx = ImGui.GetFrameHeightWithSpacing(ctx)
       currentFrameHeightEx = currentFrameHeight + math.ceil(((currentFrameHeightEx - currentFrameHeight) / 2) + 0.5)
-      r.ImGui_PopFont(ctx)
+      ImGui.PopFont(ctx)
       prepped = true
     else
-      currentFontWidth = r.ImGui_CalcTextSize(ctx, '0', nil, nil)
+      currentFontWidth = ImGui.CalcTextSize(ctx, '0', nil, nil)
       DEFAULT_ITEM_WIDTH = 10 * currentFontWidth -- (currentFontWidth / canonicalFontWidth)
-      currentFrameHeight = r.ImGui_GetFrameHeight(ctx)
-      currentFrameHeightEx = r.ImGui_GetFrameHeightWithSpacing(ctx)
+      currentFrameHeight = ImGui.GetFrameHeight(ctx)
+      currentFrameHeightEx = ImGui.GetFrameHeightWithSpacing(ctx)
       currentFrameHeightEx = currentFrameHeight + math.ceil(((currentFrameHeightEx - currentFrameHeight) / 2) + 0.5)
       fontWidScale = currentFontWidth / canonicalFontWidth
     end
 
-    r.ImGui_BeginGroup(ctx)
+    ImGui.BeginGroup(ctx)
     windowFn()
-    r.ImGui_SetCursorPos(ctx, 0, 0)
-    local ww, wh = r.ImGui_GetContentRegionMax(ctx)
-    r.ImGui_Dummy(ctx, ww, wh)
-    r.ImGui_EndGroup(ctx)
+    ImGui.SetCursorPos(ctx, 0, 0)
+    local ww, wh = ImGui.GetContentRegionMax(ctx)
+    ImGui.Dummy(ctx, ww, wh)
+    ImGui.EndGroup(ctx)
 
     -- handle drag and drop of preset files using the entire frame
-    if r.ImGui_BeginDragDropTarget(ctx) then
-      if r.ImGui_AcceptDragDropPayloadFiles(ctx) then
-        local retdrag, filedrag = r.ImGui_GetDragDropPayloadFile(ctx, 0)
+    if ImGui.BeginDragDropTarget(ctx) then
+      if ImGui.AcceptDragDropPayloadFiles(ctx) then
+        local retdrag, filedrag = ImGui.GetDragDropPayloadFile(ctx, 0)
         if retdrag and string.match(filedrag, presetExt .. '$') then
           local success, notes, ignoreSelectInArrange = tx.loadPreset(filedrag)
           if success then
@@ -3752,14 +3764,14 @@ local function loop()
           end
         end
       end
-      r.ImGui_EndDragDropTarget(ctx)
+      ImGui.EndDragDropTarget(ctx)
     end
 
-    r.ImGui_PopFont(ctx)
+    ImGui.PopFont(ctx)
 
     updateWindowPosition()
 
-    r.ImGui_End(ctx)
+    ImGui.End(ctx)
   end
 
   if not open then

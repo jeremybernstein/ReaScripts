@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.2
+-- @version 1.0.11-alpha.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - update ReaImGui to v0.9.3
+--   - more refactoring (runtime context)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.2'
+local versionStr = '1.0.11-alpha.3'
 
 local r = reaper
 
@@ -29,6 +29,7 @@ local fontStyle = 'sans-serif'
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
 local tx = require 'TransformerLib'
 local mu = tx.mu
+local gdefs = require 'TransformerGeneralDefs'
 
 local canStart = true
 
@@ -350,7 +351,7 @@ local function setupRowFormat(row, condOpTab)
     if condOp.split and condOp.split[i].default then
       local menuEntry
       row.params[i].textEditorStr = tostring(condOp.split[i].default) -- hack
-      if paramTypes[i] == tx.PARAM_TYPE_MENU then
+      if paramTypes[i] == gdefs.PARAM_TYPE_MENU then
         menuEntry = tonumber(row.params[i].textEditorStr)
       end
       row.params[i].menuEntry = menuEntry and menuEntry or 1
@@ -380,16 +381,16 @@ local function setupRowFormat(row, condOpTab)
     tx.makeDefaultEventSelector(row)
   end
 
-  local p1 = tx.DEFAULT_TIMEFORMAT_STRING
-  local p2 = tx.DEFAULT_TIMEFORMAT_STRING
+  local p1 = gdefs.DEFAULT_TIMEFORMAT_STRING
+  local p2 = gdefs.DEFAULT_TIMEFORMAT_STRING
 
   if target.notation == '$length' then
-    p1 = tx.DEFAULT_LENGTHFORMAT_STRING
-    p2 = tx.DEFAULT_LENGTHFORMAT_STRING
+    p1 = gdefs.DEFAULT_LENGTHFORMAT_STRING
+    p2 = gdefs.DEFAULT_LENGTHFORMAT_STRING
   end
 
-  if paramTypes[1] == tx.PARAM_TYPE_TIMEDUR then p1 = tx.DEFAULT_LENGTHFORMAT_STRING end
-  if paramTypes[2] == tx.PARAM_TYPE_TIMEDUR then p2 = tx.DEFAULT_LENGTHFORMAT_STRING end
+  if paramTypes[1] == gdefs.PARAM_TYPE_TIMEDUR then p1 = gdefs.DEFAULT_LENGTHFORMAT_STRING end
+  if paramTypes[2] == gdefs.PARAM_TYPE_TIMEDUR then p2 = gdefs.DEFAULT_LENGTHFORMAT_STRING end
 
   row.params[1].timeFormatStr = p1
   row.params[2].timeFormatStr = p2
@@ -433,7 +434,7 @@ end
 local function check14Bit(paramType)
   local has14bit = false
   local hasOther = false
-  if paramType == tx.PARAM_TYPE_INTEDITOR then
+  if paramType == gdefs.PARAM_TYPE_INTEDITOR then
     local hasTable, fresh = tx.getHasTable()
     has14bit = hasTable[0xE0] and true or false
     hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
@@ -445,34 +446,34 @@ end
 local function overrideEditorType(row, target, condOp, paramTypes, idx)
   local has14bit, hasOther = check14Bit(paramTypes[idx])
   if condOp.bitfield or (condOp.split and condOp.split[idx].bitfield) then
-    tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_BITFIELD)
-  elseif not (paramTypes[idx] == tx.PARAM_TYPE_INTEDITOR or paramTypes[idx] == tx.PARAM_TYPE_FLOATEDITOR)
+    tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_BITFIELD)
+  elseif not (paramTypes[idx] == gdefs.PARAM_TYPE_INTEDITOR or paramTypes[idx] == gdefs.PARAM_TYPE_FLOATEDITOR)
     or (condOp.norange or (condOp.split and condOp.split[idx].norange))
     or (condOp.nooverride or (condOp.split and condOp.split[idx].nooverride))
   then
     tx.setEditorTypeForRow(row, idx, nil)
   elseif target.notation == '$velocity' or target.notation == '$relvel' then
     if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
+      tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_7BIT_BIPOLAR)
     elseif target.notation == '$velocity' and not condOp.fullrange then
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_NOZERO)
+      tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_7BIT_NOZERO)
     else
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+      tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_7BIT)
     end
   elseif has14bit then
     if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
-      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT_BIPOLAR or tx.EDITOR_TYPE_PITCHBEND_BIPOLAR)
+      tx.setEditorTypeForRow(row, idx, hasOther and gdefs.EDITOR_TYPE_PERCENT_BIPOLAR or gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR)
     else
-      tx.setEditorTypeForRow(row, idx, hasOther and tx.EDITOR_TYPE_PERCENT or tx.EDITOR_TYPE_PITCHBEND)
+      tx.setEditorTypeForRow(row, idx, hasOther and gdefs.EDITOR_TYPE_PERCENT or gdefs.EDITOR_TYPE_PITCHBEND)
     end
   elseif target.notation ~= '$position'
     and target.notation ~= '$length'
     and target.notation ~= '$channel'
   then
     if condOp.bipolar or (condOp.split and condOp.split[idx].bipolar) then
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT_BIPOLAR)
+      tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_7BIT_BIPOLAR)
     else
-      tx.setEditorTypeForRow(row, idx, tx.EDITOR_TYPE_7BIT)
+      tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_7BIT)
     end
   else
     tx.setEditorTypeForRow(row, idx, nil)
@@ -1520,7 +1521,7 @@ local function windowFn()
     if NewHasTable then
       local strVal = row.params[index].textEditorStr
       if not (flags.isMetricOrMusical or flags.isBitField) then
-        strVal = ensureNumString(row.params[index].textEditorStr, range, paramType == tx.PARAM_TYPE_INTEDITOR)
+        strVal = ensureNumString(row.params[index].textEditorStr, range, paramType == gdefs.PARAM_TYPE_INTEDITOR)
       end
       strVal = tx.handlePercentString(strVal, row, target, condOp, paramType, editorType, index, range, bipolar)
       row.params[index].textEditorStr = strVal
@@ -1570,7 +1571,7 @@ local function windowFn()
       ImGui.SameLine(ctx)
       ImGui.AlignTextToFramePadding(ctx)
       ImGui.PushFont(ctx, fontInfo.small)
-      if editorType == tx.EDITOR_TYPE_PERCENT
+      if editorType == gdefs.EDITOR_TYPE_PERCENT
         or condOp.percent or (condOp.split and condOp.split[index].percent) -- hack
       then
         ImGui.TextColored(ctx, 0xFFFFFF7F, '%')
@@ -1586,17 +1587,17 @@ local function windowFn()
   local function handleTableParam(row, condOp, paramTab, paramType, index, procFn)
     local rv = false
 
-    if paramType == tx.PARAM_TYPE_HIDDEN then return end
+    if paramType == gdefs.PARAM_TYPE_HIDDEN then return end
 
     local editorType = row.params[index].editorType
     local flags = {}
-    flags.isMetricOrMusical = paramType == tx.PARAM_TYPE_METRICGRID or paramType == tx.PARAM_TYPE_MUSICAL
-    flags.isEveryN = paramType == tx.PARAM_TYPE_EVERYN and row.evn
-    flags.isBitField = editorType == tx.EDITOR_TYPE_BITFIELD
-    flags.isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
-    flags.isNewMIDIEvent = paramType == tx.PARAM_TYPE_NEWMIDIEVENT
-    flags.isParam3 = condOp.param3 and paramType ~= tx.PARAM_TYPE_MENU -- param3 exception -- make this nicer
-    flags.isEventSelector = paramType == tx.PARAM_TYPE_EVENTSELECTOR
+    flags.isMetricOrMusical = paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL
+    flags.isEveryN = paramType == gdefs.PARAM_TYPE_EVERYN and row.evn
+    flags.isBitField = editorType == gdefs.EDITOR_TYPE_BITFIELD
+    flags.isFloat = (paramType == gdefs.PARAM_TYPE_FLOATEDITOR or editorType == gdefs.EDITOR_TYPE_PERCENT) and true or false
+    flags.isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
+    flags.isParam3 = condOp.param3 and paramType ~= gdefs.PARAM_TYPE_MENU -- param3 exception -- make this nicer
+    flags.isEventSelector = paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
 
     if (flags.isMetricOrMusical and index == 1) -- special case, sorry
       or (flags.isEveryN and index == 1)
@@ -1604,14 +1605,14 @@ local function windowFn()
       or flags.isParam3
       or flags.isEventSelector
     then
-      paramType = tx.PARAM_TYPE_MENU
+      paramType = gdefs.PARAM_TYPE_MENU
     end
 
     if condOp.terms >= index then
       local targetTab = row:is_a(tx.FindRow) and tx.findTargetEntries or tx.actionTargetEntries
       local target = targetTab[row.targetEntry]
 
-      if paramType == tx.PARAM_TYPE_MENU then
+      if paramType == gdefs.PARAM_TYPE_MENU then
         local canOpen = (flags.isEveryN or flags.isParam3 or flags.isEventSelector) and true or #paramTab ~= 0
         local paramEntry = paramTab[row.params[index].menuEntry]
         local label =  #paramTab ~= 0 and paramEntry.label or '---'
@@ -1645,9 +1646,9 @@ local function windowFn()
         end
         if flags.isMetricOrMusical and paramEntry.notation ~= '$grid' then
           local mgMods, mgReaSwing = tx.GetMetricGridModifiers(row.mg)
-          if mgMods == tx.MG_GRID_TRIPLET then label = label .. 'T'
-          elseif mgMods == tx.MG_GRID_DOTTED then label = label .. '.'
-          elseif mgMods == tx.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
+          if mgMods == gdefs.MG_GRID_TRIPLET then label = label .. 'T'
+          elseif mgMods == gdefs.MG_GRID_DOTTED then label = label .. '.'
+          elseif mgMods == gdefs.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
           end
         end
         ImGui.Button(ctx, label)
@@ -1655,11 +1656,11 @@ local function windowFn()
           rv = true
           ImGui.OpenPopup(ctx, 'param' .. index .. 'Menu')
         end
-      elseif paramType == tx.PARAM_TYPE_INTEDITOR
+      elseif paramType == gdefs.PARAM_TYPE_INTEDITOR
         or flags.isFloat
         or flags.isMetricOrMusical or flags.isBitField
-        or editorType == tx.EDITOR_TYPE_PITCHBEND
-        or editorType == tx.EDITOR_TYPE_PERCENT
+        or editorType == gdefs.EDITOR_TYPE_PITCHBEND
+        or editorType == gdefs.EDITOR_TYPE_PERCENT
       then
         ImGui.BeginGroup(ctx)
 
@@ -1671,11 +1672,11 @@ local function windowFn()
             rv = true
           end
         end
-      elseif paramType == tx.PARAM_TYPE_TIME or paramType == tx.PARAM_TYPE_TIMEDUR then
+      elseif paramType == gdefs.PARAM_TYPE_TIME or paramType == gdefs.PARAM_TYPE_TIMEDUR then
         ImGui.BeginGroup(ctx)
         local retval, buf = ImGui.InputText(ctx, '##' .. 'param' .. index .. 'Edit', row.params[index].timeFormatStr, ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
         if kbdEntryIsCompleted(retval) then
-          row.params[index].timeFormatStr = paramType == tx.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
+          row.params[index].timeFormatStr = paramType == gdefs.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
           procFn()
           inTextInput = false
         elseif retval then inTextInput = true
@@ -1752,33 +1753,33 @@ local function windowFn()
     local useGrid = paramEntry.notation == '$grid'
     local mgMods, mgReaSwing = tx.GetMetricGridModifiers(mg)
     local newMgMods = mgMods
-    local dotVal = not useGrid and mgMods == tx.MG_GRID_DOTTED or false
-    local tripVal = not useGrid and mgMods == tx.MG_GRID_TRIPLET or false
-    local swingVal = not useGrid and mgMods == tx.MG_GRID_SWING or false
+    local dotVal = not useGrid and mgMods == gdefs.MG_GRID_DOTTED or false
+    local tripVal = not useGrid and mgMods == gdefs.MG_GRID_TRIPLET or false
+    local swingVal = not useGrid and mgMods == gdefs.MG_GRID_SWING or false
     local showSwing = mg.showswing
 
     if useGrid then ImGui.BeginDisabled(ctx) end
     local rv, sel = ImGui.Checkbox(ctx, 'Dotted', dotVal)
     if rv then
-      newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_DOTTED or tx.MG_GRID_STRAIGHT)
+      newMgMods = tx.SetMetricGridModifiers(mg, sel and gdefs.MG_GRID_DOTTED or gdefs.MG_GRID_STRAIGHT)
       fun(1, true)
     end
 
     rv, sel = ImGui.Checkbox(ctx, 'Triplet', tripVal)
     if rv then
-      newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_TRIPLET or tx.MG_GRID_STRAIGHT)
+      newMgMods = tx.SetMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
       fun(2, true)
     end
 
     if showSwing then
       rv, sel = ImGui.Checkbox(ctx, 'Swing', swingVal)
       if rv then
-        newMgMods = tx.SetMetricGridModifiers(mg, sel and tx.MG_GRID_SWING or tx.MG_GRID_STRAIGHT)
+        newMgMods = tx.SetMetricGridModifiers(mg, sel and gdefs.MG_GRID_SWING or gdefs.MG_GRID_STRAIGHT)
         fun(4, true)
       end
 
       ImGui.SameLine(ctx)
-      local isSwing = newMgMods == tx.MG_GRID_SWING
+      local isSwing = newMgMods == gdefs.MG_GRID_SWING
 
       if not isSwing then ImGui.BeginDisabled(ctx) end
       ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
@@ -2320,10 +2321,10 @@ local function windowFn()
     ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
     local rv, buf = ImGui.InputText(ctx, 'Scale', row.params[1].textEditorStr, inputFlag | ImGui.InputTextFlags_CharsDecimal | ImGui.InputTextFlags_CharsNoBlank)
     if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-    tx.setRowParam(row, 1, tx.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
+    tx.setRowParam(row, 1, gdefs.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
 
     ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    rv, buf = ImGui.InputText(ctx, 'Offset', (row.params[3] and row.params[3].textEditorStr) and row.params[3].textEditorStr or tx.DEFAULT_LENGTHFORMAT_STRING, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
+    rv, buf = ImGui.InputText(ctx, 'Offset', (row.params[3] and row.params[3].textEditorStr) and row.params[3].textEditorStr or gdefs.DEFAULT_LENGTHFORMAT_STRING, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
     if rv then
       row.params[3].textEditorStr = tx.lengthFormatRebuf(buf)
     end
@@ -2355,7 +2356,7 @@ local function windowFn()
       overrideEditorType(row, target, operation, paramTypes, i)
       local paramType = paramTypes[i]
       local editorType = row.params[i].editorType
-      flags.isFloat = (paramType == tx.PARAM_TYPE_FLOATEDITOR or editorType == tx.EDITOR_TYPE_PERCENT) and true or false
+      flags.isFloat = (paramType == gdefs.PARAM_TYPE_FLOATEDITOR or editorType == gdefs.EDITOR_TYPE_PERCENT) and true or false
       ImGui.AlignTextToFramePadding(ctx)
       ImGui.Text(ctx, i == 1 and 'Lo:' or 'Hi:')
       ImGui.SameLine(ctx)
@@ -2555,7 +2556,7 @@ local function windowFn()
       if showTimeFormatColumn then
         colIdx = colIdx + 1
         ImGui.TableSetColumnIndex(ctx, colIdx) -- Time format
-        if (paramTypes[1] == tx.PARAM_TYPE_TIME or paramTypes[1] == tx.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
+        if (paramTypes[1] == gdefs.PARAM_TYPE_TIME or paramTypes[1] == gdefs.PARAM_TYPE_TIMEDUR) and currentFindCondition.terms ~= 0 then
           ImGui.Button(ctx, tx.findTimeFormatEntries[currentRow.timeFormatEntry].label or '---')
           if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
             selectedFindRow = k
@@ -2664,31 +2665,31 @@ local function windowFn()
 
       createPopup(currentRow, 'param1Menu', param1Entries, currentRow.params[1].menuEntry, function(i, isSpecial)
           if not isSpecial then
-            if paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR then
+            if paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR then
               currentRow.evsel.chanmsg = tonumber(param1Entries[i].text)
             end
             currentRow.params[1].menuEntry = i
           end
           doFindUpdate()
         end,
-        paramTypes[1] == tx.PARAM_TYPE_METRICGRID
+        paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID
             and metricParam1Special
-          or paramTypes[1] == tx.PARAM_TYPE_MUSICAL
+          or paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL
             and musicalParam1Special
-          or paramTypes[1] == tx.PARAM_TYPE_EVERYN
+          or paramTypes[1] == gdefs.PARAM_TYPE_EVERYN
             and everyNParam1Special
-          or paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR
+          or paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR
             and eventSelectorParam1Special
           or conditionEntries[currentRow.conditionEntry].notation == ':undereditcursor'
             and underEditCursorParam1Special
           or nil,
-        paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR and 'Type' or false)
+        paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR and 'Type' or false)
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i)
           currentRow.params[2].menuEntry = i
           doFindUpdate()
         end,
-        paramTypes[1] == tx.PARAM_TYPE_EVENTSELECTOR
+        paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR
           and eventSelectorParam2Special
         or nil)
 
@@ -3034,15 +3035,15 @@ local function windowFn()
             doActionUpdate()
           end
         end,
-        paramTypes[1] == tx.PARAM_TYPE_MUSICAL
+        paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL
             and musicalParam1SpecialNoSlop
-          or paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT
+          or paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT
             and newMIDIEventParam1Special
           or currentActionOperation.param3
             and (currentActionOperation.notation == ':scaleoffset' and positionScaleOffsetParam1Special
             or isLineOp and LineParam1Special)
           or nil,
-          paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT)
+          paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT)
 
       createPopup(currentRow, 'param2Menu', param2Entries, currentRow.params[2].menuEntry, function(i, isSpecial)
           if not isSpecial then
@@ -3055,12 +3056,12 @@ local function windowFn()
             doActionUpdate()
           end
         end,
-        paramTypes[2] == tx.PARAM_TYPE_NEWMIDIEVENT
+        paramTypes[2] == gdefs.PARAM_TYPE_NEWMIDIEVENT
             and newMIDIEventParam2Special
           or isLineOp
             and LineParam2Special
           or nil,
-          isLineOp or paramTypes[1] == tx.PARAM_TYPE_NEWMIDIEVENT)
+          isLineOp or paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT)
 
       ImGui.PopID(ctx)
     end

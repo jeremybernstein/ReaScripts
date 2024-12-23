@@ -67,32 +67,29 @@ _G['isANote'] = isANote -- must be defined before TransformerExtra is required
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
 local te = require 'TransformerExtra'
+local gdefs = require 'TransformerGeneralDefs'
 local fdefs = require 'TransformerFindDefs'
 local adefs = require 'TransformerActionDefs'
 
+local ffuns = require 'TransformerFindFuns'
+local afuns = require 'TransformerActionFuns'
+
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
-
-local INVALID = -0xFFFFFFFF
-
-local NOTE_TYPE = 0
-local CC_TYPE = 1
-local SYXTEXT_TYPE = 2
-local OTHER_TYPE = 7
-
-local CC_CURVE_SQUARE = 0
--- local CC_CURVE_LINEAR = 1
--- local CC_CURVE_SLOW_START_END = 2
--- local CC_CURVE_FAST_START = 3
--- local CC_CURVE_FAST_END = 4
-local CC_CURVE_BEZIER = 5
 
 local parserError = ''
 local dirtyFind = false
 local wantsTab = {}
 
 local allEvents = {}
+function AllEvents()
+  return allEvents
+end
+
 local selectedEvents = {}
+function SelectedEvents()
+  return selectedEvents
+end
 
 local libPresetNotesBuffer = ''
 
@@ -117,46 +114,30 @@ ClearFindPostProcessingInfo()
 local currentActionScope = adefs.actionScopeFromNotation()
 local currentActionScopeFlags = adefs.actionScopeFlagsFromNotation()
 
-local DEFAULT_TIMEFORMAT_STRING = te.DEFAULT_TIMEFORMAT_STRING
-TransformerLib.DEFAULT_TIMEFORMAT_STRING = DEFAULT_TIMEFORMAT_STRING
-local DEFAULT_LENGTHFORMAT_STRING = te.DEFAULT_LENGTHFORMAT_STRING
-TransformerLib.DEFAULT_LENGTHFORMAT_STRING = DEFAULT_LENGTHFORMAT_STRING
-
 local scriptIgnoreSelectionInArrangeView = false
 
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
-local PARAM_TYPE_UNKNOWN = te.PARAM_TYPE_UNKNOWN
-local PARAM_TYPE_MENU = te.PARAM_TYPE_MENU
-local PARAM_TYPE_INTEDITOR = te.PARAM_TYPE_INTEDITOR
-local PARAM_TYPE_FLOATEDITOR = te.PARAM_TYPE_FLOATEDITOR
-local PARAM_TYPE_TIME = te.PARAM_TYPE_TIME
-local PARAM_TYPE_TIMEDUR = te.PARAM_TYPE_TIMEDUR
-local PARAM_TYPE_METRICGRID = te.PARAM_TYPE_METRICGRID
-local PARAM_TYPE_MUSICAL = te.PARAM_TYPE_MUSICAL
-local PARAM_TYPE_EVERYN = te.PARAM_TYPE_EVERYN
-local PARAM_TYPE_NEWMIDIEVENT = te.PARAM_TYPE_NEWMIDIEVENT
-local PARAM_TYPE_PARAM3 = te.PARAM_TYPE_PARAM3
-local PARAM_TYPE_EVENTSELECTOR = te.PARAM_TYPE_EVENTSELECTOR
-local PARAM_TYPE_HIDDEN = te.PARAM_TYPE_HIDDEN
+local gridInfo = { currentGrid = 0, currentSwing = 0. } -- swing is -1. to 1
+function GridInfo()
+  return gridInfo
+end
 
-local EDITOR_TYPE_PITCHBEND = te.EDITOR_TYPE_PITCHBEND
-local EDITOR_TYPE_PITCHBEND_BIPOLAR = te.EDITOR_TYPE_PITCHBEND_BIPOLAR
-local EDITOR_TYPE_PERCENT = te.EDITOR_TYPE_PERCENT
-local EDITOR_TYPE_PERCENT_BIPOLAR = te.EDITOR_TYPE_PERCENT_BIPOLAR
-local EDITOR_TYPE_7BIT = te.EDITOR_TYPE_7BIT
-local EDITOR_TYPE_7BIT_NOZERO = te.EDITOR_TYPE_7BIT_NOZERO
-local EDITOR_TYPE_7BIT_BIPOLAR = te.EDITOR_TYPE_7BIT_BIPOLAR
-local EDITOR_TYPE_14BIT = te.EDITOR_TYPE_14BIT
-local EDITOR_TYPE_14BIT_BIPOLAR = te.EDITOR_TYPE_14BIT_BIPOLAR
-local EDITOR_TYPE_BITFIELD = te.EDITOR_TYPE_BITFIELD
-
-local MG_GRID_STRAIGHT = 0
-local MG_GRID_DOTTED = 1
-local MG_GRID_TRIPLET = 2
-local MG_GRID_SWING = 3
-local MG_GRID_SWING_REAPER = 0x8
+-- global
+-------------------------------
+function GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local gridUnit
+  local mgMods = GetMetricGridModifiers(mgParams)
+  if subdiv >= 0 then
+    gridUnit = PPQ * (subdiv * 4)
+    if mgMods == gdefs.MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
+    elseif mgMods == gdefs.MG_GRID_TRIPLET then gridUnit = (gridUnit * 2 / 3) end
+  else
+    gridUnit = PPQ * GridInfo().currentGrid
+  end
+  return gridUnit
+end
 
 function GetValue(event, property, bipolar)
   if not property then return 0 end
@@ -166,374 +147,8 @@ function GetValue(event, property, bipolar)
   if is14bit and bipolar then oldval = (oldval - (1 << 13)) end
   return oldval
 end
-
-function TestEvent1(event, property, op, param1)
-  local val = GetValue(event, property)
-  local retval = false
-
-  if op == fdefs.OP_EQ then
-    retval = val == param1
-  elseif op == fdefs.OP_GT then
-    retval = val > param1
-  elseif op == fdefs.OP_GTE then
-    retval = val >= param1
-  elseif op == fdefs.OP_LT then
-    retval = val < param1
-  elseif op == fdefs.OP_LTE then
-    retval = val <= param1
-  elseif op == fdefs.OP_EQ_NOTE then
-    retval = (GetEventType(event) == NOTE_TYPE) and (val % 12 == param1)
-  end
-  return retval
-end
-
-function EventIsSimilar(event, property, val, param1, param2)
-  for _, e in ipairs(selectedEvents) do
-    if e.chanmsg == event.chanmsg then -- a little hacky here
-      local check = true
-      if e.chanmsg == 0xB0 -- special case for real CC msgs, must match the CC#, as well
-        and property ~= 'msg2'
-        and e.msg2 ~= event.msg2
-      then
-        check = false
-      end
-      if check then
-        local eval = GetValue(e, property)
-        if val >= (eval - param1) and val <= (eval + param2) then
-          return true
-        end
-      end
-    end
-  end
-  return false
-end
-
-function TestEvent2(event, property, op, param1, param2)
-  local val = GetValue(event, property)
-  local retval = false
-
-  if op == fdefs.OP_INRANGE then
-    retval = (val >= param1 and val <= param2)
-  elseif op == fdefs.OP_INRANGE_EXCL then
-    retval = (val >= param1 and val < param2)
-  elseif op == fdefs.OP_EQ_SLOP then
-    retval = (val >= (param1 - param2) and val <= (param1 + param2))
-  elseif op == fdefs.OP_SIMILAR then
-    if EventIsSimilar(event, property, val, param1, param2) then return true end
-  end
-  return retval
-end
-
-function FindEveryN(event, evnParams)
-  if not evnParams then return false end
-
-  if evnParams.isBitField then return FindEveryNPattern(event, evnParams) end
-
-  local param1 = evnParams.interval
-  if not param1 or param1 <= 0 then return false end
-
-  local count = event.count - 1
-  count = count - (evnParams.offset and evnParams.offset or 0)
-  return count % param1 == 0
-end
-
-function FindEveryNPattern(event, evnParams)
-  if not (evnParams and evnParams.isBitField and evnParams.pattern) then return false end
-
-  local patLen = #evnParams.pattern
-  if patLen <= 0 then return false end
-
-  local count = event.count - 1
-  count = count - (evnParams.offset and evnParams.offset or 0)
-  local index = (count % patLen) + 1
-
-  if evnParams.pattern:sub(index, index) == '1' then
-    return true
-  end
-  return false
-end
-
-function FindEveryNNote(event, evnParams, notenum)
-  if GetEventType(event) ~= NOTE_TYPE then return false end
-  if not evnParams then return false end
-
-  if evnParams.isBitField then return FindEveryNNotePattern(event, evnParams, notenum) end
-
-  local param1 = evnParams.interval
-  if not param1 or param1 <= 0 then return false end
-
-  local count = event.ncount - 1
-  count = count - (evnParams.offset and evnParams.offset or 0)
-
-  if count % param1 == 0 then
-    if notenum >= 12 and event.msg2 == notenum then return true
-    elseif notenum < 12 and event.msg2 % 12 == notenum then return true
-    end
-  end
-  return false
-end
-
-function FindEveryNNotePattern(event, evnParams, notenum)
-  if GetEventType(event) ~= NOTE_TYPE then return false end
-  if not (evnParams and evnParams.isBitField and evnParams.pattern) then return false end
-
-  local patLen = #evnParams.pattern
-  if patLen <= 0 then return false end
-
-  local param1 = evnParams.interval
-  if not param1 or param1 <= 0 then return false end
-
-  local count = event.ncount - 1
-  count = count - (evnParams.offset and evnParams.offset or 0)
-  local index = (count % patLen) + 1
-
-  if evnParams.pattern:sub(index, index) == '1' then
-    if notenum > 11 and event.msg2 == notenum then return true
-    elseif notenum < 11 and event.msg2 % 12 == notenum then return true
-    end
-  end
-  return false
-end
-
-local currentGrid = 0
-local currentSwing = 0. -- -1. to 1
-
-function GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local gridUnit
-  local mgMods = GetMetricGridModifiers(mgParams)
-  if subdiv >= 0 then
-    gridUnit = PPQ * (subdiv * 4)
-    if mgMods == MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
-    elseif mgMods == MG_GRID_TRIPLET then gridUnit = (gridUnit * 2 / 3) end
-  else
-    gridUnit = PPQ * currentGrid
-  end
-  return gridUnit
-end
-
-function EqualsMusicalLength(event, take, PPQ, mgParams)
-  if not take then return false end
-
-  if GetEventType(event) ~= NOTE_TYPE then return false end
-
-  local subdiv = mgParams.param1
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-
-  local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
-  local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
-  if postSlop == 0 then postSlop = 1 end
-
-  local ppqlen = event.endppqpos - event.ppqpos
-  return ppqlen >= gridUnit - preSlop and ppqlen <= gridUnit + postSlop
-end
-
-function SelectChordNote(event, chordNote)
-  local wantsHigh, wantsLow, isString
-  if type(chordNote) == 'string' then
-    wantsHigh = chordNote == '$high'
-    wantsLow = chordNote == '$low'
-    isString = true
-  end
-  if wantsHigh then if event.chordTop then return true else return false end
-  elseif wantsLow then if event.chordBottom then return true else return false end
-  elseif isString then return false -- safety
-  elseif event.chordIdx then
-    if chordNote < 0 and event.chordIdx == event.chordCount + (chordNote + 1) then return true
-    elseif event.chordIdx - 1 == chordNote then return true
-    end
-  end
-  return false
-end
-
-function SetMusicalLength(event, take, PPQ, mgParams)
-  if not take then return event.projlen end
-
-  if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
-
-  local subdiv = mgParams.param1
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-
-  local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
-  local newppqpos = oldppqpos + gridUnit
-  local newprojpos = r.MIDI_GetProjTimeFromPPQPos(take, newppqpos)
-  local newprojlen = newprojpos - event.projtime
-
-  event.projlen = newprojlen
-  return newprojlen
-end
-
-function QuantizeMusicalPosition(event, take, PPQ, mgParams)
-  if not take then return event.projtime end
-
-  local subdiv = mgParams.param1
-  local strength = tonumber(mgParams.param2)
-
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local useGridSwing = subdiv < 0 and currentSwing ~= 0
-
-  if gridUnit == 0 then return event.projtime end
-
-  local timeAdjust = GetTimeOffset()
-  local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, oldppqpos)
-
-  local ppqinmeasure = oldppqpos - som -- get the position from the start of the measure
-  local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
-
-  local mgMods, mgReaSwing = GetMetricGridModifiers(mgParams)
-
-  if useGridSwing or (mgMods == MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and currentSwing or (mgParams.swing * 0.01)
-    local half = gridUnit * 0.5
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit - half and localpos < gridUnit + half then
-      newppqpos = newppqpos + (gridUnit * 0.5 * scale)
-    end
-  elseif mgMods == MG_GRID_SWING then
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit then
-      local scale = ((mgParams.swing - 50) * 2) * 0.01 -- convert to -1. - 1. for scaling
-      newppqpos = newppqpos + (gridUnit * scale)
-    end
-  end
-
-  if strength and strength ~= 100 then
-    local distance = newppqpos - oldppqpos
-    local scaledDistance = distance * (strength / 100)
-    newppqpos = oldppqpos + scaledDistance
-  end
-  local newprojpos = r.MIDI_GetProjTimeFromPPQPos(take, newppqpos) + timeAdjust
-
-  event.projtime = newprojpos
-  return newprojpos
-end
-
-function QuantizeMusicalLength(event, take, PPQ, mgParams)
-  if not take then return event.projlen end
-
-  local subdiv = mgParams.param1
-  local strength = tonumber(mgParams.param2)
-
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-
-  if gridUnit == 0 then return event.projtime end
-
-  local timeAdjust = GetTimeOffset()
-  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-  local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
-  local ppqlen = endppqpos - ppqpos
-
-  local newppqlen = (gridUnit * math.floor((ppqlen / gridUnit) + 0.5))
-  if newppqlen == 0 then newppqlen = gridUnit end
-
-  if strength and strength ~= 100 then
-    local distance = newppqlen - ppqlen
-    local scaledDistance = distance * (strength / 100)
-    newppqlen = ppqlen + scaledDistance
-  end
-  local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
-
-  event.projlen = newprojlen
-  return newprojlen
-end
-
-function QuantizeMusicalEndPos(event, take, PPQ, mgParams)
-  if not take then return event.projlen end
-
-  local subdiv = mgParams.param1
-  local strength = tonumber(mgParams.param2)
-
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local useGridSwing = subdiv < 0 and currentSwing ~= 0
-
-  if gridUnit == 0 then return event.projtime end
-
-  local timeAdjust = GetTimeOffset()
-  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-  local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
-  local ppqlen = endppqpos - ppqpos
-
-  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, endppqpos)
-
-  local ppqinmeasure = endppqpos - som -- get the position from the start of the measure
-
-  local quant = (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
-  local newendppqpos = som + quant
-  local newppqlen = newendppqpos - ppqpos
-  if newppqlen < ppqlen * 0.5 then
-    newendppqpos = som + quant + gridUnit
-    newppqlen = newendppqpos - ppqpos
-  end
-
-  local mgMods, mgReaSwing = GetMetricGridModifiers(mgParams)
-
-  if useGridSwing or (mgMods == MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and currentSwing or (mgParams.swing * 0.01)
-    local half = gridUnit * 0.5
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit - half and localpos < gridUnit + half then
-      newendppqpos = newendppqpos + (gridUnit * 0.5 * scale)
-      newppqlen = newendppqpos - ppqpos
-    end
-  elseif mgMods == MG_GRID_SWING then
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit then
-      local scale = ((mgParams.swing - 50) * 2) * 0.01 -- convert to -1. - 1. for scaling
-      newendppqpos = newendppqpos + (gridUnit * scale)
-      newppqlen = newendppqpos - ppqpos
-    end
-  end
-
-  if strength and strength ~= 100 then
-    local distance = newppqlen - ppqlen
-    local scaledDistance = distance * (strength / 100)
-    newppqlen = ppqlen + scaledDistance
-  end
-  local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
-
-  event.projlen = newprojlen
-  return newprojlen
-end
-
-function CursorPosition(event, property, cursorPosProj, which)
-  local time = event[property]
-
-  if which == fdefs.CURSOR_LT then -- before
-    return time < cursorPosProj
-  elseif which == fdefs.CURSOR_GT then -- after
-    return time > cursorPosProj
-  elseif which == fdefs.CURSOR_AT then -- at
-    return time == cursorPosProj
-  elseif which == fdefs.CURSOR_LTE then -- before/at
-    return time <= cursorPosProj
-  elseif which == fdefs.CURSOR_GTE then -- after/at
-    return time >= cursorPosProj
-  elseif which == fdefs.CURSOR_UNDER then
-    if GetEventType(event) == NOTE_TYPE then
-      local endtime = time + event.projlen
-      return cursorPosProj >= time and cursorPosProj < endtime
-    else
-      return time == cursorPosProj
-    end
-  end
-  return false
-end
-
-function UnderEditCursor(event, take, PPQ, cursorPosProj, param1, param2)
-  local gridUnit = GetGridUnitFromSubdiv(param1, PPQ)
-  local PPQPercent = gridUnit + (gridUnit * (param2 / 100))
-  local cursorPPQPos = r.MIDI_GetPPQPosFromProjTime(take, cursorPosProj)
-  local minRange = cursorPPQPos - PPQPercent
-  local maxRange = cursorPPQPos + PPQPercent
-
-  local time = event.ppqpos
-  if time >= minRange and time < maxRange then return true end
-  if GetEventType(event) == NOTE_TYPE then
-    local endtime = event.endppqpos
-    if time <= minRange and endtime > minRange then return true end
-  end
-  return false
-end
+-- global
+-------------------------------
 
 function GetTimeSelectionStart()
   local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
@@ -545,25 +160,11 @@ function GetTimeSelectionEnd()
   return ts_end + GetTimeOffset()
 end
 
-function CCHasCurve(take, event, ctype)
-  if event.chanmsg < 0xA0 or event.chanmsg >= 0xF0 then return false end
-  local rv, curveType = mu.MIDI_GetCCShape(take, event.idx)
-  return rv and curveType == ctype
-end
-
-function CCSetCurve(take, event, ctype, bzext)
-  if event.chanmsg < 0xA0 or event.chanmsg >= 0xF0 then return false end
-  ctype = ctype < CC_CURVE_SQUARE and CC_CURVE_SQUARE or ctype > CC_CURVE_BEZIER and CC_CURVE_BEZIER or ctype
-  event.setcurve = ctype
-  event.setcurveext = ctype == CC_CURVE_BEZIER and bzext or 0
-  return ctype
-end
-
 function ChanMsgToType(chanmsg)
-  if chanmsg == 0x90 then return NOTE_TYPE
-  elseif chanmsg == 0xF0 or chanmsg == 0x100 then return SYXTEXT_TYPE
-  elseif chanmsg >= 0xA0 and chanmsg <= 0xEF then return CC_TYPE
-  else return OTHER_TYPE
+  if chanmsg == 0x90 then return gdefs.NOTE_TYPE
+  elseif chanmsg == 0xF0 or chanmsg == 0x100 then return gdefs.SYXTEXT_TYPE
+  elseif chanmsg >= 0xA0 and chanmsg <= 0xEF then return gdefs.CC_TYPE
+  else return gdefs.OTHER_TYPE
   end
 end
 
@@ -572,13 +173,13 @@ function GetEventType(event)
 end
 
 function GetSubtypeValue(event)
-  if GetEventType(event) == SYXTEXT_TYPE then return 0
+  if GetEventType(event) == gdefs.SYXTEXT_TYPE then return 0
   else return event.msg2 / 127
   end
 end
 
 function GetSubtypeValueName(event)
-  if GetEventType(event) == SYXTEXT_TYPE then return 'devnull'
+  if GetEventType(event) == gdefs.SYXTEXT_TYPE then return 'devnull'
   else return 'msg2'
   end
 end
@@ -596,14 +197,14 @@ end
 
 function GetMainValue(event)
   if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 0
-  elseif GetEventType(event) == SYXTEXT_TYPE then return 0
+  elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then return 0
   else return event.msg3 / 127
   end
 end
 
 function GetMainValueName(event)
   if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'msg2'
-  elseif GetEventType(event) == SYXTEXT_TYPE then return 'devnull'
+  elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then return 'devnull'
   else return 'msg3'
   end
 end
@@ -640,433 +241,17 @@ function GetTimeOffset(correctMeasures)
   return offset
 end
 
-function OnGrid(event, property, take, PPQ)
-  if not take then return false end
-
-  local grid, swing = currentGrid, currentSwing -- 1.0 is QN, 1.5 dotted, etc.
-  local timeAdjust = GetTimeOffset()
-  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-  local measppq = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
-  local gridUnit = grid * PPQ
-  local subMeas = math.floor((gridUnit * 2) + 0.5)
-  local swingUnit = swing and math.floor((gridUnit + (swing * gridUnit * 0.5)) + 0.5) or nil
-
-  local testppq = (ppqpos - measppq) % subMeas
-  if testppq == 0 or (swingUnit and testppq % swingUnit == 0) then
-    return true
-  end
-  return false
-end
-
-function InBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
-  if not take then return false end
-
-  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + GetTimeOffset()
-  local _, _, cml, _, cdenom = r.TimeMap2_timeToBeats(0, tpos)
-  local beatPPQ = (4 / cdenom) * PPQ
-  local measurePPQ = beatPPQ * cml
-
-  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
-  local barpos = (ppqpos - som) / measurePPQ
-
-  return barpos >= (rangeStart / 100) and barpos <= (rangeEnd / 100)
-end
-
-function InRazorArea(event, take)
-  if not take then return false end
-
-  local track = r.GetMediaItemTake_Track(take)
-  if not track then return false end
-
-  local item = r.GetMediaItemTake_Item(take)
-  if not item then return false end
-
-  local freemode = r.GetMediaTrackInfo_Value(track, 'I_FREEMODE')
-  local itemTop = freemode ~= 0 and r.GetMediaItemInfo_Value(item, 'F_FREEMODE_Y') or nil
-  local itemBottom = freemode ~= 0 and (itemTop + r.GetMediaItemInfo_Value(item, 'F_FREEMODE_H')) or nil
-
-  local timeAdjust = GetTimeOffset()
-
-  local ret, area = r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS_EXT', '', false)
-  if area ~= '' then
-    local razors = {}
-    for word in string.gmatch(area, '([^,]+)') do
-      local terms = {}
-      table.insert(razors, terms)
-      for str in string.gmatch(word, '%S+') do
-        table.insert(terms, str)
-      end
-    end
-
-    for _, v in ipairs(razors) do
-      local ct = #v
-      local areaStart, areaEnd, areaTop, areaBottom
-      if ct >= 3 then
-        areaStart = tonumber(v[1]) + timeAdjust
-        areaEnd = tonumber(v[2]) + timeAdjust
-        if ct >= 5 and freemode ~= 0 then
-          areaTop = tonumber(v[4])
-          areaBottom = tonumber(v[5])
-        end
-        if event.projtime >= areaStart and event.projtime < areaEnd then
-          if freemode ~= 0 and areaTop and areaBottom then
-            if itemTop >= areaTop and itemBottom <= areaBottom then
-              return true
-            end
-          else
-            return true
-          end
-        end
-      end
-    end
-  end
-  return false
-end
-
-function IsNearEvent(event, take, PPQ, evSelParams, param2)
-  local scale = tonumber(evSelParams.scaleStr)
-  local gridUnit = GetGridUnitFromSubdiv(param2, PPQ)
-  local PPQPercent = gridUnit + (gridUnit * (scale / 100))
-  local minRange = event.ppqpos - PPQPercent
-  local maxRange = event.ppqpos + PPQPercent
-
-  for k, ev in ipairs(allEvents) do
-    local sameEvent = false
-    local ppqMatch = false
-    local typeMatch = false
-    local selMatch = false
-    local muteMatch = false
-
-    if ev.chanmsg == event.chanmsg
-      and ev.idx == event.idx
-    then
-      sameEvent = true
-    end
-
-    if not sameEvent then
-      if ev.ppqpos >= minRange
-        and ev.ppqpos < maxRange
-      then
-        ppqMatch = true -- can we bail early once we're outside of a certain range?
-      end
-    end
-
-    if ppqMatch then
-      if evSelParams.chanmsg == 0x00
-        or ev.chanmsg == evSelParams.chanmsg
-      then
-        typeMatch = true
-      end
-    end
-
-    if typeMatch then
-      if evSelParams.selected == -1
-        or evSelParams.selected == 0 and not ev.selected
-        or evSelParams.selected == 1 and ev.selected
-      then
-        selMatch = true
-      end
-    end
-
-    if selMatch then
-      if evSelParams.muted == -1
-        or evSelParams.muted == 0 and not ev.muted
-        or evSelParams.muted == 1 and ev.muted
-      then
-        muteMatch = true
-      end
-    end
-
-    if muteMatch then
-      if not evSelParams.useval1
-        or ev.msg2 == evSelParams.msg2
-      then
-        return true
-      end
-    end
-  end
-  return false
-end
-
-function OnMetricGrid(take, PPQ, ppqpos, mgParams)
-  if not take then return false end
-
-  local subdiv = mgParams.param1
-  local gridStr = mgParams.param2
-
-  local gridLen = #gridStr
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-
-  local cycleLength = gridUnit * gridLen
-  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
-  local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
-  local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
-  if postSlop == 0 then postSlop = 1 end
-
-  -- handle cycle lengths > measure
-  if mgParams.wantsBarRestart then
-    if not SOM then SOM = som end
-    if som - SOM > cycleLength then
-      SOM = som
-      CACHED_METRIC = nil
-      CACHED_WRAPPED = nil
-    end
-    ppqpos = ppqpos - SOM
-  end
-
-  local wrapped = math.floor(ppqpos / cycleLength)
-  if wrapped ~= CACHED_WRAPPED then
-    CACHED_WRAPPED = wrapped
-    CACHED_METRIC = nil
-  end
-  local modPos = math.fmod(ppqpos, cycleLength)
-
-  -- CACHED_METRIC is used to avoid iterating from the beginning each time
-  -- although it assumes a single metric grid -- how to solve?
-
-  local iter = 0
-  while iter < 2 do
-    local doRestart = false
-    for i = (CACHED_METRIC and iter == 0) and CACHED_METRIC or 1, gridLen do
-      local c = gridStr:sub(i, i)
-      local trueStartRange = (gridUnit * (i - 1))
-      local startRange = trueStartRange - preSlop
-      local endRange = trueStartRange + postSlop
-      local mod2 = modPos
-
-      if modPos > cycleLength - preSlop then
-        mod2 = modPos - cycleLength
-        doRestart = true
-      end
-
-      if mod2 >= startRange and mod2 <= endRange then
-        CACHED_METRIC = i
-        return c ~= '0' and true or false
-      end
-    end
-    iter = iter + 1
-    if not doRestart then break end
-  end
-  return false
-end
-
-function InScale(event, scale, root)
-  if GetEventType(event) ~= NOTE_TYPE then return false end
-
-  local note = event.msg2 % 12
-  note = note - root
-  if note < 0 then note = note + 12 end
-  for _, v in ipairs(scale) do
-    if note == v then return true end
-  end
-  return false
-end
-
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
-function SetValue(event, property, newval, bipolar)
-  if not property then return newval end
-
-  if property == 'chanmsg' then
-    local oldtype = GetEventType(event)
-    local newtype = ChanMsgToType(newval)
-    if oldtype ~= newtype then
-      if event.orig_type then
-        if newval == event.orig_type then event.orig_type = nil end -- if multiple steps change and then unchange the type (edge case)
-      else
-        event.orig_type = oldtype -- will be compared against chanmsg before writing and Delete+New as necessary
-      end
-    end
-  end
-
-  local is14bit = false
-  if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
-  if is14bit then
-    if bipolar then newval = newval + (1 << 13) end
-    newval = newval < 0 and 0 or newval > ((1 << 14) - 1) and ((1 << 14) - 1) or newval
-    newval = math.floor(newval + 0.5)
-    event.msg2 = newval & 0x7F
-    event.msg3 = (newval >> 7) & 0x7F
-  else
-    event[property] = newval
-  end
-  return newval
+local addLengthInfo = { addLengthFirstEventOffset = nil, addLengthFirstEventOffset_Take = nil, addLengthFirstEventStartTime = nil }
+function AddLengthInfo()
+  return addLengthInfo
 end
 
-function OperateEvent1(event, property, op, param1)
-  local bipolar = (op == adefs.OP_MULT or op == adefs.OP_DIV) and true or false
-  local oldval = GetValue(event, property, bipolar)
-  local newval = oldval
-
-  if op == adefs.OP_ADD then
-    newval = oldval + param1
-  elseif op == adefs.OP_SUB then
-    newval = oldval - param1
-  elseif op == adefs.OP_MULT then
-    newval = oldval * param1
-  elseif op == adefs.OP_DIV then
-    newval = param1 ~= 0 and (oldval / param1) or 0
-  elseif op == adefs.OP_FIXED then
-    newval = param1
-  end
-  return SetValue(event, property, newval, bipolar)
-end
-
-function OperateEvent2(event, property, op, param1, param2)
-  local oldval = GetValue(event, property)
-  local newval = oldval
-  if op == adefs.OP_SCALEOFF then
-    newval = (oldval * param1) + param2
-  end
-  return SetValue(event, property, newval)
-end
-
--- TODO there might be multiple lines, each of which can only be processed ONCE
--- how to do this? could filter these lines out and then run the nme events separately from the rows
-function CreateNewMIDIEvent()
-end
-
-function RandomValue(event, property, min, max, single)
-  local oldval = GetValue(event, property)
-  if event.firstlastevent then return oldval end
-
-  local newval = oldval
-
-  local rnd = single and single or math.random()
-
-  newval = (rnd * (max - min)) + min
-  if math.type(min) == 'integer' and math.type(max) == 'integer' then newval = math.floor(newval) end
-  return SetValue(event, property, newval)
-end
-
-function ClampValue(event, property, low, high)
-  local oldval = GetValue(event, property)
-  local newval = oldval < low and low or oldval > high and high or oldval
-  return SetValue(event, property, newval)
-end
-
-function QuantizeTo(event, property, quant)
-  local oldval = GetValue(event, property)
-  if quant == 0 then return oldval end
-  local newval = quant * math.floor((oldval / quant) + 0.5)
-  return SetValue(event, property, newval)
-end
-
-function Mirror(event, property, mirrorVal)
-  local oldval = GetValue(event, property)
-  local newval = mirrorVal - (oldval - mirrorVal)
-  return SetValue(event, property, newval)
-end
-
-function LinearChangeOverSelection(event, property, projTime, p1, type, p2, mult, context)
-  local firstTime = context.firstTime
-  local lastTime = context.lastTime
-
-  if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
-    local linearPos = (projTime - firstTime) / (lastTime - firstTime)
-    local newval = projTime
-    local scalePos = linearPos
-    if type == 0 then
-      -- done
-    elseif type == 1 then -- exp
-      scalePos = linearPos ^ mult
-    elseif type == 2 then -- log
-      local e3 = 2.718281828459045 ^ mult
-      local ePos = (linearPos * (e3 - 1)) + 1 -- scale from 1 - e
-      scalePos = math.log(ePos, e3)
-    elseif type == 3 then -- s
-      mult = mult <= -1 and -0.999999 or mult >= 1 and 0.999999 or mult
-      scalePos = ((mult - 1) * ((2 * linearPos) - 1)) / (2 * ((4 * mult) * math.abs(linearPos - 0.5) - mult - 1)) + 0.5
-    end
-    newval = ((p2 - p1) * scalePos) + p1
-    return SetValue(event, property, newval)
-  end
-  return SetValue(event, property, 0)
-end
-
-local addLengthFirstEventOffset
-local addLengthFirstEventOffset_Take
-local addLengthFirstEventStartTime
-
-function AddLength(event, property, mode, context)
-  if GetEventType(event) ~= NOTE_TYPE then return event.projtime end
-
-  if mode == 3 then
-    local lastNoteEnd = context.lastNoteEnd
-    if not addLengthFirstEventStartTime then addLengthFirstEventStartTime = event.projtime end
-    if not lastNoteEnd then lastNoteEnd = 0 end
-    event.projtime = event.projtime + lastNoteEnd - addLengthFirstEventStartTime
-    return event.projtime + lastNoteEnd
-  elseif mode == 2 then
-    event.projtime = event.projtime + event.projlen
-    return event.projtime + event.projlen
-  elseif mode == 1 then
-    if not addLengthFirstEventOffset_Take then addLengthFirstEventOffset_Take = event.projlen end
-    event.projtime = event.projtime + addLengthFirstEventOffset_Take
-    return event.projtime + addLengthFirstEventOffset_Take
-  end
-  if not addLengthFirstEventOffset then addLengthFirstEventOffset = event.projlen end
-  event.projtime = event.projtime + addLengthFirstEventOffset
-  return event.projtime
-end
-
-local moveCursorFirstEventPosition
-local moveCursorFirstEventPosition_Take
-
-function MoveToCursor(event, property, mode)
-  if mode == 1 then -- independent
-    if not moveCursorFirstEventPosition_Take then moveCursorFirstEventPosition_Take = event.projtime end
-    event.projtime = (event.projtime - moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + GetTimeOffset()
-    return event.projtime
-  end
-  if not moveCursorFirstEventPosition then moveCursorFirstEventPosition = event.projtime end
-  event.projtime = (event.projtime - moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + GetTimeOffset()
-  return event.projtime
-end
-
--- need to think about this
--- function MoveNoteOffToCursor(event, mode)
---   if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
-
---   if mode == 1 then -- independent
---     if not moveCursorFirstEventLength_Take then moveCursorFirstEventLength_Take = event.projtime end
---     return (event.projtime - moveCursorFirstEventLength_Take) + r.GetCursorPositionEx(0) + GetTimeOffset()
---   else
---     if not moveCursorFirstEventLength then moveCursorFirstEventLength = event.projtime end
---     return (event.projtime - moveCursorFirstEventLength) + r.GetCursorPositionEx(0) + GetTimeOffset()
---   end
--- end
-
-function MoveLengthToCursor(event)
-  if GetEventType(event) ~= NOTE_TYPE then return event.projlen end
-
-  local cursorPos = r.GetCursorPositionEx(0) + GetTimeOffset()
-
-  if event.projtime >= cursorPos then return event.projlen end
-
-  event.projlen = cursorPos - event.projtime
-  return event.projlen
-end
-
-function MoveToItemPos(event, property, way, offset, context)
-  local take = context.take
-  if not take then return event[property] end
-
-  if GetEventType(event) ~= NOTE_TYPE and way == 2 then return event[property] end
-  local item = r.GetMediaItemTake_Item(take)
-  if item then
-    if way == 0 then
-      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
-      local offsetTime = offset and LengthFormatToSeconds(offset, targetPos, context) or 0
-      event[property] = targetPos + offsetTime
-    elseif way == 1 or way == 2 then
-      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset() + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
-      local offsetTime = offset and LengthFormatToSeconds(offset, targetPos, context) or 0
-      event[property] = way == 1 and (targetPos + offsetTime) or ((targetPos - event.projtime) + offsetTime)
-    end
-  end
-  return event[property]
+local moveCursorInfo = { moveCursorFirstEventPosition = nil, moveCursorFirstEventPosition_Take = nil }
+function MoveCursorInfo()
+  return moveCursorInfo
 end
 
 -----------------------------------------------------------------------------
@@ -1256,7 +441,7 @@ end
 
 function LengthFormatRebuf(buf)
   local format = DetermineTimeFormatStringType(buf)
-  if format == TIME_FORMAT_UNKNOWN then return DEFAULT_LENGTHFORMAT_STRING end
+  if format == TIME_FORMAT_UNKNOWN then return gdefs.DEFAULT_LENGTHFORMAT_STRING end
 
   local isneg = string.match(buf, '^%s*%-')
 
@@ -1338,12 +523,12 @@ function LengthFormatRebuf(buf)
     hours = TimeFormatClampPad(hours, 0, nil, '%d', hoursVal)
     return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
-  return DEFAULT_LENGTHFORMAT_STRING
+  return gdefs.DEFAULT_LENGTHFORMAT_STRING
 end
 
 function TimeFormatRebuf(buf)
   local format = DetermineTimeFormatStringType(buf)
-  if format == TIME_FORMAT_UNKNOWN then return DEFAULT_TIMEFORMAT_STRING end
+  if format == TIME_FORMAT_UNKNOWN then return gdefs.DEFAULT_TIMEFORMAT_STRING end
 
   local isneg = string.match(buf, '^%s*%-')
 
@@ -1425,7 +610,7 @@ function TimeFormatRebuf(buf)
     hours = TimeFormatClampPad(hours, 0, nil, '%d', hoursVal)
     return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
-  return DEFAULT_TIMEFORMAT_STRING
+  return gdefs.DEFAULT_TIMEFORMAT_STRING
 end
 
 function FindTabsFromTarget(row)
@@ -1516,13 +701,13 @@ function GenerateMetricGridNotation(row)
   if not row.mg then return '' end
   local mgStr = '|'
   local mgMods, mgReaSwing = GetMetricGridModifiers(row.mg)
-  mgStr = mgStr .. (mgMods == MG_GRID_SWING and (mgReaSwing and 'r' or 'm')
-                    or mgMods == MG_GRID_TRIPLET and 't'
-                    or mgMods == MG_GRID_DOTTED and 'd'
+  mgStr = mgStr .. (mgMods == gdefs.MG_GRID_SWING and (mgReaSwing and 'r' or 'm')
+                    or mgMods == gdefs.MG_GRID_TRIPLET and 't'
+                    or mgMods == gdefs.MG_GRID_DOTTED and 'd'
                     or '-')
   mgStr = mgStr .. (row.mg.wantsBarRestart and 'b' or '-')
   mgStr = mgStr .. string.format('|%0.2f|%0.2f', row.mg.preSlopPercent, row.mg.postSlopPercent)
-  if mgMods == MG_GRID_SWING then
+  if mgMods == gdefs.MG_GRID_SWING then
     mgStr = mgStr .. '|sw(' .. string.format('%0.2f', row.mg.swing) .. ')'
   end
   return mgStr
@@ -1530,11 +715,11 @@ end
 
 function SetMetricGridModifiers(mg, mgMods, mgReaSwing)
   local mods = mg.modifiers & 0x7
-  local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+  local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
   if mg then
     mods = mgMods and (mgMods & 0x7) or mods
     if mgReaSwing ~= nil then reaperSwing = mgReaSwing end
-    mg.modifiers = mods | (reaperSwing and MG_GRID_SWING_REAPER or 0)
+    mg.modifiers = mods | (reaperSwing and gdefs.MG_GRID_SWING_REAPER or 0)
   end
   return mods, reaperSwing
 end
@@ -1542,10 +727,10 @@ end
 function GetMetricGridModifiers(mg)
   if mg then
     local mods = mg.modifiers & 0x7
-    local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+    local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
     return mods, reaperSwing
   end
-  return MG_GRID_STRAIGHT, false
+  return gdefs.MG_GRID_STRAIGHT, false
 end
 
 function ParseMetricGridNotation(str)
@@ -1557,16 +742,16 @@ function ParseMetricGridNotation(str)
   end
   if fs and fe then
     mg.modifiers =
-      mod == 'r' and (MG_GRID_SWING | MG_GRID_SWING_REAPER) -- reaper
-      or mod == 'm' and MG_GRID_SWING -- mpc
-      or mod == 't' and MG_GRID_TRIPLET
-      or mod == 'd' and MG_GRID_DOTTED
-      or MG_GRID_STRAIGHT
+      mod == 'r' and (gdefs.MG_GRID_SWING | gdefs.MG_GRID_SWING_REAPER) -- reaper
+      or mod == 'm' and gdefs.MG_GRID_SWING -- mpc
+      or mod == 't' and gdefs.MG_GRID_TRIPLET
+      or mod == 'd' and gdefs.MG_GRID_DOTTED
+      or gdefs.MG_GRID_STRAIGHT
     mg.wantsBarRestart = rst == 'b' and true or false
     mg.preSlopPercent = tonumber(pre)
     mg.postSlopPercent = tonumber(post)
 
-    local reaperSwing = mg.modifiers & MG_GRID_SWING_REAPER ~= 0
+    local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
     mg.swing = swing and tonumber(swing)
     if not mg.swing then mg.swing = reaperSwing and 0 or 50 end
     if reaperSwing then
@@ -1712,7 +897,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
       nme.muted = false
       nme.msg2 = 64
       nme.msg3 = 64
-      nme.posText = DEFAULT_TIMEFORMAT_STRING
+      nme.posText = gdefs.DEFAULT_TIMEFORMAT_STRING
       nme.durText = '0.1.00'
       nme.relvel = 0
       nme.posmod = adefs.NEWEVENT_POSITION_ATCURSOR
@@ -1737,29 +922,29 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
 end
 
 function GetParamType(src)
-  return not src and PARAM_TYPE_UNKNOWN
-    or src.menu and PARAM_TYPE_MENU
-    or src.inteditor and PARAM_TYPE_INTEDITOR
-    or src.floateditor and PARAM_TYPE_FLOATEDITOR
-    or src.time and PARAM_TYPE_TIME
-    or src.timedur and PARAM_TYPE_TIMEDUR
-    or src.metricgrid and PARAM_TYPE_METRICGRID
-    or src.musical and PARAM_TYPE_MUSICAL
-    or src.everyn and PARAM_TYPE_EVERYN
-    or src.newevent and PARAM_TYPE_NEWMIDIEVENT
-    or src.param3 and PARAM_TYPE_PARAM3
-    or src.eventselector and PARAM_TYPE_EVENTSELECTOR
-    or src.hidden and PARAM_TYPE_HIDDEN
-    or PARAM_TYPE_UNKNOWN
+  return not src and gdefs.PARAM_TYPE_UNKNOWN
+    or src.menu and gdefs.PARAM_TYPE_MENU
+    or src.inteditor and gdefs.PARAM_TYPE_INTEDITOR
+    or src.floateditor and gdefs.PARAM_TYPE_FLOATEDITOR
+    or src.time and gdefs.PARAM_TYPE_TIME
+    or src.timedur and gdefs.PARAM_TYPE_TIMEDUR
+    or src.metricgrid and gdefs.PARAM_TYPE_METRICGRID
+    or src.musical and gdefs.PARAM_TYPE_MUSICAL
+    or src.everyn and gdefs.PARAM_TYPE_EVERYN
+    or src.newevent and gdefs.PARAM_TYPE_NEWMIDIEVENT
+    or src.param3 and gdefs.PARAM_TYPE_PARAM3
+    or src.eventselector and gdefs.PARAM_TYPE_EVENTSELECTOR
+    or src.hidden and gdefs.PARAM_TYPE_HIDDEN
+    or gdefs.PARAM_TYPE_UNKNOWN
 end
 
 function GetParamTypesForRow(row, target, condOp)
   local paramType = GetParamType(condOp)
-  if paramType == PARAM_TYPE_UNKNOWN then
+  if paramType == gdefs.PARAM_TYPE_UNKNOWN then
     paramType = GetParamType(target)
   end
-  if paramType == PARAM_TYPE_UNKNOWN then
-    paramType = PARAM_TYPE_INTEDITOR
+  if paramType == gdefs.PARAM_TYPE_UNKNOWN then
+    paramType = gdefs.PARAM_TYPE_INTEDITOR
   end
   local split = { paramType, paramType }
   if row.params[3] then table.insert(split, paramType) end
@@ -1768,9 +953,9 @@ function GetParamTypesForRow(row, target, condOp)
     local split1 = GetParamType(condOp.split[1])
     local split2 = GetParamType(condOp.split[2])
     local split3 = row.params[3] and GetParamType(condOp.split[3]) or nil
-    if split1 ~= PARAM_TYPE_UNKNOWN then split[1] = split1 end
-    if split2 ~= PARAM_TYPE_UNKNOWN then split[2] = split2 end
-    if split3 and split3 ~= PARAM_TYPE_UNKNOWN then split[3] = split3 end
+    if split1 ~= gdefs.PARAM_TYPE_UNKNOWN then split[1] = split1 end
+    if split2 ~= gdefs.PARAM_TYPE_UNKNOWN then split[2] = split2 end
+    if split3 and split3 ~= gdefs.PARAM_TYPE_UNKNOWN then split[3] = split3 end
   end
   return split
 end
@@ -1778,7 +963,7 @@ end
 function Check14Bit(paramType)
   local has14bit = false
   local hasOther = false
-  if paramType == PARAM_TYPE_INTEDITOR then
+  if paramType == gdefs.PARAM_TYPE_INTEDITOR then
     local hasTable = GetHasTable()
     has14bit = hasTable[0xE0] and true or false
     hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
@@ -1793,7 +978,7 @@ end
 function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
   local paramType
   local paramTypes = GetParamTypesForRow(row, target, condOp)
-  paramType = paramTypes[index] or PARAM_TYPE_UNKNOWN
+  paramType = paramTypes[index] or gdefs.PARAM_TYPE_UNKNOWN
 
   local percent = string.match(paramStr, 'percent<(.-)>')
   if percent then
@@ -1809,9 +994,9 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
 
   paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
 
-  local isEveryN = paramType == PARAM_TYPE_EVERYN
-  local isNewEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
-  local isEventSelector = paramType == PARAM_TYPE_EVENTSELECTOR
+  local isEveryN = paramType == gdefs.PARAM_TYPE_EVERYN
+  local isNewEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
+  local isEventSelector = paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
 
   if not (isEveryN or isNewEvent or isEventSelector) and #paramTab ~= 0 then
     for kk, vv in ipairs(paramTab) do
@@ -1832,7 +1017,7 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
       end
       if pa and pb then
         row.params[index].menuEntry = kk
-        if paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL then
+        if paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL then
           row.mg = ParseMetricGridNotation(paramStr:sub(pb))
           row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[index].showswing)
         end
@@ -1847,7 +1032,7 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
     row.evsel = ParseEventSelectorNotation(paramStr, row, paramTab)
   elseif condOp.bitfield or (condOp.split and condOp.split[index] and condOp.split[index].bitfield) then
     row.params[index].textEditorStr = paramStr
-  elseif paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR then
+  elseif paramType == gdefs.PARAM_TYPE_INTEDITOR or paramType == gdefs.PARAM_TYPE_FLOATEDITOR then
     local range = condOp.range and condOp.range or target.range
     local has14bit, hasOther = Check14Bit(paramType)
     if has14bit then
@@ -1856,16 +1041,16 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
       end
     end
     row.params[index].textEditorStr = EnsureNumString(paramStr, range)
-  elseif paramType == PARAM_TYPE_TIME then
+  elseif paramType == gdefs.PARAM_TYPE_TIME then
     row.params[index].timeFormatStr = TimeFormatRebuf(paramStr)
-  elseif paramType == PARAM_TYPE_TIMEDUR then
+  elseif paramType == gdefs.PARAM_TYPE_TIMEDUR then
     row.params[index].timeFormatStr = LengthFormatRebuf(paramStr)
-  elseif paramType == PARAM_TYPE_METRICGRID
-    or paramType == PARAM_TYPE_MUSICAL
-    or paramType == PARAM_TYPE_EVERYN
-    or paramType == PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
-    or paramType == PARAM_TYPE_PARAM3
-    or paramType == PARAM_TYPE_HIDDEN
+  elseif paramType == gdefs.PARAM_TYPE_METRICGRID
+    or paramType == gdefs.PARAM_TYPE_MUSICAL
+    or paramType == gdefs.PARAM_TYPE_EVERYN
+    or paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
+    or paramType == gdefs.PARAM_TYPE_PARAM3
+    or paramType == gdefs.PARAM_TYPE_HIDDEN
   then
     row.params[index].textEditorStr = paramStr
   end
@@ -2062,55 +1247,26 @@ function LengthFormatToSeconds(buf, baseTime, context)
   return TimeFormatToSeconds(buf, baseTime, context, true)
 end
 
-function AddDuration(event, property, duration, baseTime, context)
-  local adjustedTime = LengthFormatToSeconds(duration, baseTime, context)
-  event[property] = baseTime + adjustedTime
-  return event[property]
-end
-
-function SubtractDuration(event, property, duration, baseTime, context)
-  local adjustedTime = LengthFormatToSeconds(duration, baseTime, context)
-  event[property] = baseTime - adjustedTime
-  return event[property]
-end
-
--- uses a timeval for the offset so that we can get an offset relative to the new position
-function MultiplyPosition(event, property, param, relative, offset, context)
-  local take = context.take
-  if not take then return event[property] end
-
-  local item = r.GetMediaItemTake_Item(take)
-  if not item then return event[property] end
-
-  local scaledPosition
-  if relative == 1 then -- first event
-    local firstTime = context.firstTime
-    local distanceFromStart = event.projtime - firstTime
-    scaledPosition = firstTime + (distanceFromStart * param)
-  else
-    local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset() -- item
-    local distanceFromStart = event.projtime - itemStartPos
-    scaledPosition = itemStartPos + (distanceFromStart * param)
-  end
-  scaledPosition = scaledPosition + (offset and LengthFormatToSeconds(offset, scaledPosition, context) or 0)
-
-  event[property] = scaledPosition
-  return scaledPosition
-end
-
 local context = {}
 context.r = r
 context.math = math
 
-context.TestEvent1 = TestEvent1
-context.TestEvent2 = TestEvent2
-context.FindEveryN = FindEveryN
-context.FindEveryNPattern = FindEveryNPattern
-context.FindEveryNNote = FindEveryNNote
-context.EqualsMusicalLength = EqualsMusicalLength
-context.CursorPosition = CursorPosition
-context.UnderEditCursor = UnderEditCursor
-context.SelectChordNote = SelectChordNote
+context.TestEvent1 = ffuns.testEvent1
+context.TestEvent2 = ffuns.testEvent2
+context.FindEveryN = ffuns.findEveryN
+context.FindEveryNPattern = ffuns.findEveryNPattern
+context.FindEveryNNote = ffuns.findEveryNNote
+context.EqualsMusicalLength = ffuns.equalsMusicalLength
+context.CursorPosition = ffuns.cursorPosition
+context.UnderEditCursor = ffuns.underEditCursor
+context.SelectChordNote = ffuns.selectChordNote
+context.OnMetricGrid = ffuns.onMetricGrid
+context.OnGrid = ffuns.onGrid
+context.InBarRange = ffuns.inBarRange
+context.InRazorArea = ffuns.inRazorArea
+context.IsNearEvent = ffuns.isNearEvent
+context.InScale = ffuns.inScale
+context.CCHasCurve = ffuns.ccHasCurve
 
 context.OP_EQ = fdefs.OP_EQ
 context.OP_GT = fdefs.OP_GT
@@ -2130,40 +1286,33 @@ context.CURSOR_LTE = fdefs.CURSOR_LTE
 context.CURSOR_GTE = fdefs.CURSOR_GTE
 context.CURSOR_UNDER = fdefs.CURSOR_UNDER
 
-context.GetTimeOffset = GetTimeOffset
+context.OperateEvent1 = afuns.operateEvent1
+context.OperateEvent2 = afuns.operateEvent2
+context.CreateNewMIDIEvent = afuns.createNewMIDIEvent
+context.RandomValue = afuns.randomValue
+context.QuantizeTo = afuns.quantizeTo
+context.Mirror = afuns.mirror
+context.LinearChangeOverSelection = afuns.linearChangeOverSelection
+context.ClampValue = afuns.clampValue
+context.AddLength = afuns.addLength
+context.MoveToCursor = afuns.moveToCursor
+context.MoveLengthToCursor = afuns.moveLengthToCursor
+context.SetMusicalLength = afuns.setMusicalLength
+context.QuantizeMusicalPosition = afuns.quantizeMusicalPosition
+context.QuantizeMusicalLength = afuns.quantizeMusicalLength
+context.QuantizeMusicalEndPos = afuns.quantizeMusicalEndPos
+context.MoveToItemPos = afuns.moveToItemPos
+context.CCSetCurve = afuns.ccSetCurve
+context.AddDuration = afuns.addDuration
+context.SubtractDuration = afuns.subtractDuration
+context.MultiplyPosition = afuns.multiplyPosition
 
-context.OperateEvent1 = OperateEvent1
-context.OperateEvent2 = OperateEvent2
-context.CreateNewMIDIEvent = CreateNewMIDIEvent
-context.RandomValue = RandomValue
+context.GetMainValue = GetMainValue
+context.GetSubtypeValue = GetSubtypeValue
+context.GetTimeOffset = GetTimeOffset
 context.GetTimeSelectionStart = GetTimeSelectionStart
 context.GetTimeSelectionEnd = GetTimeSelectionEnd
-context.GetSubtypeValue = GetSubtypeValue
-context.GetMainValue = GetMainValue
-context.QuantizeTo = QuantizeTo
-context.Mirror = Mirror
-context.OnMetricGrid = OnMetricGrid
-context.OnGrid = OnGrid
-context.InBarRange = InBarRange
-context.InRazorArea = InRazorArea
-context.IsNearEvent = IsNearEvent
-context.CCHasCurve = CCHasCurve
-context.CCSetCurve = CCSetCurve
-context.LinearChangeOverSelection = LinearChangeOverSelection
-context.AddDuration = AddDuration
-context.SubtractDuration = SubtractDuration
-context.MultiplyPosition = MultiplyPosition
-context.ClampValue = ClampValue
-context.AddLength = AddLength
 context.TimeFormatToSeconds = TimeFormatToSeconds
-context.InScale = InScale
-context.MoveToCursor = MoveToCursor
-context.MoveLengthToCursor = MoveLengthToCursor
-context.SetMusicalLength = SetMusicalLength
-context.QuantizeMusicalPosition = QuantizeMusicalPosition
-context.QuantizeMusicalLength = QuantizeMusicalLength
-context.QuantizeMusicalEndPos = QuantizeMusicalEndPos
-context.MoveToItemPos = MoveToItemPos
 
 context.OP_ADD = adefs.OP_ADD
 context.OP_SUB = adefs.OP_SUB
@@ -2176,28 +1325,28 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
   local addMetricGridNotation = false
   local addEveryNNotation = false
   local addNewMIDIEventNotation = false
-  local isParam3 = paramType == PARAM_TYPE_PARAM3
+  local isParam3 = paramType == gdefs.PARAM_TYPE_PARAM3
   local addEventSelectorNotation = false
 
-  if paramType == PARAM_TYPE_METRICGRID
-    or paramType == PARAM_TYPE_MUSICAL
-    or paramType == PARAM_TYPE_EVERYN
-    or paramType == PARAM_TYPE_NEWMIDIEVENT
-    or paramType == PARAM_TYPE_EVENTSELECTOR
+  if paramType == gdefs.PARAM_TYPE_METRICGRID
+    or paramType == gdefs.PARAM_TYPE_MUSICAL
+    or paramType == gdefs.PARAM_TYPE_EVERYN
+    or paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
+    or paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
   then
     if index == 1 then
       if notation then
-        if paramType == PARAM_TYPE_EVERYN then
+        if paramType == gdefs.PARAM_TYPE_EVERYN then
           addEveryNNotation = true
-        elseif paramType == PARAM_TYPE_NEWMIDIEVENT then
+        elseif paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT then
           addNewMIDIEventNotation = true
-        elseif paramType == PARAM_TYPE_EVENTSELECTOR then
+        elseif paramType == gdefs.PARAM_TYPE_EVENTSELECTOR then
           addEventSelectorNotation = true
         else
           addMetricGridNotation = true
         end
       end
-      paramType = PARAM_TYPE_MENU
+      paramType = gdefs.PARAM_TYPE_MENU
     end
   end
 
@@ -2208,34 +1357,34 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
   if condOp.terms < index then
     paramVal = ''
   elseif notation and override then
-    if override == EDITOR_TYPE_BITFIELD then
+    if override == gdefs.EDITOR_TYPE_BITFIELD then
       paramVal = row.params[index].textEditorStr
-    elseif (override == EDITOR_TYPE_PERCENT or override == EDITOR_TYPE_PERCENT_BIPOLAR) then
+    elseif (override == gdefs.EDITOR_TYPE_PERCENT or override == gdefs.EDITOR_TYPE_PERCENT_BIPOLAR) then
       paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row.params[index].textEditorStr)):gsub("%.?0+$", "")
-    elseif (override == EDITOR_TYPE_PITCHBEND or override == EDITOR_TYPE_PITCHBEND_BIPOLAR) then
+    elseif (override == gdefs.EDITOR_TYPE_PITCHBEND or override == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR) then
       paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) + (1 << 13)) / ((1 << 14) - 1) * 100):gsub("%.?0+$", "")
-    elseif ((override == EDITOR_TYPE_14BIT or override == EDITOR_TYPE_14BIT_BIPOLAR)) then
+    elseif ((override == gdefs.EDITOR_TYPE_14BIT or override == gdefs.EDITOR_TYPE_14BIT_BIPOLAR)) then
       paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 14) - 1)) * 100):gsub("%.?0+$", "")
-    elseif ((override == EDITOR_TYPE_7BIT
-        or override == EDITOR_TYPE_7BIT_NOZERO
-        or override == EDITOR_TYPE_7BIT_BIPOLAR))
+    elseif ((override == gdefs.EDITOR_TYPE_7BIT
+        or override == gdefs.EDITOR_TYPE_7BIT_NOZERO
+        or override == gdefs.EDITOR_TYPE_7BIT_BIPOLAR))
       then
         paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 7) - 1)) * 100):gsub("%.?0+$", "")
     else
       mu.post('unknown override: ' .. override)
     end
-  elseif (paramType == PARAM_TYPE_INTEDITOR or paramType == PARAM_TYPE_FLOATEDITOR) then
+  elseif (paramType == gdefs.PARAM_TYPE_INTEDITOR or paramType == gdefs.PARAM_TYPE_FLOATEDITOR) then
     paramVal = percentVal and string.format('%g', percentVal) or row.params[index].textEditorStr
-  elseif paramType == PARAM_TYPE_TIME then
+  elseif paramType == gdefs.PARAM_TYPE_TIME then
     paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(TimeFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
-  elseif paramType == PARAM_TYPE_TIMEDUR then
+  elseif paramType == gdefs.PARAM_TYPE_TIMEDUR then
     paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(LengthFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
-  elseif paramType == PARAM_TYPE_METRICGRID
-    or paramType == PARAM_TYPE_MUSICAL
-    or paramType == PARAM_TYPE_EVERYN
-    or paramType == PARAM_TYPE_PARAM3
-    or override == EDITOR_TYPE_BITFIELD
-    or paramType == PARAM_TYPE_HIDDEN
+  elseif paramType == gdefs.PARAM_TYPE_METRICGRID
+    or paramType == gdefs.PARAM_TYPE_MUSICAL
+    or paramType == gdefs.PARAM_TYPE_EVERYN
+    or paramType == gdefs.PARAM_TYPE_PARAM3
+    or override == gdefs.EDITOR_TYPE_BITFIELD
+    or paramType == gdefs.PARAM_TYPE_HIDDEN
   then
     paramVal = row.params[index].textEditorStr
   elseif #paramTab ~= 0 then
@@ -2277,10 +1426,10 @@ function FindRowToNotation(row, index)
   local paramTypes = GetParamTypesForRow(row, curTarget, curCondition)
 
   param1Val, param2Val = ProcessParams(row, curTarget, curCondition, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
-  if paramTypes[1] == PARAM_TYPE_MENU then
+  if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
     param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
   end
-  if paramTypes[2] == PARAM_TYPE_MENU then
+  if paramTypes[2] == gdefs.PARAM_TYPE_MENU then
     param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[row.params[2].menuEntry].notation or nil
   end
 
@@ -2324,7 +1473,7 @@ end
 
 function UpdateEventCount(event, counts, onlyNoteRow)
   local char
-  if GetEventType(event) == NOTE_TYPE and not onlyNoteRow then
+  if GetEventType(event) == gdefs.NOTE_TYPE and not onlyNoteRow then
     event.count = counts.noteCount + 1
     counts.noteCount = event.count
   end
@@ -2334,7 +1483,7 @@ function UpdateEventCount(event, counts, onlyNoteRow)
   local subIdx = event.msg2 and event.msg2 or 0 -- sysex/text
   if event.chanmsg >= 0xC0 then subIdx = 0 end
   if not counts[eventIdx][subIdx] then counts[eventIdx][subIdx] = 0 end
-  local cname = GetEventType(event) == NOTE_TYPE and 'ncount' or 'count'
+  local cname = GetEventType(event) == gdefs.NOTE_TYPE and 'ncount' or 'count'
   event[cname] = counts[eventIdx][subIdx] + 1
   counts[eventIdx][subIdx] = event[cname]
 end
@@ -2342,7 +1491,7 @@ end
 function CalcChordPos(first, last)
   local chordPos = {}
   for i = first, last do
-    if GetEventType(allEvents[i]) == NOTE_TYPE then
+    if GetEventType(allEvents[i]) == gdefs.NOTE_TYPE then
       table.insert(chordPos, allEvents[i])
     end
   end
@@ -2381,9 +1530,9 @@ function RunFind(findFn, params, runFn)
     local take = params.take
 
     for k, event in ipairs(allEvents) do
-      if GetEventType(event) == CC_TYPE or GetEventType(event) == SYXTEXT_TYPE then
+      if GetEventType(event) == gdefs.CC_TYPE or GetEventType(event) == gdefs.SYXTEXT_TYPE then
         UpdateEventCount(event, counts)
-      elseif GetEventType(event) == NOTE_TYPE then -- note event
+      elseif GetEventType(event) == gdefs.NOTE_TYPE then -- note event
         if take then
           local noteOnset = event.projtime
           local notePpq = r.MIDI_GetPPQPosFromProjTime(take, noteOnset)
@@ -2440,7 +1589,7 @@ function RunFind(findFn, params, runFn)
       hasTable[event.chanmsg] = true
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
-      if GetEventType(event) == NOTE_TYPE and event.projtime + event.projlen > lastNoteEnd then lastNoteEnd = event.projtime + event.projlen end
+      if GetEventType(event) == gdefs.NOTE_TYPE and event.projtime + event.projlen > lastNoteEnd then lastNoteEnd = event.projtime + event.projlen end
       table.insert(found, event)
       matches = true
     elseif getUnfound then
@@ -2457,7 +1606,7 @@ function RunFind(findFn, params, runFn)
     local frEnd = params.findRange.frEnd
     local firstLastEventsByType = {}
     for _, event in ipairs(found) do
-      if GetEventType(event) == CC_TYPE then
+      if GetEventType(event) == gdefs.CC_TYPE then
         local eventIdx = EventToIdx(event)
         if not firstLastEventsByType[eventIdx] then firstLastEventsByType[eventIdx] = {} end
         if not firstLastEventsByType[eventIdx][event.msg2] then firstLastEventsByType[eventIdx][event.msg2] = {} end
@@ -2473,12 +1622,12 @@ function RunFind(findFn, params, runFn)
         newEvent = tableCopy(rEvent.firstEvent)
         newEvent.projtime = frStart
         newEvent.firstlastevent = true
-        newEvent.orig_type = OTHER_TYPE
+        newEvent.orig_type = gdefs.OTHER_TYPE
         table.insert(found, newEvent)
         newEvent = tableCopy(rEvent.lastEvent)
         newEvent.projtime = frEnd
         newEvent.firstlastevent = true
-        newEvent.orig_type = OTHER_TYPE
+        newEvent.orig_type = gdefs.OTHER_TYPE
         table.insert(found, newEvent)
       end
     end
@@ -2559,7 +1708,7 @@ function ProcessFind(take, fromHasTable)
 
     local paramTypes = GetParamTypesForRow(v, curTarget, condition)
     for i = 1, 2 do -- param3 for Find?
-      if paramNums[i] and (paramTypes[i] == PARAM_TYPE_INTEDITOR or paramTypes[i] == PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
+      if paramNums[i] and (paramTypes[i] == gdefs.PARAM_TYPE_INTEDITOR or paramTypes[i] == gdefs.PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
         paramTerms[i] = GetParamPercentTerm(paramNums[i], opIsBipolar(curCondition, i))
       end
     end
@@ -2610,10 +1759,10 @@ function ProcessFind(take, fromHasTable)
     findTerm = string.gsub(findTerm, '{param1}', tostring(paramTerms[1]))
     findTerm = string.gsub(findTerm, '{param2}', tostring(paramTerms[2]))
 
-    local isMetricGrid = paramTypes[1] == PARAM_TYPE_METRICGRID and true or false
-    local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
-    local isEveryN = paramTypes[1] == PARAM_TYPE_EVERYN and true or false
-    local isEventSelector = paramTypes[1] == PARAM_TYPE_EVENTSELECTOR and true or false
+    local isMetricGrid = paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID and true or false
+    local isMusical = paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL and true or false
+    local isEveryN = paramTypes[1] == gdefs.PARAM_TYPE_EVERYN and true or false
+    local isEventSelector = paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR and true or false
 
     if isMetricGrid or isMusical then
       local mgParams = tableCopy(row.mg)
@@ -2667,8 +1816,8 @@ function ProcessFind(take, fromHasTable)
   context.take = take
   if take then
     local cg, cs = r.MIDI_GetGrid(take)
-    currentGrid = cg or 0
-    currentSwing = cs or 0
+    GridInfo().currentGrid = cg or 0
+    GridInfo().currentSwing = cs or 0
   end -- 1.0 is QN, 1.5 dotted, etc.
   _, findFn = FnStringToFn(fnString, function(err)
     parserError = 'Fatal error: could not load selection criteria'
@@ -3007,7 +2156,7 @@ function InitializeTake(take)
 
   local noteidx = enumNotesFn(take, -1)
   while noteidx ~= -1 do
-    local e = { type = NOTE_TYPE, idx = noteidx }
+    local e = { type = gdefs.NOTE_TYPE, idx = noteidx }
     _, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.pitch, e.vel, e.relvel = mu.MIDI_GetNote(take, noteidx)
 
     local doIt = not activeRow or e.pitch == activeRow
@@ -3027,14 +2176,14 @@ function InitializeTake(take)
 
   local ccidx = onlyNotes and -1 or enumCCFn(take, -1)
   while ccidx ~= -1 do
-    local e = { type = CC_TYPE, idx = ccidx }
+    local e = { type = gdefs.CC_TYPE, idx = ccidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3 = mu.MIDI_GetCC(take, ccidx)
 
     if e.chanmsg == 0xE0 then
-      e.ccnum = INVALID
+      e.ccnum = gdefs.INVALID
       e.ccval = ((e.msg3 << 7) + e.msg2) - (1 << 13)
     elseif e.chanmsg == 0xD0 then
-      e.ccnum = INVALID
+      e.ccnum = gdefs.INVALID
       e.ccval = e.msg2
     else
       e.ccnum = e.msg2
@@ -3049,7 +2198,7 @@ function InitializeTake(take)
 
   local syxidx = onlyNotes and -1 or enumTextSysexFn(take, -1)
   while syxidx ~= -1 do
-    local e = { type = SYXTEXT_TYPE, idx = syxidx }
+    local e = { type = gdefs.SYXTEXT_TYPE, idx = syxidx }
     _, e.selected, e.muted, e.ppqpos, e.chanmsg, e.textmsg = mu.MIDI_GetTextSysexEvt(take, syxidx)
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
     if e.chanmsg ~- 0xF0 then
@@ -3114,11 +2263,11 @@ function DeleteEventsInTake(take, eventTab, doTx)
     mu.MIDI_OpenWriteTransaction(take)
   end
   for _, event in ipairs(eventTab) do
-    if GetEventType(event) == NOTE_TYPE then
+    if GetEventType(event) == gdefs.NOTE_TYPE then
       mu.MIDI_DeleteNote(take, event.idx)
-    elseif GetEventType(event) == CC_TYPE then
+    elseif GetEventType(event) == gdefs.CC_TYPE then
       mu.MIDI_DeleteCC(take, event.idx)
-    elseif GetEventType(event) == SYXTEXT_TYPE then
+    elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then
       mu.MIDI_DeleteTextSysexEvt(take, event.idx)
     end
   end
@@ -3219,7 +2368,7 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           local evType = GetEventType(e)
 
           e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos) -- check for abs pos mode
-          if evType == NOTE_TYPE then
+          if evType == gdefs.NOTE_TYPE then
             e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + LengthFormatToSeconds(nme.durText, pos, context))
           end
           e.chan = e.channel
@@ -3229,16 +2378,16 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           actionFn(e, GetSubtypeValueName(e), GetMainValueName(e), contextTab)
 
           e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, e.projtime - timeAdjust)
-          if evType == NOTE_TYPE then
+          if evType == gdefs.NOTE_TYPE then
             e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (e.projtime - timeAdjust) + e.projlen)
             e.msg3 = e.msg3 < 1 and 1 or e.msg3
           end
           PostProcessSelection(e)
           e.muted = (e.flags & 2) ~= 0
 
-          if evType == NOTE_TYPE then
+          if evType == gdefs.NOTE_TYPE then
             mu.MIDI_InsertNote(take, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.msg2, e.msg3, e.relvel)
-          elseif evType == CC_TYPE then
+          elseif evType == gdefs.CC_TYPE then
             mu.MIDI_InsertCC(take, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3)
           end
         end
@@ -3259,17 +2408,17 @@ function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     PostProcessSelection(event)
     event.muted = (event.flags & 2) ~= 0
-    if GetEventType(event) == NOTE_TYPE then
+    if GetEventType(event) == gdefs.NOTE_TYPE then
       if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
       event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
       mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
-    elseif GetEventType(event) == CC_TYPE then
+    elseif GetEventType(event) == gdefs.CC_TYPE then
       local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
       if rv and event.setcurve then
         mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
       end
-    elseif GetEventType(event) == SYXTEXT_TYPE then
+    elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then
       mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
     end
   end
@@ -3287,11 +2436,11 @@ function SelectEntriesInTake(take, eventTab, wantsSelect)
 end
 
 function SetEntrySelectionInTake(take, event)
-  if GetEventType(event) == NOTE_TYPE then
+  if GetEventType(event) == gdefs.NOTE_TYPE then
     mu.MIDI_SetNote(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil, nil)
-  elseif GetEventType(event) == CC_TYPE then
+  elseif GetEventType(event) == gdefs.CC_TYPE then
     mu.MIDI_SetCC(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil)
-  elseif GetEventType(event) == SYXTEXT_TYPE then
+  elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then
     mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, nil, nil, nil, nil)
   end
 end
@@ -3330,7 +2479,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
     PostProcessSelection(event)
     event.muted = (event.flags & 2) ~= 0
-    if eventType == NOTE_TYPE then
+    if eventType == gdefs.NOTE_TYPE then
       if (not event.projlen or event.projlen <= 0) then event.projlen = 1 / context.PPQ end
       event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
@@ -3344,7 +2493,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
         replaceData = replaceTab[eventIdx]
       end
       local eventData = replaceData
-      if eventType == CC_TYPE then
+      if eventType == gdefs.CC_TYPE then
         eventData = replaceData[event.msg2]
         if not eventData then
           replaceData[event.msg2] = {}
@@ -3359,7 +2508,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
 
   mu.MIDI_OpenWriteTransaction(take)
   if replace then
-    local grid = currentGrid
+    local grid = GridInfo().currentGrid
     local PPQ = mu.MIDI_GetPPQ(take)
     local gridSlop = math.floor(((PPQ * grid) * 0.5) + 0.5)
     local rangeType = contextTab.findRange.type
@@ -3370,7 +2519,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
       local eventData
       local replaceData = replaceTab[eventIdx]
       if replaceData then
-        if eventType == CC_TYPE then eventData = replaceData[event.msg2]
+        if eventType == gdefs.CC_TYPE then eventData = replaceData[event.msg2]
         else eventData = replaceData
         end
       end
@@ -3381,17 +2530,17 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
           if (not (rangeType & fdefs.SELECT_TIME_MINRANGE ~= 0) or event.ppqpos >= (eventData.startPpq - gridSlop))
             and (not (rangeType & fdefs.SELECT_TIME_MAXRANGE ~= 0) or event.ppqpos <= (eventData.endPpq + gridSlop))
           then
-            if eventType == NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
-            elseif eventType == CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
-            elseif eventType == SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+            if eventType == gdefs.NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
+            elseif eventType == gdefs.CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
+            elseif eventType == gdefs.SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
             end
           end
         elseif rangeType == fdefs.SELECT_TIME_INDIVIDUAL then
           for _, v in ipairs(eventData) do
             if event.ppqpos >= (v - gridSlop) and event.ppqpos <= (v + gridSlop) then
-              if eventType == NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
-              elseif eventType == CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
-              elseif eventType == SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
+              if eventType == gdefs.NOTE_TYPE then mu.MIDI_DeleteNote(take, event.idx)
+              elseif eventType == gdefs.CC_TYPE then mu.MIDI_DeleteCC(take, event.idx)
+              elseif eventType == gdefs.SYXTEXT_TYPE then mu.MIDI_DeleteTextSysexEvt(take, event.idx)
               end
               break
             end
@@ -3405,19 +2554,19 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
   for _, event in ipairs(eventTab) do
     local eventType = GetEventType(event)
     -- handle insert, also type changes
-    if eventType == NOTE_TYPE then
-      if not event.orig_type or event.orig_type == NOTE_TYPE then
+    if eventType == gdefs.NOTE_TYPE then
+      if not event.orig_type or event.orig_type == gdefs.NOTE_TYPE then
         mu.MIDI_SetNote(take, event.idx, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
       else
         mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
-        if event.orig_type == CC_TYPE then
+        if event.orig_type == gdefs.CC_TYPE then
           mu.MIDI_DeleteCC(take, event.idx)
-        elseif event.orig_type == SYXTEXT_TYPE then
+        elseif event.orig_type == gdefs.SYXTEXT_TYPE then
           mu.MIDI_DeleteTextSysexEvt(take, event.idx)
         end
       end
-    elseif eventType == CC_TYPE then
-      if not event.orig_type or event.orig_type == CC_TYPE then
+    elseif eventType == gdefs.CC_TYPE then
+      if not event.orig_type or event.orig_type == gdefs.CC_TYPE then
         mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
         if event.setcurve then
           mu.MIDI_SetCCShape(take, event.idx, event.setcurve, event.setcurveext)
@@ -3427,19 +2576,19 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
         if rv and event.setcurve then
           mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
         end
-        if event.orig_type == NOTE_TYPE then
+        if event.orig_type == gdefs.NOTE_TYPE then
           mu.MIDI_DeleteNote(take, event.idx)
-        elseif event.orig_type == SYXTEXT_TYPE then
+        elseif event.orig_type == gdefs.SYXTEXT_TYPE then
           mu.MIDI_DeleteTextSysexEvt(take, event.idx)
         end
       end
-    elseif eventType == SYXTEXT_TYPE then
-      if not event.orig_type or event.orig_type == SYXTEXT_TYPE then
+    elseif eventType == gdefs.SYXTEXT_TYPE then
+      if not event.orig_type or event.orig_type == gdefs.SYXTEXT_TYPE then
         mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
       else
-        if event.orig_type == NOTE_TYPE then
+        if event.orig_type == gdefs.NOTE_TYPE then
           mu.MIDI_DeleteNote(take, event.idx)
-        elseif event.orig_type == CC_TYPE then
+        elseif event.orig_type == gdefs.CC_TYPE then
           mu.MIDI_DeleteCC(take, event.idx)
         end
       end
@@ -3574,7 +2723,7 @@ function ProcessActionForTake(take)
 
     local paramTypes = GetParamTypesForRow(v, curTarget, curOperation)
     for i = 1, 3 do -- param3
-      if paramNums[i] and (paramTypes[i] == PARAM_TYPE_INTEDITOR or paramTypes[i] == PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
+      if paramNums[i] and (paramTypes[i] == gdefs.PARAM_TYPE_INTEDITOR or paramTypes[i] == gdefs.PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
         paramTerms[i] = GetParamPercentTerm(paramNums[i], opIsBipolar(curOperation, i))
       end
     end
@@ -3591,7 +2740,7 @@ function ProcessActionForTake(take)
       actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation, paramTerms[3]) or row.params[3].textEditorStr)
     end
 
-    local isMusical = paramTypes[1] == PARAM_TYPE_MUSICAL and true or false
+    local isMusical = paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL and true or false
     if isMusical then
       local mgParams = tableCopy(row.mg)
       mgParams.param1 = paramNums[1]
@@ -3599,7 +2748,7 @@ function ProcessActionForTake(take)
       actionTerm = string.gsub(actionTerm, '{musicalparams}', serialize(mgParams))
     end
 
-    local isNewMIDIEvent = paramTypes[1] == PARAM_TYPE_NEWMIDIEVENT and true or false
+    local isNewMIDIEvent = paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT and true or false
     if isNewMIDIEvent then
       -- local nmeParams = tableCopy(row.nme)
       CreateNewMIDIEvent_Once = true
@@ -3699,8 +2848,8 @@ function ProcessAction(execute, fromScript)
   CACHED_WRAPPED = nil
   SOM = nil
 
-  moveCursorFirstEventPosition = nil
-  addLengthFirstEventOffset = nil
+  MoveCursorInfo().moveCursorFirstEventPosition = nil
+  AddLengthInfo().addLengthFirstEventOffset = nil
 
   -- fast early return after sanity check
   if not execute then
@@ -3728,9 +2877,9 @@ function ProcessAction(execute, fromScript)
     local take = v.take
     InitializeTake(take)
 
-    moveCursorFirstEventPosition_Take = nil
-    addLengthFirstEventOffset_Take = nil
-    addLengthFirstEventStartTime = nil
+    MoveCursorInfo().moveCursorFirstEventPosition_Take = nil
+    AddLengthInfo().addLengthFirstEventOffset_Take = nil
+    AddLengthInfo().addLengthFirstEventStartTime = nil
 
     local actionFn
     local actionFnString
@@ -4044,20 +3193,20 @@ function PitchBendTo14Bit(val, literal)
 end
 
 function SetRowParam(row, index, paramType, editorType, strVal, range, literal)
-  local isMetricOrMusical = (paramType == PARAM_TYPE_METRICGRID or paramType == PARAM_TYPE_MUSICAL)
-  local isNewMIDIEvent = paramType == PARAM_TYPE_NEWMIDIEVENT
-  local isBitField = editorType == EDITOR_TYPE_BITFIELD
+  local isMetricOrMusical = (paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL)
+  local isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
+  local isBitField = editorType == gdefs.EDITOR_TYPE_BITFIELD
   row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or EnsureNumString(strVal, range)
   if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
     row.params[index].percentVal = nil
     -- nothing
   else
     local val = tonumber(row.params[index].textEditorStr)
-    if editorType == EDITOR_TYPE_PERCENT or editorType == EDITOR_TYPE_PERCENT_BIPOLAR then
+    if editorType == gdefs.EDITOR_TYPE_PERCENT or editorType == gdefs.EDITOR_TYPE_PERCENT_BIPOLAR then
       row.params[index].percentVal = literal and nil or val
-    elseif editorType == EDITOR_TYPE_PITCHBEND or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then
-      row.params[index].percentVal = PitchBendTo14Bit(val, literal or editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR)
-    elseif editorType == EDITOR_TYPE_7BIT or editorType == EDITOR_TYPE_7BIT_NOZERO or editorType == EDITOR_TYPE_7BIT_BIPOLAR then
+    elseif editorType == gdefs.EDITOR_TYPE_PITCHBEND or editorType == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR then
+      row.params[index].percentVal = PitchBendTo14Bit(val, literal or editorType == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR)
+    elseif editorType == gdefs.EDITOR_TYPE_7BIT or editorType == gdefs.EDITOR_TYPE_7BIT_NOZERO or editorType == gdefs.EDITOR_TYPE_7BIT_BIPOLAR then
       row.params[index].percentVal = (val / ((1 << 7) - 1)) * 100
     end
   end
@@ -4070,16 +3219,16 @@ function GetRowParamRange(row, target, condOp, paramType, editorType, idx)
                   or target.range
   local bipolar = false
 
-  if condOp.percent or (condOp.split and condOp.split[idx].percent) then range = TransformerLib.EDITOR_PERCENT_RANGE
-  elseif editorType == EDITOR_TYPE_PITCHBEND then range = TransformerLib.EDITOR_PITCHBEND_RANGE
-  elseif editorType == EDITOR_TYPE_PITCHBEND_BIPOLAR then range = TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE bipolar = true
-  elseif editorType == EDITOR_TYPE_PERCENT then range = TransformerLib.EDITOR_PERCENT_RANGE
-  elseif editorType == EDITOR_TYPE_PERCENT_BIPOLAR then range = TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE bipolar = true
-  elseif editorType == EDITOR_TYPE_7BIT then range = TransformerLib.EDITOR_7BIT_RANGE
-  elseif editorType == EDITOR_TYPE_7BIT_BIPOLAR then range = TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE bipolar = true
-  elseif editorType == EDITOR_TYPE_7BIT_NOZERO then range = TransformerLib.EDITOR_7BIT_NOZERO_RANGE
-  elseif editorType == EDITOR_TYPE_14BIT then range = TransformerLib.EDITOR_14BIT_RANGE
-  elseif editorType == EDITOR_TYPE_14BIT_BIPOLAR then range = TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE bipolar = true
+  if condOp.percent or (condOp.split and condOp.split[idx].percent) then range = gdefs.EDITOR_PERCENT_RANGE
+  elseif editorType == gdefs.EDITOR_TYPE_PITCHBEND then range = gdefs.EDITOR_PITCHBEND_RANGE
+  elseif editorType == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR then range = gdefs.EDITOR_PITCHBEND_BIPOLAR_RANGE bipolar = true
+  elseif editorType == gdefs.EDITOR_TYPE_PERCENT then range = gdefs.EDITOR_PERCENT_RANGE
+  elseif editorType == gdefs.EDITOR_TYPE_PERCENT_BIPOLAR then range = gdefs.EDITOR_PERCENT_BIPOLAR_RANGE bipolar = true
+  elseif editorType == gdefs.EDITOR_TYPE_7BIT then range = gdefs.EDITOR_7BIT_RANGE
+  elseif editorType == gdefs.EDITOR_TYPE_7BIT_BIPOLAR then range = gdefs.EDITOR_7BIT_BIPOLAR_RANGE bipolar = true
+  elseif editorType == gdefs.EDITOR_TYPE_7BIT_NOZERO then range = gdefs.EDITOR_7BIT_NOZERO_RANGE
+  elseif editorType == gdefs.EDITOR_TYPE_14BIT then range = gdefs.EDITOR_14BIT_RANGE
+  elseif editorType == gdefs.EDITOR_TYPE_14BIT_BIPOLAR then range = gdefs.EDITOR_14BIT_BIPOLAR_RANGE bipolar = true
   end
 
   if range and #range == 0 then range = nil end
@@ -4093,10 +3242,10 @@ function GetRowTextAndParameterValues(row)
   local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
 
   local param1Val, param2Val, param3Val = ProcessParams(row, curTarget, curOperation, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
-  if paramTypes[1] == PARAM_TYPE_MENU then
+  if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
     param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
   end
-  if paramTypes[2] == PARAM_TYPE_MENU then
+  if paramTypes[2] == gdefs.PARAM_TYPE_MENU then
     param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.params[2].menuEntry].notation or nil
   end
   return rowText, param1Val, param2Val, param3Val
@@ -4110,14 +3259,14 @@ function HandlePercentString(strVal, row, target, condOp, paramType, editorType,
   if range and range[1] and range[2] and row.params[index].percentVal then
     local percentVal = row.params[index].percentVal / 100
     local scaledVal
-    if editorType == EDITOR_TYPE_PITCHBEND and condOp.literal then
+    if editorType == gdefs.EDITOR_TYPE_PITCHBEND and condOp.literal then
       scaledVal = percentVal * ((1 << 14) - 1)
     elseif bipolar then
       scaledVal = percentVal * range[2]
     else
       scaledVal = (percentVal * (range[2] - range[1])) + range[1]
     end
-    if paramType == PARAM_TYPE_INTEDITOR then
+    if paramType == gdefs.PARAM_TYPE_INTEDITOR then
       scaledVal = math.floor(scaledVal + 0.5)
     end
     strVal = tostring(scaledVal)
@@ -4329,7 +3478,7 @@ local function makeDefaultNewMIDIEvent(row)
     muted = false,
     msg2 = 60,
     msg3 = 64,
-    posText = DEFAULT_TIMEFORMAT_STRING,
+    posText = gdefs.DEFAULT_TIMEFORMAT_STRING,
     durText = '0.1.00', -- one beat long as a default?
     relvel = 0,
     projtime = 0,
@@ -4361,40 +3510,6 @@ TransformerLib.FIND_POSTPROCESSING_FLAG_NONE = fdefs.FIND_POSTPROCESSING_FLAG_NO
 TransformerLib.FIND_POSTPROCESSING_FLAG_FIRSTEVENT = fdefs.FIND_POSTPROCESSING_FLAG_FIRSTEVENT
 TransformerLib.FIND_POSTPROCESSING_FLAG_LASTEVENT = fdefs.FIND_POSTPROCESSING_FLAG_LASTEVENT
 
-TransformerLib.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
-TransformerLib.PARAM_TYPE_MENU = PARAM_TYPE_MENU
-TransformerLib.PARAM_TYPE_INTEDITOR = PARAM_TYPE_INTEDITOR
-TransformerLib.PARAM_TYPE_FLOATEDITOR = PARAM_TYPE_FLOATEDITOR
-TransformerLib.PARAM_TYPE_TIME = PARAM_TYPE_TIME
-TransformerLib.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
-TransformerLib.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
-TransformerLib.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
-TransformerLib.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
-TransformerLib.PARAM_TYPE_NEWMIDIEVENT = PARAM_TYPE_NEWMIDIEVENT
-TransformerLib.PARAM_TYPE_PARAM3 = PARAM_TYPE_PARAM3
-TransformerLib.PARAM_TYPE_EVENTSELECTOR = PARAM_TYPE_EVENTSELECTOR
-TransformerLib.PARAM_TYPE_HIDDEN = PARAM_TYPE_HIDDEN
-
-TransformerLib.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
-TransformerLib.EDITOR_PITCHBEND_RANGE = { -(1 << 13), (1 << 13) - 1 }
-TransformerLib.EDITOR_TYPE_PITCHBEND_BIPOLAR = EDITOR_TYPE_PITCHBEND_BIPOLAR
-TransformerLib.EDITOR_PITCHBEND_BIPOLAR_RANGE = { -((1 << 14) - 1), (1 << 14) - 1 }
-TransformerLib.EDITOR_TYPE_PERCENT = EDITOR_TYPE_PERCENT
-TransformerLib.EDITOR_PERCENT_RANGE = { 0, 100 }
-TransformerLib.EDITOR_TYPE_PERCENT_BIPOLAR = EDITOR_TYPE_PERCENT_BIPOLAR
-TransformerLib.EDITOR_PERCENT_BIPOLAR_RANGE = { -100, 100 }
-TransformerLib.EDITOR_TYPE_14BIT = EDITOR_TYPE_14BIT
-TransformerLib.EDITOR_14BIT_RANGE = { 0, (1 << 14) - 1 }
-TransformerLib.EDITOR_TYPE_14BIT_BIPOLAR = EDITOR_TYPE_14BIT_BIPOLAR
-TransformerLib.EDITOR_14BIT_BIPOLAR_RANGE = { -((1 << 14) - 1), (1 << 14) - 1 }
-TransformerLib.EDITOR_TYPE_7BIT = EDITOR_TYPE_7BIT
-TransformerLib.EDITOR_7BIT_RANGE = { 0, (1 << 7) - 1 }
-TransformerLib.EDITOR_TYPE_7BIT_NOZERO = EDITOR_TYPE_7BIT_NOZERO
-TransformerLib.EDITOR_7BIT_NOZERO_RANGE = { 1, (1 << 7) - 1 }
-TransformerLib.EDITOR_TYPE_7BIT_BIPOLAR = EDITOR_TYPE_7BIT_BIPOLAR
-TransformerLib.EDITOR_7BIT_BIPOLAR_RANGE = { -((1 << 7) - 1), (1 << 7) - 1 }
-TransformerLib.EDITOR_TYPE_BITFIELD = EDITOR_TYPE_BITFIELD
-
 TransformerLib.NEWEVENT_POSITION_ATCURSOR = adefs.NEWEVENT_POSITION_ATCURSOR
 TransformerLib.NEWEVENT_POSITION_ATPOSITION = adefs.NEWEVENT_POSITION_ATPOSITION
 
@@ -4418,10 +3533,6 @@ TransformerLib.mu = mu
 TransformerLib.handlePercentString = HandlePercentString
 TransformerLib.isANote = isANote
 
-TransformerLib.MG_GRID_STRAIGHT = MG_GRID_STRAIGHT
-TransformerLib.MG_GRID_DOTTED = MG_GRID_DOTTED
-TransformerLib.MG_GRID_TRIPLET = MG_GRID_TRIPLET
-TransformerLib.MG_GRID_SWING = MG_GRID_SWING
 TransformerLib.GetMetricGridModifiers = GetMetricGridModifiers
 TransformerLib.SetMetricGridModifiers = SetMetricGridModifiers
 

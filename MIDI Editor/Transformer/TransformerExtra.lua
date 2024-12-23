@@ -10,6 +10,8 @@ local Extra = {}
 local mu = _G['mu']
 local isANote = _G['isANote']
 
+local gdefs = require 'TransformerGeneralDefs'
+
 -----------------------------------------------------------------------------
 ----------------------------------- OOP -------------------------------------
 
@@ -87,15 +89,12 @@ end
 -----------------------------------------------------------------------------
 -------------------------------- PARAMINFO ----------------------------------
 
-local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
-local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'
-
 local ParamInfo = class(nil, {})
 
 function ParamInfo:init()
   self.menuEntry = 1
   self.textEditorStr = '0'
-  self.timeFormatStr = DEFAULT_TIMEFORMAT_STRING
+  self.timeFormatStr = gdefs.DEFAULT_TIMEFORMAT_STRING
   self.editorType = nil
   self.percentVal = nil
 end
@@ -209,34 +208,6 @@ end
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
 
-local PARAM_TYPE_UNKNOWN = 0
-local PARAM_TYPE_MENU = 1
-local PARAM_TYPE_INTEDITOR = 2
-local PARAM_TYPE_FLOATEDITOR = 3
-local PARAM_TYPE_TIME = 4
-local PARAM_TYPE_TIMEDUR = 5
-local PARAM_TYPE_METRICGRID = 6
-local PARAM_TYPE_MUSICAL = 7
-local PARAM_TYPE_EVERYN = 8
-local PARAM_TYPE_NEWMIDIEVENT = 9
-local PARAM_TYPE_PARAM3 = 10
-local PARAM_TYPE_EVENTSELECTOR = 11
-local PARAM_TYPE_HIDDEN = 12
-
-local EDITOR_TYPE_PITCHBEND = 100
-local EDITOR_TYPE_PITCHBEND_BIPOLAR = 101
-local EDITOR_TYPE_PERCENT = 102
-local EDITOR_TYPE_PERCENT_BIPOLAR = 103
-local EDITOR_TYPE_7BIT = 104
-local EDITOR_TYPE_7BIT_NOZERO = 105
-local EDITOR_TYPE_7BIT_BIPOLAR = 106
-local EDITOR_TYPE_14BIT = 107
-local EDITOR_TYPE_14BIT_BIPOLAR = 108
-local EDITOR_TYPE_BITFIELD = 109
-
-----------------------------------------------------------------------------------------
-----------------------------------------------------------------------------------------
-
 -- param3Formatter
 local function param3FormatPositionScaleOffset(row)
   -- reverse p2 and p3, another param3 user might need to do weirder stuff
@@ -282,7 +253,7 @@ end
 
 local function param3PositionScaleOffsetMenuLabel(row)
   if not isValidString(row.params[3].textEditorStr) then
-    row.params[3].textEditorStr = DEFAULT_LENGTHFORMAT_STRING
+    row.params[3].textEditorStr = gdefs.DEFAULT_LENGTHFORMAT_STRING
   end
   return '* ' .. row.params[1].textEditorStr .. ' + ' .. row.params[3].textEditorStr
 end
@@ -299,7 +270,7 @@ local function makeParam3PositionScaleOffset(row)
   row.params[1].textEditorStr = '1' -- default
   row.params[3] = ParamInfo()
   for k, v in pairs(positionScaleOffsetParam3Tab) do row.params[3][k] = v end
-  row.params[3].textEditorStr = DEFAULT_LENGTHFORMAT_STRING
+  row.params[3].textEditorStr = gdefs.DEFAULT_LENGTHFORMAT_STRING
 end
 
 ----------------------------------------------------------------------------------------
@@ -391,8 +362,8 @@ local function param3LineMenuLabel(row, target, condOp, newHasTable)
   end
 
   if newHasTable then
-    row.params[1].textEditorStr = HandlePercentString(row.params[1].textEditorStr, row, target, condOp, PARAM_TYPE_INTEDITOR, row.params[1].editorType, 1)
-    row.params[3].textEditorStr = HandlePercentString(row.params[3].textEditorStr, row, target, condOp, PARAM_TYPE_INTEDITOR, row.params[1].editorType, 3)
+    row.params[1].textEditorStr = HandlePercentString(row.params[1].textEditorStr, row, target, condOp, gdefs.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 1)
+    row.params[3].textEditorStr = HandlePercentString(row.params[3].textEditorStr, row, target, condOp, gdefs.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 3)
   end
 
   local note1 = row.params[1].noteName
@@ -487,33 +458,6 @@ Extra.lineParam3Tab = lineParam3Tab
 Extra.makeParam3Line = makeParam3Line
 Extra.param3LineEntries = param3LineEntries
 Extra.isREAPER7 = isREAPER7
-Extra.DEFAULT_TIMEFORMAT_STRING = DEFAULT_TIMEFORMAT_STRING
-Extra.DEFAULT_LENGTHFORMAT_STRING = DEFAULT_LENGTHFORMAT_STRING
-
-Extra.PARAM_TYPE_UNKNOWN = PARAM_TYPE_UNKNOWN
-Extra.PARAM_TYPE_MENU = PARAM_TYPE_MENU
-Extra.PARAM_TYPE_INTEDITOR = PARAM_TYPE_INTEDITOR
-Extra.PARAM_TYPE_FLOATEDITOR = PARAM_TYPE_FLOATEDITOR
-Extra.PARAM_TYPE_TIME = PARAM_TYPE_TIME
-Extra.PARAM_TYPE_TIMEDUR = PARAM_TYPE_TIMEDUR
-Extra.PARAM_TYPE_METRICGRID = PARAM_TYPE_METRICGRID
-Extra.PARAM_TYPE_MUSICAL = PARAM_TYPE_MUSICAL
-Extra.PARAM_TYPE_EVERYN = PARAM_TYPE_EVERYN
-Extra.PARAM_TYPE_NEWMIDIEVENT = PARAM_TYPE_NEWMIDIEVENT
-Extra.PARAM_TYPE_PARAM3 = PARAM_TYPE_PARAM3
-Extra.PARAM_TYPE_EVENTSELECTOR = PARAM_TYPE_EVENTSELECTOR
-Extra.PARAM_TYPE_HIDDEN = PARAM_TYPE_HIDDEN
-
-Extra.EDITOR_TYPE_PITCHBEND = EDITOR_TYPE_PITCHBEND
-Extra.EDITOR_TYPE_PITCHBEND_BIPOLAR = EDITOR_TYPE_PITCHBEND_BIPOLAR
-Extra.EDITOR_TYPE_PERCENT = EDITOR_TYPE_PERCENT
-Extra.EDITOR_TYPE_PERCENT_BIPOLAR = EDITOR_TYPE_PERCENT_BIPOLAR
-Extra.EDITOR_TYPE_7BIT = EDITOR_TYPE_7BIT
-Extra.EDITOR_TYPE_7BIT_NOZERO = EDITOR_TYPE_7BIT_NOZERO
-Extra.EDITOR_TYPE_7BIT_BIPOLAR = EDITOR_TYPE_7BIT_BIPOLAR
-Extra.EDITOR_TYPE_14BIT = EDITOR_TYPE_14BIT
-Extra.EDITOR_TYPE_14BIT_BIPOLAR = EDITOR_TYPE_14BIT_BIPOLAR
-Extra.EDITOR_TYPE_BITFIELD = EDITOR_TYPE_BITFIELD
 
 -- put these things in the global table so we can call them from anywhere
 _G['class'] = class

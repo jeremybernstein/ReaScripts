@@ -1,5 +1,5 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.4
+-- @version 1.0.11-alpha.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.4'
+local versionStr = '1.0.11-alpha.5'
 
 local r = reaper
 
@@ -423,20 +423,8 @@ local function removeActionRow()
   end
 end
 
-local function check14Bit(paramType)
-  local has14bit = false
-  local hasOther = false
-  if paramType == gdefs.PARAM_TYPE_INTEDITOR then
-    local hasTable, fresh = tx.getHasTable()
-    has14bit = hasTable[0xE0] and true or false
-    hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
-    if fresh then NewHasTable = true end
-  end
-  return has14bit, hasOther
-end
-
 local function overrideEditorType(row, target, condOp, paramTypes, idx)
-  local has14bit, hasOther = check14Bit(paramTypes[idx])
+  local has14bit, hasOther = tx.check14Bit(paramTypes[idx])
   if condOp.bitfield or (condOp.split and condOp.split[idx].bitfield) then
     tx.setEditorTypeForRow(row, idx, gdefs.EDITOR_TYPE_BITFIELD)
   elseif not (paramTypes[idx] == gdefs.PARAM_TYPE_INTEDITOR or paramTypes[idx] == gdefs.PARAM_TYPE_FLOATEDITOR)
@@ -806,8 +794,6 @@ end
 -----------------------------------------------------------------------------
 -------------------------------- THE GUTS -----------------------------------
 
-local ppqToTime -- forward declaration to avoid vs.code warning
-
 local function windowFn()
 
   -- if wantsRecede ~= 0 and focuswait then
@@ -1072,17 +1058,6 @@ local function windowFn()
 
   ---------------------------------------------------------------------------
   --------------------------------- UTILITIES -------------------------------
-
-  local function ensureNumString(str, range, floor)
-    local num = tonumber(str)
-    if not num then num = 0 end
-    if range then
-      if range[1] and num < range[1] then num = range[1] end
-      if range[2] and num > range[2] then num = range[2] end
-    end
-    if floor then num = math.floor(num + 0.5) end
-    return tostring(num)
-  end
 
   local function handleNewFolderCreationDialog(title, text)
     local rv = false
@@ -1505,7 +1480,7 @@ local function windowFn()
   end
 
   local function doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
-    local isNote = tg.isANote(target, condOp)
+    local isNote = tx.isANote(target, condOp)
     local floatFlags = ImGui.InputTextFlags_CharsDecimal + ImGui.InputTextFlags_CharsNoBlank
 
     -- TODO: cleanup these attributes & combinations
@@ -1513,7 +1488,7 @@ local function windowFn()
     if NewHasTable then
       local strVal = row.params[index].textEditorStr
       if not (flags.isMetricOrMusical or flags.isBitField) then
-        strVal = ensureNumString(row.params[index].textEditorStr, range, paramType == gdefs.PARAM_TYPE_INTEDITOR)
+        strVal = tg.ensureNumString(row.params[index].textEditorStr, range, paramType == gdefs.PARAM_TYPE_INTEDITOR)
       end
       strVal = tx.handlePercentString(strVal, row, target, condOp, paramType, editorType, index, range, bipolar)
       row.params[index].textEditorStr = strVal
@@ -1637,7 +1612,7 @@ local function windowFn()
           end
         end
         if flags.isMetricOrMusical and paramEntry.notation ~= '$grid' then
-          local mgMods, mgReaSwing = tx.GetMetricGridModifiers(row.mg)
+          local mgMods, mgReaSwing = tx.getMetricGridModifiers(row.mg)
           if mgMods == gdefs.MG_GRID_TRIPLET then label = label .. 'T'
           elseif mgMods == gdefs.MG_GRID_DOTTED then label = label .. '.'
           elseif mgMods == gdefs.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
@@ -1743,7 +1718,7 @@ local function windowFn()
 
     local mg = row.mg
     local useGrid = paramEntry.notation == '$grid'
-    local mgMods, mgReaSwing = tx.GetMetricGridModifiers(mg)
+    local mgMods, mgReaSwing = tx.getMetricGridModifiers(mg)
     local newMgMods = mgMods
     local dotVal = not useGrid and mgMods == gdefs.MG_GRID_DOTTED or false
     local tripVal = not useGrid and mgMods == gdefs.MG_GRID_TRIPLET or false
@@ -1753,20 +1728,20 @@ local function windowFn()
     if useGrid then ImGui.BeginDisabled(ctx) end
     local rv, sel = ImGui.Checkbox(ctx, 'Dotted', dotVal)
     if rv then
-      newMgMods = tx.SetMetricGridModifiers(mg, sel and gdefs.MG_GRID_DOTTED or gdefs.MG_GRID_STRAIGHT)
+      newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_DOTTED or gdefs.MG_GRID_STRAIGHT)
       fun(1, true)
     end
 
     rv, sel = ImGui.Checkbox(ctx, 'Triplet', tripVal)
     if rv then
-      newMgMods = tx.SetMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
+      newMgMods = tx.setFindScopeFlagsetMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
       fun(2, true)
     end
 
     if showSwing then
       rv, sel = ImGui.Checkbox(ctx, 'Swing', swingVal)
       if rv then
-        newMgMods = tx.SetMetricGridModifiers(mg, sel and gdefs.MG_GRID_SWING or gdefs.MG_GRID_STRAIGHT)
+        newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_SWING or gdefs.MG_GRID_STRAIGHT)
         fun(4, true)
       end
 

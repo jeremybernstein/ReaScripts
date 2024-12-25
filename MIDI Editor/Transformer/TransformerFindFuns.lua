@@ -1,11 +1,13 @@
 local FindFuns = {}
 
+Shared = Shared or {} -- Use an existing table or create a new one
+
 local r = reaper
 local gdefs = require 'TransformerGeneralDefs'
 local fdefs = require 'TransformerFindDefs'
 
 local function testEvent1(event, property, op, param1)
-  local val = GetValue(event, property)
+  local val = Shared.getValue(event, property)
   local retval = false
 
   if op == fdefs.OP_EQ then
@@ -19,7 +21,7 @@ local function testEvent1(event, property, op, param1)
   elseif op == fdefs.OP_LTE then
     retval = val <= param1
   elseif op == fdefs.OP_EQ_NOTE then
-    retval = (GetEventType(event) == gdefs.NOTE_TYPE) and (val % 12 == param1)
+    retval = (Shared.getEventType(event) == gdefs.NOTE_TYPE) and (val % 12 == param1)
   end
   return retval
 end
@@ -35,7 +37,7 @@ local function eventIsSimilar(event, property, val, param1, param2)
         check = false
       end
       if check then
-        local eval = GetValue(e, property)
+        local eval = Shared.getValue(e, property)
         if val >= (eval - param1) and val <= (eval + param2) then
           return true
         end
@@ -46,7 +48,7 @@ local function eventIsSimilar(event, property, val, param1, param2)
 end
 
 local function testEvent2(event, property, op, param1, param2)
-  local val = GetValue(event, property)
+  local val = Shared.getValue(event, property)
   local retval = false
 
   if op == fdefs.OP_INRANGE then
@@ -91,7 +93,7 @@ local function findEveryN(event, evnParams)
 end
 
 local function findEveryNNotePattern(event, evnParams, notenum)
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return false end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return false end
   if not (evnParams and evnParams.isBitField and evnParams.pattern) then return false end
 
   local patLen = #evnParams.pattern
@@ -113,7 +115,7 @@ local function findEveryNNotePattern(event, evnParams, notenum)
 end
 
 local function findEveryNNote(event, evnParams, notenum)
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return false end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return false end
   if not evnParams then return false end
 
   if evnParams.isBitField then return findEveryNNotePattern(event, evnParams, notenum) end
@@ -135,10 +137,10 @@ end
 local function equalsMusicalLength(event, take, PPQ, mgParams)
   if not take then return false end
 
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return false end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return false end
 
   local subdiv = mgParams.param1
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local preSlop = gridUnit * (mgParams.preSlopPercent / 100)
   local postSlop = gridUnit * (mgParams.postSlopPercent / 100)
@@ -180,7 +182,7 @@ local function cursorPosition(event, property, cursorPosProj, which)
   elseif which == fdefs.CURSOR_GTE then -- after/at
     return time >= cursorPosProj
   elseif which == fdefs.CURSOR_UNDER then
-    if GetEventType(event) == gdefs.NOTE_TYPE then
+    if Shared.getEventType(event) == gdefs.NOTE_TYPE then
       local endtime = time + event.projlen
       return cursorPosProj >= time and cursorPosProj < endtime
     else
@@ -191,7 +193,7 @@ local function cursorPosition(event, property, cursorPosProj, which)
 end
 
 local function underEditCursor(event, take, PPQ, cursorPosProj, param1, param2)
-  local gridUnit = GetGridUnitFromSubdiv(param1, PPQ)
+  local gridUnit = Shared.getGridUnitFromSubdiv(param1, PPQ)
   local PPQPercent = gridUnit + (gridUnit * (param2 / 100))
   local cursorPPQPos = r.MIDI_GetPPQPosFromProjTime(take, cursorPosProj)
   local minRange = cursorPPQPos - PPQPercent
@@ -199,7 +201,7 @@ local function underEditCursor(event, take, PPQ, cursorPosProj, param1, param2)
 
   local time = event.ppqpos
   if time >= minRange and time < maxRange then return true end
-  if GetEventType(event) == gdefs.NOTE_TYPE then
+  if Shared.getEventType(event) == gdefs.NOTE_TYPE then
     local endtime = event.endppqpos
     if time <= minRange and endtime > minRange then return true end
   end
@@ -208,7 +210,7 @@ end
 
 local function isNearEvent(event, take, PPQ, evSelParams, param2)
   local scale = tonumber(evSelParams.scaleStr)
-  local gridUnit = GetGridUnitFromSubdiv(param2, PPQ)
+  local gridUnit = Shared.getGridUnitFromSubdiv(param2, PPQ)
   local PPQPercent = gridUnit + (gridUnit * (scale / 100))
   local minRange = event.ppqpos - PPQPercent
   local maxRange = event.ppqpos + PPQPercent
@@ -278,7 +280,7 @@ local function onMetricGrid(take, PPQ, ppqpos, mgParams)
   local gridStr = mgParams.param2
 
   local gridLen = #gridStr
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local cycleLength = gridUnit * gridLen
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
@@ -334,7 +336,7 @@ local function onMetricGrid(take, PPQ, ppqpos, mgParams)
 end
 
 local function inScale(event, scale, root)
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return false end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return false end
 
   local note = event.msg2 % 12
   note = note - root
@@ -348,8 +350,8 @@ end
 local function onGrid(event, property, take, PPQ)
   if not take then return false end
 
-  local grid, swing = GridInfo().currentGrid, GridInfo().currentSwing -- 1.0 is QN, 1.5 dotted, etc.
-  local timeAdjust = GetTimeOffset()
+  local grid, swing = Shared.gridInfo().currentGrid, Shared.gridInfo().currentSwing -- 1.0 is QN, 1.5 dotted, etc.
+  local timeAdjust = Shared.getTimeOffset()
   local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
   local measppq = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
   local gridUnit = grid * PPQ
@@ -366,7 +368,7 @@ end
 local function inBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
   if not take then return false end
 
-  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + GetTimeOffset()
+  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + Shared.getTimeOffset()
   local _, _, cml, _, cdenom = r.TimeMap2_timeToBeats(0, tpos)
   local beatPPQ = (4 / cdenom) * PPQ
   local measurePPQ = beatPPQ * cml
@@ -390,7 +392,7 @@ local function inRazorArea(event, take)
   local itemTop = freemode ~= 0 and r.GetMediaItemInfo_Value(item, 'F_FREEMODE_Y') or nil
   local itemBottom = freemode ~= 0 and (itemTop + r.GetMediaItemInfo_Value(item, 'F_FREEMODE_H')) or nil
 
-  local timeAdjust = GetTimeOffset()
+  local timeAdjust = Shared.getTimeOffset()
 
   local ret, area = r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS_EXT', '', false)
   if area ~= '' then
@@ -430,7 +432,7 @@ end
 
 local function ccHasCurve(take, event, ctype)
   if event.chanmsg < 0xA0 or event.chanmsg >= 0xF0 then return false end
-  local rv, curveType = mu.MIDI_GetCCShape(take, event.idx)
+  local rv, curveType = Shared.mu.MIDI_GetCCShape(take, event.idx)
   return rv and curveType == ctype
 end
 

@@ -6,8 +6,9 @@
 --]]
 
 local Extra = {}
+Shared = Shared or {} -- Use an existing table or create a new one
 
-local mu = _G.mu
+local mu = Shared.mu
 
 local tg = require 'TransformerGlobal'
 local gdefs = require 'TransformerGeneralDefs'
@@ -18,7 +19,7 @@ local gdefs = require 'TransformerGeneralDefs'
 -- param3Formatter
 local function param3FormatPositionScaleOffset(row)
   -- reverse p2 and p3, another param3 user might need to do weirder stuff
-  local rowText, param1Val, param2Val = GetRowTextAndParameterValues(row)
+  local rowText, param1Val, param2Val = Shared.getRowTextAndParameterValuesetRowTextAndParameterValues(row)
   rowText = rowText .. '('
   if tg.isValidString(param1Val) then
     rowText = rowText .. param1Val
@@ -35,12 +36,12 @@ end
 
 -- param3Parser
 local function param3ParsePositionScaleOffset(row, param1, param2, param3)
-  local _, param1Tab, param2Tab, target, condOp = ActionTabsFromTarget(row)
+  local _, param1Tab, param2Tab, target, condOp = Shared.actionTabsFromTarget(row)
   if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
   if tg.isValidString(param1) then
-    param1 = HandleMacroParam(row, target, condOp, param1Tab, param1, 1)
+    param1 = Shared.handleMacroParam(row, target, condOp, param1Tab, param1, 1)
   else
-    param1 = DefaultValueIfAny(row, condOp, 1)
+    param1 = Shared.defaultValueIfAny(row, condOp, 1)
   end
   if tg.isValidString(param3) then
     local tmp = param2
@@ -48,14 +49,14 @@ local function param3ParsePositionScaleOffset(row, param1, param2, param3)
     param3 = tmp
   end
   if tg.isValidString(param2) then
-    param2 = HandleMacroParam(row, target, condOp, param2Tab, param2, 2)
+    param2 = Shared.handleMacroParam(row, target, condOp, param2Tab, param2, 2)
   else
-    param2 = DefaultValueIfAny(row, condOp, 2)
+    param2 = Shared.defaultValueIfAny(row, condOp, 2)
   end
 
   row.params[1].textEditorStr = param1
   row.params[2].textEditorStr = param2
-  row.params[3].textEditorStr = LengthFormatRebuf(param3)
+  row.params[3].textEditorStr = Shared.lengthFormatRebuf(param3)
 end
 
 local function param3PositionScaleOffsetMenuLabel(row)
@@ -85,7 +86,7 @@ end
 
 local function param3FormatLine(row)
   -- reverse p2 and p3, another param3 user might need to do weirder stuff
-  local rowText, param1Val, param2Val, param3Val = GetRowTextAndParameterValues(row)
+  local rowText, param1Val, param2Val, param3Val = Shared.getRowTextAndParameterValues(row)
   rowText = rowText .. '('
   if tg.isValidString(param1Val) then
     rowText = rowText .. param1Val
@@ -130,13 +131,13 @@ local function param3Line2Range(type, mod)
 end
 
 local function param3ParseLine(row, param1, param2, param3)
-  local _, param1Tab, param2Tab, target, condOp = ActionTabsFromTarget(row)
+  local _, param1Tab, param2Tab, target, condOp = Shared.actionTabsFromTarget(row)
   local p2tmp = param2
   if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
   if tg.isValidString(param1) then
-    param1 = HandleMacroParam(row, target, condOp, param1Tab, param1, 1)
+    param1 = Shared.handleMacroParam(row, target, condOp, param1Tab, param1, 1)
   else
-    param1 = DefaultValueIfAny(row, condOp, 1)
+    param1 = Shared.defaultValueIfAny(row, condOp, 1)
   end
   local mult
   if tg.isValidString(param3) then
@@ -151,11 +152,11 @@ local function param3ParseLine(row, param1, param2, param3)
   param3 = p2tmp
 
   if tg.isValidString(param2) then
-    param2 = HandleMacroParam(row, target, condOp, param2Tab, param2, 2)
+    param2 = Shared.handleMacroParam(row, target, condOp, param2Tab, param2, 2)
   else
-    param2 = DefaultValueIfAny(row, condOp, 2)
+    param2 = Shared.defaultValueIfAny(row, condOp, 2)
   end
-  param3 = HandleMacroParam(row, target, condOp, {}, param3, 3)
+  param3 = Shared.handleMacroParam(row, target, condOp, {}, param3, 3)
   row.params[1].textEditorStr = param1
   row.params[2].textEditorStr = param2
   if tg.isValidString(param3) then
@@ -169,14 +170,14 @@ local function param3LineMenuLabel(row, target, condOp, newHasTable)
   end
 
   if newHasTable then
-    row.params[1].textEditorStr = HandlePercentString(row.params[1].textEditorStr, row, target, condOp, gdefs.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 1)
-    row.params[3].textEditorStr = HandlePercentString(row.params[3].textEditorStr, row, target, condOp, gdefs.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 3)
+    row.params[1].textEditorStr = Shared.handlePercentString(row.params[1].textEditorStr, row, target, condOp, gdefs.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 1)
+    row.params[3].textEditorStr = Shared.handlePercentString(row.params[3].textEditorStr, row, target, condOp, gdefs.PARAM_TYPE_INTEDITOR, row.params[1].editorType, 3)
   end
 
   local note1 = row.params[1].noteName
   local note3 = row.params[3].noteName
   if row.dirty or not (note1 and note3) then
-    if tg.isANote(target, condOp) then
+    if Shared.isANote(target, condOp) then
       note1 = mu.MIDI_NoteNumberToNoteName(tonumber(row.params[1].textEditorStr))
       row.params[1].noteName = note1
       note3 = mu.MIDI_NoteNumberToNoteName(tonumber(row.params[3].textEditorStr))

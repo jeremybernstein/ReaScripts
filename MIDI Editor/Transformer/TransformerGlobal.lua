@@ -1,5 +1,7 @@
 local TransformerGlobal = {}
 
+Shared = Shared or {} -- Use an existing table or create a new one
+
 local gdefs = require 'TransformerGeneralDefs'
 
 -----------------------------------------------------------------------------
@@ -234,13 +236,15 @@ end
 -----------------------------------------------------------------------------
 ----------------------------------- MISC ------------------------------------
 
-local function isANote(target, condOp)
-  local isNote = target.notation == '$value1' and not condOp.nixnote
-  if isNote then
-    local hasTable = GetHasTable()
-    isNote = hasTable._size == 1 and hasTable[0x90]
+local function ensureNumString(str, range, floor)
+  local num = tonumber(str)
+  if not num then num = 0 end
+  if range then
+    if range[1] and num < range[1] then num = range[1] end
+    if range[2] and num > range[2] then num = range[2] end
   end
-  return isNote
+  if floor then num = math.floor(num + 0.5) end
+  return tostring(num)
 end
 
 TransformerGlobal.class = class
@@ -255,6 +259,6 @@ TransformerGlobal.base64encode = b64enc
 TransformerGlobal.base64decode = b64dec
 TransformerGlobal.filePathExists = filePathExists
 TransformerGlobal.dirExists = dirExists
-TransformerGlobal.isANote = isANote
+TransformerGlobal.ensureNumString = ensureNumString
 
 return TransformerGlobal

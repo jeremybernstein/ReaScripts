@@ -35,7 +35,8 @@ mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true -- any downsides to having it on all 
 mu.CORRECT_OVERLAPS_FAVOR_NOTEON = true
 mu.CORRECT_EXTENTS = true
 
-_G.mu = mu -- must be defined before TransformerParam3 is required
+Shared = Shared or {} -- Use an existing table or create a new one
+Shared.mu = mu -- must be defined before TransformerParam3 is required
 
 function P(...)
   mu.post(...)
@@ -92,14 +93,14 @@ if fsf then currentFindScopeFlags = fsf end
 
 local currentFindPostProcessingInfo
 
-function ClearFindPostProcessingInfo()
+local function clearFindPostProcessingInfo()
   currentFindPostProcessingInfo = {
     flags = fdefs.FIND_POSTPROCESSING_FLAG_NONE,
     front = { count = 1, offset = 0 },
     back = { count = 1, offset = 0 },
   }
 end
-ClearFindPostProcessingInfo()
+clearFindPostProcessingInfo()
 
 local currentActionScope = adefs.actionScopeFromNotation()
 local currentActionScopeFlags = adefs.actionScopeFlagsFromNotation()
@@ -109,27 +110,41 @@ local scriptIgnoreSelectionInArrangeView = false
 -----------------------------------------------------------------------------
 ----------------------------- OPERATION FUNS --------------------------------
 
+-- forward declarations
+local ppqToTime
+local getHasTable
+-- end forward declarations
+
 local gridInfo = { currentGrid = 0, currentSwing = 0. } -- swing is -1. to 1
-function GridInfo()
+Shared.gridInfo = function()
   return gridInfo
 end
 
--- global
--------------------------------
-function GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+local function getMetricGridModifiers(mg) -- used in ActionFuns, can we improve on that
+  if mg then
+    local mods = mg.modifiers & 0x7
+    local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
+    return mods, reaperSwing
+  end
+  return gdefs.MG_GRID_STRAIGHT, false
+end
+Shared.getMetricGridModifiers = getMetricGridModifiers
+
+local function getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
   local gridUnit
-  local mgMods = GetMetricGridModifiers(mgParams)
+  local mgMods = getMetricGridModifiers(mgParams)
   if subdiv >= 0 then
     gridUnit = PPQ * (subdiv * 4)
     if mgMods == gdefs.MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
     elseif mgMods == gdefs.MG_GRID_TRIPLET then gridUnit = (gridUnit * 2 / 3) end
   else
-    gridUnit = PPQ * GridInfo().currentGrid
+    gridUnit = PPQ * Shared.gridInfo().currentGrid
   end
   return gridUnit
 end
+Shared.getGridUnitFromSubdiv = getGridUnitFromSubdiv
 
-function GetValue(event, property, bipolar)
+local function getValue(event, property, bipolar)
   if not property then return 0 end
   local is14bit = false
   if property == 'msg2' and event.chanmsg == 0xE0 then is14bit = true end
@@ -137,80 +152,9 @@ function GetValue(event, property, bipolar)
   if is14bit and bipolar then oldval = (oldval - (1 << 13)) end
   return oldval
 end
--- global
--------------------------------
+Shared.getValue = getValue
 
-function GetTimeSelectionStart()
-  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return ts_start + GetTimeOffset()
-end
-
-function GetTimeSelectionEnd()
-  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return ts_end + GetTimeOffset()
-end
-
-function ChanMsgToType(chanmsg)
-  if chanmsg == 0x90 then return gdefs.NOTE_TYPE
-  elseif chanmsg == 0xF0 or chanmsg == 0x100 then return gdefs.SYXTEXT_TYPE
-  elseif chanmsg >= 0xA0 and chanmsg <= 0xEF then return gdefs.CC_TYPE
-  else return gdefs.OTHER_TYPE
-  end
-end
-
-function GetEventType(event)
-  return ChanMsgToType(event.chanmsg)
-end
-
-function GetSubtypeValue(event)
-  if GetEventType(event) == gdefs.SYXTEXT_TYPE then return 0
-  else return event.msg2 / 127
-  end
-end
-
-function GetSubtypeValueName(event)
-  if GetEventType(event) == gdefs.SYXTEXT_TYPE then return 'devnull'
-  else return 'msg2'
-  end
-end
-
-function GetSubtypeValueLabel(typeIndex)
-  if typeIndex == 1 then return 'Note #'
-  elseif typeIndex == 2 then return 'Note #'
-  elseif typeIndex == 3 then return 'CC #'
-  elseif typeIndex == 4 then return 'Pgm #'
-  elseif typeIndex == 5 then return 'Pressure Amount'
-  elseif typeIndex == 6 then return 'PBnd'
-  else return ''
-  end
-end
-
-function GetMainValue(event)
-  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 0
-  elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then return 0
-  else return event.msg3 / 127
-  end
-end
-
-function GetMainValueName(event)
-  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'msg2'
-  elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then return 'devnull'
-  else return 'msg3'
-  end
-end
-
-function GetMainValueLabel(typeIndex)
-  if typeIndex == 1 then return 'Velocity'
-  elseif typeIndex == 2 then return 'Pressure Amount'
-  elseif typeIndex == 3 then return 'CC Value'
-  elseif typeIndex == 4 then return 'Pgm # (aliased Value 1)'
-  elseif typeIndex == 5 then return 'Channel Pressure Amount (aliased Value 1)'
-  elseif typeIndex == 6 then return 'PBnd (aliased Value 1)'
-  else return ''
-  end
-end
-
-function GetTimeOffset(correctMeasures)
+local function getTimeOffset(correctMeasures)
   local offset = r.GetProjectTimeOffset(0, false)
   if correctMeasures then
     local rv, measoff = r.get_config_var_string('projmeasoffs')
@@ -230,18 +174,100 @@ function GetTimeOffset(correctMeasures)
   end
   return offset
 end
+Shared.getTimeOffset = getTimeOffset
 
------------------------------------------------------------------------------
------------------------------ OPERATION FUNS --------------------------------
+local function chanMsgToType(chanmsg)
+  if chanmsg == 0x90 then return gdefs.NOTE_TYPE
+  elseif chanmsg == 0xF0 or chanmsg == 0x100 then return gdefs.SYXTEXT_TYPE
+  elseif chanmsg >= 0xA0 and chanmsg <= 0xEF then return gdefs.CC_TYPE
+  else return gdefs.OTHER_TYPE
+  end
+end
+Shared.chanMsgToType = chanMsgToType
+
+local function getEventType(event)
+  return chanMsgToType(event.chanmsg)
+end
+Shared.getEventType = getEventType
 
 local addLengthInfo = { addLengthFirstEventOffset = nil, addLengthFirstEventOffset_Take = nil, addLengthFirstEventStartTime = nil }
-function AddLengthInfo()
+Shared.addLengthInfo = function()
   return addLengthInfo
 end
 
 local moveCursorInfo = { moveCursorFirstEventPosition = nil, moveCursorFirstEventPosition_Take = nil }
-function MoveCursorInfo()
+Shared.moveCursorInfo = function()
   return moveCursorInfo
+end
+
+local function isANote(target, condOp)
+  local isNote = target.notation == '$value1' and not condOp.nixnote
+  if isNote then
+    local hasTable = getHasTable()
+    isNote = hasTable._size == 1 and hasTable[0x90]
+  end
+  return isNote
+end
+Shared.isANote = isANote
+
+---------------------------------------------------------------
+
+local function getTimeSelectionStart()
+  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  return ts_start + getTimeOffset()
+end
+
+local function getTimeSelectionEnd()
+  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  return ts_end + getTimeOffset()
+end
+
+local function getSubtypeValue(event)
+  if getEventType(event) == gdefs.SYXTEXT_TYPE then return 0
+  else return event.msg2 / 127
+  end
+end
+
+local function getSubtypeValueName(event)
+  if getEventType(event) == gdefs.SYXTEXT_TYPE then return 'devnull'
+  else return 'msg2'
+  end
+end
+
+local function getSubtypeValueLabel(typeIndex)
+  if typeIndex == 1 then return 'Note #'
+  elseif typeIndex == 2 then return 'Note #'
+  elseif typeIndex == 3 then return 'CC #'
+  elseif typeIndex == 4 then return 'Pgm #'
+  elseif typeIndex == 5 then return 'Pressure Amount'
+  elseif typeIndex == 6 then return 'PBnd'
+  else return ''
+  end
+end
+
+local function getMainValue(event)
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 0
+  elseif getEventType(event) == gdefs.SYXTEXT_TYPE then return 0
+  else return event.msg3 / 127
+  end
+end
+
+local function getMainValueName(event)
+  if event.chanmsg == 0xC0 or event.chanmsg == 0xD0 or event.chanmsg == 0xE0 then return 'msg2'
+  elseif getEventType(event) == gdefs.SYXTEXT_TYPE then return 'devnull'
+  else return 'msg3'
+  end
+end
+
+local function getMainValueLabel(typeIndex)
+  if typeIndex == 1 then return 'Velocity'
+  elseif typeIndex == 2 then return 'Pressure Amount'
+  elseif typeIndex == 3 then return 'CC Value'
+  elseif typeIndex == 4 then return 'Pgm # (aliased Value 1)'
+  elseif typeIndex == 5 then return 'Channel Pressure Amount (aliased Value 1)'
+  elseif typeIndex == 6 then return 'PBnd (aliased Value 1)'
+  else return ''
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -322,13 +348,13 @@ end
 --   return wantsBBU and (name == 'ticks' or name == 'notedur' or name == 'selposticks' or name == 'seldurticks')
 -- end
 
-function BBTToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
+local function bbtToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
   local nilmeas = measures == nil
   if not measures then measures = 0 end
   if not beats then beats = 0 end
   if not ticks then ticks = 0 end
   if relativeppq then
-    local relMeasures, relBeats, _, relTicks = PpqToTime(relativeppq)
+    local relMeasures, relBeats, _, relTicks = ppqToTime(relativeppq)
     measures = measures + relMeasures
     beats = beats + relBeats
     ticks = ticks + relTicks
@@ -344,7 +370,8 @@ function BBTToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
   return math.floor(ppqpos)
 end
 
-function PpqToTime(take, ppqpos, projtime)
+-- local
+ppqToTime = function(take, ppqpos, projtime)
   local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, projtime)
   local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
 
@@ -353,7 +380,7 @@ function PpqToTime(take, ppqpos, projtime)
   cml = tonumber(cml) or 0
   posBeats = tonumber(posBeats) or 0
   local beatsmax = math.floor(cml)
-  local posBeats_PPQ = BBTToPPQ(take, nil, math.floor(posBeats))
+  local posBeats_PPQ = bbtToPPQ(take, nil, math.floor(posBeats))
   local ticks = math.floor(ppqpos - posBeats_PPQ)
   return measures, beats, beatsmax, ticks
 end
@@ -362,7 +389,7 @@ end
   --   -- REAPER, why is this so difficult?
   --   -- get the PPQ position of the nearest measure start (to ensure that we're dealing with round values)
   --   local _, startMeasures, _, startBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
-  --   local startPPQ = BBTToPPQ(nil, math.floor(startBeats))
+  --   local startPPQ = bbtToPPQ(nil, math.floor(startBeats))
 
   --   -- now we need the nearest measure start to the end position
   --   local _, endMeasuresSOM, _, endBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, startPPQ + ppqlen)))
@@ -371,36 +398,26 @@ end
 
   --   local measures = endMeasures - startMeasures -- measures from start to end
   --   local beats = math.floor(endBeats - endBeatsSOM) -- beats from the SOM (only this measure)
-  --   local endBeats_PPQ = BBTToPPQ(nil,  math.floor(endBeats)) -- ppq location of the beginning of this beat
+  --   local endBeats_PPQ = bbtToPPQ(nil,  math.floor(endBeats)) -- ppq location of the beginning of this beat
   --   local ticks = math.floor((startPPQ + ppqlen) - endBeats_PPQ) -- finally the ticks
   --   return measures, beats, ticks
   -- end
 
-function CalcMIDITime(take, e)
-  local timeAdjust = GetTimeOffset()
+local function calcMIDITime(take, e)
+  local timeAdjust = getTimeOffset()
   e.projtime = r.MIDI_GetProjTimeFromPPQPos(take, e.ppqpos) + timeAdjust
   if e.endppqpos then
     e.projlen = (r.MIDI_GetProjTimeFromPPQPos(take, e.endppqpos) + timeAdjust) - e.projtime
   else
     e.projlen = 0
   end
-  e.measures, e.beats, e.beatsmax, e.ticks = PpqToTime(take, e.ppqpos, e.projtime)
+  e.measures, e.beats, e.beatsmax, e.ticks = ppqToTime(take, e.ppqpos, e.projtime)
 end
 
 ---------------------------------------------------------------------------
 --------------------------------- UTILITIES -------------------------------
 
-function EnsureNumString(str, range)
-  local num = tonumber(str)
-  if not num then num = 0 end
-  if range then
-    if range[1] and num < range[1] then num = range[1] end
-    if range[2] and num > range[2] then num = range[2] end
-  end
-  return tostring(num)
-end
-
-function TimeFormatClampPad(str, min, max, fmt, startVal)
+local function timeFormatClampPad(str, min, max, fmt, startVal)
   local num = tonumber(str)
   if not num then num = 0 end
   num = num + (startVal and startVal or 0)
@@ -413,7 +430,7 @@ local TIME_FORMAT_MEASURES = 1
 local TIME_FORMAT_MINUTES = 2
 local TIME_FORMAT_HMSF = 3
 
-function DetermineTimeFormatStringType(buf)
+local function determineTimeFormatStringType(buf)
   if string.match(buf, '%d+') then
     local isMSF = false
     local isHMSF = false
@@ -429,8 +446,8 @@ function DetermineTimeFormatStringType(buf)
   return TIME_FORMAT_UNKNOWN
 end
 
-function LengthFormatRebuf(buf)
-  local format = DetermineTimeFormatStringType(buf)
+local function lengthFormatRebuf(buf)
+  local format = determineTimeFormatStringType(buf)
   if format == TIME_FORMAT_UNKNOWN then return gdefs.DEFAULT_LENGTHFORMAT_STRING end
 
   local isneg = string.match(buf, '^%s*%-')
@@ -450,19 +467,19 @@ function LengthFormatRebuf(buf)
     absTicks = string.match(buf, 't%s*$')
 
     if not bars or bars == '' then bars = 0 end
-    bars = TimeFormatClampPad(bars, 0, nil, '%d')
+    bars = timeFormatClampPad(bars, 0, nil, '%d')
     if not beats or beats == '' then beats = 0 end
-    beats = TimeFormatClampPad(beats, 0, nil, '%d')
+    beats = timeFormatClampPad(beats, 0, nil, '%d')
 
     if not fraction or fraction == '' then fraction = 0 end
     if absTicks and not subfrac then -- no range check on ticks
       return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
     else
-      fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
+      fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
 
       if not subfrac or subfrac == '' then subfrac = nil end
       if subfrac then
-        subfrac = TimeFormatClampPad(subfrac, 0, 9, '%d')
+        subfrac = timeFormatClampPad(subfrac, 0, 9, '%d')
       end
       return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
     end
@@ -477,14 +494,14 @@ function LengthFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = TimeFormatClampPad(fraction, 0, 999, '%03d')
-    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%d')
+    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes = TimeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
+    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
     return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
   elseif format == TIME_FORMAT_HMSF then
     local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
@@ -492,32 +509,33 @@ function LengthFormatRebuf(buf)
     local frate = r.TimeMap_curFrameRate(0)
 
     if not frames or frames == '' then frames = 0 end
-    frames, framesVal = TimeFormatClampPad(frames, 0, nil, '%02d')
+    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
     if framesVal > frate then
       secondsVal = math.floor(framesVal / frate)
       frames = string.format('%03d', framesVal % frate)
     end
     if not seconds or seconds == '' then seconds = 0 end
-    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes, minutesVal = TimeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
+    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
     if minutesVal > 59 then
       hoursVal = math.floor(minutesVal / 60)
       minutes = string.format('%02d', minutesVal % 60)
     end
     if not hours or hours == '' then hours = 0 end
-    hours = TimeFormatClampPad(hours, 0, nil, '%d', hoursVal)
+    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
     return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
   return gdefs.DEFAULT_LENGTHFORMAT_STRING
 end
+Shared.lengthFormatRebuf = lengthFormatRebuf
 
-function TimeFormatRebuf(buf)
-  local format = DetermineTimeFormatStringType(buf)
+local function timeFormatRebuf(buf)
+  local format = determineTimeFormatStringType(buf)
   if format == TIME_FORMAT_UNKNOWN then return gdefs.DEFAULT_TIMEFORMAT_STRING end
 
   local isneg = string.match(buf, '^%s*%-')
@@ -537,19 +555,19 @@ function TimeFormatRebuf(buf)
     absTicks = string.match(buf, 't%s*$')
 
     if not bars or bars == '' then bars = 0 end
-    bars = TimeFormatClampPad(bars, nil, nil, '%d')
+    bars = timeFormatClampPad(bars, nil, nil, '%d')
     if not beats or beats == '' then beats = 1 end
-    beats = TimeFormatClampPad(beats, 1, nil, '%d')
+    beats = timeFormatClampPad(beats, 1, nil, '%d')
 
     if not fraction or fraction == '' then fraction = 0 end
     if absTicks and not subfrac then -- no range check on ticks
       return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
     else
-      fraction = TimeFormatClampPad(fraction, 0, 99, '%02d')
+      fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
 
       if not subfrac or subfrac == '' then subfrac = nil end
       if subfrac then
-        subfrac = TimeFormatClampPad(subfrac, 0, 9, '%d')
+        subfrac = timeFormatClampPad(subfrac, 0, 9, '%d')
       end
       return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
     end
@@ -564,14 +582,14 @@ function TimeFormatRebuf(buf)
     end
 
     if not fraction or fraction == '' then fraction = 0 end
-    fraction = TimeFormatClampPad(fraction, 0, 999, '%03d')
-    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%d')
+    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes = TimeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
+    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
     return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
   elseif format == TIME_FORMAT_HMSF then
     local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
@@ -579,31 +597,31 @@ function TimeFormatRebuf(buf)
     local frate = r.TimeMap_curFrameRate(0)
 
     if not frames or frames == '' then frames = 0 end
-    frames, framesVal = TimeFormatClampPad(frames, 0, nil, '%02d')
+    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
     if framesVal > frate then
       secondsVal = math.floor(framesVal / frate)
       frames = string.format('%02d', framesVal % frate)
     end
     if not seconds or seconds == '' then seconds = 0 end
-    seconds, secondsVal = TimeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
+    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
     if secondsVal > 59 then
       minutesVal = math.floor(secondsVal / 60)
       seconds = string.format('%02d', secondsVal % 60)
     end
     if not minutes or minutes == '' then minutes = 0 end
-    minutes, minutesVal = TimeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
+    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
     if minutesVal > 59 then
       hoursVal = math.floor(minutesVal / 60)
       minutes = string.format('%02d', minutesVal % 60)
     end
     if not hours or hours == '' then hours = 0 end
-    hours = TimeFormatClampPad(hours, 0, nil, '%d', hoursVal)
+    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
     return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
   end
   return gdefs.DEFAULT_TIMEFORMAT_STRING
 end
 
-function FindTabsFromTarget(row)
+local function findTabsFromTarget(row)
   local condTab = {}
   local param1Tab = {}
   local param2Tab = {}
@@ -687,10 +705,10 @@ function FindTabsFromTarget(row)
   return condTab, param1Tab, param2Tab, target, condition and condition or {}
 end
 
-function GenerateMetricGridNotation(row)
+local function generateMetricGridNotation(row)
   if not row.mg then return '' end
   local mgStr = '|'
-  local mgMods, mgReaSwing = GetMetricGridModifiers(row.mg)
+  local mgMods, mgReaSwing = getMetricGridModifiers(row.mg)
   mgStr = mgStr .. (mgMods == gdefs.MG_GRID_SWING and (mgReaSwing and 'r' or 'm')
                     or mgMods == gdefs.MG_GRID_TRIPLET and 't'
                     or mgMods == gdefs.MG_GRID_DOTTED and 'd'
@@ -703,7 +721,7 @@ function GenerateMetricGridNotation(row)
   return mgStr
 end
 
-function SetMetricGridModifiers(mg, mgMods, mgReaSwing)
+local function setMetricGridModifiers(mg, mgMods, mgReaSwing)
   local mods = mg.modifiers & 0x7
   local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
   if mg then
@@ -714,16 +732,7 @@ function SetMetricGridModifiers(mg, mgMods, mgReaSwing)
   return mods, reaperSwing
 end
 
-function GetMetricGridModifiers(mg)
-  if mg then
-    local mods = mg.modifiers & 0x7
-    local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
-    return mods, reaperSwing
-  end
-  return gdefs.MG_GRID_STRAIGHT, false
-end
-
-function ParseMetricGridNotation(str)
+local function parseMetricGridNotation(str)
   local mg = {}
 
   local fs, fe, mod, rst, pre, post, swing = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)|sw%((.-)%)$')
@@ -753,7 +762,7 @@ function ParseMetricGridNotation(str)
   return mg
 end
 
-function GenerateEveryNNotation(row)
+local function generateEveryNNotation(row)
   if not row.evn then return '' end
   local evn = row.evn
   local evnStr = (evn.isBitField and evn.pattern or tostring(evn.interval)) .. '|'
@@ -762,7 +771,7 @@ function GenerateEveryNNotation(row)
   return evnStr
 end
 
-function ParseEveryNNotation(str)
+local function parseEveryNNotation(str)
   local evn = {}
   local fs, fe, patInt, flag, offset = string.find(str, '(%d+)|([b-])|(%d+)$')
   if not (fs and fe) then
@@ -789,7 +798,7 @@ function ParseEveryNNotation(str)
   return evn
 end
 
-function GenerateEventSelectorNotation(row)
+local function generateEventSelectorNotation(row)
   if not row.evsel then return '' end
   local evsel = row.evsel
   local evSelStr = string.format('%02X', evsel.chanmsg)
@@ -807,7 +816,7 @@ function GenerateEventSelectorNotation(row)
   return evSelStr
 end
 
-function ParseEventSelectorNotation(str, row, paramTab)
+local function parseEventSelectorNotation(str, row, paramTab)
   local evsel = {}
   local fs, fe, chanmsg, channel, selected, muted = string.find(str, '([0-9A-Fa-f]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)')
   local msg2, scale, savefe
@@ -844,7 +853,7 @@ function ParseEventSelectorNotation(str, row, paramTab)
   return nil
 end
 
-function GenerateNewMIDIEventNotation(row)
+local function generateNewMIDIEventNotation(row)
   if not row.nme then return '' end
   local nme = row.nme
   local nmeStr = string.format('%02X%02X%02X', nme.chanmsg | nme.channel, nme.msg2, nme.msg3)
@@ -855,7 +864,7 @@ function GenerateNewMIDIEventNotation(row)
   return nmeStr
 end
 
-function ParseNewMIDIEventNotation(str, row, paramTab, index)
+local function parseNewMIDIEventNotation(str, row, paramTab, index)
   if index == 1 then
     local nme = {}
     local fs, fe, msg, flags, pos, dur, relvel = string.find(str, '([0-9A-Fa-f]+)|(%d)|([0-9%.%-:t]+)|([0-9%.:t]+)|([0-9A-Fa-f]+)')
@@ -911,7 +920,7 @@ function ParseNewMIDIEventNotation(str, row, paramTab, index)
   end
 end
 
-function GetParamType(src)
+local function getParamType(src)
   return not src and gdefs.PARAM_TYPE_UNKNOWN
     or src.menu and gdefs.PARAM_TYPE_MENU
     or src.inteditor and gdefs.PARAM_TYPE_INTEDITOR
@@ -928,10 +937,10 @@ function GetParamType(src)
     or gdefs.PARAM_TYPE_UNKNOWN
 end
 
-function GetParamTypesForRow(row, target, condOp)
-  local paramType = GetParamType(condOp)
+local function getParamTypesForRow(row, target, condOp)
+  local paramType = getParamType(condOp)
   if paramType == gdefs.PARAM_TYPE_UNKNOWN then
-    paramType = GetParamType(target)
+    paramType = getParamType(target)
   end
   if paramType == gdefs.PARAM_TYPE_UNKNOWN then
     paramType = gdefs.PARAM_TYPE_INTEDITOR
@@ -940,9 +949,9 @@ function GetParamTypesForRow(row, target, condOp)
   if row.params[3] then table.insert(split, paramType) end
 
   if condOp.split then
-    local split1 = GetParamType(condOp.split[1])
-    local split2 = GetParamType(condOp.split[2])
-    local split3 = row.params[3] and GetParamType(condOp.split[3]) or nil
+    local split1 = getParamType(condOp.split[1])
+    local split2 = getParamType(condOp.split[2])
+    local split3 = row.params[3] and getParamType(condOp.split[3]) or nil
     if split1 ~= gdefs.PARAM_TYPE_UNKNOWN then split[1] = split1 end
     if split2 ~= gdefs.PARAM_TYPE_UNKNOWN then split[2] = split2 end
     if split3 and split3 ~= gdefs.PARAM_TYPE_UNKNOWN then split[3] = split3 end
@@ -950,11 +959,11 @@ function GetParamTypesForRow(row, target, condOp)
   return split
 end
 
-function Check14Bit(paramType)
+local function check14Bit(paramType)
   local has14bit = false
   local hasOther = false
   if paramType == gdefs.PARAM_TYPE_INTEDITOR then
-    local hasTable = GetHasTable()
+    local hasTable = getHasTable()
     has14bit = hasTable[0xE0] and true or false
     hasOther = (hasTable[0x90] or hasTable[0xA0] or hasTable[0xB0] or hasTable[0xD0] or hasTable[0xF0]) and true or false
   end
@@ -965,9 +974,9 @@ local function opIsBipolar(condOp, index)
   return condOp.bipolar or (condOp.split and condOp.split[index].bipolar)
 end
 
-function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
+local function handleMacroParam(row, target, condOp, paramTab, paramStr, index)
   local paramType
-  local paramTypes = GetParamTypesForRow(row, target, condOp)
+  local paramTypes = getParamTypesForRow(row, target, condOp)
   paramType = paramTypes[index] or gdefs.PARAM_TYPE_UNKNOWN
 
   local percent = string.match(paramStr, 'percent<(.-)>')
@@ -1008,33 +1017,33 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
       if pa and pb then
         row.params[index].menuEntry = kk
         if paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL then
-          row.mg = ParseMetricGridNotation(paramStr:sub(pb))
+          row.mg = parseMetricGridNotation(paramStr:sub(pb))
           row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[index].showswing)
         end
         break
       end
     end
   elseif isEveryN then
-    row.evn = ParseEveryNNotation(paramStr)
+    row.evn = parseEveryNNotation(paramStr)
   elseif isNewEvent then
-    ParseNewMIDIEventNotation(paramStr, row, paramTab, index)
+    parseNewMIDIEventNotation(paramStr, row, paramTab, index)
   elseif isEventSelector then
-    row.evsel = ParseEventSelectorNotation(paramStr, row, paramTab)
+    row.evsel = parseEventSelectorNotation(paramStr, row, paramTab)
   elseif condOp.bitfield or (condOp.split and condOp.split[index] and condOp.split[index].bitfield) then
     row.params[index].textEditorStr = paramStr
   elseif paramType == gdefs.PARAM_TYPE_INTEDITOR or paramType == gdefs.PARAM_TYPE_FLOATEDITOR then
     local range = condOp.range and condOp.range or target.range
-    local has14bit, hasOther = Check14Bit(paramType)
+    local has14bit, hasOther = check14Bit(paramType)
     if has14bit then
       if hasOther then range = opIsBipolar(condOp, index) and TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE or TransformerLib.PARAM_PERCENT_RANGE
       else range = opIsBipolar(condOp, index) and TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE or TransformerLib.PARAM_PITCHBEND_RANGE
       end
     end
-    row.params[index].textEditorStr = EnsureNumString(paramStr, range)
+    row.params[index].textEditorStr = tg.ensureNumString(paramStr, range)
   elseif paramType == gdefs.PARAM_TYPE_TIME then
-    row.params[index].timeFormatStr = TimeFormatRebuf(paramStr)
+    row.params[index].timeFormatStr = timeFormatRebuf(paramStr)
   elseif paramType == gdefs.PARAM_TYPE_TIMEDUR then
-    row.params[index].timeFormatStr = LengthFormatRebuf(paramStr)
+    row.params[index].timeFormatStr = lengthFormatRebuf(paramStr)
   elseif paramType == gdefs.PARAM_TYPE_METRICGRID
     or paramType == gdefs.PARAM_TYPE_MUSICAL
     or paramType == gdefs.PARAM_TYPE_EVERYN
@@ -1046,8 +1055,9 @@ function HandleMacroParam(row, target, condOp, paramTab, paramStr, index)
   end
   return paramStr
 end
+Shared.handleMacroParam = handleMacroParam
 
-function GetParamPercentTerm(val, bipolar)
+local function getParamPercentTerm(val, bipolar)
   local percent = val / 100 -- it's a percent coming from the system
   local min = bipolar and -100 or 0
   local max = 100
@@ -1056,7 +1066,7 @@ function GetParamPercentTerm(val, bipolar)
   return '(event.chanmsg == 0xE0 and math.floor((((1 << 14) - 1) * ' ..  percent .. ') + 0.5) or math.floor((((1 << 7) - 1) * ' .. percent .. ') + 0.5))'
 end
 
-function ProcessFindMacroRow(buf, boolstr)
+local function processFindMacroRow(buf, boolstr)
   local row = fdefs.FindRow()
   local bufstart = 0
   local findstart, findend, parens = string.find(buf, '^%s*(%(+)%s*')
@@ -1087,7 +1097,7 @@ function ProcessFindMacroRow(buf, boolstr)
   if row.targetEntry < 1 then return end
 
   local param1Tab, param2Tab
-  local condTab = FindTabsFromTarget(row)
+  local condTab = findTabsFromTarget(row)
 
   -- do we need some way to filter out extraneous (/) chars?
   for k, v in ipairs(condTab) do
@@ -1099,11 +1109,11 @@ function ProcessFindMacroRow(buf, boolstr)
       row.conditionEntry = k
       row.isNot = hasNot == '!' and true or false
       bufstart = findend + 1
-      condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
+      condTab, param1Tab, param2Tab = findTabsFromTarget(row)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
       if tg.isValidString(param1) then
         bufstart = findend + 1
-        param1 = HandleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
+        param1 = handleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
       end
       break
     else
@@ -1116,14 +1126,14 @@ function ProcessFindMacroRow(buf, boolstr)
         row.isNot = hasNot == '!' and true or false
         bufstart = findend + 1
 
-        condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
+        condTab, param1Tab, param2Tab = findTabsFromTarget(row)
         if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
         if tg.isValidString(param1) then
-          param1 = HandleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
+          param1 = handleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
           -- mu.post('param1', param1)
         end
         if tg.isValidString(param2) then
-          param2 = HandleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
+          param2 = handleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
           -- mu.post('param2', param2)
         end
         break
@@ -1155,7 +1165,7 @@ function ProcessFindMacroRow(buf, boolstr)
   return false
 end
 
-function ProcessFindMacro(buf)
+local function processFindMacro(buf)
   local bufstart = 0
   local rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+')
   if not (rowstart and rowend) then
@@ -1164,7 +1174,7 @@ function ProcessFindMacro(buf)
   while rowstart and rowend do
     local rowbuf = string.sub(buf, bufstart, rowend)
     -- mu.post('got row: ' .. rowbuf) -- process
-    ProcessFindMacroRow(rowbuf, boolstr)
+    processFindMacroRow(rowbuf, boolstr)
     bufstart = rowend + 1
     rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+', bufstart)
     if not (rowstart and rowend) then
@@ -1173,11 +1183,11 @@ function ProcessFindMacro(buf)
   end
   -- last iteration
   -- mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
-  ProcessFindMacroRow(string.sub(buf, bufstart))
+  processFindMacroRow(string.sub(buf, bufstart))
 end
 
-function TimeFormatToSeconds(buf, baseTime, context, isLength)
-  local format = DetermineTimeFormatStringType(buf)
+local function timeFormatToSeconds(buf, baseTime, context, isLength)
+  local format = determineTimeFormatStringType(buf)
 
   local isneg = string.match(buf, '^%s*%-')
 
@@ -1203,7 +1213,7 @@ function TimeFormatToSeconds(buf, baseTime, context, isLength)
       fraction = tonumber(tfraction .. tsubfrac)
     end
     local adjust = baseTime and baseTime or 0
-    if not isLength then adjust = adjust - GetTimeOffset(true) end
+    if not isLength then adjust = adjust - getTimeOffset(true) end
     fraction = not fraction and 0 or fraction > 999 and 999 or fraction < 0 and 0 or fraction
     if baseTime then
       local retval, measures = r.TimeMap2_timeToBeats(0, baseTime)
@@ -1233,9 +1243,10 @@ function TimeFormatToSeconds(buf, baseTime, context, isLength)
   return 0
 end
 
-function LengthFormatToSeconds(buf, baseTime, context)
-  return TimeFormatToSeconds(buf, baseTime, context, true)
+local function lengthFormatToSeconds(buf, baseTime, context)
+  return timeFormatToSeconds(buf, baseTime, context, true)
 end
+Shared.lengthFormatToSeconds = lengthFormatToSeconds
 
 local context = {}
 context.r = r
@@ -1297,12 +1308,12 @@ context.AddDuration = afuns.addDuration
 context.SubtractDuration = afuns.subtractDuration
 context.MultiplyPosition = afuns.multiplyPosition
 
-context.GetMainValue = GetMainValue
-context.GetSubtypeValue = GetSubtypeValue
-context.GetTimeOffset = GetTimeOffset
-context.GetTimeSelectionStart = GetTimeSelectionStart
-context.GetTimeSelectionEnd = GetTimeSelectionEnd
-context.TimeFormatToSeconds = TimeFormatToSeconds
+context.GetMainValue = getMainValue
+context.GetSubtypeValue = getSubtypeValue
+context.GetTimeOffset = getTimeOffset
+context.GetTimeSelectionStart = getTimeSelectionStart
+context.GetTimeSelectionEnd = getTimeSelectionEnd
+context.TimeFormatToSeconds = timeFormatToSeconds
 
 context.OP_ADD = adefs.OP_ADD
 context.OP_SUB = adefs.OP_SUB
@@ -1311,7 +1322,7 @@ context.OP_DIV = adefs.OP_DIV
 context.OP_FIXED = adefs.OP_FIXED
 context.OP_SCALEOFF = adefs.OP_SCALEOFF
 
-function DoProcessParams(row, target, condOp, paramType, paramTab, index, notation, takectx)
+local function doProcessParams(row, target, condOp, paramType, paramTab, index, notation, takectx)
   local addMetricGridNotation = false
   local addEveryNNotation = false
   local addNewMIDIEventNotation = false
@@ -1366,9 +1377,9 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
   elseif (paramType == gdefs.PARAM_TYPE_INTEDITOR or paramType == gdefs.PARAM_TYPE_FLOATEDITOR) then
     paramVal = percentVal and string.format('%g', percentVal) or row.params[index].textEditorStr
   elseif paramType == gdefs.PARAM_TYPE_TIME then
-    paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(TimeFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
+    paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(timeFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
   elseif paramType == gdefs.PARAM_TYPE_TIMEDUR then
-    paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(LengthFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
+    paramVal = (notation or condOp.timearg) and row.params[index].timeFormatStr or tostring(lengthFormatToSeconds(row.params[index].timeFormatStr, nil, takectx))
   elseif paramType == gdefs.PARAM_TYPE_METRICGRID
     or paramType == gdefs.PARAM_TYPE_MUSICAL
     or paramType == gdefs.PARAM_TYPE_EVERYN
@@ -1382,24 +1393,24 @@ function DoProcessParams(row, target, condOp, paramType, paramTab, index, notati
   end
 
   if addMetricGridNotation then
-    paramVal = paramVal .. GenerateMetricGridNotation(row)
+    paramVal = paramVal .. generateMetricGridNotation(row)
   elseif addEveryNNotation then
-    paramVal = GenerateEveryNNotation(row)
+    paramVal = generateEveryNNotation(row)
   elseif addNewMIDIEventNotation then
-    paramVal = GenerateNewMIDIEventNotation(row)
+    paramVal = generateNewMIDIEventNotation(row)
   elseif addEventSelectorNotation then
-    paramVal = GenerateEventSelectorNotation(row)
+    paramVal = generateEventSelectorNotation(row)
   end
 
   return paramVal
 end
 
-function ProcessParams(row, target, condOp, paramTabs, notation, takectx)
-  local paramTypes = GetParamTypesForRow(row, target, condOp)
+local function processParams(row, target, condOp, paramTabs, notation, takectx)
+  local paramTypes = getParamTypesForRow(row, target, condOp)
 
-  local param1Val = DoProcessParams(row, target, condOp, paramTypes[1], paramTabs[1], 1, notation, takectx)
-  local param2Val = DoProcessParams(row, target, condOp, paramTypes[2], paramTabs[2], 2, notation, takectx)
-  local param3Val = row.params[3] and DoProcessParams(row, target, condOp, paramTypes[3], paramTabs[3], 3, notation, takectx) or nil
+  local param1Val = doProcessParams(row, target, condOp, paramTypes[1], paramTabs[1], 1, notation, takectx)
+  local param2Val = doProcessParams(row, target, condOp, paramTypes[2], paramTabs[2], 2, notation, takectx)
+  local param3Val = row.params[3] and doProcessParams(row, target, condOp, paramTypes[3], paramTabs[3], 3, notation, takectx) or nil
 
   return param1Val, param2Val, param3Val
 end
@@ -1407,15 +1418,15 @@ end
   ---------------------------------------------------------------------------
   -------------------------------- FIND UTILS -------------------------------
 
-function FindRowToNotation(row, index)
+local function findRowToNotation(row, index)
   local rowText = ''
 
-  local _, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(row)
+  local _, param1Tab, param2Tab, curTarget, curCondition = findTabsFromTarget(row)
   rowText = curTarget.notation .. ' ' .. (row.isNot and '!' or '') .. curCondition.notation
   local param1Val, param2Val
-  local paramTypes = GetParamTypesForRow(row, curTarget, curCondition)
+  local paramTypes = getParamTypesForRow(row, curTarget, curCondition)
 
-  param1Val, param2Val = ProcessParams(row, curTarget, curCondition, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
+  param1Val, param2Val = processParams(row, curTarget, curCondition, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
   if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
     param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
   end
@@ -1447,41 +1458,41 @@ function FindRowToNotation(row, index)
   return rowText
 end
 
-function FindRowsToNotation()
+local function findRowsToNotation()
   local notationString = ''
   for k, v in ipairs(fdefs.findRowTable()) do
-    local rowText = FindRowToNotation(v, k)
+    local rowText = findRowToNotation(v, k)
     notationString = notationString .. rowText
   end
   -- mu.post('find macro: ' .. notationString)
   return notationString
 end
 
-function EventToIdx(event)
+local function eventToIdx(event)
   return event.chanmsg + (event.chan and event.chan or 0)
 end
 
-function UpdateEventCount(event, counts, onlyNoteRow)
+local function updateEventCount(event, counts, onlyNoteRow)
   local char
-  if GetEventType(event) == gdefs.NOTE_TYPE and not onlyNoteRow then
+  if getEventType(event) == gdefs.NOTE_TYPE and not onlyNoteRow then
     event.count = counts.noteCount + 1
     counts.noteCount = event.count
   end
   -- also get counts for specific notes so that we can do rows as an option
-  local eventIdx = EventToIdx(event)
+  local eventIdx = eventToIdx(event)
   if not counts[eventIdx] then counts[eventIdx] = {} end
   local subIdx = event.msg2 and event.msg2 or 0 -- sysex/text
   if event.chanmsg >= 0xC0 then subIdx = 0 end
   if not counts[eventIdx][subIdx] then counts[eventIdx][subIdx] = 0 end
-  local cname = GetEventType(event) == gdefs.NOTE_TYPE and 'ncount' or 'count'
+  local cname = getEventType(event) == gdefs.NOTE_TYPE and 'ncount' or 'count'
   event[cname] = counts[eventIdx][subIdx] + 1
   counts[eventIdx][subIdx] = event[cname]
 end
 
-function CalcChordPos(first, last)
+local function calcChordPos(first, last)
   local chordPos = {}
   for i = first, last do
-    if GetEventType(allEvents[i]) == gdefs.NOTE_TYPE then
+    if getEventType(allEvents[i]) == gdefs.NOTE_TYPE then
       table.insert(chordPos, allEvents[i])
     end
   end
@@ -1497,7 +1508,49 @@ function CalcChordPos(first, last)
   end
 end
 
-function RunFind(findFn, params, runFn)
+local function doFindPostProcessing(found, unfound)
+  local wantsFront = currentFindPostProcessingInfo.flags & fdefs.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0
+  local wantsBack = currentFindPostProcessingInfo.flags & fdefs.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0
+  local newfound = {}
+
+  if wantsFront then
+    local num = currentFindPostProcessingInfo.front.count
+    local offset = currentFindPostProcessingInfo.front.offset + 1
+    for i = 1, #found do
+      local f = found[i]
+      if i >= offset and (i - offset) < num then
+        table.insert(newfound, f)
+      else
+        table.insert(unfound, f)
+      end
+    end
+  end
+  if wantsBack then
+    local num = currentFindPostProcessingInfo.back.count
+    local offset = currentFindPostProcessingInfo.back.offset + 1
+    local ii = 1
+    for i = #found, 1, -1 do
+      local f = found[i]
+      if ii >= offset and (ii - offset) < num then
+        table.insert(newfound, f)
+      else
+        table.insert(unfound, f)
+      end
+      ii = ii + 1
+    end
+  end
+  if #newfound ~= 0 then found = newfound end
+  return found
+end
+
+local function handleFindPostProcessing(found, unfound)
+  if currentFindPostProcessingInfo.flags ~= fdefs.FIND_POSTPROCESSING_FLAG_NONE then
+    return doFindPostProcessing(found, unfound)
+  end
+  return found, unfound
+end
+
+local function runFind(findFn, params, runFn)
 
   local wantsEventPreprocessing = params and params.wantsEventPreprocessing or false
   local getUnfound = params and params.wantsUnfound or false
@@ -1520,9 +1573,9 @@ function RunFind(findFn, params, runFn)
     local take = params.take
 
     for k, event in ipairs(allEvents) do
-      if GetEventType(event) == gdefs.CC_TYPE or GetEventType(event) == gdefs.SYXTEXT_TYPE then
-        UpdateEventCount(event, counts)
-      elseif GetEventType(event) == gdefs.NOTE_TYPE then -- note event
+      if getEventType(event) == gdefs.CC_TYPE or getEventType(event) == gdefs.SYXTEXT_TYPE then
+        updateEventCount(event, counts)
+      elseif getEventType(event) == gdefs.NOTE_TYPE then -- note event
         if take then
           local noteOnset = event.projtime
           local notePpq = r.MIDI_GetPPQPosFromProjTime(take, noteOnset)
@@ -1554,7 +1607,7 @@ function RunFind(findFn, params, runFn)
           if not matched then
             if updateFirstNote then
               if k > 1 and (allEvents[k - 1].flags & 0x04 ~= 0) then
-                CalcChordPos(firstNoteIndex, k - 1)
+                calcChordPos(firstNoteIndex, k - 1)
               end
 
               firstNotePpq = notePpq
@@ -1564,22 +1617,22 @@ function RunFind(findFn, params, runFn)
               prevEvents[2] = nil
             end
           end
-          UpdateEventCount(event, counts, matched)
+          updateEventCount(event, counts, matched)
         end
       end
     end
     if firstNoteIndex and (allEvents[firstNoteIndex].flags & 0x04 ~= 0) then
-      CalcChordPos(firstNoteIndex, #allEvents)
+      calcChordPos(firstNoteIndex, #allEvents)
     end
   end
 
   for _, event in ipairs(allEvents) do
     local matches = false
-    if findFn and findFn(event, GetSubtypeValueName(event), GetMainValueName(event)) then -- event, _value1, _value2
+    if findFn and findFn(event, getSubtypeValueName(event), getMainValueName(event)) then -- event, _value1, _value2
       hasTable[event.chanmsg] = true
       if event.projtime < firstTime then firstTime = event.projtime end
       if event.projtime > lastTime then lastTime = event.projtime end
-      if GetEventType(event) == gdefs.NOTE_TYPE and event.projtime + event.projlen > lastNoteEnd then lastNoteEnd = event.projtime + event.projlen end
+      if getEventType(event) == gdefs.NOTE_TYPE and event.projtime + event.projlen > lastNoteEnd then lastNoteEnd = event.projtime + event.projlen end
       table.insert(found, event)
       matches = true
     elseif getUnfound then
@@ -1588,7 +1641,7 @@ function RunFind(findFn, params, runFn)
     if runFn then runFn(event, matches) end
   end
 
-  found, unfound = HandleFindPostProcessing(found, unfound)
+  found, unfound = handleFindPostProcessing(found, unfound)
 
   -- it was a time selection, add a final event to make behavior predictable
   if params.addRangeEvents and params.findRange.frStart and params.findRange.frEnd then
@@ -1596,8 +1649,8 @@ function RunFind(findFn, params, runFn)
     local frEnd = params.findRange.frEnd
     local firstLastEventsByType = {}
     for _, event in ipairs(found) do
-      if GetEventType(event) == gdefs.CC_TYPE then
-        local eventIdx = EventToIdx(event)
+      if getEventType(event) == gdefs.CC_TYPE then
+        local eventIdx = eventToIdx(event)
         if not firstLastEventsByType[eventIdx] then firstLastEventsByType[eventIdx] = {} end
         if not firstLastEventsByType[eventIdx][event.msg2] then firstLastEventsByType[eventIdx][event.msg2] = {} end
         if not firstLastEventsByType[eventIdx][event.msg2].firstEvent then
@@ -1638,7 +1691,7 @@ function RunFind(findFn, params, runFn)
   return found, contextTab, getUnfound and unfound or nil
 end
 
-function FnStringToFn(fnString, errFn)
+local function fnStringToFn(fnString, errFn)
   local fn
   local success, pret, err = pcall(load, fnString, nil, nil, context)
   if success and pret then
@@ -1650,7 +1703,7 @@ function FnStringToFn(fnString, errFn)
   return success, fn
 end
 
-function ProcessFind(take, fromHasTable)
+local function processFind(take, fromHasTable)
 
   local fnString = ''
   local wantsEventPreprocessing = false
@@ -1669,7 +1722,7 @@ function ProcessFind(take, fromHasTable)
 
   for k, v in ipairs(iterTab) do
     local row = v
-    local condTab, param1Tab, param2Tab, curTarget, curCondition = FindTabsFromTarget(v)
+    local condTab, param1Tab, param2Tab, curTarget, curCondition = findTabsFromTarget(v)
 
     if #condTab == 0 then return end -- continue?
 
@@ -1683,7 +1736,7 @@ function ProcessFind(take, fromHasTable)
     if curTarget.notation == '$lastevent' then wantsEventPreprocessing = true
     elseif string.match(condition.notation, ':inchord') then wantsEventPreprocessing = true end
 
-    local paramTerms = { ProcessParams(v, curTarget, condition, { param1Tab, param2Tab, {} }, false, context) }
+    local paramTerms = { processParams(v, curTarget, condition, { param1Tab, param2Tab, {} }, false, context) }
 
     if curCondition.terms > 0 and paramTerms[1] == '' then return end
 
@@ -1696,10 +1749,10 @@ function ProcessFind(take, fromHasTable)
       paramTerms[1] = tmp
     end
 
-    local paramTypes = GetParamTypesForRow(v, curTarget, condition)
+    local paramTypes = getParamTypesForRow(v, curTarget, condition)
     for i = 1, 2 do -- param3 for Find?
       if paramNums[i] and (paramTypes[i] == gdefs.PARAM_TYPE_INTEDITOR or paramTypes[i] == gdefs.PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
-        paramTerms[i] = GetParamPercentTerm(paramNums[i], opIsBipolar(curCondition, i))
+        paramTerms[i] = getParamPercentTerm(paramNums[i], opIsBipolar(curCondition, i))
       end
     end
 
@@ -1735,8 +1788,8 @@ function ProcessFind(take, fromHasTable)
 
     if curTarget.notation == '$position' and condition.timeselect == fdefs.SELECT_TIME_RANGE then
       if condition.notation == ':intimesel' then
-        local ts1 = GetTimeSelectionStart()
-        local ts2 = GetTimeSelectionEnd()
+        local ts1 = getTimeSelectionStart()
+        local ts2 = getTimeSelectionEnd()
         if not findRangeStart or ts1 < findRangeStart then findRangeStart = ts1 end
         if not findRangeEnd or ts2 > findRangeEnd then findRangeEnd = ts2 end
       end
@@ -1806,10 +1859,10 @@ function ProcessFind(take, fromHasTable)
   context.take = take
   if take then
     local cg, cs = r.MIDI_GetGrid(take)
-    GridInfo().currentGrid = cg or 0
-    GridInfo().currentSwing = cs or 0
+    Shared.gridInfo().currentGrid = cg or 0
+    Shared.gridInfo().currentSwing = cs or 0
   end -- 1.0 is QN, 1.5 dotted, etc.
-  _, findFn = FnStringToFn(fnString, function(err)
+  _, findFn = fnStringToFn(fnString, function(err)
     parserError = 'Fatal error: could not load selection criteria'
     if err then
       if string.match(err, '\'%)\' expected') then
@@ -1822,7 +1875,7 @@ function ProcessFind(take, fromHasTable)
   return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }, fnString
 end
 
-function ActionTabsFromTarget(row)
+local function actionTabsFromTarget(row)
   local opTab = {}
   local param1Tab = {}
   local param2Tab = {}
@@ -1906,8 +1959,9 @@ function ActionTabsFromTarget(row)
 
   return opTab, param1Tab, param2Tab, target, operation
 end
+Shared.actionTabsFromTarget = actionTabsFromTarget
 
-function DefaultValueIfAny(row, operation, index)
+local function defaultValueIfAny(row, operation, index)
   local param = nil
   local default = operation.split and operation.split[index].default or nil -- hack
   if default then
@@ -1916,8 +1970,9 @@ function DefaultValueIfAny(row, operation, index)
   end
   return param
 end
+Shared.defaultValueIfAny = defaultValueIfAny
 
-function ProcessActionMacroRow(buf)
+local function processActionMacroRow(buf)
   local row = adefs.ActionRow()
   local bufstart = 0
   local findstart, findend
@@ -1937,7 +1992,7 @@ function ProcessActionMacroRow(buf)
 
   if row.targetEntry < 1 then return end
 
-  local opTab, _, _, target = ActionTabsFromTarget(row) -- a little simpler than findTargets, no operation-based overrides (yet)
+  local opTab, _, _, target = actionTabsFromTarget(row) -- a little simpler than findTargets, no operation-based overrides (yet)
   if not (target and opTab) then
     mu.post('could not process action macro row: ' .. buf)
     return false
@@ -1951,12 +2006,12 @@ function ProcessActionMacroRow(buf)
     if findstart and findend then
       local cachestart = bufstart
       row.operationEntry = k
-      local _, param1Tab, _, _, operation = ActionTabsFromTarget(row)
+      local _, param1Tab, _, _, operation = actionTabsFromTarget(row)
       bufstart = findend + (buf[findend] ~= '(' and 1 or 0)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s%()]*)%s*', bufstart)
       if tg.isValidString(param1) then
-        param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
+        param1 = handleMacroParam(row, target, operation, param1Tab, param1, 1)
         tryagain = false
       else
         if operation.terms == 0 then tryagain = false
@@ -1987,18 +2042,18 @@ function ProcessActionMacroRow(buf)
 
         if row.params[3] and row.params[3].parser then row.params[3].parser(row, param1, param2, param3)
         else
-          local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
+          local _, param1Tab, param2Tab, _, operation = actionTabsFromTarget(row)
 
           if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
           if tg.isValidString(param1) then
-            param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
+            param1 = handleMacroParam(row, target, operation, param1Tab, param1, 1)
           else
-            param1 = DefaultValueIfAny(row, operation, 1)
+            param1 = defaultValueIfAny(row, operation, 1)
           end
           if tg.isValidString(param2) then
-            param2 = HandleMacroParam(row, target, operation, param2Tab, param2, 2)
+            param2 = handleMacroParam(row, target, operation, param2Tab, param2, 2)
           else
-            param2 = DefaultValueIfAny(row, operation, 2)
+            param2 = defaultValueIfAny(row, operation, 2)
           end
           if tg.isValidString(param3) then
             row.params[3].textEditorStr = param3 -- very primitive
@@ -2022,19 +2077,19 @@ function ProcessActionMacroRow(buf)
   return false
 end
 
-function ProcessActionMacro(buf)
+local function processActionMacro(buf)
   local bufstart = 0
   local rowstart, rowend = string.find(buf, '%s+(&&)%s+')
   while rowstart and rowend do
     local rowbuf = string.sub(buf, bufstart, rowend)
     -- mu.post('got row: ' .. rowbuf) -- process
-    ProcessActionMacroRow(rowbuf)
+    processActionMacroRow(rowbuf)
     bufstart = rowend + 1
     rowstart, rowend = string.find(buf, '%s+(&&)%s+', bufstart)
   end
   -- last iteration
   -- mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
-  ProcessActionMacroRow(string.sub(buf, bufstart))
+  processActionMacroRow(string.sub(buf, bufstart))
 end
 
 
@@ -2046,7 +2101,7 @@ local mediaItemCount
 local mediaItemIndex
 local enumTakesMode
 
-function GetEnumTakesMode()
+local function getEnumTakesMode()
   return 1
   -- if not enumTakesMode then
   --   enumTakesMode = 0
@@ -2059,7 +2114,7 @@ function GetEnumTakesMode()
   -- return enumTakesMode
 end
 
-function GetNextTake()
+local function getNextTake()
   local take = nil
   local notation = fdefs.findScopeTable[currentFindScope].notation
   if notation == '$midieditor' then
@@ -2068,14 +2123,14 @@ function GetNextTake()
       if not mediaItemCount then
         mediaItemCount = 0
         while me do
-          local t = r.MIDIEditor_EnumTakes(me, mediaItemCount, GetEnumTakesMode() == 1)
+          local t = r.MIDIEditor_EnumTakes(me, mediaItemCount, getEnumTakesMode() == 1)
           if not t then break end
           mediaItemCount = mediaItemCount + 1 -- we probably don't really need this iteration, but whatever
         end
         mediaItemIndex = 0
       end
       if mediaItemIndex < mediaItemCount then
-        take = r.MIDIEditor_EnumTakes(me, mediaItemIndex, GetEnumTakesMode() == 1)
+        take = r.MIDIEditor_EnumTakes(me, mediaItemIndex, getEnumTakesMode() == 1)
         mediaItemIndex = mediaItemIndex + 1
       end
     end
@@ -2120,7 +2175,7 @@ function GetNextTake()
   return nil
 end
 
-function InitializeTake(take)
+local function initializeTake(take)
   local onlySelected = false
   local onlyNotes = false
   local activeNoteRow = false
@@ -2157,7 +2212,7 @@ function InitializeTake(take)
       e.notedur = e.endppqpos - e.ppqpos
       e.chanmsg = 0x90
       e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-      CalcMIDITime(take, e)
+      calcMIDITime(take, e)
       table.insert(allEvents, e)
       if e.selected then table.insert(selectedEvents, e) end
     end
@@ -2180,7 +2235,7 @@ function InitializeTake(take)
       e.ccval = e.msg3
     end
     e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-    CalcMIDITime(take, e)
+    calcMIDITime(take, e)
     table.insert(allEvents, e)
     if e.selected then table.insert(selectedEvents, e) end
     ccidx = enumCCFn(take, ccidx)
@@ -2195,7 +2250,7 @@ function InitializeTake(take)
       e.msg2 = e.chanmsg
       e.chanmsg = 0x100
     end
-    CalcMIDITime(take, e)
+    calcMIDITime(take, e)
     table.insert(allEvents, e)
     if e.selected then table.insert(selectedEvents, e) end
     syxidx = enumTextSysexFn(take, syxidx)
@@ -2204,15 +2259,32 @@ function InitializeTake(take)
   table.sort(allEvents, function(a, b) return a.projtime < b.projtime end )
 end
 
-function ActionRowToNotation(row, index)
+local function getRowTextAndParameterValues(row)
+  local _, param1Tab, param2Tab, curTarget, curOperation = actionTabsFromTarget(row)
+  local rowText = curTarget.notation .. ' ' .. curOperation.notation
+
+  local paramTypes = getParamTypesForRow(row, curTarget, curOperation)
+
+  local param1Val, param2Val, param3Val = processParams(row, curTarget, curOperation, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
+  if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
+    param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
+  end
+  if paramTypes[2] == gdefs.PARAM_TYPE_MENU then
+    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.params[2].menuEntry].notation or nil
+  end
+  return rowText, param1Val, param2Val, param3Val
+end
+Shared.getRowTextAndParameterValues = getRowTextAndParameterValues
+
+local function actionRowToNotation(row, index)
   local rowText = ''
 
-  local _, _, _, _, curOperation = ActionTabsFromTarget(row)
+  local _, _, _, _, curOperation = actionTabsFromTarget(row)
 
   if row.params[3] and row.params[3].formatter then rowText = rowText .. row.params[3].formatter(row)
   else
     local param1Val, param2Val, param3Val
-    rowText, param1Val, param2Val, param3Val = GetRowTextAndParameterValues(row)
+    rowText, param1Val, param2Val, param3Val = getRowTextAndParameterValues(row)
     if string.match(curOperation.notation, '[!]*%:') then
       rowText = rowText .. '('
       if tg.isValidString(param1Val) then
@@ -2238,26 +2310,26 @@ function ActionRowToNotation(row, index)
   return rowText
 end
 
-function ActionRowsToNotation()
+local function actionRowsToNotation()
   local notationString = ''
   for k, v in ipairs(adefs.actionRowTable()) do
-    local rowText = ActionRowToNotation(v, k)
+    local rowText = actionRowToNotation(v, k)
     notationString = notationString .. rowText
   end
   -- mu.post('action macro: ' .. notationString)
   return notationString
 end
 
-function DeleteEventsInTake(take, eventTab, doTx)
+local function deleteEventsInTake(take, eventTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
   for _, event in ipairs(eventTab) do
-    if GetEventType(event) == gdefs.NOTE_TYPE then
+    if getEventType(event) == gdefs.NOTE_TYPE then
       mu.MIDI_DeleteNote(take, event.idx)
-    elseif GetEventType(event) == gdefs.CC_TYPE then
+    elseif getEventType(event) == gdefs.CC_TYPE then
       mu.MIDI_DeleteCC(take, event.idx)
-    elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then
+    elseif getEventType(event) == gdefs.SYXTEXT_TYPE then
       mu.MIDI_DeleteTextSysexEvt(take, event.idx)
     end
   end
@@ -2266,51 +2338,24 @@ function DeleteEventsInTake(take, eventTab, doTx)
   end
 end
 
-function DoFindPostProcessing(found, unfound)
-  local wantsFront = currentFindPostProcessingInfo.flags & fdefs.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0
-  local wantsBack = currentFindPostProcessingInfo.flags & fdefs.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0
-  local newfound = {}
-
-  if wantsFront then
-    local num = currentFindPostProcessingInfo.front.count
-    local offset = currentFindPostProcessingInfo.front.offset + 1
-    for i = 1, #found do
-      local f = found[i]
-      if i >= offset and (i - offset) < num then
-        table.insert(newfound, f)
-      else
-        table.insert(unfound, f)
-      end
-    end
-  end
-  if wantsBack then
-    local num = currentFindPostProcessingInfo.back.count
-    local offset = currentFindPostProcessingInfo.back.offset + 1
-    local ii = 1
-    for i = #found, 1, -1 do
-      local f = found[i]
-      if ii >= offset and (ii - offset) < num then
-        table.insert(newfound, f)
-      else
-        table.insert(unfound, f)
-      end
-      ii = ii + 1
-    end
-  end
-  if #newfound ~= 0 then found = newfound end
-  return found
-end
-
-function HandleFindPostProcessing(found, unfound)
-  if currentFindPostProcessingInfo.flags ~= fdefs.FIND_POSTPROCESSING_FLAG_NONE then
-    return DoFindPostProcessing(found, unfound)
-  end
-  return found, unfound
-end
-
 local CreateNewMIDIEvent_Once
 
-function HandleCreateNewMIDIEvent(take, contextTab)
+local function postProcessSelection(event)
+  local notation = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation
+  if notation == '$addselect'
+    or notation == '$exclusiveselect'
+  then
+    event.selected = true
+  elseif notation == '$invertselect' -- doesn't exist anymore
+    or notation == '$unselect' -- but this one does
+  then
+    event.selected = false
+  else
+    event.selected = (event.flags & 1) ~= 0
+  end
+end
+
+local function handleCreateNewMIDIEvent(take, contextTab)
   if CreateNewMIDIEvent_Once then
     for i, row in ipairs(adefs.actionRowTable()) do
       if row.nme and not row.disabled then
@@ -2330,14 +2375,14 @@ function HandleCreateNewMIDIEvent(take, contextTab)
           fnString = fnString .. s .. '\n'
         end
 
-        local _, actionFn = FnStringToFn(fnString, function(err)
+        local _, actionFn = fnStringToFn(fnString, function(err)
           if err then
             mu.post(err)
           end
           parserError = 'Error: could not load action description (New MIDI Event)'
         end)
         if actionFn then
-          local timeAdjust = GetTimeOffset()
+          local timeAdjust = getTimeOffset()
           local e = tg.tableCopy(nme)
           local pos
           if nme.posmode == adefs.NEWEVENT_POSITION_ATCURSOR then
@@ -2348,31 +2393,31 @@ function HandleCreateNewMIDIEvent(take, contextTab)
             local item = r.GetMediaItemTake_Item(take)
             pos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
           else
-            pos = TimeFormatToSeconds(nme.posText, nil, context) - timeAdjust
+            pos = timeFormatToSeconds(nme.posText, nil, context) - timeAdjust
           end
 
           if nme.posmode ~= adefs.NEWEVENT_POSITION_ATPOSITION and nme.relmode then
-            pos = pos + LengthFormatToSeconds(nme.posText, pos, context)
+            pos = pos + lengthFormatToSeconds(nme.posText, pos, context)
           end
 
-          local evType = GetEventType(e)
+          local evType = getEventType(e)
 
           e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos) -- check for abs pos mode
           if evType == gdefs.NOTE_TYPE then
-            e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + LengthFormatToSeconds(nme.durText, pos, context))
+            e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + lengthFormatToSeconds(nme.durText, pos, context))
           end
           e.chan = e.channel
           e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-          CalcMIDITime(take, e)
+          calcMIDITime(take, e)
 
-          actionFn(e, GetSubtypeValueName(e), GetMainValueName(e), contextTab)
+          actionFn(e, getSubtypeValueName(e), getMainValueName(e), contextTab)
 
           e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, e.projtime - timeAdjust)
           if evType == gdefs.NOTE_TYPE then
             e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (e.projtime - timeAdjust) + e.projlen)
             e.msg3 = e.msg3 < 1 and 1 or e.msg3
           end
-          PostProcessSelection(e)
+          postProcessSelection(e)
           e.muted = (e.flags & 2) ~= 0
 
           if evType == gdefs.NOTE_TYPE then
@@ -2387,55 +2432,7 @@ function HandleCreateNewMIDIEvent(take, contextTab)
   end
 end
 
-function InsertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
-  if doTx == true or doTx == nil then
-    mu.MIDI_OpenWriteTransaction(take)
-  end
-  PreProcessSelection(take)
-  for _, event in ipairs(eventTab) do
-    local timeAdjust = GetTimeOffset()
-    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab) -- event, _value1, _value2, _context
-    event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-    PostProcessSelection(event)
-    event.muted = (event.flags & 2) ~= 0
-    if GetEventType(event) == gdefs.NOTE_TYPE then
-      if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
-      event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
-      event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
-      mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
-    elseif GetEventType(event) == gdefs.CC_TYPE then
-      local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
-      if rv and event.setcurve then
-        mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
-      end
-    elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then
-      mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
-    end
-  end
-  HandleCreateNewMIDIEvent(take, contextTab)
-  if doTx == true or doTx == nil then
-    mu.MIDI_CommitWriteTransaction(take, false, true)
-  end
-end
-
-function SelectEntriesInTake(take, eventTab, wantsSelect)
-  for _, event in ipairs(eventTab) do
-    event.selected = wantsSelect
-    SetEntrySelectionInTake(take, event)
-  end
-end
-
-function SetEntrySelectionInTake(take, event)
-  if GetEventType(event) == gdefs.NOTE_TYPE then
-    mu.MIDI_SetNote(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil, nil)
-  elseif GetEventType(event) == gdefs.CC_TYPE then
-    mu.MIDI_SetCC(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil)
-  elseif GetEventType(event) == gdefs.SYXTEXT_TYPE then
-    mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, nil, nil, nil, nil)
-  end
-end
-
-function PreProcessSelection(take)
+local function preProcessSelection(take)
   local notation = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation
   if notation == '$invertselect' then -- doesn't exist anymore
     mu.MIDI_SelectAll(take, true) -- select all
@@ -2444,30 +2441,63 @@ function PreProcessSelection(take)
   end
 end
 
-function PostProcessSelection(event)
-  local notation = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation
-  if notation == '$addselect'
-    or notation == '$exclusiveselect'
-  then
-    event.selected = true
-  elseif notation == '$invertselect' -- doesn't exist anymore
-    or notation == '$unselect' -- but this one does
-  then
-    event.selected = false
-  else
-    event.selected = (event.flags & 1) ~= 0
+local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
+  if doTx == true or doTx == nil then
+    mu.MIDI_OpenWriteTransaction(take)
+  end
+  preProcessSelection(take)
+  for _, event in ipairs(eventTab) do
+    local timeAdjust = getTimeOffset()
+    actionFn(event, getSubtypeValueName(event), getMainValueName(event), contextTab) -- event, _value1, _value2, _context
+    event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+    postProcessSelection(event)
+    event.muted = (event.flags & 2) ~= 0
+    if getEventType(event) == gdefs.NOTE_TYPE then
+      if event.projlen <= 0 then event.projlen = 1 / context.PPQ end
+      event.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime - timeAdjust) + event.projlen)
+      event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
+      mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
+    elseif getEventType(event) == gdefs.CC_TYPE then
+      local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+      if rv and event.setcurve then
+        mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
+      end
+    elseif getEventType(event) == gdefs.SYXTEXT_TYPE then
+      mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
+    end
+  end
+  handleCreateNewMIDIEvent(take, contextTab)
+  if doTx == true or doTx == nil then
+    mu.MIDI_CommitWriteTransaction(take, false, true)
   end
 end
 
-function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
+local function setEntrySelectionInTake(take, event)
+  if getEventType(event) == gdefs.NOTE_TYPE then
+    mu.MIDI_SetNote(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil, nil)
+  elseif getEventType(event) == gdefs.CC_TYPE then
+    mu.MIDI_SetCC(take, event.idx, event.selected, nil, nil, nil, nil, nil, nil)
+  elseif getEventType(event) == gdefs.SYXTEXT_TYPE then
+    mu.MIDI_SetTextSysexEvt(take, event.idx, event.selected, nil, nil, nil, nil)
+  end
+end
+
+local function selectEntriesInTake(take, eventTab, wantsSelect)
+  for _, event in ipairs(eventTab) do
+    event.selected = wantsSelect
+    setEntrySelectionInTake(take, event)
+  end
+end
+
+local function transformEntryInTake(take, eventTab, actionFn, contextTab, replace)
   local replaceTab = replace and {} or nil
-  local timeAdjust = GetTimeOffset()
+  local timeAdjust = getTimeOffset()
 
   for _, event in ipairs(eventTab) do
-    local eventType = GetEventType(event)
-    actionFn(event, GetSubtypeValueName(event), GetMainValueName(event), contextTab)
+    local eventType = getEventType(event)
+    actionFn(event, getSubtypeValueName(event), getMainValueName(event), contextTab)
     event.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
-    PostProcessSelection(event)
+    postProcessSelection(event)
     event.muted = (event.flags & 2) ~= 0
     if eventType == gdefs.NOTE_TYPE then
       if (not event.projlen or event.projlen <= 0) then event.projlen = 1 / context.PPQ end
@@ -2476,7 +2506,7 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     end
 
     if replace then
-      local eventIdx = EventToIdx(event)
+      local eventIdx = eventToIdx(event)
       local replaceData = replaceTab[eventIdx]
       if not replaceData then
         replaceTab[eventIdx] = {}
@@ -2498,14 +2528,14 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
 
   mu.MIDI_OpenWriteTransaction(take)
   if replace then
-    local grid = GridInfo().currentGrid
+    local grid = Shared.gridInfo().currentGrid
     local PPQ = mu.MIDI_GetPPQ(take)
     local gridSlop = math.floor(((PPQ * grid) * 0.5) + 0.5)
     local rangeType = contextTab.findRange.type
 
     for _, event in ipairs(replace) do
-      local eventType = GetEventType(event)
-      local eventIdx = EventToIdx(event)
+      local eventType = getEventType(event)
+      local eventIdx = eventToIdx(event)
       local eventData
       local replaceData = replaceTab[eventIdx]
       if replaceData then
@@ -2540,9 +2570,9 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
     end
   end
 
-  PreProcessSelection(take)
+  preProcessSelection(take)
   for _, event in ipairs(eventTab) do
-    local eventType = GetEventType(event)
+    local eventType = getEventType(event)
     -- handle insert, also type changes
     if eventType == gdefs.NOTE_TYPE then
       if not event.orig_type or event.orig_type == gdefs.NOTE_TYPE then
@@ -2584,11 +2614,11 @@ function TransformEntryInTake(take, eventTab, actionFn, contextTab, replace)
       end
     end
   end
-  HandleCreateNewMIDIEvent(take, contextTab)
+  handleCreateNewMIDIEvent(take, contextTab)
   mu.MIDI_CommitWriteTransaction(take, false, true)
 end
 
-function NewTakeInNewTrack(take)
+local function newTakeInNewTrack(take)
   local track = r.GetMediaItemTake_Track(take)
   local item = r.GetMediaItemTake_Item(take)
   local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
@@ -2608,7 +2638,7 @@ function NewTakeInNewTrack(take)
   return newtake
 end
 
-function NewTakeInNewLane(take)
+local function newTakeInNewLane(take)
   local newtake
   local track = r.GetMediaItemTake_Track(take)
   local item = r.GetMediaItemTake_Item(take)
@@ -2645,10 +2675,10 @@ function NewTakeInNewLane(take)
   return newtake
 end
 
-function GrabAllTakes()
+local function grabAllTakes()
   enumTakesMode = nil -- refresh
 
-  local take = GetNextTake()
+  local take = getNextTake()
   if not take then return {} end
 
   local takes = {}
@@ -2661,10 +2691,10 @@ function GrabAllTakes()
 
   while take do
     local _, _, _, ppqpos = r.MIDI_GetEvt(take, 0)
-    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + GetTimeOffset()
+    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + getTimeOffset()
     local active = take == activeTake and true or false
     table.insert(takes, { take = take, firstTime = projTime, active = active })
-    take = GetNextTake()
+    take = getNextTake()
   end
   table.sort(takes, function(a, b)
       if a.active then return true
@@ -2675,7 +2705,7 @@ function GrabAllTakes()
   return takes
 end
 
-function ProcessActionForTake(take)
+local function processActionForTake(take)
   local fnString = ''
 
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
@@ -2689,7 +2719,7 @@ function ProcessActionForTake(take)
 
   for k, v in ipairs(iterTab) do
     local row = v
-    local opTab, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(v)
+    local opTab, param1Tab, param2Tab, curTarget, curOperation = actionTabsFromTarget(v)
 
     if #opTab == 0 then return end -- continue?
 
@@ -2698,7 +2728,7 @@ function ProcessActionForTake(take)
     local operationVal = operation.text
     local actionTerm = ''
 
-    local paramTerms = { ProcessParams(v, curTarget, curOperation, { param1Tab, param2Tab, {} }, false, context) }
+    local paramTerms = { processParams(v, curTarget, curOperation, { param1Tab, param2Tab, {} }, false, context) }
 
     if paramTerms[1] == '' and curOperation.terms ~= 0 then return end
 
@@ -2711,10 +2741,10 @@ function ProcessActionForTake(take)
       paramTerms[1] = tmp
     end
 
-    local paramTypes = GetParamTypesForRow(v, curTarget, curOperation)
+    local paramTypes = getParamTypesForRow(v, curTarget, curOperation)
     for i = 1, 3 do -- param3
       if paramNums[i] and (paramTypes[i] == gdefs.PARAM_TYPE_INTEDITOR or paramTypes[i] == gdefs.PARAM_TYPE_FLOATEDITOR) and row.params[i].percentVal then
-        paramTerms[i] = GetParamPercentTerm(paramNums[i], opIsBipolar(curOperation, i))
+        paramTerms[i] = getParamPercentTerm(paramNums[i], opIsBipolar(curOperation, i))
       end
     end
 
@@ -2767,14 +2797,14 @@ function ProcessActionForTake(take)
   return fnString
 end
 
-function ItemInTable(it, t)
+local function itemInTable(it, t)
   for i = 1, #t do
     if it == t[i] then return true end
   end
   return false
 end
 
-function ProcessAction(execute, fromScript)
+local function processAction(execute, fromScript)
   mediaItemCount = nil
   mediaItemIndex = nil
 
@@ -2795,7 +2825,7 @@ function ProcessAction(execute, fromScript)
         if selCount > 0 then
           local ec = 0
           while true do
-            local etake = r.MIDIEditor_EnumTakes(me, ec, GetEnumTakesMode() == 1)
+            local etake = r.MIDIEditor_EnumTakes(me, ec, getEnumTakesMode() == 1)
             if not etake then break end
             table.insert(meTakes, etake)
             ec = ec + 1
@@ -2806,7 +2836,7 @@ function ProcessAction(execute, fromScript)
               local item = r.GetSelectedMediaItem(0, i)
               if item then
                 local itake = r.GetActiveTake(item)
-                if not ItemInTable(itake, meTakes) then
+                if not itemInTable(itake, meTakes) then
                   found = false
                   break
                 end
@@ -2831,23 +2861,23 @@ function ProcessAction(execute, fromScript)
     end
   end
 
-  local takes = GrabAllTakes()
+  local takes = grabAllTakes()
   if #takes == 0 then return end
 
   CACHED_METRIC = nil
   CACHED_WRAPPED = nil
   SOM = nil
 
-  MoveCursorInfo().moveCursorFirstEventPosition = nil
-  AddLengthInfo().addLengthFirstEventOffset = nil
+  Shared.moveCursorInfo().moveCursorFirstEventPosition = nil
+  Shared.addLengthInfo().addLengthFirstEventOffset = nil
 
   -- fast early return after sanity check
   if not execute then
-    local findFn = ProcessFind()
+    local findFn = processFind()
     if findFn then
-      local fnString = ProcessActionForTake()
+      local fnString = processActionForTake()
       if fnString then
-        FnStringToFn(fnString, function(err)
+        fnStringToFn(fnString, function(err)
           if err then
             mu.post(err)
           end
@@ -2865,19 +2895,19 @@ function ProcessAction(execute, fromScript)
 
   for _, v in ipairs(takes) do
     local take = v.take
-    InitializeTake(take)
+    initializeTake(take)
 
-    MoveCursorInfo().moveCursorFirstEventPosition_Take = nil
-    AddLengthInfo().addLengthFirstEventOffset_Take = nil
-    AddLengthInfo().addLengthFirstEventStartTime = nil
+    Shared.moveCursorInfo().moveCursorFirstEventPosition_Take = nil
+    Shared.addLengthInfo().addLengthFirstEventOffset_Take = nil
+    Shared.addLengthInfo().addLengthFirstEventStartTime = nil
 
     local actionFn
     local actionFnString
-    local findFn, wantsEventPreprocessing, findRange, findFnString = ProcessFind(take, nil)
+    local findFn, wantsEventPreprocessing, findRange, findFnString = processFind(take, nil)
     if findFn then
-      actionFnString = ProcessActionForTake(take)
+      actionFnString = processActionForTake(take)
       if actionFnString then
-        _, actionFn = FnStringToFn(actionFnString, function(err)
+        _, actionFn = fnStringToFn(actionFnString, function(err)
           if err then
             mu.post(err)
           end
@@ -2907,108 +2937,108 @@ function ProcessAction(execute, fromScript)
       mu.CORRECT_EXTENTS = not selectonly and extentsstate or false
       if notation == '$select' then
         mu.MIDI_OpenWriteTransaction(take)
-        local found = RunFind(findFn, defParams)
+        local found = runFind(findFn, defParams)
         mu.MIDI_SelectAll(take, false)
-        SelectEntriesInTake(take, found, true)
+        selectEntriesInTake(take, found, true)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$selectadd' then
         mu.MIDI_OpenWriteTransaction(take)
-        RunFind(findFn, defParams,
+        runFind(findFn, defParams,
           function(event, matches)
             if matches then
               event.selected = true
-              SetEntrySelectionInTake(take, event)
+              setEntrySelectionInTake(take, event)
             end
           end)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$invertselect' then
         mu.MIDI_OpenWriteTransaction(take)
-        local found = RunFind(findFn, defParams)
+        local found = runFind(findFn, defParams)
         mu.MIDI_SelectAll(take, true)
-        SelectEntriesInTake(take, found, false)
+        selectEntriesInTake(take, found, false)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$deselect' then
         mu.MIDI_OpenWriteTransaction(take)
-        RunFind(findFn, defParams,
+        runFind(findFn, defParams,
           function(event, matches)
             if matches then
               event.selected = false
-              SetEntrySelectionInTake(take, event)
+              setEntrySelectionInTake(take, event)
             end
           end)
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$transform' then
-        local found, contextTab = RunFind(findFn, defParams)
+        local found, contextTab = runFind(findFn, defParams)
         if canProcess(found) then
-          TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
+          transformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$replace' then
         local repParams = tg.tableCopy(defParams)
         repParams.wantsUnfound = true
         repParams.addRangeEvents = true
-        local found, contextTab, unfound = RunFind(findFn, repParams)
+        local found, contextTab, unfound = runFind(findFn, repParams)
         if canProcess(found) then
-          TransformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
+          transformEntryInTake(take, found, actionFn, contextTab, unfound) -- could use runFn
         end
       elseif notation == '$copy' then
-        local found, contextTab = RunFind(findFn, defParams)
+        local found, contextTab = runFind(findFn, defParams)
         if canProcess(found) then
-          local newtake = NewTakeInNewTrack(take)
+          local newtake = newTakeInNewTrack(take)
           if newtake then
-            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+            insertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
         end
       elseif notation == '$copylane' then
         if tg.isREAPER7() then
-          local found, contextTab = RunFind(findFn, defParams)
+          local found, contextTab = runFind(findFn, defParams)
           if canProcess(found) then
-            local newtake = NewTakeInNewLane(take)
+            local newtake = newTakeInNewLane(take)
             if newtake then
-              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+              insertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
           end
         end
       elseif notation == '$insert' then
-        local found, contextTab = RunFind(findFn, defParams)
+        local found, contextTab = runFind(findFn, defParams)
         if canProcess(found) then
-          InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
+          insertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$insertexclusive' then
         local ieParams = tg.tableCopy(defParams)
         ieParams.wantsUnfound = true
-        local found, contextTab, unfound = RunFind(findFn, ieParams)
+        local found, contextTab, unfound = runFind(findFn, ieParams)
         mu.MIDI_OpenWriteTransaction(take)
         if canProcess(found) then
-          InsertEventsIntoTake(take, found, actionFn, contextTab, false)
+          insertEventsIntoTake(take, found, actionFn, contextTab, false)
           if unfound and #unfound ~=0 then
-            DeleteEventsInTake(take, unfound, false)
+            deleteEventsInTake(take, unfound, false)
           end
         end
         mu.MIDI_CommitWriteTransaction(take, false, true)
       elseif notation == '$extracttrack' then
-        local found, contextTab = RunFind(findFn, defParams)
+        local found, contextTab = runFind(findFn, defParams)
         if canProcess(found) then
-          local newtake = NewTakeInNewTrack(take)
+          local newtake = newTakeInNewTrack(take)
           if newtake then
-            InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+            insertEventsIntoTake(newtake, found, actionFn, contextTab)
           end
-          DeleteEventsInTake(take, found)
+          deleteEventsInTake(take, found)
         end
       elseif notation == '$extractlane' then
         if tg.isREAPER7() then
-          local found, contextTab = RunFind(findFn, defParams)
+          local found, contextTab = runFind(findFn, defParams)
           if canProcess(found) then
-            local newtake = NewTakeInNewLane(take)
+            local newtake = newTakeInNewLane(take)
             if newtake then
-              InsertEventsIntoTake(newtake, found, actionFn, contextTab)
+              insertEventsIntoTake(newtake, found, actionFn, contextTab)
             end
-            DeleteEventsInTake(take, found)
+            deleteEventsInTake(take, found)
           end
         end
       elseif notation == '$delete' then
-        local found = RunFind(findFn, defParams)
+        local found = runFind(findFn, defParams)
         if #found ~= 0 then
-          DeleteEventsInTake(take, found) -- could use runFn
+          deleteEventsInTake(take, found) -- could use runFn
         end
       end
       mu.CORRECT_EXTENTS = extentsstate
@@ -3019,11 +3049,11 @@ function ProcessAction(execute, fromScript)
   r.Undo_EndBlock2(0, 'Transformer: ' .. adefs.actionScopeTable[currentActionScope].label, -1)
 end
 
-function SetPresetNotesBuffer(buf)
+local function setPresetNotesBuffer(buf)
   libPresetNotesBuffer = buf
 end
 
-function GetCurrentPresetState()
+local function getCurrentPresetState()
   local fsFlags
   if fdefs.findScopeTable[currentFindScope].notation == '$midieditor' then
     fsFlags = {} -- not pretty
@@ -3043,10 +3073,10 @@ function GetCurrentPresetState()
   local presetTab = {
     findScope = fdefs.findScopeTable[currentFindScope].notation,
     findScopeFlags = fsFlags,
-    findMacro = FindRowsToNotation(),
+    findMacro = findRowsToNotation(),
     findPostProcessing = ppInfo,
     actionScope = adefs.actionScopeTable[currentActionScope].notation,
-    actionMacro = ActionRowsToNotation(),
+    actionMacro = actionRowsToNotation(),
     actionScopeFlags = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation,
     notes = libPresetNotesBuffer,
     scriptIgnoreSelectionInArrangeView = false
@@ -3054,7 +3084,7 @@ function GetCurrentPresetState()
   return presetTab
 end
 
-function SavePreset(pPath, scriptTab)
+local function savePreset(pPath, scriptTab)
   local f = io.open(pPath, 'wb')
   local saved = false
   local wantsScript = scriptTab.script
@@ -3062,7 +3092,7 @@ function SavePreset(pPath, scriptTab)
   local scriptPrefix = scriptTab.scriptPrefix
 
   if f then
-    local presetTab = GetCurrentPresetState()
+    local presetTab = getCurrentPresetState()
     presetTab.scriptIgnoreSelectionInArrangeView = ignoreSelectionInArrangeView
     f:write(tg.serialize(presetTab) .. '\n')
     f:close()
@@ -3099,25 +3129,25 @@ local undoTable = {}
 local undoPointer = 0
 local undoSuspended = false
 
-function SuspendUndo()
+local function suspendUndo()
   undoSuspended = true
 end
 
-function ResumeUndo()
+local function resumeUndo()
   undoSuspended = false
 end
 
-function CreateUndoStep(state)
+local function createUndoStep(state)
   if undoSuspended then return end
   while undoPointer > 1 do
     table.remove(undoTable, 1)
     undoPointer = undoPointer - 1
   end
-  table.insert(undoTable, 1, state and state or GetCurrentPresetState())
+  table.insert(undoTable, 1, state and state or getCurrentPresetState())
   undoPointer = 1
 end
 
-function LoadPresetFromTable(presetTab)
+local function loadPresetFromTable(presetTab)
   currentFindScopeFlags = fdefs.FIND_SCOPE_FLAG_NONE -- do this first (FindScopeFromNotation() may populate it)
   currentFindScope = fdefs.findScopeFromNotation(presetTab.findScope)
   local fsFlags = presetTab.findScopeFlags -- not pretty
@@ -3139,14 +3169,14 @@ function LoadPresetFromTable(presetTab)
   currentActionScope = adefs.actionScopeFromNotation(presetTab.actionScope)
   currentActionScopeFlags = adefs.actionScopeFlagsFromNotation(presetTab.actionScopeFlags)
   fdefs.clearFindRowTable()
-  ProcessFindMacro(presetTab.findMacro)
+  processFindMacro(presetTab.findMacro)
   adefs.clearActionRowTable()
-  ProcessActionMacro(presetTab.actionMacro)
+  processActionMacro(presetTab.actionMacro)
   scriptIgnoreSelectionInArrangeView = presetTab.scriptIgnoreSelectionInArrangeView
   return presetTab.notes
 end
 
-function LoadPreset(pPath)
+local function loadPreset(pPath)
   local f = io.open(pPath, 'r')
   if f then
     local presetStr = f:read('*all')
@@ -3164,7 +3194,7 @@ function LoadPreset(pPath)
       if tg.isValidString(tabStr) then
         local presetTab = tg.deserialize(tabStr)
         if presetTab then
-          local notes = LoadPresetFromTable(presetTab)
+          local notes = loadPresetFromTable(presetTab)
           dirtyFind = true
           return true, notes, presetTab.scriptIgnoreSelectionInArrangeView
         end
@@ -3175,18 +3205,18 @@ function LoadPreset(pPath)
 end
 
 -- literal means (-16394/0) - 16393, otherwise it's -8192 - 8191 and needs to be shifted
-function PitchBendTo14Bit(val, literal)
+local function pitchBendTo14Bit(val, literal)
   if not literal then
     if val < 0 then val = val + (1 << 13) else val = val + ((1 << 13) - 1) end
   end
   return (val / ((1 << 14) - 1)) * 100
 end
 
-function SetRowParam(row, index, paramType, editorType, strVal, range, literal)
+local function setRowParam(row, index, paramType, editorType, strVal, range, literal)
   local isMetricOrMusical = (paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL)
   local isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
   local isBitField = editorType == gdefs.EDITOR_TYPE_BITFIELD
-  row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or EnsureNumString(strVal, range)
+  row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or tg.ensureNumString(strVal, range)
   if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
     row.params[index].percentVal = nil
     -- nothing
@@ -3195,14 +3225,14 @@ function SetRowParam(row, index, paramType, editorType, strVal, range, literal)
     if editorType == gdefs.EDITOR_TYPE_PERCENT or editorType == gdefs.EDITOR_TYPE_PERCENT_BIPOLAR then
       row.params[index].percentVal = literal and nil or val
     elseif editorType == gdefs.EDITOR_TYPE_PITCHBEND or editorType == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR then
-      row.params[index].percentVal = PitchBendTo14Bit(val, literal or editorType == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR)
+      row.params[index].percentVal = pitchBendTo14Bit(val, literal or editorType == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR)
     elseif editorType == gdefs.EDITOR_TYPE_7BIT or editorType == gdefs.EDITOR_TYPE_7BIT_NOZERO or editorType == gdefs.EDITOR_TYPE_7BIT_BIPOLAR then
       row.params[index].percentVal = (val / ((1 << 7) - 1)) * 100
     end
   end
 end
 
-function GetRowParamRange(row, target, condOp, paramType, editorType, idx)
+local function getRowParamRange(row, target, condOp, paramType, editorType, idx)
   local range = ((condOp.split and condOp.split[idx].norange) or condOp.norange) and {}
                   or (condOp.split and condOp.split[idx].range) and condOp.split[idx].range
                   or condOp.range and condOp.range
@@ -3225,25 +3255,9 @@ function GetRowParamRange(row, target, condOp, paramType, editorType, idx)
   return range, bipolar
 end
 
-function GetRowTextAndParameterValues(row)
-  local _, param1Tab, param2Tab, curTarget, curOperation = ActionTabsFromTarget(row)
-  local rowText = curTarget.notation .. ' ' .. curOperation.notation
-
-  local paramTypes = GetParamTypesForRow(row, curTarget, curOperation)
-
-  local param1Val, param2Val, param3Val = ProcessParams(row, curTarget, curOperation, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
-  if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
-    param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
-  end
-  if paramTypes[2] == gdefs.PARAM_TYPE_MENU then
-    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.params[2].menuEntry].notation or nil
-  end
-  return rowText, param1Val, param2Val, param3Val
-end
-
-function HandlePercentString(strVal, row, target, condOp, paramType, editorType, index, range, bipolar)
+local function handlePercentString(strVal, row, target, condOp, paramType, editorType, index, range, bipolar)
   if not range then
-    range, bipolar = GetRowParamRange(row, target, condOp, paramType, editorType, index)
+    range, bipolar = getRowParamRange(row, target, condOp, paramType, editorType, index)
   end
 
   if range and range[1] and range[2] and row.params[index].percentVal then
@@ -3263,22 +3277,24 @@ function HandlePercentString(strVal, row, target, condOp, paramType, editorType,
   end
   return strVal
 end
+Shared.handlePercentString = handlePercentString
 
-function Update(action, wantsState)
+local function update(action, wantsState)
   if not action then
-    ProcessFind()
+    processFind()
   else
-    ProcessAction()
+    processAction()
   end
 
-  local nowState = GetCurrentPresetState()
-  CreateUndoStep(nowState)
+  local nowState = getCurrentPresetState()
+  createUndoStep(nowState)
   return wantsState and nowState or nil
 end
 
 local lastHasTable = {}
 
-function GetHasTable()
+-- local
+getHasTable = function()
   local fresh = false
   if dirtyFind then
     local hasTable = {}
@@ -3286,7 +3302,7 @@ function GetHasTable()
     mediaItemCount = nil
     mediaItemIndex = nil
 
-    local takes = GrabAllTakes()
+    local takes = grabAllTakes()
 
     CACHED_METRIC = nil
     CACHED_WRAPPED = nil
@@ -3295,9 +3311,9 @@ function GetHasTable()
     local count = 0
 
     for _, v in ipairs(takes) do
-      InitializeTake(v.take)
-      local findFn, _, findRange = ProcessFind(v.take, true)
-      local _, contextTab = RunFind(findFn, { wantsEventPreprocessing = true, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
+      initializeTake(v.take)
+      local findFn, _, findRange = processFind(v.take, true)
+      local _, contextTab = runFind(findFn, { wantsEventPreprocessing = true, findRange = findRange, take = v.take, PPQ = mu.MIDI_GetPPQ(v.take) })
       local tab = contextTab.hasTable
       for kk, vv in pairs(tab) do
         if vv == true then
@@ -3342,7 +3358,7 @@ TransformerLib.getFindPostProcessingInfo = function() return currentFindPostProc
 TransformerLib.setFindPostProcessingInfo = function(info)
   currentFindPostProcessingInfo = info -- could add error checking, but nope
 end
-TransformerLib.clearFindPostProcessingInfo = ClearFindPostProcessingInfo
+TransformerLib.clearFindPostProcessingInfo = clearFindPostProcessingInfo
 TransformerLib.actionScopeTable = adefs.actionScopeTable
 TransformerLib.currentActionScope = function() return currentActionScope end
 TransformerLib.setCurrentActionScope = function(val)
@@ -3370,31 +3386,32 @@ TransformerLib.clearActionRows = function() adefs.clearActionRowTable() end
 TransformerLib.findTargetEntries = fdefs.findTargetEntries
 TransformerLib.actionTargetEntries = adefs.actionTargetEntries
 
-TransformerLib.getSubtypeValueLabel = GetSubtypeValueLabel
-TransformerLib.getMainValueLabel = GetMainValueLabel
+TransformerLib.getSubtypeValueLabel = getSubtypeValueLabel
+TransformerLib.getMainValueLabel = getMainValueLabel
 
-TransformerLib.processFindMacro = ProcessFindMacro
-TransformerLib.processActionMacro = ProcessActionMacro
+TransformerLib.processFindMacro = processFindMacro
+TransformerLib.processActionMacro = processActionMacro
 
-TransformerLib.processFind = ProcessFind
-TransformerLib.processAction = ProcessAction
+TransformerLib.processFind = processFind
+TransformerLib.processAction = processAction
 
-TransformerLib.savePreset = SavePreset
-TransformerLib.loadPreset = LoadPreset
+TransformerLib.savePreset = savePreset
+TransformerLib.loadPreset = loadPreset
 
-TransformerLib.timeFormatRebuf = TimeFormatRebuf
-TransformerLib.lengthFormatRebuf = LengthFormatRebuf
+TransformerLib.timeFormatRebuf = timeFormatRebuf
+TransformerLib.lengthFormatRebuf = lengthFormatRebuf
 
-TransformerLib.getParamTypesForRow = GetParamTypesForRow
-TransformerLib.findTabsFromTarget = FindTabsFromTarget
-TransformerLib.actionTabsFromTarget = ActionTabsFromTarget
-TransformerLib.findRowToNotation = FindRowToNotation
-TransformerLib.actionRowToNotation = ActionRowToNotation
+TransformerLib.getParamTypesForRow = getParamTypesForRow
+TransformerLib.findTabsFromTarget = findTabsFromTarget
+TransformerLib.check14Bit = check14Bit
+TransformerLib.actionTabsFromTarget = actionTabsFromTarget
+TransformerLib.findRowToNotation = findRowToNotation
+TransformerLib.actionRowToNotation = actionRowToNotation
 
-TransformerLib.setRowParam = SetRowParam
-TransformerLib.getRowParamRange = GetRowParamRange
+TransformerLib.setRowParam = setRowParam
+TransformerLib.getRowParamRange = getRowParamRange
 
-TransformerLib.getHasTable = GetHasTable
+TransformerLib.getHasTable = getHasTable
 
 TransformerLib.setEditorTypeForRow = function(row, idx, type)
   row.params[idx].editorType = type
@@ -3507,7 +3524,7 @@ TransformerLib.makeDefaultMetricGrid = makeDefaultMetricGrid
 TransformerLib.makeDefaultEveryN = makeDefaultEveryN
 TransformerLib.makeDefaultNewMIDIEvent = makeDefaultNewMIDIEvent
 TransformerLib.makeParam3 = function(row)
-  local _, _, _, target, operation = ActionTabsFromTarget(row)
+  local _, _, _, target, operation = actionTabsFromTarget(row)
   if target.notation == '$position' and operation.notation == ':scaleoffset' then
     p3.makeParam3PositionScaleOffset(row)
   elseif operation.notation == ':line' or operation.notation == ':relline' then
@@ -3518,15 +3535,15 @@ TransformerLib.makeDefaultEventSelector = makeDefaultEventSelector
 
 TransformerLib.startup = startup
 TransformerLib.mu = mu
-TransformerLib.handlePercentString = HandlePercentString
+TransformerLib.handlePercentString = handlePercentString
 
-TransformerLib.GetMetricGridModifiers = GetMetricGridModifiers
-TransformerLib.SetMetricGridModifiers = SetMetricGridModifiers
+TransformerLib.getMetricGridModifiers = getMetricGridModifiers
+TransformerLib.setMetricGridModifiers = setMetricGridModifiers
 
 TransformerLib.typeEntriesForEventSelector = fdefs.typeEntriesForEventSelector
-TransformerLib.setPresetNotesBuffer = SetPresetNotesBuffer
-TransformerLib.update = Update
-TransformerLib.loadPresetFromTable = LoadPresetFromTable
+TransformerLib.setPresetNotesBuffer = setPresetNotesBuffer
+TransformerLib.update = update
+TransformerLib.loadPresetFromTable = loadPresetFromTable
 
 TransformerLib.hasUndoSteps = function()
   local undoStackLen = #undoTable
@@ -3562,15 +3579,17 @@ TransformerLib.popRedo = function()
   return nil
 end
 
-TransformerLib.createUndoStep = CreateUndoStep
+TransformerLib.createUndoStep = createUndoStep
 TransformerLib.clearUndo = function()
   undoTable = {}
   undoPointer = 0
-  CreateUndoStep()
+  createUndoStep()
 end
 
-TransformerLib.suspendUndo = SuspendUndo
-TransformerLib.resumeUndo = ResumeUndo
+TransformerLib.suspendUndo = suspendUndo
+TransformerLib.resumeUndo = resumeUndo
+
+TransformerLib.isANote = isANote
 
 return TransformerLib
 

@@ -1,5 +1,7 @@
 local ActionFuns = {}
 
+Shared = Shared or {} -- Use an existing table or create a new one
+
 local r = reaper
 local gdefs = require 'TransformerGeneralDefs'
 local adefs = require 'TransformerActionDefs'
@@ -7,10 +9,10 @@ local adefs = require 'TransformerActionDefs'
 local function setMusicalLength(event, take, PPQ, mgParams)
   if not take then return event.projlen end
 
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
 
   local subdiv = mgParams.param1
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
   local newppqpos = oldppqpos + gridUnit
@@ -27,22 +29,22 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local useGridSwing = subdiv < 0 and GridInfo().currentSwing ~= 0
+  local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local useGridSwing = subdiv < 0 and Shared.gridInfo().currentSwing ~= 0
 
   if gridUnit == 0 then return event.projtime end
 
-  local timeAdjust = GetTimeOffset()
+  local timeAdjust = Shared.getTimeOffset()
   local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, oldppqpos)
 
   local ppqinmeasure = oldppqpos - som -- get the position from the start of the measure
   local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
 
-  local mgMods, mgReaSwing = GetMetricGridModifiers(mgParams)
+  local mgMods, mgReaSwing = Shared.getMetricGridModifiers(mgParams)
 
   if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and GridInfo().currentSwing or (mgParams.swing * 0.01)
+    local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
     local half = gridUnit * 0.5
     local localpos = ppqinmeasure % (gridUnit * 2)
     if localpos >= gridUnit - half and localpos < gridUnit + half then
@@ -73,11 +75,11 @@ local function quantizeMusicalLength(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   if gridUnit == 0 then return event.projtime end
 
-  local timeAdjust = GetTimeOffset()
+  local timeAdjust = Shared.getTimeOffset()
   local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
   local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
   local ppqlen = endppqpos - ppqpos
@@ -102,12 +104,12 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
 
-  local gridUnit = GetGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local useGridSwing = subdiv < 0 and GridInfo().currentSwing ~= 0
+  local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  local useGridSwing = subdiv < 0 and Shared.gridInfo().currentSwing ~= 0
 
   if gridUnit == 0 then return event.projtime end
 
-  local timeAdjust = GetTimeOffset()
+  local timeAdjust = Shared.getTimeOffset()
   local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
   local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
   local ppqlen = endppqpos - ppqpos
@@ -124,10 +126,10 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
     newppqlen = newendppqpos - ppqpos
   end
 
-  local mgMods, mgReaSwing = GetMetricGridModifiers(mgParams)
+  local mgMods, mgReaSwing = Shared.getMetricGridModifiers(mgParams)
 
   if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and GridInfo().currentSwing or (mgParams.swing * 0.01)
+    local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
     local half = gridUnit * 0.5
     local localpos = ppqinmeasure % (gridUnit * 2)
     if localpos >= gridUnit - half and localpos < gridUnit + half then
@@ -158,8 +160,8 @@ local function setValue(event, property, newval, bipolar)
   if not property then return newval end
 
   if property == 'chanmsg' then
-    local oldtype = GetEventType(event)
-    local newtype = ChanMsgToType(newval)
+    local oldtype = Shared.getEventType(event)
+    local newtype = Shared.chanMsgToType(newval)
     if oldtype ~= newtype then
       if event.orig_type then
         if newval == event.orig_type then event.orig_type = nil end -- if multiple steps change and then unchange the type (edge case)
@@ -185,7 +187,7 @@ end
 
 local function operateEvent1(event, property, op, param1)
   local bipolar = (op == adefs.OP_MULT or op == adefs.OP_DIV) and true or false
-  local oldval = GetValue(event, property, bipolar)
+  local oldval = Shared.getValue(event, property, bipolar)
   local newval = oldval
 
   if op == adefs.OP_ADD then
@@ -203,7 +205,7 @@ local function operateEvent1(event, property, op, param1)
 end
 
 local function operateEvent2(event, property, op, param1, param2)
-  local oldval = GetValue(event, property)
+  local oldval = Shared.getValue(event, property)
   local newval = oldval
   if op == adefs.OP_SCALEOFF then
     newval = (oldval * param1) + param2
@@ -217,7 +219,7 @@ local function createNewMIDIEvent()
 end
 
 local function randomValue(event, property, min, max, single)
-  local oldval = GetValue(event, property)
+  local oldval = Shared.getValue(event, property)
   if event.firstlastevent then return oldval end
 
   local newval = oldval
@@ -230,20 +232,20 @@ local function randomValue(event, property, min, max, single)
 end
 
 local function clampValue(event, property, low, high)
-  local oldval = GetValue(event, property)
+  local oldval = Shared.getValue(event, property)
   local newval = oldval < low and low or oldval > high and high or oldval
   return setValue(event, property, newval)
 end
 
 local function quantizeTo(event, property, quant)
-  local oldval = GetValue(event, property)
+  local oldval = Shared.getValue(event, property)
   if quant == 0 then return oldval end
   local newval = quant * math.floor((oldval / quant) + 0.5)
   return setValue(event, property, newval)
 end
 
 local function mirror(event, property, mirrorVal)
-  local oldval = GetValue(event, property)
+  local oldval = Shared.getValue(event, property)
   local newval = mirrorVal - (oldval - mirrorVal)
   return setValue(event, property, newval)
 end
@@ -275,55 +277,55 @@ local function linearChangeOverSelection(event, property, projTime, p1, type, p2
 end
 
 local function addLength(event, property, mode, context)
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return event.projtime end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return event.projtime end
 
   if mode == 3 then
     local lastNoteEnd = context.lastNoteEnd
-    if not AddLengthInfo().addLengthFirstEventStartTime then AddLengthInfo().addLengthFirstEventStartTime = event.projtime end
+    if not Shared.addLengthInfo().addLengthFirstEventStartTime then Shared.addLengthInfo().addLengthFirstEventStartTime = event.projtime end
     if not lastNoteEnd then lastNoteEnd = 0 end
-    event.projtime = event.projtime + lastNoteEnd - AddLengthInfo().addLengthFirstEventStartTime
+    event.projtime = event.projtime + lastNoteEnd - Shared.addLengthInfo().addLengthFirstEventStartTime
     return event.projtime + lastNoteEnd
   elseif mode == 2 then
     event.projtime = event.projtime + event.projlen
     return event.projtime + event.projlen
   elseif mode == 1 then
-    if not AddLengthInfo().addLengthFirstEventOffset_Take then AddLengthInfo().addLengthFirstEventOffset_Take = event.projlen end
-    event.projtime = event.projtime + AddLengthInfo().addLengthFirstEventOffset_Take
-    return event.projtime + AddLengthInfo().addLengthFirstEventOffset_Take
+    if not Shared.addLengthInfo().addLengthFirstEventOffset_Take then Shared.addLengthInfo().addLengthFirstEventOffset_Take = event.projlen end
+    event.projtime = event.projtime + Shared.addLengthInfo().addLengthFirstEventOffset_Take
+    return event.projtime + Shared.addLengthInfo().addLengthFirstEventOffset_Take
   end
-  if not AddLengthInfo().addLengthFirstEventOffset then AddLengthInfo().addLengthFirstEventOffset = event.projlen end
-  event.projtime = event.projtime + AddLengthInfo().addLengthFirstEventOffset
+  if not Shared.addLengthInfo().addLengthFirstEventOffset then Shared.addLengthInfo().addLengthFirstEventOffset = event.projlen end
+  event.projtime = event.projtime + Shared.addLengthInfo().addLengthFirstEventOffset
   return event.projtime
 end
 
 local function moveToCursor(event, property, mode)
   if mode == 1 then -- independent
-    if not MoveCursorInfo().moveCursorFirstEventPosition_Take then MoveCursorInfo().moveCursorFirstEventPosition_Take = event.projtime end
-    event.projtime = (event.projtime - MoveCursorInfo().moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + GetTimeOffset()
+    if not Shared.moveCursorInfo().moveCursorFirstEventPosition_Take then Shared.moveCursorInfo().moveCursorFirstEventPosition_Take = event.projtime end
+    event.projtime = (event.projtime - Shared.moveCursorInfo().moveCursorFirstEventPosition_Take) + r.GetCursorPositionEx(0) + Shared.getTimeOffset()
     return event.projtime
   end
-  if not MoveCursorInfo().moveCursorFirstEventPosition then MoveCursorInfo().moveCursorFirstEventPosition = event.projtime end
-  event.projtime = (event.projtime - MoveCursorInfo().moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + GetTimeOffset()
+  if not Shared.moveCursorInfo().moveCursorFirstEventPosition then Shared.moveCursorInfo().moveCursorFirstEventPosition = event.projtime end
+  event.projtime = (event.projtime - Shared.moveCursorInfo().moveCursorFirstEventPosition) + r.GetCursorPositionEx(0) + Shared.getTimeOffset()
   return event.projtime
 end
 
 -- need to think about this
 -- function MoveNoteOffToCursor(event, mode)
---   if GetEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
+--   if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
 
 --   if mode == 1 then -- independent
---     if not MoveCursorInfo().moveCursorFirstEventLength_Take then MoveCursorInfo().moveCursorFirstEventLength_Take = event.projtime end
---     return (event.projtime - MoveCursorInfo().moveCursorFirstEventLength_Take) + r.GetCursorPositionEx(0) + GetTimeOffset()
+--     if not Shared.moveCursorInfo().moveCursorFirstEventLength_Take then Shared.moveCursorInfo().moveCursorFirstEventLength_Take = event.projtime end
+--     return (event.projtime - Shared.moveCursorInfo().moveCursorFirstEventLength_Take) + r.GetCursorPositionEx(0) + Shared.getTimeOffset()
 --   else
---     if not MoveCursorInfo().moveCursorFirstEventLength then MoveCursorInfo().moveCursorFirstEventLength = event.projtime end
---     return (event.projtime - MoveCursorInfo().moveCursorFirstEventLength) + r.GetCursorPositionEx(0) + GetTimeOffset()
+--     if not Shared.moveCursorInfo().moveCursorFirstEventLength then Shared.moveCursorInfo().moveCursorFirstEventLength = event.projtime end
+--     return (event.projtime - Shared.moveCursorInfo().moveCursorFirstEventLength) + r.GetCursorPositionEx(0) + Shared.getTimeOffset()
 --   end
 -- end
 
 local function moveLengthToCursor(event)
-  if GetEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
 
-  local cursorPos = r.GetCursorPositionEx(0) + GetTimeOffset()
+  local cursorPos = r.GetCursorPositionEx(0) + Shared.getTimeOffset()
 
   if event.projtime >= cursorPos then return event.projlen end
 
@@ -335,16 +337,16 @@ local function moveToItemPos(event, property, way, offset, context)
   local take = context.take
   if not take then return event[property] end
 
-  if GetEventType(event) ~= gdefs.NOTE_TYPE and way == 2 then return event[property] end
+  if Shared.getEventType(event) ~= gdefs.NOTE_TYPE and way == 2 then return event[property] end
   local item = r.GetMediaItemTake_Item(take)
   if item then
     if way == 0 then
-      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset()
-      local offsetTime = offset and LengthFormatToSeconds(offset, targetPos, context) or 0
+      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + Shared.getTimeOffset()
+      local offsetTime = offset and Shared.lengthFormatToSeconds(offset, targetPos, context) or 0
       event[property] = targetPos + offsetTime
     elseif way == 1 or way == 2 then
-      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset() + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
-      local offsetTime = offset and LengthFormatToSeconds(offset, targetPos, context) or 0
+      local targetPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + Shared.getTimeOffset() + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+      local offsetTime = offset and Shared.lengthFormatToSeconds(offset, targetPos, context) or 0
       event[property] = way == 1 and (targetPos + offsetTime) or ((targetPos - event.projtime) + offsetTime)
     end
   end
@@ -360,13 +362,13 @@ local function ccSetCurve(take, event, ctype, bzext)
 end
 
 local function addDuration(event, property, duration, baseTime, context)
-  local adjustedTime = LengthFormatToSeconds(duration, baseTime, context)
+  local adjustedTime = Shared.lengthFormatToSeconds(duration, baseTime, context)
   event[property] = baseTime + adjustedTime
   return event[property]
 end
 
 local function subtractDuration(event, property, duration, baseTime, context)
-  local adjustedTime = LengthFormatToSeconds(duration, baseTime, context)
+  local adjustedTime = Shared.lengthFormatToSeconds(duration, baseTime, context)
   event[property] = baseTime - adjustedTime
   return event[property]
 end
@@ -385,11 +387,11 @@ local function multiplyPosition(event, property, param, relative, offset, contex
     local distanceFromStart = event.projtime - firstTime
     scaledPosition = firstTime + (distanceFromStart * param)
   else
-    local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + GetTimeOffset() -- item
+    local itemStartPos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + Shared.getTimeOffset() -- item
     local distanceFromStart = event.projtime - itemStartPos
     scaledPosition = itemStartPos + (distanceFromStart * param)
   end
-  scaledPosition = scaledPosition + (offset and LengthFormatToSeconds(offset, scaledPosition, context) or 0)
+  scaledPosition = scaledPosition + (offset and Shared.lengthFormatToSeconds(offset, scaledPosition, context) or 0)
 
   event[property] = scaledPosition
   return scaledPosition

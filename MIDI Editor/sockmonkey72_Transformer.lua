@@ -1,10 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.7
+-- @version 1.0.11-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - more refactoring, also fixing isNearEvent()
+--   - huge refactor, not much in the way of functional change
+--   - update ReaImGui requirement to 9.0.3
+--   - fix isNearEvent grid range testing
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*

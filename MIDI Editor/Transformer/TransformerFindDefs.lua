@@ -3,9 +3,9 @@
 
 local FindDefs = {}
 
-local te = require 'TransformerExtra'
+local tg = require 'TransformerGlobal'
 
-local FindRow = class(nil, {})
+local FindRow = tg.class(nil, {})
 
 function FindRow:init()
   self.targetEntry = 1
@@ -16,8 +16,8 @@ function FindRow:init()
   self.endParenEntry = 1
 
   self.params = {
-    te.ParamInfo(),
-    te.ParamInfo()
+    tg.ParamInfo(),
+    tg.ParamInfo()
   }
   self.isNot = false
   self.except = nil
@@ -118,12 +118,12 @@ local findLastEventConditionEntries = {
 }
 
 function FindConditionAddSelectRange(t, r)
-  local tt = tableCopy(t)
+  local tt = tg.tableCopy(t)
   tt.timeselect = r
   return tt
 end
 
-local findConditionSimilarSlopTime = tableCopy(findConditionSimilarSlop)
+local findConditionSimilarSlopTime = tg.tableCopy(findConditionSimilarSlop)
 findConditionSimilarSlopTime.timedur = true
 
 local SELECT_TIME_SHEBANG = 0
@@ -186,11 +186,11 @@ local typeEntries = {
   { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
 }
 
-local findTypeParam1Entries = tableCopy(typeEntries)
+local findTypeParam1Entries = tg.tableCopy(typeEntries)
 table.insert(findTypeParam1Entries, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
 table.insert(findTypeParam1Entries, { notation = '$txt', label = 'Text', text = '0x100' }) -- special case; these need a new chanmsg
 
-local typeEntriesForEventSelector = tableCopy(typeEntries)
+local typeEntriesForEventSelector = tg.tableCopy(typeEntries)
 table.insert(typeEntriesForEventSelector, 1, { notation = '$any', label = 'Any', text = '0x00' })
 table.insert(typeEntriesForEventSelector, { notation = '$syx', label = 'System Exclusive', text = '0xF0' })
 
@@ -249,7 +249,7 @@ local findMusicalParam1Entries = {
   { notation = '$grid', label = 'Current Grid', text = '-1' },
 }
 
-local findPositionMusicalSlopEntries = tableCopy(findMusicalParam1Entries)
+local findPositionMusicalSlopEntries = tg.tableCopy(findMusicalParam1Entries)
 table.insert(findPositionMusicalSlopEntries, 1, { notation = '$none', label = '<none>', text = '0' })
 
 local findBooleanEntries = { -- in cubase this a simple toggle to switch, not a bad idea

@@ -1,5 +1,5 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.3
+-- @version 1.0.11-alpha.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.3'
+local versionStr = '1.0.11-alpha.4'
 
 local r = reaper
 
@@ -29,23 +29,15 @@ local fontStyle = 'sans-serif'
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
 local tx = require 'TransformerLib'
 local mu = tx.mu
+local tg = require 'TransformerGlobal'
 local gdefs = require 'TransformerGeneralDefs'
 
 local canStart = true
 
-local isValidString = _G['isValidString']
-local spairs = _G['spairs']
-local serialize = _G['serialize']
-local deserialize = _G['deserialize']
-local base64encode = _G['base64encode']
-local base64decode = _G['base64decode']
-local filePathExists = _G['filePathExists']
-local dirExists = _G['dirExists']
-
-local function fileExists(name)
-  local f = io.open(name,'r')
-  if f ~= nil then io.close(f) return true else return false end
-end
+-- local function fileExists(name)
+--   local f = io.open(name,'r')
+--   if f ~= nil then io.close(f) return true else return false end
+-- end
 
 if not tx then
   r.ShowConsoleMsg('MIDI Transformer requires TransformerLib, which appears to not be present (should have been installed by ReaPack when installing this script. Please reinstall.\n')
@@ -227,7 +219,7 @@ local function doUpdate(action)
       presetSubPath = presetSubPath,
       presetName = presetNameTextBuffer
     }
-    r.SetExtState(scriptID, 'lastState', base64encode(serialize(lastState)), true)
+    r.SetExtState(scriptID, 'lastState', tg.base64encode(tg.serialize(lastState)), true)
   end
 end
 
@@ -507,27 +499,27 @@ local function handleExtState()
   local state
 
   state = r.GetExtState(scriptID, 'defaultFindRow')
-  if isValidString(state) then
+  if tg.isValidString(state) then
     defaultFindRow = state
   end
 
   state = r.GetExtState(scriptID, 'defaultActionRow')
-  if isValidString(state) then
+  if tg.isValidString(state) then
     defaultActionRow = state
   end
 
   state = r.GetExtState(scriptID, 'scriptWritesMainContext')
-  if isValidString(state) then
+  if tg.isValidString(state) then
     scriptWritesMainContext = tonumber(state) == 1 and true or false
   end
 
   state = r.GetExtState(scriptID, 'scriptWritesMIDIContexts')
-  if isValidString(state) then
+  if tg.isValidString(state) then
     scriptWritesMIDIContexts = tonumber(state) == 1 and true or false
   end
 
   state = r.GetExtState(scriptID, 'updateItemBoundsOnEdit')
-  if isValidString(state) then
+  if tg.isValidString(state) then
     updateItemBoundsOnEdit = state == '1' and true or false
     tx.setUpdateItemBoundsOnEdit(updateItemBoundsOnEdit)
   end
@@ -538,18 +530,18 @@ local function handleExtState()
   end
 
   state = r.GetExtState(scriptID, 'restoreLastState')
-  if isValidString(state) then
+  if tg.isValidString(state) then
     restoreLastState = tonumber(state) == 1 and true or false
     if restoreLastState then
       state = r.GetExtState(scriptID, 'lastState')
-      if isValidString(state) then
-        local presetStateStr = base64decode(state)
-        if isValidString(presetStateStr) then
-          local lastState = deserialize(presetStateStr)
+      if tg.isValidString(state) then
+        local presetStateStr = tg.base64decode(state)
+        if tg.isValidString(presetStateStr) then
+          local lastState = tg.deserialize(presetStateStr)
           if lastState then
             if lastState.state then
               presetNameTextBuffer = lastState.presetName
-              if dirExists(lastState.presetSubPath) then presetSubPath = lastState.presetSubPath end
+              if tg.dirExists(lastState.presetSubPath) then presetSubPath = lastState.presetSubPath end
               presetNotesBuffer = tx.loadPresetFromTable(lastState.state)
               overrideEditorTypeForAllRows()
               doActionUpdate()
@@ -984,7 +976,7 @@ local function windowFn()
 
       ImGui.Spacing(ctx)
       ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
-      local defaultText = isValidString(scriptPrefix) and scriptPrefix or scriptPrefix_Empty
+      local defaultText = tg.isValidString(scriptPrefix) and scriptPrefix or scriptPrefix_Empty
       rv, v = ImGui.InputText(ctx, 'Script Prefix', defaultText, inputFlag | ImGui.InputTextFlags_EnterReturnsTrue)
       if rv then
         scriptPrefix = v == scriptPrefix_Empty and '' or v
@@ -1335,7 +1327,7 @@ local function windowFn()
     end
 
     local sorted = {}
-    for _, v in spairs(fnames, function (t, a, b) return string.lower(t[a].label) < string.lower(t[b].label) end) do
+    for _, v in tg.spairs(fnames, function (t, a, b) return string.lower(t[a].label) < string.lower(t[b].label) end) do
       table.insert(sorted, v)
     end
     return sorted
@@ -1346,9 +1338,9 @@ local function windowFn()
 
   local function decorateTargetLabel(label)
     if label == 'Value 1' then
-      label = label .. (isValidString(subtypeValueLabel) and ' (' .. subtypeValueLabel .. ')' or '')
+      label = label .. (tg.isValidString(subtypeValueLabel) and ' (' .. subtypeValueLabel .. ')' or '')
     elseif label == 'Value 2' then
-      label = label .. (isValidString(mainValueLabel) and ' (' .. mainValueLabel .. ')' or '')
+      label = label .. (tg.isValidString(mainValueLabel) and ' (' .. mainValueLabel .. ')' or '')
     end
     return label
   end
@@ -1437,7 +1429,7 @@ local function windowFn()
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Button(ctx, 'Recall Preset...', DEFAULT_ITEM_WIDTH * 2)
   if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
-    if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
+    if not tg.dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetTable = enumerateTransformerPresets(presetPath)
     ImGui.OpenPopup(ctx, 'openPresetMenu') -- defined far below
   end
@@ -1513,7 +1505,7 @@ local function windowFn()
   end
 
   local function doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
-    local isNote = tx.isANote(target, condOp)
+    local isNote = tg.isANote(target, condOp)
     local floatFlags = ImGui.InputTextFlags_CharsDecimal + ImGui.InputTextFlags_CharsNoBlank
 
     -- TODO: cleanup these attributes & combinations
@@ -1881,7 +1873,7 @@ local function windowFn()
       evn.isBitField and bitFieldCallback or numbersOnlyCallback)
     if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      if isValidString(buf) then
+      if tg.isValidString(buf) then
         evn.textEditorStr = buf
         if evn.isBitField then
           evn.pattern = evn.textEditorStr
@@ -1916,7 +1908,7 @@ local function windowFn()
     rv, buf = ImGui.InputText(ctx, '##everyNoffset', evn.offsetEditorStr, ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
     if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     if kbdEntryIsCompleted(rv) then
-      if isValidString(buf) then
+      if tg.isValidString(buf) then
         evn.offsetEditorStr = buf
         evn.offset = tonumber(evn.offsetEditorStr)
         fun(3, true)
@@ -3150,7 +3142,7 @@ local function windowFn()
   local _, presetButtonHeight = ImGui.GetItemRectSize(ctx)
   presetButtonBottom = presetButtonBottom + presetButtonHeight
   if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
-    if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
+    if not tg.dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
     presetFolders = enumerateTransformerPresets(presetPath, true)
     ImGui.OpenPopup(ctx, '##presetfolderselect')
   end
@@ -3275,7 +3267,7 @@ local function windowFn()
     local buf = presetNameTextBuffer
     if not buf:match('%' .. presetExt .. '$') then buf = buf .. presetExt end
 
-    if not dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
+    if not tg.dirExists(presetPath) then r.RecursiveCreateDirectory(presetPath, 0) end
 
     path = (presetSubPath and presetSubPath or presetPath) .. '/' .. buf
     return path, buf
@@ -3319,13 +3311,13 @@ local function windowFn()
         statusMsg = 'Could not find or create directory'
         statusTime = r.time_precise()
         statusContext = statusCtx
-      elseif suppressOverwrite or not filePathExists(path) then
+      elseif suppressOverwrite or not tg.filePathExists(path) then
         saveFn(path, fname)
         inOKDialog = false
       end
     end
 
-    if isValidString(presetNameTextBuffer) then
+    if tg.isValidString(presetNameTextBuffer) then
       local okrv, okval = handleOKDialog('Overwrite File?', 'Overwrite file '..presetNameTextBuffer..'?')
       if okrv then
         if okval == 1 then

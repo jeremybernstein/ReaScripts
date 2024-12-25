@@ -3,16 +3,17 @@
 
 local ActionDefs = {}
 
-local te = require 'TransformerExtra'
+local tg = require 'TransformerGlobal'
+local p3 = require 'TransformerParam3'
 
-local ActionRow = class(nil, {})
+local ActionRow = tg.class(nil, {})
 
 function ActionRow:init()
   self.targetEntry = 1
   self.operationEntry = 1
   self.params = {
-    te.ParamInfo(),
-    te.ParamInfo()
+    tg.ParamInfo(),
+    tg.ParamInfo()
   }
 end
 
@@ -53,13 +54,13 @@ local actionOperationRandom = { notation = ':random', label = 'Random Values Btw
 local actionOperationRelRandom = { notation = ':relrandom', label = 'Relative Random Values Btw', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true, nixnote = true }
 local actionOperationRelRandomSingle = { notation = ':relrandomsingle', label = 'Single Relative Random Value Btw', text = 'OperateEvent1(event, {tgt}, OP_ADD, RandomValue(event, nil, {param1}, {param2}, {randomsingle}))', terms = 2, inteditor = true, range = { -127, 127 }, fullrange = true, bipolar = true, literal = true, nixnote = true }
 local actionOperationFixed = { notation = '=', label = 'Set to Fixed Value', text = 'OperateEvent1(event, {tgt}, OP_FIXED, {param1})', terms = 1 }
-local actionOperationLine = { notation = ':line', label = 'Ramp in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, {param3}, _context)', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, param3 = te.lineParam3Tab }
-local actionOperationRelLine = { notation = ':relline', label = 'Relative Ramp in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, {param3}, _context))', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, fullrange = true, bipolar = true, param3 = te.lineParam3Tab }
+local actionOperationLine = { notation = ':line', label = 'Ramp in Selection Range', text = 'LinearChangeOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, {param3}, _context)', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, param3 = p3.lineParam3Tab }
+local actionOperationRelLine = { notation = ':relline', label = 'Relative Ramp in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, {param3}, _context))', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, fullrange = true, bipolar = true, param3 = p3.lineParam3Tab }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true, nixnote = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 
 local function positionMod(op)
-  local newop = tableCopy(op)
+  local newop = tg.tableCopy(op)
   newop.menu = false
   newop.inteditor = false
   newop.floateditor = false
@@ -70,7 +71,7 @@ local function positionMod(op)
 end
 
 local function lengthMod(op)
-  local newop = tableCopy(op)
+  local newop = tg.tableCopy(op)
   newop.menu = false
   newop.inteditor = false
   newop.floateditor = false
@@ -91,7 +92,7 @@ local actionPositionOperationEntries = {
   positionMod(actionOperationRandom), lengthMod(actionOperationRelRandom), lengthMod(actionOperationRelRandomSingle),
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveToCursor(event, {tgt}, {param1})', terms = 1, menu = true },
   { notation = ':addlength', label = 'Add Length', text = 'AddLength(event, {tgt}, {param1}, _context)', terms = 1, menu = true },
-  { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 3, split = {{}, { menu = true }, {}}, param3 = te.positionScaleOffsetParam3Tab },
+  { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 3, split = {{}, { menu = true }, {}}, param3 = p3.positionScaleOffsetParam3Tab },
   { notation = ':toitemstart', label = 'Move to Item Start', text = 'MoveToItemPos(event, {tgt}, 0, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
   { notation = ':toitemend', label = 'Move to Item End', text = 'MoveToItemPos(event, {tgt}, 1, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
 }
@@ -117,7 +118,7 @@ local actionLengthOperationEntries = {
 }
 
 local function channelMod(op)
-  local newop = tableCopy(op)
+  local newop = tg.tableCopy(op)
   newop.literal = true
   newop.range = newop.bipolar and { -15, 15 } or { 0, 15 }
   return newop
@@ -165,7 +166,7 @@ local actionAddLengthParam1Entries = {
   { notation = '$note', label = 'Per Note', text = '2'},
 }
 
-local actionLineParam2Entries = te.param3LineEntries
+local actionLineParam2Entries = p3.param3LineEntries
 -- {
 --   { notation = '$lin', label = 'Linear', text = '0' },
 --   { notation = '$exp', label = 'Exponential', text = '1' },
@@ -251,16 +252,16 @@ local actionScopeTable = {
   { notation = '$transform', label = 'Transform' },
   { notation = '$replace', label = 'Transform & Replace' },
   { notation = '$copy', label = 'Transform to Track' },
-  { notation = '$copylane', label = 'Transform to Lane', disable = not te.isREAPER7() },
+  { notation = '$copylane', label = 'Transform to Lane', disable = not tg.isREAPER7() },
   { notation = '$insert', label = 'Insert' },
   { notation = '$insertexclusive', label = 'Insert Exclusive' },
   { notation = '$extracttrack', label = 'Extract to Track' },
-  { notation = '$extractlane', label = 'Extract to Lane', disable = not te.isREAPER7() },
+  { notation = '$extractlane', label = 'Extract to Lane', disable = not tg.isREAPER7() },
   { notation = '$delete', label = 'Delete' },
 }
 
 local function actionScopeFromNotation(notation)
-  if isValidString(notation) then
+  if tg.isValidString(notation) then
     for k, v in ipairs(actionScopeTable) do
       if v.notation == notation then
         return k
@@ -279,7 +280,7 @@ local actionScopeFlagsTable = {
 }
 
 local function actionScopeFlagsFromNotation(notation)
-  if isValidString(notation) then
+  if tg.isValidString(notation) then
     for k, v in ipairs(actionScopeFlagsTable) do
       if v.notation == notation then
         return k

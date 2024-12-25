@@ -35,7 +35,7 @@ mu.CORRECT_OVERLAPS_FAVOR_SELECTION = true -- any downsides to having it on all 
 mu.CORRECT_OVERLAPS_FAVOR_NOTEON = true
 mu.CORRECT_EXTENTS = true
 
-_G['mu'] = mu -- must be defined before TransformerExtra is required
+_G.mu = mu -- must be defined before TransformerParam3 is required
 
 function P(...)
   mu.post(...)
@@ -54,19 +54,9 @@ end
 
 local TransformerLib = {}
 
-local function isANote(target, condOp)
-  local isNote = target.notation == '$value1' and not condOp.nixnote
-  if isNote then
-    local hasTable = GetHasTable()
-    isNote = hasTable._size == 1 and hasTable[0x90]
-  end
-  return isNote
-end
-
-_G['isANote'] = isANote -- must be defined before TransformerExtra is required
-
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
-local te = require 'TransformerExtra'
+local tg = require 'TransformerGlobal'
+local p3 = require 'TransformerParam3'
 local gdefs = require 'TransformerGeneralDefs'
 local fdefs = require 'TransformerFindDefs'
 local adefs = require 'TransformerActionDefs'
@@ -1111,7 +1101,7 @@ function ProcessFindMacroRow(buf, boolstr)
       bufstart = findend + 1
       condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
       findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
-      if isValidString(param1) then
+      if tg.isValidString(param1) then
         bufstart = findend + 1
         param1 = HandleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
       end
@@ -1127,12 +1117,12 @@ function ProcessFindMacroRow(buf, boolstr)
         bufstart = findend + 1
 
         condTab, param1Tab, param2Tab = FindTabsFromTarget(row)
-        if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
-        if isValidString(param1) then
+        if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
+        if tg.isValidString(param1) then
           param1 = HandleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
           -- mu.post('param1', param1)
         end
-        if isValidString(param2) then
+        if tg.isValidString(param2) then
           param2 = HandleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
           -- mu.post('param2', param2)
         end
@@ -1435,15 +1425,15 @@ function FindRowToNotation(row, index)
 
   if string.match(curCondition.notation, '[!]*%:') then
     rowText = rowText .. '('
-    if isValidString(param1Val) then
+    if tg.isValidString(param1Val) then
       rowText = rowText .. param1Val
-      if isValidString(param2Val) then
+      if tg.isValidString(param2Val) then
         rowText = rowText .. ', ' .. param2Val
       end
     end
     rowText = rowText .. ')'
   else
-    if isValidString(param1Val) then
+    if tg.isValidString(param1Val) then
       rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
     end
   end
@@ -1619,12 +1609,12 @@ function RunFind(findFn, params, runFn)
     for _, rData in pairs(firstLastEventsByType) do
       for _, rEvent in pairs(rData) do
         local newEvent
-        newEvent = tableCopy(rEvent.firstEvent)
+        newEvent = tg.tableCopy(rEvent.firstEvent)
         newEvent.projtime = frStart
         newEvent.firstlastevent = true
         newEvent.orig_type = gdefs.OTHER_TYPE
         table.insert(found, newEvent)
-        newEvent = tableCopy(rEvent.lastEvent)
+        newEvent = tg.tableCopy(rEvent.lastEvent)
         newEvent.projtime = frEnd
         newEvent.firstlastevent = true
         newEvent.orig_type = gdefs.OTHER_TYPE
@@ -1765,16 +1755,16 @@ function ProcessFind(take, fromHasTable)
     local isEventSelector = paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR and true or false
 
     if isMetricGrid or isMusical then
-      local mgParams = tableCopy(row.mg)
+      local mgParams = tg.tableCopy(row.mg)
       mgParams.param1 = paramNums[1]
       mgParams.param2 = paramTerms[2]
-      findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', serialize(mgParams))
+      findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', tg.serialize(mgParams))
     elseif isEveryN then
-      local evnParams = tableCopy(row.evn)
-      findTerm = string.gsub(findTerm, '{everyNparams}', serialize(evnParams))
+      local evnParams = tg.tableCopy(row.evn)
+      findTerm = string.gsub(findTerm, '{everyNparams}', tg.serialize(evnParams))
     elseif isEventSelector then
-      local evSelParams = tableCopy(row.evsel)
-      findTerm = string.gsub(findTerm, '{eventselectorparams}', serialize(evSelParams))
+      local evSelParams = tg.tableCopy(row.evsel)
+      findTerm = string.gsub(findTerm, '{eventselectorparams}', tg.serialize(evSelParams))
     end
 
     if curTarget.cond then
@@ -1965,7 +1955,7 @@ function ProcessActionMacroRow(buf)
       bufstart = findend + (buf[findend] ~= '(' and 1 or 0)
 
       local _, _, param1 = string.find(buf, '^%s*([^%s%()]*)%s*', bufstart)
-      if isValidString(param1) then
+      if tg.isValidString(param1) then
         param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
         tryagain = false
       else
@@ -1987,7 +1977,7 @@ function ProcessActionMacroRow(buf)
         row.operationEntry = k
 
         if param3 and v.param3 then
-          row.params[3] = te.ParamInfo()
+          row.params[3] = tg.ParamInfo()
           for p3k, p3v in pairs(v.param3) do row.params[3][p3k] = p3v end
           row.params[3].textEditorStr = param3
         else
@@ -1999,18 +1989,18 @@ function ProcessActionMacroRow(buf)
         else
           local _, param1Tab, param2Tab, _, operation = ActionTabsFromTarget(row)
 
-          if param2 and not isValidString(param1) then param1 = param2 param2 = nil end
-          if isValidString(param1) then
+          if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
+          if tg.isValidString(param1) then
             param1 = HandleMacroParam(row, target, operation, param1Tab, param1, 1)
           else
             param1 = DefaultValueIfAny(row, operation, 1)
           end
-          if isValidString(param2) then
+          if tg.isValidString(param2) then
             param2 = HandleMacroParam(row, target, operation, param2Tab, param2, 2)
           else
             param2 = DefaultValueIfAny(row, operation, 2)
           end
-          if isValidString(param3) then
+          if tg.isValidString(param3) then
             row.params[3].textEditorStr = param3 -- very primitive
           end
           row.params[1].textEditorStr = param1
@@ -2225,18 +2215,18 @@ function ActionRowToNotation(row, index)
     rowText, param1Val, param2Val, param3Val = GetRowTextAndParameterValues(row)
     if string.match(curOperation.notation, '[!]*%:') then
       rowText = rowText .. '('
-      if isValidString(param1Val) then
+      if tg.isValidString(param1Val) then
         rowText = rowText .. param1Val
-        if isValidString(param2Val) then
+        if tg.isValidString(param2Val) then
           rowText = rowText .. ', ' .. param2Val
-          if isValidString(param3Val) then
+          if tg.isValidString(param3Val) then
             rowText = rowText .. ', ' .. param3Val
           end
         end
       end
       rowText = rowText .. ')'
     else
-      if isValidString(param1Val) then
+      if tg.isValidString(param1Val) then
         rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
       end
     end
@@ -2348,7 +2338,7 @@ function HandleCreateNewMIDIEvent(take, contextTab)
         end)
         if actionFn then
           local timeAdjust = GetTimeOffset()
-          local e = tableCopy(nme)
+          local e = tg.tableCopy(nme)
           local pos
           if nme.posmode == adefs.NEWEVENT_POSITION_ATCURSOR then
             pos = r.GetCursorPositionEx(0)
@@ -2736,23 +2726,23 @@ function ProcessActionForTake(take)
     if curOperation.notation == ':relrandomsingle' then
       actionTerm = string.gsub(actionTerm, '{randomsingle}', tostring(math.random()))
     end
-    if row.params[3] and isValidString(row.params[3].textEditorStr) then
+    if row.params[3] and tg.isValidString(row.params[3].textEditorStr) then
       actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation, paramTerms[3]) or row.params[3].textEditorStr)
     end
 
     local isMusical = paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL and true or false
     if isMusical then
-      local mgParams = tableCopy(row.mg)
+      local mgParams = tg.tableCopy(row.mg)
       mgParams.param1 = paramNums[1]
       mgParams.param2 = paramTerms[2]
-      actionTerm = string.gsub(actionTerm, '{musicalparams}', serialize(mgParams))
+      actionTerm = string.gsub(actionTerm, '{musicalparams}', tg.serialize(mgParams))
     end
 
     local isNewMIDIEvent = paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT and true or false
     if isNewMIDIEvent then
-      -- local nmeParams = tableCopy(row.nme)
+      -- local nmeParams = tg.tableCopy(row.nme)
       CreateNewMIDIEvent_Once = true
-      -- actionTerm = string.gsub(actionTerm, '{neweventparams}', serialize(nmeParams))
+      -- actionTerm = string.gsub(actionTerm, '{neweventparams}', tg.serialize(nmeParams))
     end
 
     actionTerm = string.gsub(actionTerm, '^%s*(.-)%s*$', '%1') -- trim whitespace
@@ -2953,7 +2943,7 @@ function ProcessAction(execute, fromScript)
           TransformEntryInTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$replace' then
-        local repParams = tableCopy(defParams)
+        local repParams = tg.tableCopy(defParams)
         repParams.wantsUnfound = true
         repParams.addRangeEvents = true
         local found, contextTab, unfound = RunFind(findFn, repParams)
@@ -2969,7 +2959,7 @@ function ProcessAction(execute, fromScript)
           end
         end
       elseif notation == '$copylane' then
-        if te.isREAPER7() then
+        if tg.isREAPER7() then
           local found, contextTab = RunFind(findFn, defParams)
           if canProcess(found) then
             local newtake = NewTakeInNewLane(take)
@@ -2984,7 +2974,7 @@ function ProcessAction(execute, fromScript)
           InsertEventsIntoTake(take, found, actionFn, contextTab) -- could use runFn
         end
       elseif notation == '$insertexclusive' then
-        local ieParams = tableCopy(defParams)
+        local ieParams = tg.tableCopy(defParams)
         ieParams.wantsUnfound = true
         local found, contextTab, unfound = RunFind(findFn, ieParams)
         mu.MIDI_OpenWriteTransaction(take)
@@ -3005,7 +2995,7 @@ function ProcessAction(execute, fromScript)
           DeleteEventsInTake(take, found)
         end
       elseif notation == '$extractlane' then
-        if te.isREAPER7() then
+        if tg.isREAPER7() then
           local found, contextTab = RunFind(findFn, defParams)
           if canProcess(found) then
             local newtake = NewTakeInNewLane(take)
@@ -3044,7 +3034,7 @@ function GetCurrentPresetState()
   local ppInfo
   if currentFindPostProcessingInfo.flags ~= fdefs.FIND_POSTPROCESSING_FLAG_NONE then
     local ppFlags = currentFindPostProcessingInfo.flags
-    ppInfo = tableCopy(currentFindPostProcessingInfo)
+    ppInfo = tg.tableCopy(currentFindPostProcessingInfo)
     ppInfo.flags = {}
     if ppFlags & fdefs.FIND_POSTPROCESSING_FLAG_FIRSTEVENT ~= 0 then table.insert(ppInfo.flags, '$firstevent') end
     if ppFlags & fdefs.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0 then table.insert(ppInfo.flags, '$lastevent') end
@@ -3074,7 +3064,7 @@ function SavePreset(pPath, scriptTab)
   if f then
     local presetTab = GetCurrentPresetState()
     presetTab.scriptIgnoreSelectionInArrangeView = ignoreSelectionInArrangeView
-    f:write(serialize(presetTab) .. '\n')
+    f:write(tg.serialize(presetTab) .. '\n')
     f:close()
     saved = true
   end
@@ -3138,7 +3128,7 @@ function LoadPresetFromTable(presetTab)
   end
   if presetTab.findPostProcessing then
     local ppFlags = presetTab.findPostProcessing.flags
-    currentFindPostProcessingInfo = tableCopy(presetTab.findPostProcessing)
+    currentFindPostProcessingInfo = tg.tableCopy(presetTab.findPostProcessing)
     currentFindPostProcessingInfo.flags = fdefs.FIND_POSTPROCESSING_FLAG_NONE
     if ppFlags then
       for _, v in ipairs(ppFlags) do
@@ -3171,8 +3161,8 @@ function LoadPreset(pPath)
       else
         tabStr = presetStr -- fallback for old presets
       end
-      if isValidString(tabStr) then
-        local presetTab = deserialize(tabStr)
+      if tg.isValidString(tabStr) then
+        local presetTab = tg.deserialize(tabStr)
         if presetTab then
           local notes = LoadPresetFromTable(presetTab)
           dirtyFind = true
@@ -3364,8 +3354,6 @@ TransformerLib.setCurrentActionScopeFlags = function(val)
   currentActionScopeFlags = val < 1 and 1 or val > #adefs.actionScopeFlagsTable and #adefs.actionScopeFlagsTable or val
 end
 
-TransformerLib.ParamInfo = te.ParamInfo
-
 TransformerLib.FindRow = fdefs.FindRow
 TransformerLib.findRowTable = function() return fdefs.findRowTable() end
 TransformerLib.clearFindRows = function() fdefs.clearFindRowTable() end
@@ -3521,9 +3509,9 @@ TransformerLib.makeDefaultNewMIDIEvent = makeDefaultNewMIDIEvent
 TransformerLib.makeParam3 = function(row)
   local _, _, _, target, operation = ActionTabsFromTarget(row)
   if target.notation == '$position' and operation.notation == ':scaleoffset' then
-    te.makeParam3PositionScaleOffset(row)
+    p3.makeParam3PositionScaleOffset(row)
   elseif operation.notation == ':line' or operation.notation == ':relline' then
-    te.makeParam3Line(row)
+    p3.makeParam3Line(row)
   end
 end
 TransformerLib.makeDefaultEventSelector = makeDefaultEventSelector
@@ -3531,7 +3519,6 @@ TransformerLib.makeDefaultEventSelector = makeDefaultEventSelector
 TransformerLib.startup = startup
 TransformerLib.mu = mu
 TransformerLib.handlePercentString = HandlePercentString
-TransformerLib.isANote = isANote
 
 TransformerLib.GetMetricGridModifiers = GetMetricGridModifiers
 TransformerLib.SetMetricGridModifiers = SetMetricGridModifiers

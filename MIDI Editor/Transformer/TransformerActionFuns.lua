@@ -16,6 +16,8 @@ local r = reaper
 local gdefs = require 'TransformerGeneralDefs'
 local adefs = require 'TransformerActionDefs'
 
+local mgdefs = require 'TransformerMetricGrid'
+
 local function setMusicalLength(event, take, PPQ, mgParams)
   if not take then return event.projlen end
 
@@ -51,7 +53,7 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
   local ppqinmeasure = oldppqpos - som -- get the position from the start of the measure
   local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
 
-  local mgMods, mgReaSwing = Shared.getMetricGridModifiers(mgParams)
+  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
 
   if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
     local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
@@ -136,7 +138,7 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
     newppqlen = newendppqpos - ppqpos
   end
 
-  local mgMods, mgReaSwing = Shared.getMetricGridModifiers(mgParams)
+  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
 
   if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
     local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)

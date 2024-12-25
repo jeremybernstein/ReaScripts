@@ -58,9 +58,15 @@ local TransformerLib = {}
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
 local tg = require 'TransformerGlobal'
 local p3 = require 'TransformerParam3'
+
 local gdefs = require 'TransformerGeneralDefs'
 local fdefs = require 'TransformerFindDefs'
 local adefs = require 'TransformerActionDefs'
+
+local mgdefs = require 'TransformerMetricGrid'
+local evndefs = require 'TransformerEveryN'
+local nmedefs = require 'TransformerNewMIDIEvent'
+local evseldefs = require 'TransformerEventSelector'
 
 local ffuns = require 'TransformerFindFuns'
 local afuns = require 'TransformerActionFuns'
@@ -68,7 +74,8 @@ local afuns = require 'TransformerActionFuns'
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
 
-local parserError = ''
+Shared.parserError = ''
+
 local dirtyFind = false
 local wantsTab = {}
 
@@ -120,19 +127,9 @@ Shared.gridInfo = function()
   return gridInfo
 end
 
-local function getMetricGridModifiers(mg) -- used in ActionFuns, can we improve on that
-  if mg then
-    local mods = mg.modifiers & 0x7
-    local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
-    return mods, reaperSwing
-  end
-  return gdefs.MG_GRID_STRAIGHT, false
-end
-Shared.getMetricGridModifiers = getMetricGridModifiers
-
 local function getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
   local gridUnit
-  local mgMods = getMetricGridModifiers(mgParams)
+  local mgMods = mgdefs.getMetricGridModifiers(mgParams)
   if subdiv >= 0 then
     gridUnit = PPQ * (subdiv * 4)
     if mgMods == gdefs.MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
@@ -233,6 +230,7 @@ local function getSubtypeValueName(event)
   else return 'msg2'
   end
 end
+Shared.getSubtypeValueName = getSubtypeValueName
 
 local function getSubtypeValueLabel(typeIndex)
   if typeIndex == 1 then return 'Note #'
@@ -258,6 +256,7 @@ local function getMainValueName(event)
   else return 'msg3'
   end
 end
+Shared.getMainValueName = getMainValueName
 
 local function getMainValueLabel(typeIndex)
   if typeIndex == 1 then return 'Velocity'
@@ -413,6 +412,7 @@ local function calcMIDITime(take, e)
   end
   e.measures, e.beats, e.beatsmax, e.ticks = ppqToTime(take, e.ppqpos, e.projtime)
 end
+Shared.calcMIDITime = calcMIDITime
 
 ---------------------------------------------------------------------------
 --------------------------------- UTILITIES -------------------------------
@@ -705,221 +705,6 @@ local function findTabsFromTarget(row)
   return condTab, param1Tab, param2Tab, target, condition and condition or {}
 end
 
-local function generateMetricGridNotation(row)
-  if not row.mg then return '' end
-  local mgStr = '|'
-  local mgMods, mgReaSwing = getMetricGridModifiers(row.mg)
-  mgStr = mgStr .. (mgMods == gdefs.MG_GRID_SWING and (mgReaSwing and 'r' or 'm')
-                    or mgMods == gdefs.MG_GRID_TRIPLET and 't'
-                    or mgMods == gdefs.MG_GRID_DOTTED and 'd'
-                    or '-')
-  mgStr = mgStr .. (row.mg.wantsBarRestart and 'b' or '-')
-  mgStr = mgStr .. string.format('|%0.2f|%0.2f', row.mg.preSlopPercent, row.mg.postSlopPercent)
-  if mgMods == gdefs.MG_GRID_SWING then
-    mgStr = mgStr .. '|sw(' .. string.format('%0.2f', row.mg.swing) .. ')'
-  end
-  return mgStr
-end
-
-local function setMetricGridModifiers(mg, mgMods, mgReaSwing)
-  local mods = mg.modifiers & 0x7
-  local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
-  if mg then
-    mods = mgMods and (mgMods & 0x7) or mods
-    if mgReaSwing ~= nil then reaperSwing = mgReaSwing end
-    mg.modifiers = mods | (reaperSwing and gdefs.MG_GRID_SWING_REAPER or 0)
-  end
-  return mods, reaperSwing
-end
-
-local function parseMetricGridNotation(str)
-  local mg = {}
-
-  local fs, fe, mod, rst, pre, post, swing = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)|sw%((.-)%)$')
-  if not (fs and fe) then
-    fs, fe, mod, rst, pre, post = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)$')
-  end
-  if fs and fe then
-    mg.modifiers =
-      mod == 'r' and (gdefs.MG_GRID_SWING | gdefs.MG_GRID_SWING_REAPER) -- reaper
-      or mod == 'm' and gdefs.MG_GRID_SWING -- mpc
-      or mod == 't' and gdefs.MG_GRID_TRIPLET
-      or mod == 'd' and gdefs.MG_GRID_DOTTED
-      or gdefs.MG_GRID_STRAIGHT
-    mg.wantsBarRestart = rst == 'b' and true or false
-    mg.preSlopPercent = tonumber(pre)
-    mg.postSlopPercent = tonumber(post)
-
-    local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
-    mg.swing = swing and tonumber(swing)
-    if not mg.swing then mg.swing = reaperSwing and 0 or 50 end
-    if reaperSwing then
-      mg.swing = mg.swing < -100 and -100 or mg.swing > 100 and 100 or mg.swing
-    else
-      mg.swing = mg.swing < 0 and 0 or mg.swing > 100 and 100 or mg.swing
-    end
-  end
-  return mg
-end
-
-local function generateEveryNNotation(row)
-  if not row.evn then return '' end
-  local evn = row.evn
-  local evnStr = (evn.isBitField and evn.pattern or tostring(evn.interval)) .. '|'
-  evnStr = evnStr .. (evn.isBitField and 'b' or '-') .. '|'
-  evnStr = evnStr .. evn.offset
-  return evnStr
-end
-
-local function parseEveryNNotation(str)
-  local evn = {}
-  local fs, fe, patInt, flag, offset = string.find(str, '(%d+)|([b-])|(%d+)$')
-  if not (fs and fe) then
-    flag = ''
-    offset = '0'
-    fs, fe, patInt = string.find(str, '(%d+)')
-  end
-  if fs and fe then
-    evn.isBitField = flag == 'b'
-    evn.textEditorStr = patInt
-    if evn.isBitField then evn.textEditorStr = evn.textEditorStr:gsub('[^0]', '1') end
-    evn.pattern = evn.isBitField and evn.textEditorStr or '1'
-    evn.interval = evn.isBitField and 1 or (tonumber(evn.textEditorStr) or 1)
-    evn.offsetEditorStr = offset or '0'
-    evn.offset = tonumber(evn.offsetEditorStr) or 0
-  else
-    evn.isBitField = false
-    evn.textEditorStr = '1'
-    evn.pattern = evn.textEditorStr
-    evn.interval = 1
-    evn.offsetEditorStr = '0'
-    evn.offset = 0
-  end
-  return evn
-end
-
-local function generateEventSelectorNotation(row)
-  if not row.evsel then return '' end
-  local evsel = row.evsel
-  local evSelStr = string.format('%02X', evsel.chanmsg)
-  evSelStr = evSelStr .. '|' .. evsel.channel
-  evSelStr = evSelStr .. '|' .. evsel.selected
-  evSelStr = evSelStr .. '|' .. evsel.muted
-  if evsel.useval1 then
-    evSelStr = evSelStr .. string.format('|%02X', evsel.msg2)
-  end
-  local scale = tonumber(evsel.scaleStr)
-  if not scale then scale = 100 end
-  if scale ~= 100 then
-    evSelStr = evSelStr .. string.format('|%0.4f', scale):gsub("%.?0+$", "")
-  end
-  return evSelStr
-end
-
-local function parseEventSelectorNotation(str, row, paramTab)
-  local evsel = {}
-  local fs, fe, chanmsg, channel, selected, muted = string.find(str, '([0-9A-Fa-f]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)')
-  local msg2, scale, savefe
-  if fs and fe then
-    savefe = fe
-    evsel.chanmsg = tonumber(chanmsg:sub(1, 2), 16)
-    evsel.channel = tonumber(channel)
-    evsel.selected = tonumber(selected)
-    evsel.muted = tonumber(muted)
-    evsel.useval1 = false
-    evsel.msg2 = 60
-    evsel.scaleStr = '100'
-
-    fs, fe, msg2 = string.find(str, '|([0-9A-Fa-f]+)', fe)
-    if fs and fe then
-      evsel.useval1 = true
-      evsel.msg2 = tonumber(msg2:sub(1, 2), 16)
-    end
-
-    if not fe then fe = savefe end
-    fs, fe, scale = string.find(str, '|([0-9.]+)', fe)
-    if fs and fe then
-      evsel.scaleStr = scale
-    end
-
-    for k, v in ipairs(paramTab) do
-      if tonumber(v.text) == evsel.chanmsg then
-        row.params[1].menuEntry = k
-        break
-      end
-    end
-    return evsel
-  end
-  return nil
-end
-
-local function generateNewMIDIEventNotation(row)
-  if not row.nme then return '' end
-  local nme = row.nme
-  local nmeStr = string.format('%02X%02X%02X', nme.chanmsg | nme.channel, nme.msg2, nme.msg3)
-  nmeStr = nmeStr .. '|' .. ((nme.selected and 1 or 0) | (nme.muted and 2 or 0) | (nme.relmode and 4 or 0))
-  nmeStr = nmeStr .. '|' .. nme.posText
-  nmeStr = nmeStr .. '|' .. (nme.chanmsg == 0x90 and nme.durText or '0')
-  nmeStr = nmeStr .. '|' .. string.format('%02X', (nme.chanmsg == 0x90 and tostring(nme.relvel) or '0'))
-  return nmeStr
-end
-
-local function parseNewMIDIEventNotation(str, row, paramTab, index)
-  if index == 1 then
-    local nme = {}
-    local fs, fe, msg, flags, pos, dur, relvel = string.find(str, '([0-9A-Fa-f]+)|(%d)|([0-9%.%-:t]+)|([0-9%.:t]+)|([0-9A-Fa-f]+)')
-    if fs and fe then
-      local status = tonumber(msg:sub(1, 2), 16)
-      nme.chanmsg = status & 0xF0
-      nme.channel = status & 0x0F
-      nme.msg2 = tonumber(msg:sub(3, 4), 16)
-      nme.msg3 = tonumber(msg:sub(5, 6), 16)
-      local nflags = tonumber(flags)
-      nme.selected = nflags & 0x01 ~= 0
-      nme.muted = nflags & 0x02 ~= 0
-      nme.relmode = nflags & 0x04 ~= 0
-      nme.posText = pos
-      nme.durText = dur
-      nme.relvel = tonumber(relvel:sub(1, 2), 16)
-      nme.posmode = adefs.NEWEVENT_POSITION_ATCURSOR
-
-      for k, v in ipairs(paramTab) do
-        if tonumber(v.text) == nme.chanmsg then
-          row.params[1].menuEntry = k
-          break
-        end
-      end
-    else
-      nme.chanmsg = 0x90
-      nme.channel = 0
-      nme.selected = true
-      nme.muted = false
-      nme.msg2 = 64
-      nme.msg3 = 64
-      nme.posText = gdefs.DEFAULT_TIMEFORMAT_STRING
-      nme.durText = '0.1.00'
-      nme.relvel = 0
-      nme.posmod = adefs.NEWEVENT_POSITION_ATCURSOR
-      nme.relmode = false
-    end
-    row.nme = nme
-  elseif index == 2 then
-    if str == '$relcursor' then -- legacy
-      str = '$atcursor'
-      row.nme.relmode = true
-    end
-
-    for k, v in ipairs(paramTab) do
-      if v.notation == str then
-        row.params[2].menuEntry = k
-        row.nme.posmode = k
-        break
-      end
-    end
-    if row.nme.posmode == adefs.NEWEVENT_POSITION_ATPOSITION then row.nme.relmode = false end -- ensure
-  end
-end
-
 local function getParamType(src)
   return not src and gdefs.PARAM_TYPE_UNKNOWN
     or src.menu and gdefs.PARAM_TYPE_MENU
@@ -1017,18 +802,18 @@ local function handleMacroParam(row, target, condOp, paramTab, paramStr, index)
       if pa and pb then
         row.params[index].menuEntry = kk
         if paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL then
-          row.mg = parseMetricGridNotation(paramStr:sub(pb))
+          row.mg = mgdefs.parseMetricGridNotation(paramStr:sub(pb))
           row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[index].showswing)
         end
         break
       end
     end
   elseif isEveryN then
-    row.evn = parseEveryNNotation(paramStr)
+    row.evn = evndefs.parseEveryNNotation(paramStr)
   elseif isNewEvent then
-    parseNewMIDIEventNotation(paramStr, row, paramTab, index)
+    nmedefs.parseNewMIDIEventNotation(paramStr, row, paramTab, index)
   elseif isEventSelector then
-    row.evsel = parseEventSelectorNotation(paramStr, row, paramTab)
+    row.evsel = evseldefs.parseEventSelectorNotation(paramStr, row, paramTab)
   elseif condOp.bitfield or (condOp.split and condOp.split[index] and condOp.split[index].bitfield) then
     row.params[index].textEditorStr = paramStr
   elseif paramType == gdefs.PARAM_TYPE_INTEDITOR or paramType == gdefs.PARAM_TYPE_FLOATEDITOR then
@@ -1242,6 +1027,7 @@ local function timeFormatToSeconds(buf, baseTime, context, isLength)
   end
   return 0
 end
+Shared.timeFormatToSeconds = timeFormatToSeconds
 
 local function lengthFormatToSeconds(buf, baseTime, context)
   return timeFormatToSeconds(buf, baseTime, context, true)
@@ -1393,13 +1179,13 @@ local function doProcessParams(row, target, condOp, paramType, paramTab, index, 
   end
 
   if addMetricGridNotation then
-    paramVal = paramVal .. generateMetricGridNotation(row)
+    paramVal = paramVal .. mgdefs.generateMetricGridNotation(row)
   elseif addEveryNNotation then
-    paramVal = generateEveryNNotation(row)
+    paramVal = evndefs.generateEveryNNotation(row)
   elseif addNewMIDIEventNotation then
-    paramVal = generateNewMIDIEventNotation(row)
+    paramVal = nmedefs.generateNewMIDIEventNotation(row)
   elseif addEventSelectorNotation then
-    paramVal = generateEventSelectorNotation(row)
+    paramVal = evseldefs.generateEventSelectorNotation(row)
   end
 
   return paramVal
@@ -1696,12 +1482,13 @@ local function fnStringToFn(fnString, errFn)
   local success, pret, err = pcall(load, fnString, nil, nil, context)
   if success and pret then
     fn = pret()
-    parserError = ''
+    Shared.parserError = ''
   else
     if errFn then errFn(err) end
   end
   return success, fn
 end
+Shared.fnStringToFn = fnStringToFn
 
 local function processFind(take, fromHasTable)
 
@@ -1863,10 +1650,10 @@ local function processFind(take, fromHasTable)
     Shared.gridInfo().currentSwing = cs or 0
   end -- 1.0 is QN, 1.5 dotted, etc.
   _, findFn = fnStringToFn(fnString, function(err)
-    parserError = 'Fatal error: could not load selection criteria'
+    Shared.parserError = 'Fatal error: could not load selection criteria'
     if err then
       if string.match(err, '\'%)\' expected') then
-        parserError = parserError .. ' (Unmatched Parentheses)'
+        Shared.parserError = Shared.parserError .. ' (Unmatched Parentheses)'
       end
     end
   end)
@@ -2338,8 +2125,6 @@ local function deleteEventsInTake(take, eventTab, doTx)
   end
 end
 
-local CreateNewMIDIEvent_Once
-
 local function postProcessSelection(event)
   local notation = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation
   if notation == '$addselect'
@@ -2354,83 +2139,7 @@ local function postProcessSelection(event)
     event.selected = (event.flags & 1) ~= 0
   end
 end
-
-local function handleCreateNewMIDIEvent(take, contextTab)
-  if CreateNewMIDIEvent_Once then
-    for i, row in ipairs(adefs.actionRowTable()) do
-      if row.nme and not row.disabled then
-        local nme = row.nme
-
-        -- magic
-
-        local fnTab = {}
-        for s in contextTab.actionFnString:gmatch("[^\r\n]+") do
-          table.insert(fnTab, s)
-        end
-        for ii = 2, i + 1 do
-          fnTab[ii] = nil
-        end
-        local fnString = ''
-        for _, s in pairs(fnTab) do
-          fnString = fnString .. s .. '\n'
-        end
-
-        local _, actionFn = fnStringToFn(fnString, function(err)
-          if err then
-            mu.post(err)
-          end
-          parserError = 'Error: could not load action description (New MIDI Event)'
-        end)
-        if actionFn then
-          local timeAdjust = getTimeOffset()
-          local e = tg.tableCopy(nme)
-          local pos
-          if nme.posmode == adefs.NEWEVENT_POSITION_ATCURSOR then
-            pos = r.GetCursorPositionEx(0)
-          elseif nme.posmode == adefs.NEWEVENT_POSITION_ITEMSTART then
-            pos = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_POSITION')
-          elseif nme.posmode == adefs.NEWEVENT_POSITION_ITEMEND then
-            local item = r.GetMediaItemTake_Item(take)
-            pos = r.GetMediaItemInfo_Value(item, 'D_POSITION') + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
-          else
-            pos = timeFormatToSeconds(nme.posText, nil, context) - timeAdjust
-          end
-
-          if nme.posmode ~= adefs.NEWEVENT_POSITION_ATPOSITION and nme.relmode then
-            pos = pos + lengthFormatToSeconds(nme.posText, pos, context)
-          end
-
-          local evType = getEventType(e)
-
-          e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos) -- check for abs pos mode
-          if evType == gdefs.NOTE_TYPE then
-            e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, pos + lengthFormatToSeconds(nme.durText, pos, context))
-          end
-          e.chan = e.channel
-          e.flags = (e.muted and 2 or 0) | (e.selected and 1 or 0)
-          calcMIDITime(take, e)
-
-          actionFn(e, getSubtypeValueName(e), getMainValueName(e), contextTab)
-
-          e.ppqpos = r.MIDI_GetPPQPosFromProjTime(take, e.projtime - timeAdjust)
-          if evType == gdefs.NOTE_TYPE then
-            e.endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (e.projtime - timeAdjust) + e.projlen)
-            e.msg3 = e.msg3 < 1 and 1 or e.msg3
-          end
-          postProcessSelection(e)
-          e.muted = (e.flags & 2) ~= 0
-
-          if evType == gdefs.NOTE_TYPE then
-            mu.MIDI_InsertNote(take, e.selected, e.muted, e.ppqpos, e.endppqpos, e.chan, e.msg2, e.msg3, e.relvel)
-          elseif evType == gdefs.CC_TYPE then
-            mu.MIDI_InsertCC(take, e.selected, e.muted, e.ppqpos, e.chanmsg, e.chan, e.msg2, e.msg3)
-          end
-        end
-      end
-    end
-    CreateNewMIDIEvent_Once = nil
-  end
-end
+Shared.postProcessSelection = postProcessSelection
 
 local function preProcessSelection(take)
   local notation = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation
@@ -2466,7 +2175,7 @@ local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
       mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
     end
   end
-  handleCreateNewMIDIEvent(take, contextTab)
+  nmedefs.handleCreateNewMIDIEvent(take, contextTab, context)
   if doTx == true or doTx == nil then
     mu.MIDI_CommitWriteTransaction(take, false, true)
   end
@@ -2614,7 +2323,7 @@ local function transformEntryInTake(take, eventTab, actionFn, contextTab, replac
       end
     end
   end
-  handleCreateNewMIDIEvent(take, contextTab)
+  nmedefs.handleCreateNewMIDIEvent(take, contextTab, context)
   mu.MIDI_CommitWriteTransaction(take, false, true)
 end
 
@@ -2771,7 +2480,7 @@ local function processActionForTake(take)
     local isNewMIDIEvent = paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT and true or false
     if isNewMIDIEvent then
       -- local nmeParams = tg.tableCopy(row.nme)
-      CreateNewMIDIEvent_Once = true
+      Shared.createNewMIDIEvent_Once = true
       -- actionTerm = string.gsub(actionTerm, '{neweventparams}', tg.serialize(nmeParams))
     end
 
@@ -2864,9 +2573,10 @@ local function processAction(execute, fromScript)
   local takes = grabAllTakes()
   if #takes == 0 then return end
 
-  CACHED_METRIC = nil
-  CACHED_WRAPPED = nil
-  SOM = nil
+  Shared.createNewMIDIEvent_Once = nil
+  Shared.cachedMetric = nil
+  Shared.cachedWrapped = nil
+  Shared.cachedSOM = nil
 
   Shared.moveCursorInfo().moveCursorFirstEventPosition = nil
   Shared.addLengthInfo().addLengthFirstEventOffset = nil
@@ -2881,10 +2591,10 @@ local function processAction(execute, fromScript)
           if err then
             mu.post(err)
           end
-          parserError = 'Fatal error: could not load action description'
+          Shared.parserError = 'Fatal error: could not load action description'
         end)
       else
-        parserError = 'Fatal error: could not load action description'
+        Shared.parserError = 'Fatal error: could not load action description'
       end
     end
     return
@@ -2911,16 +2621,16 @@ local function processAction(execute, fromScript)
           if err then
             mu.post(err)
           end
-          parserError = 'Fatal error: could not load action description'
+          Shared.parserError = 'Fatal error: could not load action description'
         end)
       else
-        parserError = 'Fatal error: could not load action description'
+        Shared.parserError = 'Fatal error: could not load action description'
       end
     end
 
     if findFn and actionFn then
       local function canProcess(found)
-        return #found ~=0 or CreateNewMIDIEvent_Once
+        return #found ~=0 or Shared.createNewMIDIEvent_Once
       end
 
       local notation = adefs.actionScopeTable[currentActionScope].notation
@@ -3304,9 +3014,9 @@ getHasTable = function()
 
     local takes = grabAllTakes()
 
-    CACHED_METRIC = nil
-    CACHED_WRAPPED = nil
-    SOM = nil
+    Shared.cachedMetric = nil
+    Shared.cachedWrapped = nil
+    Shared.cachedSOM = nil
 
     local count = 0
 
@@ -3442,71 +3152,6 @@ TransformerLib.getFindPostProcessingLabel = function()
   return label
 end
 
-local function makeDefaultMetricGrid(row, data)
-  local isMetric = data.isMetric
-  local metricLastUnit = data.metricLastUnit
-  local musicalLastUnit = data.musicalLastUnit
-  local metricLastBarRestart = data.metricLastBarRestart
-
-  row.params[1].menuEntry = isMetric and metricLastUnit or musicalLastUnit
-  -- row.params[2].textEditorStr = '0' -- don't overwrite defaults
-  row.mg = {
-    wantsBarRestart = metricLastBarRestart,
-    preSlopPercent = 0,
-    postSlopPercent = 0,
-    modifiers = 0
-  }
-  return row.mg
-end
-
-local function makeDefaultEveryN(row)
-  row.params[1].menuEntry = 1
-  -- row.params[2].textEditorStr = '0' -- don't overwrite defaults
-  row.evn = {
-    pattern = '1',
-    interval = 1,
-    offset = 0,
-    textEditorStr = '1',
-    offsetEditorStr = '0',
-    isBitField = false
-  }
-  return row.evn
-end
-
-local function makeDefaultNewMIDIEvent(row)
-  row.params[1].menuEntry = 1
-  row.params[2].menuEntry = 1
-  row.nme = {
-    chanmsg = 0x90,
-    channel = 0,
-    selected = true,
-    muted = false,
-    msg2 = 60,
-    msg3 = 64,
-    posText = gdefs.DEFAULT_TIMEFORMAT_STRING,
-    durText = '0.1.00', -- one beat long as a default?
-    relvel = 0,
-    projtime = 0,
-    projlen = 1,
-    posmode = adefs.NEWEVENT_POSITION_ATCURSOR,
-  }
-end
-
-local function makeDefaultEventSelector(row)
-  row.params[1].menuEntry = 1
-  row.params[2].menuEntry = 4 -- $1/16
-  row.evsel = {
-    chanmsg = 0x00,
-    channel = -1,
-    selected = -1,
-    muted = -1,
-    useval1 = false,
-    msg2 = 60,
-    scale = 100,
-    scaleStr = '100'
-  }
-end
-
 TransformerLib.FIND_SCOPE_FLAG_NONE = fdefs.FIND_SCOPE_FLAG_NONE
 TransformerLib.FIND_SCOPE_FLAG_SELECTED_ONLY = fdefs.FIND_SCOPE_FLAG_SELECTED_ONLY
 TransformerLib.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW = fdefs.FIND_SCOPE_FLAG_ACTIVE_NOTE_ROW
@@ -3520,9 +3165,9 @@ TransformerLib.NEWEVENT_POSITION_ATPOSITION = adefs.NEWEVENT_POSITION_ATPOSITION
 
 TransformerLib.setUpdateItemBoundsOnEdit = function(v) mu.CORRECT_EXTENTS = v and true or false end
 
-TransformerLib.makeDefaultMetricGrid = makeDefaultMetricGrid
-TransformerLib.makeDefaultEveryN = makeDefaultEveryN
-TransformerLib.makeDefaultNewMIDIEvent = makeDefaultNewMIDIEvent
+TransformerLib.makeDefaultMetricGrid = mgdefs.makeDefaultMetricGrid
+TransformerLib.makeDefaultEveryN = evndefs.makeDefaultEveryN
+TransformerLib.makeDefaultNewMIDIEvent = nmedefs.makeDefaultNewMIDIEvent
 TransformerLib.makeParam3 = function(row)
   local _, _, _, target, operation = actionTabsFromTarget(row)
   if target.notation == '$position' and operation.notation == ':scaleoffset' then
@@ -3531,14 +3176,14 @@ TransformerLib.makeParam3 = function(row)
     p3.makeParam3Line(row)
   end
 end
-TransformerLib.makeDefaultEventSelector = makeDefaultEventSelector
+TransformerLib.makeDefaultEventSelector = evseldefs.makeDefaultEventSelector
 
 TransformerLib.startup = startup
 TransformerLib.mu = mu
 TransformerLib.handlePercentString = handlePercentString
 
-TransformerLib.getMetricGridModifiers = getMetricGridModifiers
-TransformerLib.setMetricGridModifiers = setMetricGridModifiers
+TransformerLib.getMetricGridModifiers = mgdefs.getMetricGridModifiers
+TransformerLib.setMetricGridModifiers = mgdefs.setMetricGridModifiers
 
 TransformerLib.typeEntriesForEventSelector = fdefs.typeEntriesForEventSelector
 TransformerLib.setPresetNotesBuffer = setPresetNotesBuffer

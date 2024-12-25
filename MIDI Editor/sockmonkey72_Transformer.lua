@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.6
+-- @version 1.0.11-alpha.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - more refactoring (runtime context)
+--   - more refactoring, also fixing isNearEvent()
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.6'
+local versionStr = '1.0.11-alpha.7'
 
 local r = reaper
 

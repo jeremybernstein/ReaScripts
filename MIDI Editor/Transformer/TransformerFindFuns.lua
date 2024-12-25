@@ -221,7 +221,7 @@ end
 local function isNearEvent(event, take, PPQ, evSelParams, param2)
   local scale = tonumber(evSelParams.scaleStr)
   local gridUnit = Shared.getGridUnitFromSubdiv(param2, PPQ)
-  local PPQPercent = gridUnit + (gridUnit * (scale / 100))
+  local PPQPercent = gridUnit * (scale / 100)
   local minRange = event.ppqpos - PPQPercent
   local maxRange = event.ppqpos + PPQPercent
 
@@ -300,29 +300,29 @@ local function onMetricGrid(take, PPQ, ppqpos, mgParams)
 
   -- handle cycle lengths > measure
   if mgParams.wantsBarRestart then
-    if not SOM then SOM = som end
-    if som - SOM > cycleLength then
-      SOM = som
-      CACHED_METRIC = nil
-      CACHED_WRAPPED = nil
+    if not Shared.cachedSOM then Shared.cachedSOM = som end
+    if som - Shared.cachedSOM > cycleLength then
+      Shared.cachedSOM = som
+      Shared.cachedMetric = nil
+      Shared.cachedWrapped = nil
     end
-    ppqpos = ppqpos - SOM
+    ppqpos = ppqpos - Shared.cachedSOM
   end
 
   local wrapped = math.floor(ppqpos / cycleLength)
-  if wrapped ~= CACHED_WRAPPED then
-    CACHED_WRAPPED = wrapped
-    CACHED_METRIC = nil
+  if wrapped ~= Shared.cachedWrapped then
+    Shared.cachedWrapped = wrapped
+    Shared.cachedMetric = nil
   end
   local modPos = math.fmod(ppqpos, cycleLength)
 
-  -- CACHED_METRIC is used to avoid iterating from the beginning each time
+  -- Shared.cachedMetric is used to avoid iterating from the beginning each time
   -- although it assumes a single metric grid -- how to solve?
 
   local iter = 0
   while iter < 2 do
     local doRestart = false
-    for i = (CACHED_METRIC and iter == 0) and CACHED_METRIC or 1, gridLen do
+    for i = (Shared.cachedMetric and iter == 0) and Shared.cachedMetric or 1, gridLen do
       local c = gridStr:sub(i, i)
       local trueStartRange = (gridUnit * (i - 1))
       local startRange = trueStartRange - preSlop
@@ -335,7 +335,7 @@ local function onMetricGrid(take, PPQ, ppqpos, mgParams)
       end
 
       if mod2 >= startRange and mod2 <= endRange then
-        CACHED_METRIC = i
+        Shared.cachedMetric = i
         return c ~= '0' and true or false
       end
     end

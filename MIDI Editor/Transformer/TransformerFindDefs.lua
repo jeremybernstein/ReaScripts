@@ -1,7 +1,14 @@
------------------------------------------------------------------------------
------------------------------- FIND DEFS ------------------------------------
+--[[
+   * Author: sockmonkey72
+   * Licence: MIT
+   * Version: 1.00
+   * NoIndex: true
+--]]
 
 local FindDefs = {}
+
+-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 
 local tg = require 'TransformerGlobal'
 
@@ -117,7 +124,7 @@ local findLastEventConditionEntries = {
   { notation = ':chordpos', label = 'Position in Chord', text = 'SelectChordNote(event, {param1})', terms = 1, inteditor = true, literal = true, nooverride = true},
 }
 
-function FindConditionAddSelectRange(t, r)
+local function findConditionAddSelectRange(t, r)
   local tt = tg.tableCopy(t)
   tt.timeselect = r
   return tt
@@ -133,15 +140,15 @@ local SELECT_TIME_RANGE = 3
 local SELECT_TIME_INDIVIDUAL = 4
 
 local findPositionConditionEntries = {
-  FindConditionAddSelectRange(findConditionEqual, SELECT_TIME_INDIVIDUAL),
+  findConditionAddSelectRange(findConditionEqual, SELECT_TIME_INDIVIDUAL),
   { notation = ':eqslop', label = 'Equal (Slop)', text = 'TestEvent2(event, {tgt}, OP_EQ_SLOP, {param1}, {param2})', terms = 2, split = { { time = true }, { timedur = true } }, freeterm = true, timeselect = SELECT_TIME_RANGE },
-  FindConditionAddSelectRange(findConditionGreaterThan, SELECT_TIME_MINRANGE),
-  FindConditionAddSelectRange(findConditionGreaterThanEqual, SELECT_TIME_MINRANGE),
-  FindConditionAddSelectRange(findConditionLessThan, SELECT_TIME_MAXRANGE),
-  FindConditionAddSelectRange(findConditionLessThanEqual, SELECT_TIME_MAXRANGE),
-  FindConditionAddSelectRange(findConditionInRange, SELECT_TIME_RANGE),
-  FindConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
-  FindConditionAddSelectRange(findConditionSimilarSlopTime, SELECT_TIME_INDIVIDUAL),
+  findConditionAddSelectRange(findConditionGreaterThan, SELECT_TIME_MINRANGE),
+  findConditionAddSelectRange(findConditionGreaterThanEqual, SELECT_TIME_MINRANGE),
+  findConditionAddSelectRange(findConditionLessThan, SELECT_TIME_MAXRANGE),
+  findConditionAddSelectRange(findConditionLessThanEqual, SELECT_TIME_MAXRANGE),
+  findConditionAddSelectRange(findConditionInRange, SELECT_TIME_RANGE),
+  findConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
+  findConditionAddSelectRange(findConditionSimilarSlopTime, SELECT_TIME_INDIVIDUAL),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0', rangelabel = 'bitfield' }}, timeselect = SELECT_TIME_INDIVIDUAL },

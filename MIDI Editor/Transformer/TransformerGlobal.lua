@@ -1,6 +1,14 @@
+--[[
+   * Author: sockmonkey72
+   * Licence: MIT
+   * Version: 1.00
+   * NoIndex: true
+--]]
+
 local TransformerGlobal = {}
 
-Shared = Shared or {} -- Use an existing table or create a new one
+----------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
 
 local gdefs = require 'TransformerGeneralDefs'
 

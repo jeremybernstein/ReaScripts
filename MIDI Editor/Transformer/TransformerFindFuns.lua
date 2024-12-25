@@ -1,4 +1,14 @@
+--[[
+   * Author: sockmonkey72
+   * Licence: MIT
+   * Version: 1.00
+   * NoIndex: true
+--]]
+
 local FindFuns = {}
+
+----------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
 
 Shared = Shared or {} -- Use an existing table or create a new one
 
@@ -27,7 +37,7 @@ local function testEvent1(event, property, op, param1)
 end
 
 local function eventIsSimilar(event, property, val, param1, param2)
-  for _, e in ipairs(SelectedEvents()) do
+  for _, e in ipairs(Shared.selectedEvents()) do
     if e.chanmsg == event.chanmsg then -- a little hacky here
       local check = true
       if e.chanmsg == 0xB0 -- special case for real CC msgs, must match the CC#, as well
@@ -215,7 +225,7 @@ local function isNearEvent(event, take, PPQ, evSelParams, param2)
   local minRange = event.ppqpos - PPQPercent
   local maxRange = event.ppqpos + PPQPercent
 
-  for k, ev in ipairs(AllEvents()) do
+  for k, ev in ipairs(Shared.allEvents()) do
     local sameEvent = false
     local ppqMatch = false
     local typeMatch = false

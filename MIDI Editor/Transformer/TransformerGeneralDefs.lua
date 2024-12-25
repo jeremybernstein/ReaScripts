@@ -1,8 +1,14 @@
+--[[
+   * Author: sockmonkey72
+   * Licence: MIT
+   * Version: 1.00
+   * NoIndex: true
+--]]
+
 local GeneralDefs = {}
 
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
-
 
 local DEFAULT_TIMEFORMAT_STRING = '1.1.00'
 local DEFAULT_LENGTHFORMAT_STRING = '0.0.00'

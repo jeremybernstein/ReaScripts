@@ -73,12 +73,12 @@ local dirtyFind = false
 local wantsTab = {}
 
 local allEvents = {}
-function AllEvents()
+Shared.allEvents = function()
   return allEvents
 end
 
 local selectedEvents = {}
-function SelectedEvents()
+Shared.selectedEvents = function()
   return selectedEvents
 end
 

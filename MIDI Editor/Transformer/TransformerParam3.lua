@@ -5,7 +5,11 @@
    * NoIndex: true
 --]]
 
-local Extra = {}
+local Param3 = {}
+
+----------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
+
 Shared = Shared or {} -- Use an existing table or create a new one
 
 local mu = Shared.mu
@@ -223,10 +227,10 @@ end
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
 
-Extra.positionScaleOffsetParam3Tab = positionScaleOffsetParam3Tab
-Extra.makeParam3PositionScaleOffset = makeParam3PositionScaleOffset
-Extra.lineParam3Tab = lineParam3Tab
-Extra.makeParam3Line = makeParam3Line
-Extra.param3LineEntries = param3LineEntries
+Param3.positionScaleOffsetParam3Tab = positionScaleOffsetParam3Tab
+Param3.makeParam3PositionScaleOffset = makeParam3PositionScaleOffset
+Param3.lineParam3Tab = lineParam3Tab
+Param3.makeParam3Line = makeParam3Line
+Param3.param3LineEntries = param3LineEntries
 
-return Extra
+return Param3

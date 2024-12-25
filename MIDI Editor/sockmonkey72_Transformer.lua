@@ -1,5 +1,5 @@
 -- @description MIDI Transformer
--- @version 1.0.11-alpha.5
+-- @version 1.0.11-alpha.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.5'
+local versionStr = '1.0.11-alpha.6'
 
 local r = reaper
 
@@ -31,6 +31,7 @@ local tx = require 'TransformerLib'
 local mu = tx.mu
 local tg = require 'TransformerGlobal'
 local gdefs = require 'TransformerGeneralDefs'
+-- NOTE: do NOT use Shared here, it will work, but that's not what it's for
 
 local canStart = true
 
@@ -696,8 +697,8 @@ local function checkShortcuts()
 
   -- fallback to old style, selective passthrough and that's it
   local keyMods = ImGui.GetKeyMods(ctx)
-  local modKey = keyMods == ImGui.Mod_Super
-  local modShiftKey = keyMods == ImGui.Mod_Super + ImGui.Mod_Shift
+  local modKey = keyMods == ImGui.Mod_Ctrl
+  local modShiftKey = keyMods == ImGui.Mod_Ctrl + ImGui.Mod_Shift
   local noMod = keyMods == 0
 
   local active = r.MIDIEditor_GetActive()
@@ -757,7 +758,7 @@ local function handleKeys(handledEscape)
     end
   end
 
-  if not inTextInput and ImGui.GetKeyMods(ctx) == ImGui.Mod_Super then
+  if not inTextInput and ImGui.GetKeyMods(ctx) == ImGui.Mod_Ctrl then
     if ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) then
       handledKey = true
       if lastSelectedRowType == 0 then

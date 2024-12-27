@@ -70,7 +70,10 @@ local contexts = {
   MM_CTX_ITEMSTRETCHMARKER = 'Media item stretch marker (left drag)',
   MM_CTX_ITEMSTRETCHMARKER_DBLCLK = 'Media item stretch marker (double click)',
   MM_CTX_ITEMSTRETCHMARKERRATE = 'Media item stretch marker rate (left drag)',
-  MM_CTX_LINKEDLANE = 'Fixed lane when comping is enabled (left drag)',
+  MM_CTX_ITEMTAKEMARKER = 'Media item take marker (left drag)',
+  MM_CTX_ITEMTAKEMARKER_CLK = 'Media item take marker (left click)',
+  MM_CTX_ITEMTAKEMARKER_DBLCLK = 'Media item take marker (double click)',
+  MM_CTX_LINKEDLANE = 'Fixed lane comp area (left drag)',
   MM_CTX_LINKEDLANE_CLK = 'Fixed lane comp area (left click)',
   MM_CTX_LINKEDLANE_DBLCLK = 'Fixed lane comp area (double click)',
   MM_CTX_MARKER_REGIONEDGE = 'Project marker/region edge (left drag)',
@@ -106,7 +109,7 @@ local contexts = {
   MM_CTX_TEMPOMARKER = 'Project tempo/time signature marker (left drag)',
   MM_CTX_TRACK = 'Track (left drag)',
   MM_CTX_TRACK_CLK = 'Track (left click)',
-  MM_CTX_TRACK_DBLCLK = 'Track (double click)'
+  MM_CTX_TRACK_DBLCLK = 'Track (double click)',
 }
 
 -----------------------------------------------------------------------------

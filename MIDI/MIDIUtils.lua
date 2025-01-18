@@ -1,11 +1,15 @@
 -- @description MIDI Utils API
--- @version 0.1.29
+-- @version 0.2.00
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix correct extents for the case that the event list is unsorted
+--   - add MIDI_GetState, MIDI_RestoreState, MIDI_ForceNextTransaction and tableCopy exports
+--   - tableCopy makes a deep copy of a table (but doesn't permit table keys)
+--   - NOTE: MIDI_GetState returns a copy of the state table, MIDI_RestoreState makes a copy of the table passed in
+--   - new USE_XPCALL and COMMIT_CANSKIP options for special where additional performance is required
+--   - most of this stuff is for "internal use", will be documented later
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -21,6 +25,8 @@ local r = reaper
 local MIDIUtils = {}
 
 MIDIUtils.ENFORCE_ARGS = true -- turn off for efficiency
+MIDIUtils.USE_XPCALL = true -- turn off for efficiency
+MIDIUtils.COMMIT_CANSKIP = false -- turn on for efficiency
 MIDIUtils.CORRECT_OVERLAPS = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_SELECTION = false
 MIDIUtils.CORRECT_OVERLAPS_FAVOR_NOTEON = false
@@ -36,6 +42,11 @@ local META_TYPE = 4
 local BEZIER_TYPE = 5
 local TAIL_TYPE = 6
 local OTHER_TYPE = 7
+
+MIDIUtils.NOTE_TYPE = NOTE_TYPE
+MIDIUtils.NOTEOFF_TYPE = NOTE_TYPE
+MIDIUtils.CC_TYPE = CC_TYPE
+MIDIUtils.SYSEX_TYPE = CC_TYPE
 
 local MIDIEvents = {}
 local bezTable = {}
@@ -71,7 +82,11 @@ MIDIUtils.SetOnError = function(fn)
 end
 
 MIDIUtils.CheckDependencies = function(scriptName)
-  return select(2, xpcall(CheckDependencies, OnError, scriptName))
+  if not MIDIUtils.USE_XPCALL then
+    return CheckDependencies(scriptName)
+  else
+    return select(2, xpcall(CheckDependencies, OnError, scriptName))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -143,7 +158,11 @@ end
 -----------------------------------------------------------------------------
 
 MIDIUtils.post = function(...)
-  return select(2, xpcall(post, OnError, ...))
+  if not MIDIUtils.USE_XPCALL then
+    return post(...)
+  else
+    return select(2, xpcall(post, OnError, ...))
+  end
 end
 
 MIDIUtils.p = MIDIUtils.post
@@ -207,7 +226,7 @@ function EnforceArgs(...)
 end
 
 function MakeTypedArg(val, type, optional, reapertype)
-  if not MIDIUtils.ENFORCE_ARGS then return {} end
+  if not MIDIUtils.ENFORCE_ARGS then return nil end
   local typedArg = {
     type = type,
     val = val,
@@ -548,6 +567,74 @@ end
 -----------------------------------------------------------------------------
 ----------------------------------- PARSE -----------------------------------
 
+local function tableCopy(obj, seen)
+  if type(obj) ~= 'table' then return obj end
+  if seen and seen[obj] then return seen[obj] end
+  local s = seen or {}
+  local res = setmetatable({}, getmetatable(obj))
+  s[obj] = res
+  -- for k, v in next, obj, nil do res[flatTableCopy(k, s)] = flatTableCopy(v, s) end
+  for k, v in pairs(obj) do res[tableCopy(k, s)] = tableCopy(v, s) end
+  return res
+end
+
+local function tableCopySimpleKeys(obj, seen)
+  if type(obj) ~= 'table' then return obj end
+  if seen and seen[obj] then return seen[obj] end
+  local s = seen or {}
+  local res = setmetatable({}, getmetatable(obj))
+  s[obj] = res
+  for k, v in pairs(obj) do res[k] = tableCopySimpleKeys(v, s) end
+  return res
+end
+
+local function MIDI_GetState()
+  return {
+    MIDIEvents = tableCopySimpleKeys(MIDIEvents),
+    bezTable = tableCopySimpleKeys(bezTable),
+    tailEvent = tableCopySimpleKeys(tailEvent),
+    enumNoteIdx = enumNoteIdx,
+    enumCCIdx = enumCCIdx,
+    enumSyxIdx = enumSyxIdx,
+    enumAllIdx = enumAllIdx,
+    enumAllLastCt = enumAllLastCt,
+    activeTake = activeTake,
+    openTransaction = openTransaction,
+  }
+end
+
+local function MIDI_RestoreState(state)
+  MIDIEvents = tableCopySimpleKeys(state.MIDIEvents)
+  bezTable = tableCopySimpleKeys(state.bezTable)
+  tailEvent = tableCopySimpleKeys(state.tailEvent)
+
+  enumNoteIdx = state.enumNoteIdx
+  enumCCIdx = state.enumCCIdx
+  enumSyxIdx = state.enumSyxIdx
+  enumAllIdx = state.enumAllIdx
+  enumAllLastCt = state.enumAllLastCt
+  activeTake = state.activeTake
+  openTransaction = state.openTransaction
+
+  -- rebuild these from the MIDIEvents table
+  noteEvents = {}
+  ccEvents = {}
+  syxEvents = {}
+
+  for _, e in ipairs(MIDIEvents) do
+    if e:is_a(NoteOnEvent) then
+      noteEvents[#noteEvents + 1] = e
+      -- if e.idx + 1 ~= #noteEvents then post('noteEvents', #noteEvents, 'assertion') end
+    elseif e:is_a(CCEvent) then
+      ccEvents[#ccEvents + 1] = e
+      -- if e.idx + 1 ~= #ccEvents then post('ccEvents', #ccEvents, 'assertion') end
+    elseif e:is_a(TextSysexEvent) then
+      syxEvents[#syxEvents + 1] = e
+      -- if e.idx + 1 ~= #syxEvents then post('syxEvents', #syxEvents, 'assertion') end
+    end
+  end
+end
+
 local function Reset()
   MIDIEvents = {}
   bezTable = {}
@@ -728,21 +815,33 @@ MIDIUtils.MIDI_InitializeTake = function(take, enforceargs)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(enforceargs, 'boolean', true)
   )
-  return select(2, xpcall(MIDI_InitializeTake, OnError, take))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_InitializeTake(take)
+  else
+    return select(2, xpcall(MIDI_InitializeTake, OnError, take))
+  end
 end
 
 MIDIUtils.MIDI_CountEvts = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
-  return select(2, xpcall(MIDI_CountEvts, OnError, take))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_CountEvts(take)
+  else
+    return select(2, xpcall(MIDI_CountEvts, OnError, take))
+  end
 end
 
 MIDIUtils.MIDI_CountAllEvts = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
-  return select(2, xpcall(MIDI_CountAllEvts, OnError, take))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_CountAllEvts(take)
+  else
+    return select(2, xpcall(MIDI_CountAllEvts, OnError, take))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -810,11 +909,17 @@ MIDIUtils.MIDI_CorrectOverlaps = function (take, favorSelection)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(favorSelection, 'boolean', true)
   )
-  return select(2, xpcall(CorrectOverlaps, OnError, take, favorSelection or false))
+  if not MIDIUtils.USE_XPCALL then
+    return CorrectOverlaps(take, favorSelection or false)
+  else
+    return select(2, xpcall(CorrectOverlaps, OnError, take, favorSelection or false))
+  end
 end
 
 -----------------------------------------------------------------------------
 ------------------------------- TRANSACTIONS --------------------------------
+
+local lastMIDIString
 
 local function MIDI_OpenWriteTransaction(take)
   EnsureTake(take)
@@ -927,7 +1032,6 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     end
   end
 
-  r.MIDI_DisableSort(take)
   if MIDIUtils.ALLNOTESOFF_SNAPS_TO_ITEM_END then
     local itemEndPPQPos = GetItemEndPPQPos(take) -- in case it changed
     -- local ASOPPQPos = itemEndPPQPos - tailEvent.allnotesoff_delta
@@ -936,14 +1040,29 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     tailEvent.offset = math.floor(tailEvent.ppqpos - lastPPQPos)
   end
   local TailMsg = string.pack('i4Bs4', tailEvent.offset, tailEvent.flags, tailEvent.msg)
-  r.MIDI_SetAllEvts(take, newMIDIString .. TailMsg)
+
+  newMIDIString = newMIDIString .. TailMsg
+
+  if MIDIUtils.COMMIT_CANSKIP
+    and newMIDIString == lastMIDIString
+  then
+    -- don't resend the same MIDI if it's unchanged
+    openTransaction = nil
+    return true, false
+  end
+
+  lastMIDIString = newMIDIString
+
+  r.MIDI_DisableSort(take)
+  -- local TailMsg = string.pack('i4Bs4', tailEvent.offset, tailEvent.flags, tailEvent.msg)
+  r.MIDI_SetAllEvts(take, newMIDIString)
   r.MIDI_Sort(take)
   openTransaction = nil
 
   if refresh then MIDIUtils.MIDI_InitializeTake(take) end -- update the tables based on the new data
   if dirty then r.MarkTrackItemsDirty(r.GetMediaItemTake_Track(take), r.GetMediaItemTake_Item(take)) end
 
-  return true
+  return true, true
 end
 
 -----------------------------------------------------------------------------
@@ -952,7 +1071,11 @@ MIDIUtils.MIDI_OpenWriteTransaction = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
-  return select(2, xpcall(MIDI_OpenWriteTransaction, OnError, take))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_OpenWriteTransaction(take)
+  else
+    return select(2, xpcall(MIDI_OpenWriteTransaction, OnError, take))
+  end
 end
 
 MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh, dirty)
@@ -961,7 +1084,11 @@ MIDIUtils.MIDI_CommitWriteTransaction = function(take, refresh, dirty)
     MakeTypedArg(refresh, 'boolean', true),
     MakeTypedArg(dirty, 'boolean', true)
   )
-  return select(2, xpcall(MIDI_CommitWriteTransaction, OnError, take, refresh, dirty))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_CommitWriteTransaction(take, refresh, dirty)
+  else
+    return select(2, xpcall(MIDI_CommitWriteTransaction, OnError, take, refresh, dirty))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1078,7 +1205,11 @@ MIDIUtils.MIDI_GetNote = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_GetNote, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetNote(take, idx)
+  else
+    return select(2, xpcall(MIDI_GetNote, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
@@ -1094,7 +1225,11 @@ MIDIUtils.MIDI_SetNote = function(take, idx, selected, muted, ppqpos, endppqpos,
     MakeTypedArg(vel, 'number', true),
     MakeTypedArg(relvel, 'number', true)
   )
-  return select(2, xpcall(MIDI_SetNote, OnError, take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_SetNote(take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
+  else
+    return select(2, xpcall(MIDI_SetNote, OnError, take, idx, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel))
+  end
 end
 
 MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel)
@@ -1109,7 +1244,7 @@ MIDIUtils.MIDI_InsertNote = function(take, selected, muted, ppqpos, endppqpos, c
     MakeTypedArg(vel, 'number'),
     MakeTypedArg(relvel, 'number', true)
   )
-  return select(2, xpcall(MIDI_InsertNote, OnError, take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel))
+  return MIDI_InsertNote(take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel) -- select(2, xpcall(MIDI_InsertNote, OnError, take, selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel))
 end
 
 MIDIUtils.MIDI_DeleteNote = function(take, idx)
@@ -1117,7 +1252,11 @@ MIDIUtils.MIDI_DeleteNote = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_DeleteNote, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_DeleteNote(take, idx)
+  else
+    return select(2, xpcall(MIDI_DeleteNote, OnError, take, idx))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1313,7 +1452,11 @@ MIDIUtils.MIDI_GetCC = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_GetCC, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetCC(take, idx)
+  else
+    return select(2, xpcall(MIDI_GetCC, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
@@ -1328,7 +1471,11 @@ MIDIUtils.MIDI_SetCC = function(take, idx, selected, muted, ppqpos, chanmsg, cha
     MakeTypedArg(msg2, 'number', true),
     MakeTypedArg(msg3, 'number', true)
   )
-  return select(2, xpcall(MIDI_SetCC, OnError, take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
+  else
+    return select(2, xpcall(MIDI_SetCC, OnError, take, idx, selected, muted, ppqpos, chanmsg, chan, msg2, msg3))
+  end
 end
 
 MIDIUtils.MIDI_GetCCShape = function(take, idx)
@@ -1336,7 +1483,11 @@ MIDIUtils.MIDI_GetCCShape = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_GetCCShape, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetCCShape(take, idx)
+  else
+    return select(2, xpcall(MIDI_GetCCShape, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
@@ -1346,7 +1497,11 @@ MIDIUtils.MIDI_SetCCShape = function(take, idx, shape, beztension)
     MakeTypedArg(shape, 'number'),
     MakeTypedArg(beztension, 'number', true)
   )
-  return select(2, xpcall(MIDI_SetCCShape, OnError, take, idx, shape, beztension))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_SetCCShape(take, idx, shape, beztension)
+  else
+    return select(2, xpcall(MIDI_SetCCShape, OnError, take, idx, shape, beztension))
+  end
 end
 
 MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
@@ -1360,7 +1515,11 @@ MIDIUtils.MIDI_InsertCC = function(take, selected, muted, ppqpos, chanmsg, chan,
     MakeTypedArg(msg2, 'number'),
     MakeTypedArg(msg3, 'number')
   )
-  return select(2, xpcall(MIDI_InsertCC, OnError, take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3)
+  else
+    return select(2, xpcall(MIDI_InsertCC, OnError, take, selected, muted, ppqpos, chanmsg, chan, msg2, msg3))
+  end
 end
 
 MIDIUtils.MIDI_DeleteCC = function(take, idx)
@@ -1368,7 +1527,11 @@ MIDIUtils.MIDI_DeleteCC = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_DeleteCC, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_DeleteCC(take, idx)
+  else
+    return select(2, xpcall(MIDI_DeleteCC, OnError, take, idx))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1449,7 +1612,11 @@ MIDIUtils.MIDI_GetTextSysexEvt = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_GetTextSysexEvt, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetTextSysexEvt(take, idx)
+  else
+    return select(2, xpcall(MIDI_GetTextSysexEvt, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, type, msg)
@@ -1462,7 +1629,11 @@ MIDIUtils.MIDI_SetTextSysexEvt = function(take, idx, selected, muted, ppqpos, ty
     MakeTypedArg(type, 'number', true),
     MakeTypedArg(msg, 'string', true)
   )
-  return select(2, xpcall(MIDI_SetTextSysexEvt, OnError, take, idx, selected, muted, ppqpos, type, msg))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_SetTextSysexEvt(take, idx, selected, muted, ppqpos, type, msg)
+  else
+    return select(2, xpcall(MIDI_SetTextSysexEvt, OnError, take, idx, selected, muted, ppqpos, type, msg))
+  end
 end
 
 MIDIUtils.MIDI_InsertTextSysexEvt = function(take, selected, muted, ppqpos, type, bytestr)
@@ -1474,7 +1645,11 @@ MIDIUtils.MIDI_InsertTextSysexEvt = function(take, selected, muted, ppqpos, type
     MakeTypedArg(type, 'number'),
     MakeTypedArg(bytestr, 'string')
   )
-  return select(2, xpcall(MIDI_InsertTextSysexEvt, OnError, take, selected, muted, ppqpos, type, bytestr))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_InsertTextSysexEvt(take, selected, muted, ppqpos, type, bytestr)
+  else
+    return select(2, xpcall(MIDI_InsertTextSysexEvt, OnError, take, selected, muted, ppqpos, type, bytestr))
+  end
 end
 
 MIDIUtils.MIDI_DeleteTextSysexEvt = function(take, idx)
@@ -1482,7 +1657,11 @@ MIDIUtils.MIDI_DeleteTextSysexEvt = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_DeleteTextSysexEvt, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_DeleteTextSysexEvt(take, idx)
+  else
+    return select(2, xpcall(MIDI_DeleteTextSysexEvt, OnError, take, idx))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1579,7 +1758,11 @@ MIDIUtils.MIDI_GetEvt = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_GetEvt, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetEvt(take, idx)
+  else
+    return select(2, xpcall(MIDI_GetEvt, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
@@ -1591,7 +1774,11 @@ MIDIUtils.MIDI_SetEvt = function(take, idx, selected, muted, ppqpos, msg)
     MakeTypedArg(ppqpos, 'number', true),
     MakeTypedArg(msg, 'string', true)
   )
-  return select(2, xpcall(MIDI_SetEvt, OnError, take, idx, selected, muted, ppqpos, msg))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_SetEvt(take, idx, selected, muted, ppqpos, msg)
+  else
+    return select(2, xpcall(MIDI_SetEvt, OnError, take, idx, selected, muted, ppqpos, msg))
+  end
 end
 
 MIDIUtils.MIDI_InsertEvt = function(take, selected, muted, ppqpos, bytestr)
@@ -1602,7 +1789,11 @@ MIDIUtils.MIDI_InsertEvt = function(take, selected, muted, ppqpos, bytestr)
     MakeTypedArg(ppqpos, 'number'),
     MakeTypedArg(bytestr, 'str')
   )
-  return select(2, xpcall(MIDI_InsertEvt, OnError, take, selected, muted, ppqpos, bytestr))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_InsertEvt(take, selected, muted, ppqpos, bytestr)
+  else
+    return select(2, xpcall(MIDI_InsertEvt, OnError, take, selected, muted, ppqpos, bytestr))
+  end
 end
 
 MIDIUtils.MIDI_DeleteEvt = function(take, idx)
@@ -1610,7 +1801,11 @@ MIDIUtils.MIDI_DeleteEvt = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_DeleteEvt, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_DeleteEvt(take, idx)
+  else
+    return select(2, xpcall(MIDI_DeleteEvt, OnError, take, idx))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1726,7 +1921,11 @@ MIDIUtils.MIDI_EnumNotes = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumNotes, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumNotes(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumNotes, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
@@ -1734,7 +1933,11 @@ MIDIUtils.MIDI_EnumSelNotes = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumSelNotes, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumSelNotes(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumSelNotes, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumCC = function(take, idx)
@@ -1742,7 +1945,11 @@ MIDIUtils.MIDI_EnumCC = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumCC, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumCC(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumCC, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumSelCC = function(take, idx)
@@ -1750,7 +1957,11 @@ MIDIUtils.MIDI_EnumSelCC = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumSelCC, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumSelCC(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumSelCC, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumTextSysexEvts = function(take, idx)
@@ -1758,7 +1969,11 @@ MIDIUtils.MIDI_EnumTextSysexEvts = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumTextSysexEvts, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumTextSysexEvts(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumTextSysexEvts, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumSelTextSysexEvts = function(take, idx)
@@ -1766,7 +1981,11 @@ MIDIUtils.MIDI_EnumSelTextSysexEvts = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumSelTextSysexEvts, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumSelTextSysexEvts(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumSelTextSysexEvts, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumEvts = function(take, idx)
@@ -1774,7 +1993,11 @@ MIDIUtils.MIDI_EnumEvts = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumEvts, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumEvts(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumEvts, OnError, take, idx))
+  end
 end
 
 MIDIUtils.MIDI_EnumSelEvts = function(take, idx)
@@ -1782,7 +2005,11 @@ MIDIUtils.MIDI_EnumSelEvts = function(take, idx)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(idx, 'number')
   )
-  return select(2, xpcall(MIDI_EnumSelEvts, OnError, take, idx))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_EnumSelEvts(take, idx)
+  else
+    return select(2, xpcall(MIDI_EnumSelEvts, OnError, take, idx))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -1953,7 +2180,7 @@ local function CalculateCCValueAtTime(val1, val2, pos, shape, beztension)
   return val1
 end
 
-local function MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
+local function MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time, isppqtime)
   EnsureTake(take)
   local rv = false
   local val = 0
@@ -1968,7 +2195,7 @@ local function MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time)
   local msg3out = 0
 
   if chanmsg >= 0xA0 and chanmsg < 0xF0 then
-    ppqpos = r.MIDI_GetPPQPosFromProjTime(take, time)
+    ppqpos = isppqtime and time or r.MIDI_GetPPQPosFromProjTime(take, time)
     local event_start
     local event_end
     if b3 and not msg2 then return false, 0 end
@@ -2026,14 +2253,19 @@ end
 
 -----------------------------------------------------------------------------
 
-MIDIUtils.MIDI_GetCCValueAtTime = function(take, chanmsg, chan, msg2, time)
+MIDIUtils.MIDI_GetCCValueAtTime = function(take, chanmsg, chan, msg2, time, isppqtime)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(chanmsg, 'number'),
     MakeTypedArg(chan, 'number'),
-    MakeTypedArg(time, 'number')
+    MakeTypedArg(time, 'number'),
+    MakeTypedArg(isppqtime, 'boolean', true)
   )
-  return select(2, xpcall(MIDI_GetCCValueAtTime, OnError, take, chanmsg, chan, msg2, time))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetCCValueAtTime(take, chanmsg, chan, msg2, time, isppqtime)
+  else
+    return select(2, xpcall(MIDI_GetCCValueAtTime, OnError, take, chanmsg, chan, msg2, time, isppqtime))
+  end
 end
 
 -----------------------------------------------------------------------------
@@ -2129,12 +2361,38 @@ local function MIDI_SelectAll(take, wantsSelect)
   end
 end
 
+local function MIDI_GetTimeOffset(correctMeasures)
+  if true then return 0 end
+  local offset = r.GetProjectTimeOffset(0, false)
+  if correctMeasures then
+    local rv, measoff = r.get_config_var_string('projmeasoffs')
+    if rv then
+      local mo = tonumber(measoff)
+      if mo then
+        local qn1, qn2
+        _, qn1 = r.TimeMap_GetMeasureInfo(0, mo)
+        _, qn2 = r.TimeMap_GetMeasureInfo(0, -1) -- 0 in the prefs interface is -1, go figure
+        if qn1 and qn2 then
+          local time1 = r.TimeMap2_QNToTime(0, qn1)
+          local time2 = r.TimeMap2_QNToTime(0, qn2)
+          offset = offset + (time2 - time1)
+        end
+      end
+    end
+  end
+  return offset
+end
+
 MIDIUtils.MIDI_NoteNumberToNoteName = function(notenum, names)
   EnforceArgs(
     MakeTypedArg(notenum, 'number'),
     MakeTypedArg(names, 'table', true)
   )
-  return select(2, xpcall(MIDI_NoteNumberToNoteName, OnError, notenum, names))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_NoteNumberToNoteName(notenum, names)
+  else
+    return select(2, xpcall(MIDI_NoteNumberToNoteName, OnError, notenum, names))
+  end
 end
 
 MIDIUtils.MIDI_NoteNameToNoteNumber = function(notename, names)
@@ -2142,21 +2400,33 @@ MIDIUtils.MIDI_NoteNameToNoteNumber = function(notename, names)
     MakeTypedArg(notename, 'string'),
     MakeTypedArg(names, 'table', true)
   )
-  return select(2, xpcall(MIDI_NoteNameToNoteNumber, OnError, notename, names))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_NoteNameToNoteNumber(notename, names)
+  else
+    return select(2, xpcall(MIDI_NoteNameToNoteNumber, OnError, notename, names))
+  end
 end
 
 MIDIUtils.MIDI_DebugInfo = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
-  return select(2, xpcall(MIDI_DebugInfo, OnError, take))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_DebugInfo(take)
+  else
+    return select(2, xpcall(MIDI_DebugInfo, OnError, take))
+  end
 end
 
 MIDIUtils.MIDI_GetPPQ = function(take)
   EnforceArgs(
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*')
   )
-  return select(2, xpcall(MIDI_GetPPQ, OnError, take))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_GetPPQ(take)
+  else
+    return select(2, xpcall(MIDI_GetPPQ, OnError, take))
+  end
 end
 
 MIDIUtils.MIDI_SelectAll = function(take, wantsSelect)
@@ -2164,10 +2434,20 @@ MIDIUtils.MIDI_SelectAll = function(take, wantsSelect)
     MakeTypedArg(take, 'userdata', false, 'MediaItem_Take*'),
     MakeTypedArg(wantsSelect, 'boolean')
   )
-  return select(2, xpcall(MIDI_SelectAll, OnError, take, wantsSelect))
+  if not MIDIUtils.USE_XPCALL then
+    return MIDI_SelectAll(take, wantsSelect)
+  else
+    return select(2, xpcall(MIDI_SelectAll, OnError, take, wantsSelect))
+  end
 end
 
 MIDIUtils.tprint = tprint
+MIDIUtils.tableCopy = tableCopySimpleKeys
+
+MIDIUtils.MIDI_GetTimeOffset = MIDI_GetTimeOffset
+MIDIUtils.MIDI_GetState = MIDI_GetState
+MIDIUtils.MIDI_RestoreState = MIDI_RestoreState
+MIDIUtils.MIDI_ForceNextTransaction = function() lastMIDIString = nil end -- TODO: improve, what
 
 -----------------------------------------------------------------------------
 ----------------------------------- EXPORT ----------------------------------

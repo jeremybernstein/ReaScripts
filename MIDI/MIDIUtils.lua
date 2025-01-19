@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.03
+-- @version 0.2.04
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - updated documentation, now Markdown (Readme.md)
+--   - updated documentation, now Markdown (Readme.md) and PDF (Readme.pdf)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*

@@ -1,5 +1,5 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.6
+-- @version 0.1.0-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
@@ -786,7 +786,7 @@ local function processNotes(activeTake, area, operation)
           newppqpos = (rightmostTick - ((ppqpos >= leftmostTick and ppqpos or leftmostTick) - leftmostTick)) - (endppqpos - ppqpos) + delta
           newendppqpos = newppqpos + (endppqpos - ppqpos)
         end
-      elseif operation == OP_RETROGRADE_PITCHES then
+      elseif operation == OP_RETROGRADE_VALS then
         changed = true
         local retroOrig = true
 

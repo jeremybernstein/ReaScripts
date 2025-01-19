@@ -1,10 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.1
+-- @version 0.1.0-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - initial public beta
+--   - fix pitch bend value stretch
+--   - fix various behaviors in ME timebase mode 'Project Time'
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -137,6 +138,7 @@ lice.recalcConstants(true)
 ------------------------------------------------
 
 local function pointIsInRect(p, rect, slop)
+  if not p or not rect then return false end
   if not slop then slop = lice.EDGE_SLOP end
   return  p.x >= rect.x1 - slop and p.x <= rect.x2 + slop
       and p.y >= rect.y1 - slop and p.y <= rect.y2 + slop
@@ -239,10 +241,14 @@ local function quantizeTimeValueTimeExtent(x1, x2)
   return x1, x2
 end
 
+local function getTimeOffset()
+  return 0 -- mu.MIDI_GetTimeOffset()
+end
+
 local function updateTimeValueLeft(area)
   if meState.timeBase == 'time' then
     local leftmostTime = meState.leftmostTime + ((area.logicalRect.x1 - glob.windowRect.x1) / meState.pixelsPerSecond)
-    return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, leftmostTime - mu.MIDI_GetTimeOffset()), leftmostTime
+    return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, leftmostTime - getTimeOffset()), leftmostTime
   else
     return meState.leftmostTick + math.floor(((area.logicalRect.x1 - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5)
   end
@@ -252,7 +258,7 @@ local function updateTimeValueRight(area, leftmost)
   if meState.timeBase == 'time' then
     leftmost = leftmost or area.timeValue.time.min
     local rightmostTime = equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + (area.logicalRect:width() / meState.pixelsPerSecond))
-    return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, rightmostTime - mu.MIDI_GetTimeOffset()), rightmostTime
+    return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, rightmostTime - getTimeOffset()), rightmostTime
   else
     leftmost = leftmost or area.timeValue.ticks.min
     return equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + math.floor((area.logicalRect:width() / meState.pixelsPerTick) + 0.5))
@@ -387,6 +393,7 @@ end
 
 local function updateTimeValueTime(area)
   if meState.timeBase == 'time' then
+    if not area.timeValue.time then area.timeValue.time = Extent.new() end
     area.timeValue.time.min = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, area.timeValue.ticks.min)
     area.timeValue.time.max = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, area.timeValue.ticks.max)
   end
@@ -406,14 +413,11 @@ local function updateAreaFromTimeValue(area, noCheck)
   if area.timeValue then
     local x1, y1, x2, y2
     if meState.timeBase == 'time' then
-      if area.timeValue.time then
-        x1 = math.floor((glob.windowRect.x1 + ((area.timeValue.time.min - meState.leftmostTime) * meState.pixelsPerSecond)) + 0.5)
-        x2 = math.floor((glob.windowRect.x1 + ((area.timeValue.time.max - meState.leftmostTime) * meState.pixelsPerSecond)) + 0.5)
-      else
-        area.logicalRect = nil
-        area.viewRect = nil
-        return
+      if not area.timeValue.time then
+        updateTimeValueTime(area)
       end
+      x1 = math.floor((glob.windowRect.x1 + ((area.timeValue.time.min - meState.leftmostTime) * meState.pixelsPerSecond)) + 0.5)
+      x2 = math.floor((glob.windowRect.x1 + ((area.timeValue.time.max - meState.leftmostTime) * meState.pixelsPerSecond)) + 0.5)
     else
       x1 = math.floor((glob.windowRect.x1 + ((area.timeValue.ticks.min - meState.leftmostTick) * meState.pixelsPerTick)) + 0.5)
       x2 = math.floor((glob.windowRect.x1 + ((area.timeValue.ticks.max - meState.leftmostTick) * meState.pixelsPerTick)) + 0.5)
@@ -1133,8 +1137,9 @@ local function processCCs(activeTake, area, operation)
               newval = topValue - ((topValue - val) * vratio)
             end
             if newval then
-              newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
-              newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+              newval = clipInt(newval, 0, meLanes[area.ccLane].range)
+              newmsg2 = onebyte and newval or pitchbend and newval & 0x7F or msg2
+              newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or newval
             end
           elseif movingArea then
             newppqpos = ppqpos + deltaTicks
@@ -2102,13 +2107,13 @@ local function quantizeToGrid(mx)
   local activeTake = glob.liceData.editorTake
 
   local itemStartTime = r.GetMediaItemInfo_Value(glob.liceData.editorItem, 'D_POSITION')
-  local itemStartTick = r.MIDI_GetPPQPosFromProjTime(activeTake, itemStartTime - mu.MIDI_GetTimeOffset())
+  local itemStartTick = r.MIDI_GetPPQPosFromProjTime(activeTake, itemStartTime - getTimeOffset())
 
   local currentTick
 
   if meState.timeBase == 'time' then
     local currentTime = meState.leftmostTime + ((mx - glob.windowRect.x1) / meState.pixelsPerSecond)
-    currentTick = r.MIDI_GetPPQPosFromProjTime(activeTake, currentTime - mu.MIDI_GetTimeOffset())
+    currentTick = r.MIDI_GetPPQPosFromProjTime(activeTake, currentTime - getTimeOffset())
   else
     currentTick = meState.leftmostTick + math.floor(((mx - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5)
   end
@@ -2952,8 +2957,14 @@ local function processMouse()
 
                 -- prevent motion past item start
                 local itemStartTime = r.GetMediaItemInfo_Value(glob.liceData.editorItem, 'D_POSITION')
-                local itemStartTick = r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, itemStartTime - mu.MIDI_GetTimeOffset())
-                local itemStartX = glob.windowRect.x1 + ((itemStartTick - glob.meState.leftmostTick) * meState.pixelsPerTick)
+                local itemStartTick = r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, itemStartTime)
+                local itemStartX
+
+                if meState.timeBase == 'time' then
+                  itemStartX = glob.windowRect.x1 + ((itemStartTime - glob.meState.leftmostTime) * meState.pixelsPerSecond)
+                else
+                  itemStartX = glob.windowRect.x1 + ((itemStartTick - glob.meState.leftmostTick) * meState.pixelsPerTick)
+                end
 
                 for i, testArea in ipairs(areas) do
                   if (testArea.ccLane == area.ccLane or (not testArea.ccLane and not area.ccLane)) then

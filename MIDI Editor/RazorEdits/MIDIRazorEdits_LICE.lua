@@ -119,6 +119,7 @@ local vKeys = {
   VK_D 	          = 0x44,   --  D
   VK_F 	          = 0x46,   --  F
   VK_P 	          = 0x50,   --  P
+  VK_R 	          = 0x52,   --  R
   VK_S 	          = 0x53,   --  S
   VK_U 	          = 0x55,   --  U
   VK_V 	          = 0x56,   --  V

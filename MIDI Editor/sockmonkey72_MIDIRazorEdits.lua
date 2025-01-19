@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.5
+-- @version 0.1.0-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix rare case of area bounds changing during move
+--   - add retrograde, retrograde values actions (R, ctrl/super-Rrrrespectively)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -97,9 +97,11 @@ local resizing = RS_UNCLICKED
 local OP_DELETE = 1
 local OP_DUPLICATE = 2
 local OP_INVERT = 3
-local OP_COPY = 4
-local OP_SELECT = 5
-local OP_UNSELECT = 6
+local OP_RETROGRADE = 4
+local OP_RETROGRADE_VALS = 5
+local OP_COPY = 6
+local OP_SELECT = 7
+local OP_UNSELECT = 8
 
 local OP_STRETCH = 20 -- behaves a little differently
 
@@ -727,7 +729,7 @@ local function processNotes(activeTake, area, operation)
   end
 
   if not skipiter then
-  for _, event in ipairs(sourceEvents) do
+  for sidx, event in ipairs(sourceEvents) do
     local selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel = event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel
     local newppqpos, newendppqpos, newpitch
 
@@ -758,6 +760,52 @@ local function processNotes(activeTake, area, operation)
           newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
           newendppqpos = (endppqpos <= rightmostTick or currentMods:alt()) and endppqpos or rightmostTick + 1
           newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
+        end
+      elseif operation == OP_RETROGRADE then
+        changed = true
+        local retroOrig = true
+        local firstppq = sourceEvents[1].ppqpos
+        local lastendppq = sourceEvents[#sourceEvents].endppqpos
+
+        if ppqpos < leftmostTick then
+          if not currentMods:alt() then
+            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          else
+            retroOrig = false
+          end
+        end
+        if endppqpos > rightmostTick then
+          if not currentMods:alt() then
+            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          end
+        end
+        if retroOrig then
+          if firstppq < leftmostTick then firstppq = leftmostTick end
+          if lastendppq > rightmostTick then lastendppq = rightmostTick end
+          local delta = (firstppq - leftmostTick) - (rightmostTick - lastendppq)
+          newppqpos = (rightmostTick - ((ppqpos >= leftmostTick and ppqpos or leftmostTick) - leftmostTick)) - (endppqpos - ppqpos) + delta
+          newendppqpos = newppqpos + (endppqpos - ppqpos)
+        end
+      elseif operation == OP_RETROGRADE_PITCHES then
+        changed = true
+        local retroOrig = true
+
+        if ppqpos < leftmostTick then
+          if not currentMods:alt() then
+            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          else
+            retroOrig = false
+          end
+        end
+        if endppqpos > rightmostTick then
+          if not currentMods:alt() then
+            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          end
+        end
+        if retroOrig then
+          newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
+          newendppqpos = (endppqpos <= rightmostTick or currentMods:alt()) and endppqpos or rightmostTick + 1
+          newpitch = sourceEvents[#sourceEvents - (sidx - 1)].pitch
         end
       elseif operation == OP_DUPLICATE then
         changed = true
@@ -1092,7 +1140,7 @@ local function processCCs(activeTake, area, operation)
 
   -- third iteration
   if not skipiter then
-    for _, event in ipairs(sourceEvents) do
+    for sidx, event in ipairs(sourceEvents) do
       local selected, muted, ppqpos, endppqpos, chanmsg, chan, msg2, msg3, pitch, vel, relvel
 
       idx = event.idx
@@ -1110,6 +1158,15 @@ local function processCCs(activeTake, area, operation)
       local pitchbend = chanmsg == 0xE0
       local val = event.val
 
+      local function valToBytes(newval, numsg2, numsg3)
+        numsg2 = numsg2 or msg2
+        numsg3 = numsg3 or msg3
+        newval = math.floor(newval)
+        numsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or numsg2
+        numsg3 = onebyte and numsg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+        return numsg2, numsg3
+      end
+
       if ppqpos >= leftmostTick and ppqpos <= rightmostTick
         and chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter))
         and val <= topValue and val >= bottomValue
@@ -1123,9 +1180,24 @@ local function processCCs(activeTake, area, operation)
           touchedMIDI = true
         elseif operation == OP_INVERT then
           changed = true
-          local newval = area.timeValue.vals.max - (val - area.timeValue.vals.min)
-          newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
-          newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+          newmsg2, newmsg3 = valToBytes(area.timeValue.vals.max - (val - area.timeValue.vals.min))
+          -- local newval = area.timeValue.vals.max - (val - area.timeValue.vals.min)
+          -- newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
+          -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+        elseif operation == OP_RETROGRADE then
+          if not laneIsVel then
+            changed = true
+            local firstppq = sourceEvents[1].ppqpos
+            local lastppq = sourceEvents[#sourceEvents].ppqpos
+            local delta = (firstppq - leftmostTick) - (rightmostTick - lastppq)
+            newppqpos = (rightmostTick - (ppqpos - leftmostTick)) + delta
+          end
+        elseif operation == OP_RETROGRADE_VALS then
+          changed = true
+          newmsg2, newmsg3 = valToBytes(sourceEvents[#sourceEvents - (sidx - 1)].val)
+          -- local newval = sourceEvents[#sourceEvents - (sidx - 1)].val
+          -- newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
+          -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
         elseif operation == OP_DUPLICATE then
           if laneIsVel then
             classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), endppqpos = endppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
@@ -1150,11 +1222,13 @@ local function processCCs(activeTake, area, operation)
               newval = topValue - ((topValue - val) * vratio)
             end
             if newval then
-              newval = clipInt(newval, 0, meLanes[area.ccLane].range)
-              newmsg2 = onebyte and newval or pitchbend and newval & 0x7F or msg2
-              newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or newval
+              newmsg2, newmsg3 = valToBytes(clipInt(newval, 0, meLanes[area.ccLane].range))
+              -- newval = clipInt(newval, 0, meLanes[area.ccLane].range)
+              -- newmsg2 = onebyte and newval or pitchbend and newval & 0x7F or msg2
+              -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or newval
             end
           elseif movingArea then
+            -- TODO valToBytes, untangle the value here
             newppqpos = ppqpos + deltaTicks
             newmsg2 = onebyte and clipInt(msg2 - deltaVal) or pitchbend and ((val - deltaVal) & 0x7F) or msg2
             newmsg3 = onebyte and msg3 or pitchbend and (((val - deltaVal) >> 7) & 0x7F) or clipInt(msg3 - deltaVal)
@@ -1238,6 +1312,7 @@ local function processCCs(activeTake, area, operation)
                                 area.widgetExtents.min, area.widgetExtents.max,
                                 (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
 
+      -- TODO valToBytes, untangle here
       local newmsg2
       local newmsg3
       newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or event.msg2
@@ -1964,6 +2039,16 @@ local function processKeys()
         return true
       end
       return false
+    end
+
+    if vState:byte(vKeys.VK_R) ~= 0 then
+      if hottestMods:none() then -- retrograde
+        area.operation = OP_RETROGRADE
+        return true
+      elseif hottestMods:superOnly() then -- retrograde values
+        area.operation = OP_RETROGRADE_VALS
+        return true
+      end
     end
 
     local singleMod = singleAreaProcessing()

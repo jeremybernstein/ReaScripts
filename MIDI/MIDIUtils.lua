@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.2.00
+-- @version 0.2.01
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -2362,7 +2362,6 @@ local function MIDI_SelectAll(take, wantsSelect)
 end
 
 local function MIDI_GetTimeOffset(correctMeasures)
-  if true then return 0 end
   local offset = r.GetProjectTimeOffset(0, false)
   if correctMeasures then
     local rv, measoff = r.get_config_var_string('projmeasoffs')

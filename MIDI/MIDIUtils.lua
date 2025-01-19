@@ -1,15 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.01
+-- @version 0.2.02
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - add MIDI_GetState, MIDI_RestoreState, MIDI_ForceNextTransaction and tableCopy exports
---   - tableCopy makes a deep copy of a table (but doesn't permit table keys)
---   - NOTE: MIDI_GetState returns a copy of the state table, MIDI_RestoreState makes a copy of the table passed in
---   - new USE_XPCALL and COMMIT_CANSKIP options for special where additional performance is required
---   - most of this stuff is for "internal use", will be documented later
+--   - updated documentation, now Markdown (Readme.md)
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*

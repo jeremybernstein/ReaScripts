@@ -216,6 +216,17 @@ local function resetButtons()
   Lice.lbutton_dblclick_seen = nil
 end
 
+local function postIntercepts()
+  for _, intercept in ipairs(intercepts) do
+    local msg = intercept.message
+    local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(glob.liceData.midiview, msg)
+
+    if ret and time ~= intercept.timestamp then
+      r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+    end
+  end
+end
+
 local function peekIntercepts(m_x, m_y)
   if not glob.liceData then return end
   local lastClickTime = 0
@@ -267,6 +278,9 @@ local function peekIntercepts(m_x, m_y)
             Lice.lbutton_press_x, Lice.lbutton_press_y = nil, nil
             Lice.lbutton_release = true
             Lice.lbutton_drag = false
+          else
+            -- must have been pressed in a dead zone, post it
+            r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
           end
         end
       end
@@ -543,6 +557,7 @@ Lice.endIntercepts = endIntercepts
 
 Lice.passthroughIntercepts = passthroughIntercepts
 Lice.peekIntercepts = peekIntercepts
+Lice.postIntercepts = postIntercepts
 
 Lice.vKeys = vKeys
 Lice.resetButtons = resetButtons

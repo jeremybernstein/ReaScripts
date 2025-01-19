@@ -1,11 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.2
+-- @version 0.1.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix pitch bend value stretch
---   - fix various behaviors in ME timebase mode 'Project Time'
+--   - fix inaccurate quantizing when dragging/moving areas
+--   - improve bottom scrollbar deadzone handling
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -380,7 +380,15 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
   else
     updated = false
   end
-  if updated then area.modified = true end
+  if updated then
+    local min, max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
+    if resizing == RS_LEFT or resizing == RS_MOVEAREA then
+      area.timeValue.ticks.min = min
+    elseif resizing == RS_RIGHT then
+      area.timeValue.ticks.max = max
+    end
+    area.modified = true
+  end
 end
 
 local function viewIntersectionRect(area)
@@ -1698,6 +1706,12 @@ local function analyzeChunk()
   end
   table.insert(glob.deadZones, Rect.new(glob.windowRect.x2 - lice.MIDI_SCROLLBAR_R, glob.windowRect.y1, glob.windowRect.x2, glob.windowRect.y2))
 
+  if meLanes[0] then
+    table.insert(glob.deadZones, Rect.new(glob.windowRect.x1, meLanes[#meLanes].bottomPixel + meLanes[#meLanes].bottomMargin, glob.windowRect.x2, glob.windowRect.y2))
+  else
+    table.insert(glob.deadZones, Rect.new(glob.windowRect.x1, meLanes[-1].bottomPixel, glob.windowRect.x2, glob.windowRect.y2))
+  end
+
   glob.meLanes = meLanes
   glob.meState = meState
 
@@ -2516,9 +2530,10 @@ local function ValidateMouse()
     local mouseLeftDown = r.JS_Mouse_GetState(1) == 1
 
     local isValidMouseAction = lice.lbutton_drag and mouseLeftDown
+    local inDeadZone = isDeadZone(mx, my)
     -- Check that mouse cursor is hovered over a valid midiview area
     if not isValidMouseAction then
-      isValidMouseAction = isMidiViewHovered and not isDeadZone(mx, my)
+      isValidMouseAction = isMidiViewHovered and not inDeadZone
       if lice.lbutton_drag and not mouseLeftDown then
         lice.resetButtons()
         lice.lbutton_release = true
@@ -2528,6 +2543,10 @@ local function ValidateMouse()
     if isValidMouseAction then
       lice.peekIntercepts(mx, my)
       return true, mx, my
+    end
+    if inDeadZone then
+      lice.postIntercepts()
+      return false
     end
   end
 

@@ -1,11 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.3
+-- @version 0.1.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix inaccurate quantizing when dragging/moving areas
---   - improve bottom scrollbar deadzone handling
+--   - improvement to fix for inaccurate quantizing when dragging/moving areas
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -381,11 +380,17 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     updated = false
   end
   if updated then
-    local min, max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
-    if resizing == RS_LEFT or resizing == RS_MOVEAREA then
-      area.timeValue.ticks.min = min
-    elseif resizing == RS_RIGHT then
-      area.timeValue.ticks.max = max
+    if resizing == RS_LEFT or resizing == RS_RIGHT or resizing == RS_MOVEAREA then
+      local min, max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
+      if resizing == RS_LEFT then
+        area.timeValue.ticks.min = min
+      elseif resizing == RS_RIGHT then
+        area.timeValue.ticks.max = max
+      elseif resizing == RS_MOVEAREA then
+        local delta = min - area.timeValue.ticks.min
+        area.timeValue.ticks.min = min
+        area.timeValue.ticks.max = area.timeValue.ticks.max + delta -- ensure that the area width doesn't change
+      end
     end
     area.modified = true
   end

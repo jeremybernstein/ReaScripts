@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.4
+-- @version 0.1.0-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - improvement to fix for inaccurate quantizing when dragging/moving areas
+--   - fix rare case of area bounds changing during move
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -301,7 +301,7 @@ local function makeTimeValueExtentsForArea(area, noQuantize)
   local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
 
-  local valMax = area.fullLane and topValue or (topValue - math.floor((area.logicalRect.y1 - topPixel) / divisor))
+  local valMax = area.fullLane and topValue or (topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5))
   local valMin = area.fullLane and bottomValue or (equalIsh(area.logicalRect.y2, area.logicalRect.y1) and valMax or (valMax - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1))
   area.timeValue = TimeValueExtents.new(leftmostTick, rightmostTick, valMin, valMax, leftmostTime, rightmostTime)
 end

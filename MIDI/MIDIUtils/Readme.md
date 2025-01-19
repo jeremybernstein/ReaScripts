@@ -1,10 +1,3 @@
---[[
-   * Author: sockmonkey72 / Jeremy Bernstein
-   * Licence: MIT
-   * Version: 0.1.2
-   * NoIndex: true
---]]
-
 # MIDI Utils API Documentation
 
 updated for MIDI Utils 2.0, ©2025 Jeremy Bernstein

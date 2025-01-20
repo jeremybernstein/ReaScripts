@@ -1,3 +1,10 @@
+--[[
+   * Author: sockmonkey72 / Jeremy Bernstein
+   * Licence: MIT
+   * Version: 0.1.2
+   * NoIndex: true
+--]]
+
 # MIDI Utils API Documentation
 
 updated for MIDI Utils 2.0, ©2025 Jeremy Bernstein
@@ -167,10 +174,9 @@ transaction, which will write all changes in a single bulk set action.
 
   **Arguments:**
   `MediaItem_Take` take: the `MediaItem_Take` provided by REAPER
-  `boolean` refresh: when true, MIDIUtils will re-initialize the take after commit
-  this is useful if you intend to perform further manipulation on the data post-commit
-  `boolean` dirty: when true, MIDIUtils will dirty the take post-commit
-
+  `boolean` refresh: when `true`, MIDIUtils will re-initialize the take after commit. This is useful if you intend to perform further manipulation on the data post-commit
+  `boolean` dirty: when `true`, MIDIUtils will dirty the take post-commit
+  
   **Return Values:**
   `boolean` rv: `true` on success, `false` otherwise
 
@@ -186,11 +192,10 @@ transaction, which will write all changes in a single bulk set action.
 
   **Arguments:**
   `MediaItem_Take` take: the `MediaItem_Take` provided by REAPER
-  `boolean` favorSelection: when true, overlap correction will attempt to leave any selected
-  notes untouched (the note-on of position unselected note events will
+  `boolean` favorSelection: when `true`, overlap correction will attempt to leave any selected notes untouched (the note-on of position unselected note events will
   be changed). When `false` (or missing), overlap correction will preserve
   note-on positions and move note-offs to prevent MIDI overlaps. [optional]
-
+  
   **Return Values:**
   `boolean` rv: `true` on success, `false` otherwise
 
@@ -813,7 +818,7 @@ transaction, which will write all changes in a single bulk set action.
 
   **Arguments:**
   `MediaItem_Take` take: the `MediaItem_Take` provided by REAPER
-  `boolean` wantsSelect: select (true) or deselect (false)
+  `boolean` wantsSelect: select (`true`) or deselect (`false`)
 
   **Return Values:** none
 
@@ -861,7 +866,7 @@ transaction, which will write all changes in a single bulk set action.
   **Arguments:** none
 
   **Return Values**:
-  `table` state: a Lua table, should be passed, unmodified to `MIDI_SetState` when the MIDIUtils state is to be restored.
+  `table` state: a Lua table, which should be passed unmodified to `MIDI_SetState` when the MIDIUtils state is to be restored.
 
 **MIDI_SetState**
 

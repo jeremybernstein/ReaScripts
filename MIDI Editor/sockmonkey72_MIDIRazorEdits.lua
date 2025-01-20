@@ -1,10 +1,13 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.7
+-- @version 0.1.0-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - add retrograde, retrograde values actions (R, ctrl/super-Rrrrespectively)
+--   - fix flickering cursor in arrange view
+--   - fix some delete/duplicate edge cases
+--   - fix some alt+key+hover combis, which weren't working
+--   - fix display anomalies which could arise when quantizing moved areas
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -94,16 +97,18 @@ local RS_MOVEAREA = 5
 local resizing = RS_UNCLICKED
 
 -- local OP_NONE = 0 -- use nil for area.operation
-local OP_DELETE = 1
-local OP_DUPLICATE = 2
-local OP_INVERT = 3
-local OP_RETROGRADE = 4
-local OP_RETROGRADE_VALS = 5
-local OP_COPY = 6
-local OP_SELECT = 7
-local OP_UNSELECT = 8
+local OP_DELETE           = 1
+local OP_DELETE_TRIM      = 2
+local OP_DUPLICATE        = 3
+local OP_INVERT           = 4
+local OP_RETROGRADE       = 5
+local OP_RETROGRADE_VALS  = 6
+local OP_COPY             = 7
+local OP_SELECT           = 8
+local OP_UNSELECT         = 9
 
-local OP_STRETCH = 20 -- behaves a little differently
+local OP_STRETCH          = 20 -- behaves a little differently
+local OP_STRETCH_DELETE   = 21 -- behaves a little differently
 
 -- misc
 local muState
@@ -224,22 +229,24 @@ local function quantizeTimeValueTimeExtent(x1, x2)
 
   local activeTake = glob.liceData.editorTake
   local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-
+  local newx1, newx2 = x1, x2
   local som, tickInMeasure
 
   if x1 then
     som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, x1)
     tickInMeasure = x1 - som -- get the position from the start of the measure
-    x1 = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+    newx1 = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+    if newx1 < meState.leftmostTick then return x1, x2 end
   end
 
   if x2 then
     som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, x2)
     tickInMeasure = x2 - som -- get the position from the start of the measure
-    x2 = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+    newx2 = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+    if newx2 < meState.leftmostTick then return x1, x2 end
   end
 
-  return x1, x2
+  return newx1, newx2
 end
 
 local function getTimeOffset()
@@ -325,6 +332,8 @@ local function adjustFullLane(area, testPix)
   end
 end
 
+local updateAreaFromTimeValue
+
 local function updateTimeValueExtentsForArea(area, noCheck, force)
   local updated = true
 
@@ -382,7 +391,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     updated = false
   end
   if updated then
-    if resizing == RS_LEFT or resizing == RS_RIGHT or resizing == RS_MOVEAREA then
+    if area.active and (resizing == RS_LEFT or resizing == RS_RIGHT or resizing == RS_MOVEAREA) then
       local min, max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
       if resizing == RS_LEFT then
         area.timeValue.ticks.min = min
@@ -393,6 +402,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
         area.timeValue.ticks.min = min
         area.timeValue.ticks.max = area.timeValue.ticks.max + delta -- ensure that the area width doesn't change
       end
+      updateAreaFromTimeValue(area)
     end
     area.modified = true
   end
@@ -414,7 +424,7 @@ local function updateTimeValueTime(area)
   end
 end
 
-local function updateAreaFromTimeValue(area, noCheck)
+updateAreaFromTimeValue = function(area, noCheck)
   if not noCheck then adjustFullLane(area) end
 
   if area.ccLane and (not meLanes[area.ccLane] or meLanes[area.ccLane].type ~= area.ccType) then
@@ -521,17 +531,17 @@ local function getNoteSegments(ppqpos, endppqpos, pitch)
     local positions = {
       {
         bottom = area.timeValue.vals.min,
-        top = area.timeValue.vals.max,
+        top = area.timeValue.vals.max - 1,
         left = area.timeValue.ticks.min,
-        right = area.timeValue.ticks.max
+        right = area.timeValue.ticks.max - 1
       }
     }
     if area.unstretchedTimeValue then
       table.insert(positions, 1, {
         bottom = area.unstretchedTimeValue.vals.min,
-        top = area.unstretchedTimeValue.vals.max,
+        top = area.unstretchedTimeValue.vals.max - 1,
         left = area.unstretchedTimeValue.ticks.min,
-        right = area.unstretchedTimeValue.ticks.max
+        right = area.unstretchedTimeValue.ticks.max - 1
       })
     end
 
@@ -620,6 +630,84 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
+-- Returns true if two rectangles intersect
+local function doRectsIntersect(r1, r2)
+  return not (r1.x2 < r2.x1 or
+              r1.x1 > r2.x2 or
+              r1.y2 < r2.y1 or
+              r1.y1 > r2.y2)
+end
+
+-- Returns the intersection of two rectangles, or nil if they don't intersect
+local function getIntersection(r1, r2)
+  if not doRectsIntersect(r1, r2) then
+    return nil
+  end
+
+  return Rect.new(
+    math.max(r1.x1, r2.x1),
+    math.max(r1.y1, r2.y1),
+    math.min(r1.x2, r2.x2),
+    math.min(r1.y2, r2.y2)
+  )
+end
+
+-- Returns a table of Rect objects representing the non-intersecting parts of rect1
+local function getNonIntersectingAreas(r1, r2)
+  local intersection = getIntersection(r1, r2)
+  if not intersection then
+    -- If there's no intersection, return the first rectangle
+    return {r1}
+  end
+
+  local nonIntersecting = {}
+
+  -- Check left side of intersection
+  if intersection.x1 > r1.x1 then
+    table.insert(nonIntersecting, Rect.new(
+      r1.x1,
+      r1.y1,
+      intersection.x1,
+      r1.y2
+    ))
+  end
+
+  -- Check right side of intersection
+  if intersection.x2 < r1.x2 then
+    table.insert(nonIntersecting, Rect.new(
+      intersection.x2,
+      r1.y1,
+      r1.x2,
+      r1.y2
+    ))
+  end
+
+  -- Check top side of intersection
+  if intersection.y1 > r1.y1 then
+    table.insert(nonIntersecting, Rect.new(
+      intersection.x1,
+      r1.y1,
+      intersection.x2,
+      intersection.y1
+    ))
+  end
+
+  -- Check bottom side of intersection
+  if intersection.y2 < r1.y2 then
+    table.insert(nonIntersecting, Rect.new(
+      intersection.x1,
+      intersection.y2,
+      intersection.x2,
+      r1.y2
+    ))
+  end
+
+  return nonIntersecting
+end
+
+------------------------------------------------
+------------------------------------------------
+
 local function processNotes(activeTake, area, operation)
   local changed = false
 
@@ -691,13 +779,18 @@ local function processNotes(activeTake, area, operation)
   if operation == OP_DUPLICATE then
     local tmpArea = Area.deserialize(area:serialize())
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
-    processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+    processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_TRIM)
   elseif movingArea then
      if deltaTicks ~= 0 or deltaPitch ~= 0 then
+      -- extra work to avoid deleting the target area, if it intersects with the source area
+      local deletionRects = getNonIntersectingAreas(area.logicalRect, area.unstretched)
       local tmpArea = Area.deserialize(area:serialize())
-      -- TODO: combine area/unstretched deletion to avoid 2 generations?
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-      processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- this seems unnecessary, but is!
+      for _, rect in ipairs(deletionRects) do
+        tmpArea.logicalRect = rect
+        updateTimeValueExtentsForArea(tmpArea)
+        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+      end
       if not duplicatingArea then
         tmpArea.timeValue = area.unstretchedTimeValue
         processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
@@ -712,9 +805,9 @@ local function processNotes(activeTake, area, operation)
       local altFlag = currentMods.altFlag
       currentMods.altFlag = false
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-      processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- this seems unnecessary, but is!
+      processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- target
       tmpArea.timeValue = area.unstretchedTimeValue
-      processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+      processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- source
       currentMods.altFlag = altFlag
       insert = true
     else
@@ -735,6 +828,26 @@ local function processNotes(activeTake, area, operation)
 
     idx = event.idx
 
+    local function trimOverlappingNotes()
+      local canOperate = true
+
+      if ppqpos + GLOBAL_PREF_SLOP < rightmostTick and endppqpos - GLOBAL_PREF_SLOP >= leftmostTick then
+        if ppqpos < leftmostTick  then
+          if not currentMods:alt() then
+            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          else
+            canOperate = false
+          end
+        end
+        if endppqpos > rightmostTick then
+          if not currentMods:alt() then
+            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          end
+        end
+      end
+      return canOperate
+    end
+
     if endppqpos > leftmostTick and ppqpos < rightmostTick
       and pitch <= topPitch and pitch >= bottomPitch
     then
@@ -743,19 +856,7 @@ local function processNotes(activeTake, area, operation)
         touchedMIDI = true
       elseif operation == OP_INVERT then
         changed = true
-        local invertOrig = true
-        if ppqpos < leftmostTick then
-          if not currentMods:alt() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-          else
-            invertOrig = false
-          end
-        end
-        if endppqpos > rightmostTick then
-          if not currentMods:alt() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-          end
-        end
+        local invertOrig = trimOverlappingNotes()
         if invertOrig then
           newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
           newendppqpos = (endppqpos <= rightmostTick or currentMods:alt()) and endppqpos or rightmostTick + 1
@@ -763,24 +864,11 @@ local function processNotes(activeTake, area, operation)
         end
       elseif operation == OP_RETROGRADE then
         changed = true
-        local retroOrig = true
-        local firstppq = sourceEvents[1].ppqpos
-        local lastendppq = sourceEvents[#sourceEvents].endppqpos
-
-        if ppqpos < leftmostTick then
-          if not currentMods:alt() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-          else
-            retroOrig = false
-          end
-        end
-        if endppqpos > rightmostTick then
-          if not currentMods:alt() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-          end
-        end
+        local retroOrig = trimOverlappingNotes()
         if retroOrig then
-          if firstppq < leftmostTick then firstppq = leftmostTick end
+          local firstppq = sourceEvents[1].ppqpos
+          local lastendppq = sourceEvents[#sourceEvents].endppqpos
+            if firstppq < leftmostTick then firstppq = leftmostTick end
           if lastendppq > rightmostTick then lastendppq = rightmostTick end
           local delta = (firstppq - leftmostTick) - (rightmostTick - lastendppq)
           newppqpos = (rightmostTick - ((ppqpos >= leftmostTick and ppqpos or leftmostTick) - leftmostTick)) - (endppqpos - ppqpos) + delta
@@ -788,20 +876,7 @@ local function processNotes(activeTake, area, operation)
         end
       elseif operation == OP_RETROGRADE_VALS then
         changed = true
-        local retroOrig = true
-
-        if ppqpos < leftmostTick then
-          if not currentMods:alt() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-          else
-            retroOrig = false
-          end
-        end
-        if endppqpos > rightmostTick then
-          if not currentMods:alt() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-          end
-        end
+        local retroOrig = trimOverlappingNotes()
         if retroOrig then
           newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
           newendppqpos = (endppqpos <= rightmostTick or currentMods:alt()) and endppqpos or rightmostTick + 1
@@ -811,35 +886,30 @@ local function processNotes(activeTake, area, operation)
         changed = true
         classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = (ppqpos >= leftmostTick and ppqpos or leftmostTick) + areaTickExtent:size(),
                           endppqpos = (endppqpos <= rightmostTick and endppqpos or rightmostTick + 1) + areaTickExtent:size(), chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-      elseif operation == OP_DELETE then
-        changed = true
+      elseif operation == OP_DELETE or operation == OP_STRETCH_DELETE or operation == OP_DELETE_TRIM then
         local deleteOrig = true
+        changed = true
 
-        if currentMods:alt()
-          and (ppqpos + GLOBAL_PREF_SLOP < leftmostTick
-            or endppqpos - GLOBAL_PREF_SLOP > rightmostTick)
-        then
-          if endppqpos - GLOBAL_PREF_SLOP > rightmostTick then
+        if operation == OP_DELETE_TRIM then
+          deleteOrig = trimOverlappingNotes() -- this screws up most operations, but is necessary for OP_DUPLICATE
+        end
+
+        local segments = getNoteSegments(ppqpos, endppqpos, pitch)
+        if segments then
+          for i, seg in ipairs(segments) do
+            local newEvent = mu.tableCopy(event)
+            newEvent.ppqpos = seg[1]
+            newEvent.endppqpos = seg[2]
+            newEvent.pitch = pitch
+            newEvent.type = mu.NOTE_TYPE
+            classes.addUnique(tInsertions, newEvent)
             deleteOrig = true
-          end
-        else
-          local segments = getNoteSegments(ppqpos, endppqpos, pitch)
-          if segments then
-            for i, seg in ipairs(segments) do
-              local newEvent = mu.tableCopy(event)
-              newEvent.ppqpos = seg[1]
-              newEvent.endppqpos = seg[2]
-              newEvent.pitch = pitch
-              newEvent.type = mu.NOTE_TYPE
-              classes.addUnique(tInsertions, newEvent)
-              deleteOrig = true
-            end
           end
         end
         if deleteOrig then
           classes.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
         end
-      elseif (not currentMods:super() or ppqpos >= leftmostTick) then
+      elseif not currentMods:super() or ppqpos >= leftmostTick then
         if stretchingArea then
           if resizing ~= RS_MOVEAREA
             and currentMods:matches({ alt = true, shift = '' })
@@ -1442,7 +1512,10 @@ local function generateSourceInfo(area, op, force)
         if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
           and event.pitch <= topValue and event.pitch >= bottomValue
         then
-          if currentMods:alt() and event.ppqpos + GLOBAL_PREF_SLOP < leftmostTick then
+          if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
+            and currentMods:alt()
+            and event.ppqpos + GLOBAL_PREF_SLOP < leftmostTick
+          then
             -- ignore
           else
             event.idx = idx
@@ -1514,6 +1587,8 @@ local function swapAreas(newAreas)
   glob.areas = newAreas
   areas = glob.areas
 end
+
+local lastChanged = false
 
 local function processAreas(singleArea, forceSourceInfo)
   local activeTake = glob.liceData.editorTake
@@ -1597,8 +1672,15 @@ local function processAreas(singleArea, forceSourceInfo)
   end
   processInsertions()
 
+  if changed ~= lastChanged then -- ensure that we return to the original state
+    mu.MIDI_ForceNextTransaction()
+    lastChanged = changed
+    touchedMIDI = true
+    changed = true
+  end
+
   if touchedMIDI then
-    mu.MIDI_CommitWriteTransaction(activeTake, false, changed)
+    mu.MIDI_CommitWriteTransaction(activeTake, false, true)
   else
     noRestore = true
   end
@@ -1964,6 +2046,11 @@ local function acquireKeyMods()
                   keyMods & 0x20 ~= 0) -- ctrl/'super' (windows)
 end
 
+local function swapCurrentMods()
+  acquireKeyMods()
+  currentMods = hottestMods:clone()
+end
+
 local function processKeys()
 
   -- attempts to suss out the keyboard section focus fail for various reasons
@@ -2052,7 +2139,7 @@ local function processKeys()
     end
 
     local singleMod = singleAreaProcessing()
-    if (singleMod and area.hovering) or noMod then
+    if (singleMod and area.hovering) or noMod or (not area.ccLane and hottestMods:alt()) then
       if (vState:byte(vKeys.VK_X) ~= 0) then -- delete contents (or D?)
         area.operation = OP_DELETE
         return true
@@ -2634,10 +2721,6 @@ local function ValidateMouse()
       lice.peekIntercepts(mx, my)
       return true, mx, my
     end
-    if inDeadZone then
-      lice.postIntercepts()
-      return false
-    end
   end
 
   deadzone_lbutton_state = r.JS_Mouse_GetState(1)
@@ -2767,8 +2850,7 @@ local function processMouse()
   -- _P('down', isDown, 'clicked', isClicked, 'drag', isDragging, 'rel', isReleased, 'hov', isHovered)
 
   if isClicked then
-    acquireKeyMods()
-    currentMods = hottestMods:clone()
+    swapCurrentMods()
   end
 
   -- correct/update state
@@ -2883,6 +2965,7 @@ local function processMouse()
 
     if isOnlyHovered then
       if doProcess then
+        swapCurrentMods()
         processAreas(nil, true)
         createUndoStep('Process Razor Area Contents')
       end

@@ -101,13 +101,19 @@ local function createBitmap(midiview, windRect)
   return bitmap, Rect.new(x1, y1, x2, y2)
 end
 
-local intercepts = {
+local midiIntercepts = {
   {timestamp = 0, passthrough = false, message = 'WM_SETCURSOR'},
   {timestamp = 0, passthrough = false, message = 'WM_LBUTTONDOWN'},
   {timestamp = 0, passthrough = false, message = 'WM_LBUTTONUP'},
   {timestamp = 0, passthrough = false, message = 'WM_LBUTTONDBLCLK'},
   {timestamp = 0, passthrough = false, message = 'WM_RBUTTONDOWN'},
   {timestamp = 0, passthrough = false, message = 'WM_RBUTTONUP'}, -- need both
+  -- {timestamp = 0, passthrough = false, message = 'WM_MOUSEWHEEL'}, -- TODO
+}
+
+local appIntercepts = {
+  -- {timestamp = 0, passthrough = true, message = 'WM_ACTIVATEAPP'}, -- doesn't appear to work
+  {timestamp = 0, passthrough = true, message = 'WM_ACTIVATE'},
 }
 
 local vKeys = {
@@ -118,6 +124,9 @@ local vKeys = {
   VK_C 	          = 0x43,   --  C
   VK_D 	          = 0x44,   --  D
   VK_F 	          = 0x46,   --  F
+  VK_H 	          = 0x48,   --  H -- horizontal lock
+  VK_I 	          = 0x49,   --  I
+  VK_L 	          = 0x4C,   --  L -- vertical lock
   VK_P 	          = 0x50,   --  P
   VK_R 	          = 0x52,   --  R
   VK_S 	          = 0x53,   --  S
@@ -148,18 +157,18 @@ local function shutdownLiceKeys()
   end
 end
 
-local interceptInput = true
+local interceptKeyInput = true
 
-local function attendIntercepts()
-  if not interceptInput then
-    interceptInput = true
+local function attendKeyIntercepts()
+  if not interceptKeyInput then
+    interceptKeyInput = true
     initLiceKeys()
   end
 end
 
-local function ignoreIntercepts()
-  if interceptInput then
-    interceptInput = false
+local function ignoreKeyIntercepts()
+  if interceptKeyInput then
+    interceptKeyInput = false
     shutdownLiceKeys()
   end
 end
@@ -168,8 +177,11 @@ local function startIntercepts()
   if glob.isIntercept then return end
   glob.isIntercept = true
   if glob.liceData then
-    for _, intercept in ipairs(intercepts) do
+    for _, intercept in ipairs(midiIntercepts) do
       r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
+    end
+    for _, intercept in ipairs(appIntercepts) do
+      r.JS_WindowMessage_Intercept(r.GetMainHwnd(), intercept.message, intercept.passthrough)
     end
   end
 end
@@ -179,7 +191,10 @@ local function endIntercepts()
   glob.isIntercept = false
   if glob.liceData then
     shutdownLiceKeys()
-    for _, intercept in ipairs(intercepts) do
+    for _, intercept in ipairs(appIntercepts) do
+      r.JS_WindowMessage_Release(r.GetMainHwnd(), intercept.message)
+    end
+    for _, intercept in ipairs(midiIntercepts) do
       r.JS_WindowMessage_Release(glob.liceData.midiview, intercept.message)
       intercept.timestamp = 0
     end
@@ -190,7 +205,7 @@ end
 
 local function passthroughIntercepts()
   if not glob.liceData then return end
-  for _, intercept in ipairs(intercepts) do
+  for _, intercept in ipairs(midiIntercepts) do -- no app passthroughs
     local msg = intercept.message
     local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(glob.liceData.midiview, msg)
     if ret and time ~= intercept.timestamp then
@@ -222,12 +237,31 @@ local function peekIntercepts(m_x, m_y)
   local lastClickTime = 0
   local DOUBLE_CLICK_DELAY = 0.2 -- 200ms, adjust based on system double-click time
 
-  for _, intercept in ipairs(intercepts) do
+  for _, intercept in ipairs(appIntercepts) do
+    local msg = intercept.message
+    local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(r.GetMainHwnd(), msg)
+
+    if ret and time ~= intercept.timestamp then
+      intercept.timestamp = time
+
+      if msg == 'WM_ACTIVATE' then
+        if wpl ~= 1 then
+          glob.setCursor(glob.normal_cursor)
+        end
+      end
+    end
+  end
+
+  for _, intercept in ipairs(midiIntercepts) do
     local msg = intercept.message
     local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(glob.liceData.midiview, msg)
 
     if ret and time ~= intercept.timestamp then
       intercept.timestamp = time
+
+      -- if msg == 'WM_MOUSEWHEEL' then -- TODO: can use this to improve sync on scroll
+      --   glob._P('mousewheel', wpl, wph, lpl, lph)
+      -- end
 
       if msg == 'WM_RBUTTONDOWN' then
         if glob.handleRightClick() then return end
@@ -247,7 +281,7 @@ local function peekIntercepts(m_x, m_y)
       end
 
       if msg == 'WM_LBUTTONDOWN' then
-        local currentTime = r.time_precise()
+        local currentTime = glob.currentTime
         if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
           -- Only register the click if we're outside the double-click window
           if not Lice.lbutton_press_x then
@@ -261,7 +295,7 @@ local function peekIntercepts(m_x, m_y)
       end
 
       if msg == 'WM_LBUTTONUP' then
-        local currentTime = r.time_precise()
+        local currentTime = glob.currentTime
         if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
           -- Only process the release if we're outside the double-click window
           if Lice.lbutton_press_x then
@@ -320,17 +354,140 @@ local function shutdownLice()
   glob.setCursor(glob.normal_cursor)
 end
 
-local reFillColor = r.GetThemeColor('areasel_fill', 0) + (0x5F << 24)
-if classes.is_windows then reFillColor = (reFillColor & 0xFF000000)
-                               | (reFillColor & 0xFF) << 16
-                               | (reFillColor & 0xFF00)
-                               | (reFillColor & 0xFF0000) >> 16 end
+local function convertColorFromNative(col)
+  if classes.is_windows then
+    col = (col & 0xFF000000)
+        | (col & 0xFF) << 16
+        | (col & 0xFF00)
+        | (col & 0xFF0000) >> 16
+    return col
+  end
+  return col
+end
 
-local reBorderColor = r.GetThemeColor('areasel_outline', 0) + (0xFF << 24)
-if classes.is_windows then reBorderColor = (reBorderColor & 0xFF000000)
-                                 | (reBorderColor & 0xFF) << 16
-                                 | (reBorderColor & 0xFF00)
-                                 | (reBorderColor & 0xFF0000) >> 16 end
+local reFillColor = convertColorFromNative(r.GetThemeColor('areasel_fill', 0) + (0x5F << 24))
+local reBorderColor = convertColorFromNative(r.GetThemeColor('areasel_outline', 0) + (0xFF << 24))
+
+-- Convert 32-bit ARGB to components
+local function argbToComponents(argb)
+  local a = math.floor(argb / 0x1000000) % 256
+  local cr = math.floor(argb / 0x10000) % 256
+  local cg = math.floor(argb / 0x100) % 256
+  local cb = argb % 256
+  return a, cr, cg, cb
+end
+
+-- Convert components to 32-bit ARGB
+local function componentsToARGB(a, cr, cg, cb)
+  return a * 0x1000000 + cr * 0x10000 + cg * 0x100 + cb
+end
+
+-- Convert RGB to HSL
+local function rgbToHSL(cr, cg, cb)
+  cr, cg, cb = cr/255, cg/255, cb/255
+  local max = math.max(cr, cg, cb)
+  local min = math.min(cr, cg, cb)
+  local h, s, l = 0, 0, (max + min) / 2
+
+  if max ~= min then
+    local d = max - min
+    s = l > 0.5 and d / (2 - max - min) or d / (max + min)
+
+    if max == cr then
+      h = (cg - cb) / d + (cg < cb and 6 or 0)
+    elseif max == cg then
+      h = (cb - cr) / d + 2
+    else
+      h = (cr - cg) / d + 4
+    end
+    h = h / 6
+  end
+
+  return h * 360, s * 100, l * 100
+end
+
+-- Convert HSL to RGB
+local function hslToRGB(h, s, l)
+  h, s, l = h/360, s/100, l/100
+
+  local function hue2rgb(p, q, t)
+    if t < 0 then t = t + 1 end
+    if t > 1 then t = t - 1 end
+    if t < 1/6 then return p + (q - p) * 6 * t end
+    if t < 1/2 then return q end
+    if t < 2/3 then return p + (q - p) * (2/3 - t) * 6 end
+    return p
+  end
+
+  local cr, cg, cb
+  if s == 0 then
+    cr, cg, cb = l, l, l
+  else
+    local q = l < 0.5 and l * (1 + s) or l + s - l * s
+    local p = 2 * l - q
+    cr = hue2rgb(p, q, h + 1/3)
+    cg = hue2rgb(p, q, h)
+    cb = hue2rgb(p, q, h - 1/3)
+  end
+
+  return math.floor(cr * 255 + 0.5), math.floor(cg * 255 + 0.5), math.floor(cb * 255 + 0.5)
+end
+
+-- Generate vibrant contrast color for 32-bit ARGB
+local function generateVibrantContrast32(argb)
+  local a, cr, cg, cb = argbToComponents(argb)
+  local h, s, l = rgbToHSL(cr, cg, cb)
+
+  -- Shift hue by 180 degrees for complement, then adjust
+  local contrastH = (h + 180) % 360
+
+  -- Adjust based on original color's properties
+  if l < 50 then
+    -- For darker colors, brighten the contrast
+    l = math.min(l + 20, 60)
+  else
+    -- For lighter colors, maintain vibrancy but ensure contrast
+    l = math.max(l - 10, 40)
+  end
+
+  -- Maintain high saturation for vibrancy
+  s = math.max(s, 70)
+
+  -- Convert back to RGB and then to 32-bit ARGB
+  cr, cg, cb = hslToRGB(contrastH, s, l)
+  return componentsToARGB(a, cr, cg, cb)
+end
+
+-- Function to generate a full palette with 32-bit colors
+local function generatePalette32(argb)
+  local a, cr, cg, cb = argbToComponents(argb)
+  local h, s, l = rgbToHSL(cr, cg, cb)
+
+  -- Generate analogous colors
+  local analog1_cr, analog1_cg, analog1_cb = hslToRGB((h + 30) % 360, s, l)
+  local analog2_cr, analog2_cg, analog2_cb = hslToRGB((h - 30) % 360, s, l)
+
+  return {
+    base = argb,
+    contrast = generateVibrantContrast32(argb),
+    analogous1 = componentsToARGB(a, analog1_cr, analog1_cg, analog1_cb),
+    analogous2 = componentsToARGB(a, analog2_cr, analog2_cg, analog2_cb)
+  }
+end
+
+local reFillContrastColor = generateVibrantContrast32(reFillColor)
+local reBorderContrastColor = generateVibrantContrast32(reBorderColor)
+
+local function rebuildColors()
+  reFillColor = convertColorFromNative(r.GetThemeColor('areasel_fill', 0) + (0x5F << 24))
+  reBorderColor = convertColorFromNative(r.GetThemeColor('areasel_outline', 0) + (0xFF << 24))
+  reFillContrastColor = generateVibrantContrast32(reFillColor)
+  reBorderContrastColor = generateVibrantContrast32(reBorderColor)
+end
+
+-- Example usage:
+-- local r, g, b = getContrastingColor(255, 100, 0)  -- Orange
+-- print(r, g, b)  -- Will output: 0, 155, 255 (Blue)
 
 local function rectToLiceCoords(rect)
   -- macos
@@ -376,29 +533,47 @@ local function thickLine(bitmap, xx1, yy1, xx2, yy2, which, color, alpha, mode, 
   while scale > 0 do
     r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
                   color, alpha, mode, antialias)
-    xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or 0)
-    yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or 0)
-    xx2 = xx2 + ((which == 0) and 1 or (which == 2) and -1 or 0)
-    yy2 = yy2 + ((which == 1) and 1 or (which == 3) and -1 or 0)
+    xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0  or (which == 6) and -1 or 0)
+    yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and -1 or (which == 6) and 0  or 0)
+    xx2 = xx2 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0  or (which == 6) and -1 or 0)
+    yy2 = yy2 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and -1 or (which == 6) and 0  or 0)
     r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
                   color, alpha, mode, antialias)
-    xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or 0)
-    yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or 0)
-    xx2 = xx2 + ((which == 0) and 1 or (which == 2) and -1 or 0)
-    yy2 = yy2 + ((which == 1) and 1 or (which == 3) and -1 or 0)
+    xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0 or (which == 6) and 2 or 0)
+    yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and 2 or (which == 6) and 0 or 0)
+    xx2 = xx2 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0 or (which == 6) and 2 or 0)
+    yy2 = yy2 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and 2 or (which == 6) and 0 or 0)
     r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
                   color, alpha, mode, antialias)
     scale = scale - 1
   end
 end
 
+local lastCheckTime
+local lastThemeFile
+
+local function checkThemeFile()
+  local time = glob.currentTime
+  if not lastCheckTime or time > lastCheckTime + 0.5 then
+    lastCheckTime = time
+    local themeFile = r.GetLastColorThemeFile()
+    if themeFile ~= lastThemeFile then
+      rebuildColors() -- better than nothing for now
+      lastThemeFile = themeFile
+      glob.needsRecomposite = true
+    end
+  end
+end
+
 local function drawLice()
+  checkThemeFile()
   local antialias = true
   local recomposite = glob.needsRecomposite
   glob.needsRecomposite = false
   local mode = 'COPY,ALPHA' --classes.is_windows and 0 or 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
+
 
   if glob.liceData then
     for _, area in ipairs(glob.areas) do
@@ -494,6 +669,48 @@ local function drawLice()
               elseif area.hovering.bottom then
                 thickLine(area.bitmap, x1, y2, x2, y2, 3, reBorderColor, alpha, mode, antialias)
               end
+
+              if glob.insertMode then
+                local middleX = x2 - math.floor(Lice.EDGE_SLOP * 3.5 + 0.5)
+                local middleY = math.floor(y1 + Lice.EDGE_SLOP * 3 + 0.5)
+                local tqslop = math.floor(Lice.EDGE_SLOP * 0.75 + 0.5)
+                if true then -- add to target mode -> this might be in combination with one of the above, so different corner?
+                  r.JS_LICE_Circle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5), reBorderContrastColor, 1., mode, false) --antialias)
+                  r.JS_LICE_Circle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5) + 1, reBorderContrastColor, 1., mode, false) --antialias)
+                  thickLine(area.bitmap, middleX - tqslop, middleY, middleX + tqslop, middleY, 5, reBorderContrastColor, 1., mode, antialias)
+                  thickLine(area.bitmap, middleX, middleY - tqslop, middleX, middleY + tqslop, 6, reBorderContrastColor, 1., mode, antialias)
+                end
+              end
+
+              if glob.horizontalLock or glob.verticalLock then
+                local middleX = x1 + Lice.EDGE_SLOP * 4
+                local mx2 = math.floor(middleX - Lice.EDGE_SLOP / 1 + 0.5)
+                local middleY = math.floor(y1 + Lice.EDGE_SLOP * 3.5 + 0.5)
+                local my2 = math.floor(middleY - Lice.EDGE_SLOP / 1 + 0.5)
+                if glob.horizontalLock then -- horizontal lock scroll mode
+                  r.JS_LICE_FillTriangle(area.bitmap, middleX - (Lice.EDGE_SLOP * 2), my2,
+                                                      middleX - Lice.EDGE_SLOP, my2 - Lice.EDGE_SLOP,
+                                                      middleX - Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                                                      reBorderContrastColor, 1., mode)
+                  r.JS_LICE_FillTriangle(area.bitmap, mx2 + (Lice.EDGE_SLOP * 2), my2,
+                                                      mx2 + Lice.EDGE_SLOP, my2 - Lice.EDGE_SLOP,
+                                                      mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                                                      reBorderContrastColor, 1., mode)
+                elseif glob.verticalLock then -- vertical lock scroll mode
+                  -- r.JS_LICE_FillRect(area.bitmap, middleX - Lice.EDGE_SLOP * 3, middleY - (Lice.EDGE_SLOP * 3),
+                  --                                     Lice.EDGE_SLOP * 6, (Lice.EDGE_SLOP * 6),
+                  --                                     ((reBorderColor & 0x00FFFFFF) | 0x88000000), classes.is_windows and 0x88/255 or 1, mode)
+                  r.JS_LICE_FillTriangle(area.bitmap, mx2, middleY - (Lice.EDGE_SLOP * 2),
+                                                      mx2 - Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
+                                                      mx2 + Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
+                                                      reBorderContrastColor, 1., mode)
+                  r.JS_LICE_FillTriangle(area.bitmap, mx2, my2 + (Lice.EDGE_SLOP * 2),
+                                                      mx2 - Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                                                      mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                                                      reBorderContrastColor, 1., mode)
+                end
+              end
+
               maskTopBottom()
               area.washovering = true
             end
@@ -540,8 +757,8 @@ Lice.initLice = initLice
 Lice.shutdownLice = shutdownLice
 Lice.createBitmap = createBitmap
 Lice.destroyBitmap = destroyBitmap
-Lice.attendIntercepts = attendIntercepts
-Lice.ignoreIntercepts = ignoreIntercepts
+Lice.attendKeyIntercepts = attendKeyIntercepts
+Lice.ignoreKeyIntercepts = ignoreKeyIntercepts
 Lice.startIntercepts = startIntercepts
 Lice.endIntercepts = endIntercepts
 
@@ -550,6 +767,7 @@ Lice.peekIntercepts = peekIntercepts
 
 Lice.vKeys = vKeys
 Lice.resetButtons = resetButtons
+Lice.rebuildColors = rebuildColors
 
 Lice.drawLice = drawLice
 return Lice

@@ -32,7 +32,7 @@ end
 
 local function deserialize(str)
   local f, err = load('return ' .. str)
-  if not f then reaper.ShowConsoleMsg(err .. '\n') end
+  if not f then r.ShowConsoleMsg(err .. '\n') end
   return f ~= nil and f() or nil
 end
 
@@ -671,9 +671,9 @@ local function getDPIScale()
 
   local piano_pane_unscaled_w = is_windows and 128 or is_macos and 145 or 161 -- macos is maybe 144?
 
-  local editor_hwnd = reaper.MIDIEditor_GetActive() -- called before we are initialized
-  local piano_pane = reaper.JS_Window_FindChildByID(editor_hwnd, 1003)
-  local _, piano_pane_w = reaper.JS_Window_GetClientSize(piano_pane)
+  local editor_hwnd = r.MIDIEditor_GetActive() -- called before we are initialized
+  local piano_pane = r.JS_Window_FindChildByID(editor_hwnd, 1003)
+  local _, piano_pane_w = r.JS_Window_GetClientSize(piano_pane)
 
   local editor_scale = piano_pane_w / piano_pane_unscaled_w
   -- Round to steps of 0.01
@@ -794,7 +794,7 @@ local function addUnique(t, value)
     mt._hashes[hash] = true
     return true
   else
-    -- reaper.ShowConsoleMsg('found hash\n')
+    -- r.ShowConsoleMsg('found hash\n')
   end
   return false
 end

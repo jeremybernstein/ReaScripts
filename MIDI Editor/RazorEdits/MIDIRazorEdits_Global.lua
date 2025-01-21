@@ -60,6 +60,12 @@ Global.widgetInfo = nil
 Global.changeWidget = nil
 Global.inWidgetMode = false
 
+Global.insertMode = false
+Global.horizontalLock = false
+Global.verticalLock = false
+
+Global.currentTime = 0.
+
 Global.setCursor = setCursor
 
 return Global

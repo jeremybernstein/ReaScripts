@@ -1,13 +1,15 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.8
+-- @version 0.1.0-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix flickering cursor in arrange view
---   - fix some delete/duplicate edge cases
---   - fix some alt+key+hover combis, which weren't working
---   - fix display anomalies which could arise when quantizing moved areas
+--   - add horizontal (h), vertical (l) lock modes for area drag
+--   - add 'insert' mode (i) to not delete the target area when moving/copying data
+--   - add some indicators on the area as to which mode you're in
+--   - mode is not saved with the area state for the moment
+--   - fix key intercepts over dead zones
+--   - reset cursor when app goes to background
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -786,10 +788,12 @@ local function processNotes(activeTake, area, operation)
       local deletionRects = getNonIntersectingAreas(area.logicalRect, area.unstretched)
       local tmpArea = Area.deserialize(area:serialize())
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-      for _, rect in ipairs(deletionRects) do
-        tmpArea.logicalRect = rect
-        updateTimeValueExtentsForArea(tmpArea)
-        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+      if not glob.insertMode then
+        for _, rect in ipairs(deletionRects) do
+          tmpArea.logicalRect = rect
+          updateTimeValueExtentsForArea(tmpArea)
+          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+        end
       end
       if not duplicatingArea then
         tmpArea.timeValue = area.unstretchedTimeValue
@@ -805,7 +809,9 @@ local function processNotes(activeTake, area, operation)
       local altFlag = currentMods.altFlag
       currentMods.altFlag = false
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-      processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- target
+      if not glob.insertMode then
+        processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE)
+      end
       tmpArea.timeValue = area.unstretchedTimeValue
       processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- source
       currentMods.altFlag = altFlag
@@ -1181,7 +1187,9 @@ local function processCCs(activeTake, area, operation)
       else
         local tmpArea = Area.deserialize(area:serialize())
         tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- this seems unnecessary, but is!
+        if not glob.insertMode then
+          processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
+        end
         if not duplicatingArea then
           tmpArea.timeValue = area.unstretchedTimeValue
           processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
@@ -1198,7 +1206,9 @@ local function processCCs(activeTake, area, operation)
       local altFlag = currentMods.altFlag
       currentMods.altFlag = false
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-      processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- this seems unnecessary, but is!
+      if not glob.insertMode then
+        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
+      end
       tmpArea.timeValue = area.unstretchedTimeValue
       processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
       currentMods.altFlag = altFlag
@@ -2085,6 +2095,17 @@ local function processKeys()
   elseif (hottestMods:matches({ ctrl = true, alt = true, super = true })) and (vState:byte(vKeys.VK_X) ~= 0) then
     doClearAll()
     return
+  elseif (vState:byte(vKeys.VK_I) ~= 0) then
+    glob.insertMode = not glob.insertMode
+    return
+  elseif (vState:byte(vKeys.VK_H) ~= 0) then
+    glob.horizontalLock = not glob.horizontalLock
+    if glob.horizontalLock and glob.verticalLock then glob.verticalLock = false end
+    return
+  elseif (vState:byte(vKeys.VK_L) ~= 0) then
+    glob.verticalLock = not glob.verticalLock
+    if glob.verticalLock and glob.horizontalLock then glob.horizontalLock = false end
+    return
   elseif hottestMods:matches({ ctrl = true, alt = true }) and (vState:byte(vKeys.VK_F10) ~= 0) and classes.is_windows then
     local inputString = string.format('%0.3f', lice.compositeDelayMin) .. ',' .. string.format('%0.3f', lice.compositeDelayMax) .. ',' .. string.format('%d', lice.compositeDelayBitmaps)
     local rv, outputString = r.GetUserInputs('LICE Composite Debug', 3, 'Min. Delay (0 - 0.3), Max. Delay (0 - 0.5), Bitmap Count (1 -100)', inputString)
@@ -2657,7 +2678,6 @@ end
 -- otherwise we never receive a release event and chaos ensues
 
 local function doBail()
-  lice.ignoreIntercepts()
   resetMouse()
   lice.resetButtons()
 end
@@ -2747,11 +2767,25 @@ end
 local deferredClearAll = false
 local noProcessOnRelease = false
 
+local function runOperation()
+  swapCurrentMods()
+  processAreas(nil, true)
+  createUndoStep('Process Razor Area Contents')
+end
+
 local function processMouse()
 
   local rv, mx, my = ValidateMouse()
 
-  if not rv then return end
+  if not rv then
+    for _, area in ipairs(areas) do
+      if area.operation then
+        runOperation()
+        break
+      end
+    end
+    return
+  end
 
   local isCC = false
   local ccLane
@@ -2965,9 +2999,7 @@ local function processMouse()
 
     if isOnlyHovered then
       if doProcess then
-        swapCurrentMods()
-        processAreas(nil, true)
-        createUndoStep('Process Razor Area Contents')
+        runOperation()
       end
       return
     end
@@ -3016,7 +3048,7 @@ local function processMouse()
 
     wasDragged = true
     if not analyzeCheckTime then
-      analyzeCheckTime = r.time_precise()
+      analyzeCheckTime = glob.currentTime
     end
 
     if not hasMoved then -- first drag
@@ -3144,6 +3176,11 @@ local function processMouse()
               -- nada
               updatePoint = false
             else
+              if resizing == RS_MOVEAREA then
+                if glob.horizontalLock then dy = 0 end
+                if glob.verticalLock then dx = 0 end
+              end
+
               if not single then
                 if multilane then dy = 0 end
 
@@ -3280,12 +3317,13 @@ local function onCrash(err)
 end
 
 local function loop()
-  local currTime = r.time_precise()
+  glob.currentTime = r.time_precise()
+
   local currEditor = glob.liceData and glob.liceData.editor or nil
 
   -- Get MIDI editor window (limit to one call per 200ms)
-  if not currEditor or not editorCheckTime or currTime > editorCheckTime + 0.2 then
-    editorCheckTime = currTime
+  if not currEditor or not editorCheckTime or glob.currentTime > editorCheckTime + 0.2 then
+    editorCheckTime = glob.currentTime
     currEditor = r.MIDIEditor_GetActive()
   elseif currEditor and not r.ValidatePtr(currEditor, 'HWND*') then
     currEditor = r.MIDIEditor_GetActive()
@@ -3307,8 +3345,8 @@ local function loop()
   glob.liceData.editorTake = editorTake
   glob.liceData.editorItem = r.GetMediaItemTake_Item(editorTake)
 
-  if not analyzeCheckTime or currTime > analyzeCheckTime + 0.2 then -- no need to analyze during drag
-    analyzeCheckTime = analyzeCheckTime and currTime or nil
+  if not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2 then -- no need to analyze during drag
+    analyzeCheckTime = analyzeCheckTime and glob.currentTime or nil
     analyzeChunk()
   end
 
@@ -3327,10 +3365,10 @@ local function loop()
   -- Intercept keyboard when focused and areas are present
   local focusWindow = r.JS_Window_GetFocus()
   if (focusWindow == currEditor or r.JS_Window_IsChild(currEditor, focusWindow)) and #areas > 0 then
-    lice.attendIntercepts()
+    lice.attendKeyIntercepts()
     processKeys()
   else
-    lice.ignoreIntercepts()
+    lice.ignoreKeyIntercepts()
   end
 
   if wantsQuit then return end

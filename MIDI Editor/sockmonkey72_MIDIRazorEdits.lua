@@ -1,15 +1,13 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.9
+-- @version 0.1.0-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - add horizontal (h), vertical (l) lock modes for area drag
---   - add 'insert' mode (i) to not delete the target area when moving/copying data
---   - add some indicators on the area as to which mode you're in
---   - mode is not saved with the area state for the moment
---   - fix key intercepts over dead zones
---   - reset cursor when app goes to background
+--   - remove unnecessary cursor setting
+--   - shut more behaviors off when app in background
+--   - restore MIDI Editor view focus on shutdown
+--   - fix regenerated note while moving (under certain conditions)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -533,7 +531,7 @@ local function getNoteSegments(ppqpos, endppqpos, pitch)
     local positions = {
       {
         bottom = area.timeValue.vals.min,
-        top = area.timeValue.vals.max - 1,
+        top = area.timeValue.vals.max,
         left = area.timeValue.ticks.min,
         right = area.timeValue.ticks.max - 1
       }
@@ -541,7 +539,7 @@ local function getNoteSegments(ppqpos, endppqpos, pitch)
     if area.unstretchedTimeValue then
       table.insert(positions, 1, {
         bottom = area.unstretchedTimeValue.vals.min,
-        top = area.unstretchedTimeValue.vals.max - 1,
+        top = area.unstretchedTimeValue.vals.max,
         left = area.unstretchedTimeValue.ticks.min,
         right = area.unstretchedTimeValue.ticks.max - 1
       })
@@ -2787,6 +2785,8 @@ local function processMouse()
     return
   end
 
+  if not glob.appIsForeground then return end
+
   local isCC = false
   local ccLane
   local isActive
@@ -3043,8 +3043,6 @@ local function processMouse()
     local stretching = false
     local prevPoint = lastPoint
     local isMoving
-
-    glob.setCursor(glob.prevCursor, true)
 
     wasDragged = true
     if not analyzeCheckTime then
@@ -3304,7 +3302,8 @@ local function shutdown()
   local editor = r.MIDIEditor_GetActive()
   if editor then
     r.DockWindowActivate(editor)
-    r.JS_Window_SetFocus(editor)
+    local midiview = r.JS_Window_FindChildByID(editor, 1001)
+    r.JS_Window_SetFocus(midiview or editor)
   end
 
   r.SetToggleCommandState(sectionID, commandID, 0)
@@ -3319,8 +3318,9 @@ end
 local function loop()
   glob.currentTime = r.time_precise()
 
-  local currEditor = glob.liceData and glob.liceData.editor or nil
+  lice.peekAppIntercepts()
 
+  local currEditor = glob.liceData and glob.liceData.editor or nil
   -- Get MIDI editor window (limit to one call per 200ms)
   if not currEditor or not editorCheckTime or glob.currentTime > editorCheckTime + 0.2 then
     editorCheckTime = glob.currentTime
@@ -3345,7 +3345,9 @@ local function loop()
   glob.liceData.editorTake = editorTake
   glob.liceData.editorItem = r.GetMediaItemTake_Item(editorTake)
 
-  if not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2 then -- no need to analyze during drag
+  if glob.appIsForeground -- no need to analyze in bg or during drag (TODO: expect when scrolling)
+    and (not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2)
+  then
     analyzeCheckTime = analyzeCheckTime and glob.currentTime or nil
     analyzeChunk()
   end
@@ -3363,8 +3365,11 @@ local function loop()
   end
 
   -- Intercept keyboard when focused and areas are present
-  local focusWindow = r.JS_Window_GetFocus()
-  if (focusWindow == currEditor or r.JS_Window_IsChild(currEditor, focusWindow)) and #areas > 0 then
+  local focusWindow = glob.appIsForeground and r.JS_Window_GetFocus() or nil
+  if focusWindow
+    and (focusWindow == currEditor or r.JS_Window_IsChild(currEditor, focusWindow))
+    and #areas > 0
+  then
     lice.attendKeyIntercepts()
     processKeys()
   else

@@ -102,18 +102,19 @@ local function createBitmap(midiview, windRect)
 end
 
 local midiIntercepts = {
-  {timestamp = 0, passthrough = false, message = 'WM_SETCURSOR'},
-  {timestamp = 0, passthrough = false, message = 'WM_LBUTTONDOWN'},
-  {timestamp = 0, passthrough = false, message = 'WM_LBUTTONUP'},
-  {timestamp = 0, passthrough = false, message = 'WM_LBUTTONDBLCLK'},
-  {timestamp = 0, passthrough = false, message = 'WM_RBUTTONDOWN'},
-  {timestamp = 0, passthrough = false, message = 'WM_RBUTTONUP'}, -- need both
-  -- {timestamp = 0, passthrough = false, message = 'WM_MOUSEWHEEL'}, -- TODO
+  { timestamp = 0, passthrough = false, message = 'WM_SETCURSOR' },
+  { timestamp = 0, passthrough = false, message = 'WM_LBUTTONDOWN' },
+  { timestamp = 0, passthrough = false, message = 'WM_LBUTTONUP' },
+  { timestamp = 0, passthrough = false, message = 'WM_LBUTTONDBLCLK' },
+  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONDOWN' },
+  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONUP' }, -- need both
+  -- { timestamp = 0, passthrough = false, message = 'WM_MOUSEWHEEL' }, -- TODO
 }
 
+local appInterceptActiveMessageName = classes.is_linux and 'WM_ACTIVATEAPP' or 'WM_ACTIVATE'
+
 local appIntercepts = {
-  -- {timestamp = 0, passthrough = true, message = 'WM_ACTIVATEAPP'}, -- doesn't appear to work
-  {timestamp = 0, passthrough = true, message = 'WM_ACTIVATE'},
+  { timestamp = 0, passthrough = true, message = appInterceptActiveMessageName },
 }
 
 local vKeys = {
@@ -173,6 +174,19 @@ local function ignoreKeyIntercepts()
   end
 end
 
+local function startAppIntercepts()
+  for _, intercept in ipairs(appIntercepts) do
+    r.JS_WindowMessage_Intercept(r.GetMainHwnd(), intercept.message, intercept.passthrough)
+  end
+end
+
+local function endAppIntercepts()
+  for _, intercept in ipairs(appIntercepts) do
+    r.JS_WindowMessage_Release(r.GetMainHwnd(), intercept.message)
+    intercept.timestamp = 0
+  end
+end
+
 local function startIntercepts()
   if glob.isIntercept then return end
   glob.isIntercept = true
@@ -180,20 +194,16 @@ local function startIntercepts()
     for _, intercept in ipairs(midiIntercepts) do
       r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
     end
-    for _, intercept in ipairs(appIntercepts) do
-      r.JS_WindowMessage_Intercept(r.GetMainHwnd(), intercept.message, intercept.passthrough)
-    end
   end
+  startAppIntercepts()
 end
 
 local function endIntercepts()
   if not glob.isIntercept then return end
   glob.isIntercept = false
+  endAppIntercepts()
   if glob.liceData then
     shutdownLiceKeys()
-    for _, intercept in ipairs(appIntercepts) do
-      r.JS_WindowMessage_Release(r.GetMainHwnd(), intercept.message)
-    end
     for _, intercept in ipairs(midiIntercepts) do
       r.JS_WindowMessage_Release(glob.liceData.midiview, intercept.message)
       intercept.timestamp = 0
@@ -232,11 +242,7 @@ local function resetButtons()
   Lice.lbutton_dblclick_seen = nil
 end
 
-local function peekIntercepts(m_x, m_y)
-  if not glob.liceData then return end
-  local lastClickTime = 0
-  local DOUBLE_CLICK_DELAY = 0.2 -- 200ms, adjust based on system double-click time
-
+local function peekAppIntercepts()
   for _, intercept in ipairs(appIntercepts) do
     local msg = intercept.message
     local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(r.GetMainHwnd(), msg)
@@ -244,13 +250,21 @@ local function peekIntercepts(m_x, m_y)
     if ret and time ~= intercept.timestamp then
       intercept.timestamp = time
 
-      if msg == 'WM_ACTIVATE' then
-        if wpl ~= 1 then
+      if msg == appInterceptActiveMessageName then
+        glob.appIsForeground = (wpl == 1)
+        if not glob.appIsForeground then
           glob.setCursor(glob.normal_cursor)
         end
       end
     end
   end
+end
+
+local lastClickTime = 0
+
+local function peekIntercepts(m_x, m_y)
+  if not glob.liceData then return end
+  local DOUBLE_CLICK_DELAY = 0.2 -- 200ms, adjust based on system double-click time
 
   for _, intercept in ipairs(midiIntercepts) do
     local msg = intercept.message
@@ -764,6 +778,8 @@ Lice.endIntercepts = endIntercepts
 
 Lice.passthroughIntercepts = passthroughIntercepts
 Lice.peekIntercepts = peekIntercepts
+
+Lice.peekAppIntercepts = peekAppIntercepts
 
 Lice.vKeys = vKeys
 Lice.resetButtons = resetButtons

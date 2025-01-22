@@ -64,6 +64,7 @@ Global.insertMode = false
 Global.horizontalLock = false
 Global.verticalLock = false
 
+Global.appIsForeground = true
 Global.currentTime = 0.
 
 Global.setCursor = setCursor

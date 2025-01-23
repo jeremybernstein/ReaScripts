@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.05
+-- @version 0.2.06
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - docs fixup
+--   - fix CORRECT_EXTENTS for MIDI items with a start offset
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -951,6 +951,8 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   if MIDIUtils.CORRECT_EXTENTS then
     local item = r.GetMediaItemTake_Item(take)
     local itemStartTime = r.GetMediaItemInfo_Value(item, 'D_POSITION')
+    local itemStartOffset = r.GetMediaItemTakeInfo_Value(take, 'D_STARTOFFS')
+    local itemStartOffsetQN = r.TimeMap2_timeToQN(0, itemStartOffset)
     local itemEndTime = itemStartTime + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
 
     local itemStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemStartTime)
@@ -993,9 +995,12 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
         if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end
         if not newItemEndQN then newItemEndQN = r.TimeMap2_timeToQN(0, itemEndTime) end
         -- resize to nearest QN
-        local floorStartTime = math.floor(newItemStartQN)
-        correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime)
+        local floorStartTime = math.floor(newItemStartQN + 0.5)
+        correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime - itemStartOffsetQN)
         r.MIDI_SetItemExtents(item, floorStartTime, math.ceil(newItemEndQN))
+        if itemStartOffset ~= 0 then
+          r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', itemStartOffset)
+        end
       end
     end
   end

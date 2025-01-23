@@ -1,13 +1,13 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.10
+-- @version 0.1.0-beta.11
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - remove unnecessary cursor setting
---   - shut more behaviors off when app in background
---   - restore MIDI Editor view focus on shutdown
---   - fix regenerated note while moving (under certain conditions)
+--   - some drawing optimization, other minor efficiency tweaks
+--   - retrograde: fix potential note-length bug
+--   - fix CORRECT_EXTENTS for MIDI items with a start offset (via MIDIUtils)
+--   - improve app-in-background detection with undocked MIDI Editor window
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
@@ -78,8 +78,8 @@ local scriptID = 'sockmonkey72_MIDIRazorEdits'
 local _P = mu.post
 local _T = mu.tprint
 
-glob._P = _P -- for debugging
-glob._T = _T
+_G._P = _P -- for debugging
+_G._T = _T
 
 local areas = glob.areas
 local meState = glob.meState
@@ -872,11 +872,15 @@ local function processNotes(activeTake, area, operation)
         if retroOrig then
           local firstppq = sourceEvents[1].ppqpos
           local lastendppq = sourceEvents[#sourceEvents].endppqpos
-            if firstppq < leftmostTick then firstppq = leftmostTick end
+          if firstppq < leftmostTick then firstppq = leftmostTick end
           if lastendppq > rightmostTick then lastendppq = rightmostTick end
+
+          local thisppqpos = ppqpos < leftmostTick and leftmostTick or ppqpos
+          local thisendppqpos = endppqpos > rightmostTick and rightmostTick or endppqpos
           local delta = (firstppq - leftmostTick) - (rightmostTick - lastendppq)
-          newppqpos = (rightmostTick - ((ppqpos >= leftmostTick and ppqpos or leftmostTick) - leftmostTick)) - (endppqpos - ppqpos) + delta
-          newendppqpos = newppqpos + (endppqpos - ppqpos)
+
+          newppqpos = (rightmostTick - ((thisppqpos >= leftmostTick and thisppqpos or leftmostTick) - leftmostTick)) - (thisendppqpos - thisppqpos) + delta
+          newendppqpos = newppqpos + (thisendppqpos - thisppqpos)
         end
       elseif operation == OP_RETROGRADE_VALS then
         changed = true
@@ -1352,7 +1356,7 @@ local function processCCs(activeTake, area, operation)
               newEvent.msg3 = newmsg3 or msg3
               newEvent.type = mu.CC_TYPE
               classes.addUnique(tInsertions, newEvent)
-            else
+            elseif newppqpos or newmsg2 or newmsg3 then
               mu.MIDI_SetCC(activeTake, idx, selected, nil, newppqpos, nil, nil, newmsg2, newmsg3)
               touchedMIDI = true
             end
@@ -2708,11 +2712,12 @@ local deadzone_lbutton_state = 0
 
 local function ValidateMouse()
 
+  local mState = r.JS_Mouse_GetState(1)
+
   if deadzone_lbutton_state == 0 then
     local x, y = r.GetMousePosition()
 
-    -- this appears to be much faster than JS_Window_FromPoint
-    local _, wx1, wy1, wx2, wy2 = r.JS_Window_GetRect(glob.liceData.midiview)
+    local wx1, wy1, wx2, wy2 = glob.liceData.windRect:coords()
     if classes.is_macos then  wy1, wy2 = wy2, wy1 end
 
     local isMidiViewHovered = x >= wx1 and x <= wx2 and y >= wy1 and y <= wy2
@@ -2722,7 +2727,7 @@ local function ValidateMouse()
       y = y < wy1 and wy1 or y > wy2 and wy2 or y
     end
     local mx, my = r.JS_Window_ScreenToClient(glob.liceData.midiview, x, y)
-    local mouseLeftDown = r.JS_Mouse_GetState(1) == 1
+    local mouseLeftDown = mState == 1
 
     local isValidMouseAction = lice.lbutton_drag and mouseLeftDown
     local inDeadZone = isDeadZone(mx, my)
@@ -2741,7 +2746,7 @@ local function ValidateMouse()
     end
   end
 
-  deadzone_lbutton_state = r.JS_Mouse_GetState(1)
+  deadzone_lbutton_state = mState
   lice.passthroughIntercepts()
 
   lice.lbutton_click = false
@@ -3153,6 +3158,8 @@ local function processMouse()
                 dy = 0
                 stretching = false
               end
+            else
+              stretching = false
             end
           end
           if found then
@@ -3225,7 +3232,7 @@ local function processMouse()
         lastPoint = prevPoint
       end
     end
-    if stretching then
+    if stretching then -- TODO: not if resizing?
       processAreas()
     end
   elseif isReleased then
@@ -3318,8 +3325,6 @@ end
 local function loop()
   glob.currentTime = r.time_precise()
 
-  lice.peekAppIntercepts()
-
   local currEditor = glob.liceData and glob.liceData.editor or nil
   -- Get MIDI editor window (limit to one call per 200ms)
   if not currEditor or not editorCheckTime or glob.currentTime > editorCheckTime + 0.2 then
@@ -3339,6 +3344,8 @@ local function loop()
     r.defer(function() xpcall(loop, onCrash) end)
     return
   end
+
+  lice.peekAppIntercepts()
 
   lice.initLice(currEditor)
 
@@ -3367,7 +3374,9 @@ local function loop()
   -- Intercept keyboard when focused and areas are present
   local focusWindow = glob.appIsForeground and r.JS_Window_GetFocus() or nil
   if focusWindow
-    and (focusWindow == currEditor or r.JS_Window_IsChild(currEditor, focusWindow))
+    and (focusWindow == currEditor
+      or focusWindow == glob.liceData.midiview -- don't call into JS_Window_IsChild unless necessary
+      or r.JS_Window_IsChild(currEditor, focusWindow))
     and #areas > 0
   then
     lice.attendKeyIntercepts()

@@ -70,11 +70,20 @@ end
 
 local function prepMidiview(midiview)
   local _, x1, y1, x2, y2 = r.JS_Window_GetRect(midiview)
+  local rect = Rect.new(x1, y1, x2, y2)
+  local windChanged = false
+  local oldy1 = rect.y1
 
-  recalcConstants()
+  rect.y1 = rect.y1 + Lice.MIDI_RULER_H * (classes.is_macos and -1 or 1)
 
-  y1 = y1 + Lice.MIDI_RULER_H * (classes.is_macos and -1 or 1)
-  return Rect.new(x1, y1, x2, y2), math.abs(x2 - x1), math.abs(y2 - y1)
+  if not glob.liceData
+    or not rect:equals(glob.liceData.windRect)
+  then
+    recalcConstants()
+    windChanged = true
+    rect.y1 = oldy1 + Lice.MIDI_RULER_H * (classes.is_macos and -1 or 1)
+  end
+  return windChanged, rect
 end
 
 local numBitmaps = 0 -- print this out for diagnostics if it wets your whistle
@@ -92,8 +101,9 @@ local function createBitmap(midiview, windRect)
   local w, h = math.floor(windRect:width() + 0.5), math.floor(windRect:height() + 0.5)
   local bitmap = r.JS_LICE_CreateBitmap(true, w, h)
   numBitmaps = numBitmaps + 1
-  r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h) --, classes.is_windows and true or false)
+  r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h, not classes.is_windows and true) --, classes.is_windows and true or false)
   if classes.is_windows then
+    -- should only need to do this once for the view
     r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
   end
   local x1, y1 = pointConvertNative(windRect.x1, windRect.y1, windRect)
@@ -174,17 +184,31 @@ local function ignoreKeyIntercepts()
   end
 end
 
+local appInterceptsHWND
+local lastPeekAppInterceptsTime
+
 local function startAppIntercepts()
-  for _, intercept in ipairs(appIntercepts) do
-    r.JS_WindowMessage_Intercept(r.GetMainHwnd(), intercept.message, intercept.passthrough)
+  if appInterceptsHWND or not glob.liceData then return end
+  if r.JS_Window_IsChild(r.GetMainHwnd(), glob.liceData.editor) then
+    appInterceptsHWND = r.GetMainHwnd()
+  else
+    appInterceptsHWND = glob.liceData.editor
   end
+  glob.appIsForeground = true
+  for _, intercept in ipairs(appIntercepts) do
+    r.JS_WindowMessage_Intercept(appInterceptsHWND, intercept.message, intercept.passthrough)
+  end
+  lastPeekAppInterceptsTime = nil
 end
 
 local function endAppIntercepts()
+  if not appInterceptsHWND then return end
   for _, intercept in ipairs(appIntercepts) do
-    r.JS_WindowMessage_Release(r.GetMainHwnd(), intercept.message)
+    r.JS_WindowMessage_Release(appInterceptsHWND, intercept.message)
     intercept.timestamp = 0
   end
+  appInterceptsHWND = nil
+  lastPeekAppInterceptsTime = nil
 end
 
 local function startIntercepts()
@@ -243,9 +267,21 @@ local function resetButtons()
 end
 
 local function peekAppIntercepts()
+  if glob.windowChanged or not appInterceptsHWND then
+    endAppIntercepts()
+    startAppIntercepts()
+  end
+
+  if not appInterceptsHWND then return end
+
+  if lastPeekAppInterceptsTime and glob.currentTime < lastPeekAppInterceptsTime + 0.5 then return end
+
+  lastPeekAppInterceptsTime = glob.currentTime
+  glob.windowChanged = false
+
   for _, intercept in ipairs(appIntercepts) do
     local msg = intercept.message
-    local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(r.GetMainHwnd(), msg)
+    local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(appInterceptsHWND, msg)
 
     if ret and time ~= intercept.timestamp then
       intercept.timestamp = time
@@ -278,10 +314,8 @@ local function peekIntercepts(m_x, m_y)
       -- end
 
       if msg == 'WM_RBUTTONDOWN' then
-        if glob.handleRightClick() then return end
-      end
-
-      if msg == 'WM_LBUTTONDBLCLK' then
+        glob.handleRightClick()
+      elseif msg == 'WM_LBUTTONDBLCLK' then
         -- Got a double click - clear any pending single click state
         if not Lice.lbutton_dblclick then
           Lice.lbutton_press_x = nil
@@ -292,9 +326,7 @@ local function peekIntercepts(m_x, m_y)
           Lice.lbutton_dblclick_seen = false
           lastClickTime = time
         end
-      end
-
-      if msg == 'WM_LBUTTONDOWN' then
+      elseif msg == 'WM_LBUTTONDOWN' then
         local currentTime = glob.currentTime
         if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
           -- Only register the click if we're outside the double-click window
@@ -306,9 +338,7 @@ local function peekIntercepts(m_x, m_y)
           end
           Lice.lbutton_release = false
         end
-      end
-
-      if msg == 'WM_LBUTTONUP' then
+      elseif msg == 'WM_LBUTTONUP' then
         local currentTime = glob.currentTime
         if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
           -- Only process the release if we're outside the double-click window
@@ -328,9 +358,8 @@ end
 
 local function initLice(editor)
   if glob.liceData and glob.liceData.editor == editor then
-    local windRect, w, h = prepMidiview(glob.liceData.midiview)
-    -- Check if MIDI editor window size changed:
-    if w ~= glob.liceData.windRect:width() or h ~= glob.liceData.windRect:height() then
+    local windChanged, windRect = prepMidiview(glob.liceData.midiview)
+    if windChanged then
       glob.liceData.windRect = windRect
       -- Create new bitmap
       if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
@@ -338,14 +367,18 @@ local function initLice(editor)
       glob.windowRect = glob.liceData.screenRect:clone()
       glob.meNeedsRecalc = true
       glob.needsRecomposite = true
+      glob.windowChanged = true
+      peekAppIntercepts()
     end
   elseif editor then
     local midiview = r.JS_Window_FindChildByID(editor, 1001)
     if midiview then
-      local windRect, w, h = prepMidiview(midiview)
+      local _, windRect = prepMidiview(midiview)
       local bitmap, screenRect = createBitmap(midiview, windRect)
       glob.liceData = { editor = editor, midiview = midiview, bitmap = bitmap, windRect = windRect, screenRect = screenRect }
       glob.windowRect = glob.liceData.screenRect:clone()
+      glob.windowChanged = true
+      peekAppIntercepts()
       startIntercepts()
     end
   end
@@ -523,8 +556,9 @@ end
 local function clearBitmap(bitmap, x1, y1, width, height)
   r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
   -- if classes.is_windows then
+  --   r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
   -- else
-  --   r.JS_LICE_Clear(bitmap, 0x00FFFFFF)
+  --   r.JS_LICE_Clear(bitmap, 0x00000000)
   -- end
 end
 
@@ -587,8 +621,6 @@ local function drawLice()
   local mode = 'COPY,ALPHA' --classes.is_windows and 0 or 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
-
-
   if glob.liceData then
     for _, area in ipairs(glob.areas) do
       if area.logicalRect then
@@ -596,6 +628,8 @@ local function drawLice()
         local x1V, y1V, x2V, y2V = rectToLiceCoords(viewRect)
         local w, h = math.floor(viewRect:width() + (Lice.EDGE_SLOP * 2) + 1 + 0.5), math.floor(viewRect:height() + (Lice.EDGE_SLOP * 2) + 1 + 0.5) -- need some y slop for the widget
         local skip = false
+        local upsizing = false
+        local downsizing = false
 
         if viewRect.y2 <= viewRect.y1
           or viewRect.x2 <= viewRect.x1
@@ -608,18 +642,26 @@ local function drawLice()
         end
 
         if not skip and area.bitmap and area.modified or recomposite then
-          if destroyBitmap(area.bitmap) then
-            area.bitmap = nil
+          local bmWidth, bmHeight = r.JS_LICE_GetWidth(area.bitmap), r.JS_LICE_GetHeight(area.bitmap)
+          if w > bmWidth or h > bmHeight then
+            upsizing = true
+          elseif w < bmWidth / 2 or h < bmHeight / 2 then
+            downsizing = true
+          end
+          if upsizing or downsizing or recomposite then
+            if destroyBitmap(area.bitmap) then
+              area.bitmap = nil
+            end
+          else
+            clearBitmap(area.bitmap, 0, 0, bmWidth, bmHeight)
+            r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not classes.is_windows and true) --, classes.is_windows and true or false)
           end
         end
         if not skip and not area.bitmap then
-          area.bitmap = r.JS_LICE_CreateBitmap(true, w, h)
+          area.bitmap = r.JS_LICE_CreateBitmap(true, w + (upsizing and w or 0), h + (upsizing and h or 0)) -- when upsizing, make it double-the size so that we don't have to resize so often
           numBitmaps = numBitmaps + 1
           area.modified = true
-          r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h) --, classes.is_windows and true or false)
-          if classes.is_windows then
-            r.JS_Composite_Delay(glob.liceData.midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
-          end
+          r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not classes.is_windows and true) --, classes.is_windows and true or false)
         end
 
         if not skip and area.modified or area.hovering or area.washovering then

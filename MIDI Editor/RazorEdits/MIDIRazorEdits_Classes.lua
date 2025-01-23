@@ -231,6 +231,25 @@ function Rect:height()
   return math.abs(self.y2 - self.y1)
 end
 
+function Rect:coords()
+  return self.x1, self.y1, self.x2, self.y2
+end
+
+function Rect:offset(dx, dy)
+  self.x1 = self.x1 + dx
+  self.y1 = self.y1 + dy
+  self.x2 = self.x2 + dx
+  self.y2 = self.y2 + dy
+end
+
+function Rect:equals(rect)
+  return rect
+     and self.x1 == rect.x1
+     and self.y1 == rect.y1
+     and self.x2 == rect.x2
+     and self.y2 == rect.y2
+end
+
 function Rect:clone(grow)
   grow = grow or 0
   return Rect.new(self.x1 - grow, self.y1 - grow, self.x2 + grow, self.y2 + grow)

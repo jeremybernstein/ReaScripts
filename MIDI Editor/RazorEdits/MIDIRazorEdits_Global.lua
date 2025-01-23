@@ -47,6 +47,7 @@ Global.meLanes = {}
 Global.isIntercept = false
 Global.meNeedsRecalc = true
 Global.needsRecomposite = true
+Global.windowChanged = false
 Global.currentGrid = nil
 -- TODO: swing grid
 Global.currentSwing = nil

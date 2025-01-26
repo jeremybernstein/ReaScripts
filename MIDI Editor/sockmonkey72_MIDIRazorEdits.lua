@@ -1,13 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.12
+-- @version 0.1.0-beta.13
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - move main script into a require module, so we can call it with different args/options at some point
---   - add settings script (for key mapping)
---   - improve time/value delta calculation while moving (hopefully eliminate slight, but critical variations in duration)
---   - improve time/value delta calculation during processing
+--   - fix inadvertent deletion of notes outside of the target/source areas
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

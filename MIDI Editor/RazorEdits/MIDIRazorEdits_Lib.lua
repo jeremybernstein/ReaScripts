@@ -829,7 +829,7 @@ local function processNotes(activeTake, area, operation)
       if not glob.insertMode then
         for _, rect in ipairs(deletionRects) do
           tmpArea.logicalRect = rect
-          updateTimeValueExtentsForArea(tmpArea)
+          makeTimeValueExtentsForArea(tmpArea)
           processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
         end
       end

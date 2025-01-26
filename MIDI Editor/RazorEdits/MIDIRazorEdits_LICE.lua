@@ -12,6 +12,7 @@ local r = reaper
 -- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'RazorEdits/?.lua;' -- GET DIRECTORY FOR REQUIRE
 local classes = require 'MIDIRazorEdits_Classes'
 local glob = require 'MIDIRazorEdits_Global'
+local keys = require 'MIDIRazorEdits_Keys'
 
 local Rect = classes.Rect
 
@@ -127,33 +128,54 @@ local appIntercepts = {
   { timestamp = 0, passthrough = true, message = appInterceptActiveMessageName },
 }
 
-local vKeys = {
-  VK_BACK 	      = 0x08,   --  Backspace
-  VK_ENTER   	    = 0x0D,   --  Enter
-  VK_ESCAPE 	    = 0x1B,   --  Esc
-  VK_DELETE 	    = 0x2E,   --  Delete
-  VK_C 	          = 0x43,   --  C
-  VK_D 	          = 0x44,   --  D
-  VK_F 	          = 0x46,   --  F
-  VK_H 	          = 0x48,   --  H -- horizontal lock
-  VK_I 	          = 0x49,   --  I
-  VK_L 	          = 0x4C,   --  L -- vertical lock
-  VK_P 	          = 0x50,   --  P
-  VK_R 	          = 0x52,   --  R
-  VK_S 	          = 0x53,   --  S
-  VK_U 	          = 0x55,   --  U
-  VK_V 	          = 0x56,   --  V
-  VK_W 	          = 0x57,   --  W
-  VK_X 	          = 0x58,   --  X
-  VK_F10 	        = 0x79,   --  F10
-}
+local keyMappings
+local modMappings
 
 local keyCt = 0
 
+local userKeyMappings
+local userModMappings
+
+local function buildNewKeyMap()
+  keyMappings = tableCopy(keys.defaultKeyMappings)
+  if userKeyMappings then
+    for k, map in pairs(userKeyMappings) do
+      if keyMappings[k] then
+        keyMappings[k] = map -- pre-vetted
+      end
+    end
+  end
+  for k, map in pairs(keyMappings) do
+    map.vKey = map.vKey or keys.vKeyLookup[map.baseKey]
+  end
+
+  modMappings = tableCopy(keys.defaultModMappings)
+  if userModMappings then
+    for k, map in pairs(userModMappings) do
+      if modMappings[k] and map.modKey then
+        modMappings[k].modKey = map.modKey
+      end
+    end
+  end
+
+  -- _T(keyMappings)
+  -- _T(modMappings)
+end
+
+local function keyIsMapped(k)
+  for _, map in pairs(keyMappings) do
+    if map.vKey == k then return true end
+  end
+  return false
+end
+
 local function initLiceKeys()
+  if not keyMappings then buildNewKeyMap() end
   if glob.liceData and keyCt == 0 then
-    for _, v in pairs(vKeys) do
-      r.JS_VKeys_Intercept(v, 1)
+    for _, map in pairs(keyMappings) do
+      if map.vKey then
+        r.JS_VKeys_Intercept(map.vKey, 1)
+      end
     end
     keyCt = keyCt + 1
   end
@@ -161,14 +183,67 @@ end
 
 local function shutdownLiceKeys()
   if glob.liceData and keyCt > 0 then
-    for _, v in pairs(vKeys) do
-      r.JS_VKeys_Intercept(v, -1)
+    for _, map in pairs(keyMappings) do
+      if map.vKey then
+        r.JS_VKeys_Intercept(map.vKey, -1)
+      end
     end
     keyCt = keyCt - 1
   end
 end
 
-local interceptKeyInput = true
+local function loadKeyMappingState(stateTab)
+  if userKeyMappings then userKeyMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.baseKey then
+        local vKey = keys.vKeyLookup[map.baseKey]
+        if vKey then
+          if not userKeyMappings then userKeyMappings = {} end
+          userKeyMappings[k] = { baseKey = map.baseKey, modifiers = map.modifiers, vKey = vKey } -- need to ensure that there are no duplicate key/modifiers pairs
+        end
+      end
+    end
+  end
+end
+
+local function loadModMappingState(stateTab)
+  if userModMappings then userModMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.modKey then
+        if not userModMappings then userModMappings = {} end
+        userModMappings[k] = { modKey = map.modKey }
+      end
+    end
+  end
+end
+
+local function reloadSettings()
+  shutdownLiceKeys()
+
+  local stateVal
+  local stateTab
+
+  stateVal = r.GetExtState(glob.scriptID, 'keyMappings')
+  if stateVal then
+    stateTab = fromExtStateString(stateVal)
+  end
+  loadKeyMappingState(stateTab)
+
+  stateVal = r.GetExtState(glob.scriptID, 'modMappings')
+  if stateVal then
+    stateTab = fromExtStateString(stateVal)
+  end
+  loadModMappingState(stateTab)
+
+  keyMappings = nil
+  modMappings = nil
+
+  initLiceKeys()
+end
+
+local interceptKeyInput = false
 
 local function attendKeyIntercepts()
   if not interceptKeyInput then
@@ -823,9 +898,15 @@ Lice.peekIntercepts = peekIntercepts
 
 Lice.peekAppIntercepts = peekAppIntercepts
 
-Lice.vKeys = vKeys
+Lice.keyMappings = function() return keyMappings end
+Lice.modMappings = function() return modMappings end
+Lice.loadKeyMappingState = loadKeyMappingState
+Lice.loadModMappingState = loadModMappingState
+Lice.keyIsMapped = keyIsMapped
+
 Lice.resetButtons = resetButtons
 Lice.rebuildColors = rebuildColors
+Lice.reloadSettings = reloadSettings
 
 Lice.drawLice = drawLice
 return Lice

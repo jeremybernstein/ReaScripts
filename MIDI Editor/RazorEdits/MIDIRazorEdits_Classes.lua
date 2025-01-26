@@ -29,12 +29,14 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
     end
   end
 end
+_G.spairs = spairs
 
 local function deserialize(str)
   local f, err = load('return ' .. str)
   if not f then r.ShowConsoleMsg(err .. '\n') end
   return f ~= nil and f() or nil
 end
+_G.deserialize = deserialize
 
 local function orderByKey(t, a, b)
   return a < b
@@ -71,6 +73,51 @@ local function serialize(val, name, skipnewlines, depth)
   end
   return tmp
 end
+_G.serialize = serialize
+
+----------------------------------------------------------
+--------- BASE64 LIB from http://lua-users.org/wiki/BaseSixtyFour
+
+-- character table string
+local bt = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+-- encoding
+local function b64enc(data)
+  return ((data:gsub('.', function(x)
+    local r,b='',x:byte()
+    for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
+    return r;
+  end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+    if (#x < 6) then return '' end
+    local c=0
+    for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
+    return bt:sub(c+1,c+1)
+  end)..({ '', '==', '=' })[#data%3+1])
+end
+
+-- decoding
+local function b64dec(data)
+  data = string.gsub(data, '[^'..bt..'=]', '')
+  return (data:gsub('.', function(x)
+    if (x == '=') then return '' end
+    local r,f='',(bt:find(x)-1)
+    for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+    return r;
+  end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+    if (#x ~= 8) then return '' end
+    local c=0
+    for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+    return string.char(c)
+  end))
+end
+
+_G.toExtStateString = function(tab)
+  return next(tab) ~= nil and b64enc(serialize(tab)) or nil
+end
+
+_G.fromExtStateString = function(b64str)
+  return deserialize(b64dec(b64str))
+end
 
 ----------------------------------------------------
 -- MouseMods pseudo-object
@@ -104,6 +151,13 @@ end
 
 function MouseMods:all()
   return (self.shiftFlag and self.altFlag and self.ctrlFlag and self.superFlag)
+end
+
+function MouseMods:matchesFlags(modFlags)
+  if not modFlags or modFlags == 0 then return self:none()
+  else
+    return self:matches({ shift = modFlags & 1 ~= 0, ctrl = modFlags & 2 ~= 0, alt = modFlags & 4 ~= 0, super = modFlags & 8 ~= 0 })
+  end
 end
 
 function MouseMods:matches(mods)
@@ -399,160 +453,6 @@ Classes.Point = Point
 Classes.Rect = Rect
 Classes.Extent = Extent
 Classes.TimeValueExtents = TimeValueExtents
-
--- safekeeping
-local vKeys = {
-  VK_LBUTTON 	    = 0x01,   --  The left mouse button
-  VK_RBUTTON 	    = 0x02,   --  The right mouse button
-  VK_CANCEL 	    = 0x03,   --  The Cancel virtual key, used for control-break processing
-  VK_MBUTTON 	    = 0x04,   --  The middle mouse button
-  VK_BACK 	      = 0x08,   --  Backspace
-  VK_TAB 	        = 0x09,   --  Tab
-  VK_CLEAR 	      = 0x0C,   --  5 (keypad without Num Lock)
-  VK_ENTER   	    = 0x0D,   --  Enter
-  VK_SHIFT 	      = 0x10,   --  Shift (either one)
-  VK_CONTROL 	    = 0x11,   --  Ctrl (either one)
-  VK_MENU         = 0x12,   --  Alt (either one)
-  VK_PAUSE        = 0x13,   --  Pause
-  VK_CAPITAL 	    = 0x14,   --  Caps Lock
-  VK_ESCAPE 	    = 0x1B,   --  Esc
-  VK_SPACE 	      = 0x20,   --  Spacebar
-  VK_PAGEUP 	    = 0x21,   --  Page Up
-  VK_PAGEDOWN 	  = 0x22,   --  Page Down
-  VK_END 	        = 0x23,   --  End
-  VK_HOME 	      = 0x24,   --  Home
-  VK_LEFT 	      = 0x25,   --  Left Arrow
-  VK_UP 	        = 0x26,   --  Up Arrow
-  VK_RIGHT 	      = 0x27,   --  Right Arrow
-  VK_DOWN 	      = 0x28,   --  Down Arrow
-  VK_SELECT 	    = 0x29,   --  Select
-  VK_PRINT 	      = 0x2A,   --  Print (only used by Nokia keyboards)
-  VK_EXECUTE 	    = 0x2B,   --  Execute (not used)
-  VK_SNAPSHOT 	  = 0x2C,   --  Print Screen
-  VK_INSERT 	    = 0x2D,   --  Insert
-  VK_DELETE 	    = 0x2E,   --  Delete
-  VK_HELP 	      = 0x2F,   --  Help
-  VK_0 	          = 0x30,   --  0
-  VK_1 	          = 0x31,   --  1
-  VK_2 	          = 0x32,   --  2
-  VK_3 	          = 0x33,   --  3
-  VK_4 	          = 0x34,   --  4
-  VK_5 	          = 0x35,   --  5
-  VK_6 	          = 0x36,   --  6
-  VK_7 	          = 0x37,   --  7
-  VK_8 	          = 0x38,   --  8
-  VK_9 	          = 0x39,   --  9
-  VK_A 	          = 0x41,   --  A
-  VK_B 	          = 0x42,   --  B
-  VK_C 	          = 0x43,   --  C
-  VK_D 	          = 0x44,   --  D
-  VK_E 	          = 0x45,   --  E
-  VK_F 	          = 0x46,   --  F
-  VK_G 	          = 0x47,   --  G
-  VK_H 	          = 0x48,   --  H
-  VK_I 	          = 0x49,   --  I
-  VK_J 	          = 0x4A,   --  J
-  VK_K 	          = 0x4B,   --  K
-  VK_L 	          = 0x4C,   --  L
-  VK_M 	          = 0x4D,   --  M
-  VK_N 	          = 0x4E,   --  N
-  VK_O 	          = 0x4F,   --  O
-  VK_P 	          = 0x50,   --  P
-  VK_Q 	          = 0x51,   --  Q
-  VK_R 	          = 0x52,   --  R
-  VK_S 	          = 0x53,   --  S
-  VK_T 	          = 0x54,   --  T
-  VK_U 	          = 0x55,   --  U
-  VK_V 	          = 0x56,   --  V
-  VK_W 	          = 0x57,   --  W
-  VK_X 	          = 0x58,   --  X
-  VK_Y 	          = 0x59,   --  Y
-  VK_Z 	          = 0x5A,   --  Z
-  VK_STARTKEY 	  = 0x5B,   --  Start Menu key
-  VK_CONTEXTKEY 	= 0x5D,   --  Context Menu key
-  VK_NUMPAD0 	    = 0x60,   --  0 (keypad with Num Lock)
-  VK_NUMPAD1 	    = 0x61,   --  1 (keypad with Num Lock)
-  VK_NUMPAD2 	    = 0x62,   --  2 (keypad with Num Lock)
-  VK_NUMPAD3 	    = 0x63,   --  3 (keypad with Num Lock)
-  VK_NUMPAD4 	    = 0x64,   --  4 (keypad with Num Lock)
-  VK_NUMPAD5 	    = 0x65,   --  5 (keypad with Num Lock)
-  VK_NUMPAD6 	    = 0x66,   --  6 (keypad with Num Lock)
-  VK_NUMPAD7 	    = 0x67,   --  7 (keypad with Num Lock)
-  VK_NUMPAD8 	    = 0x68,   --  8 (keypad with Num Lock)
-  VK_NUMPAD9 	    = 0x69,   --  9 (keypad with Num Lock)
-  VK_MULTIPLY 	  = 0x6A,   --  * (keypad)
-  VK_ADD 	        = 0x6B,   --  = 0x(keypad)
-  VK_SEPARATOR 	  = 0x6C,   --  Separator (never generated by the keyboard)
-  VK_SUBTRACT 	  = 0x6D,   --  - (keypad)
-  VK_DECIMAL 	    = 0x6E,   --  . (keypad with Num Lock)
-  VK_DIVIDE 	    = 0x6F,   --  / (keypad)
-  VK_F1 	        = 0x70,   --  F1
-  VK_F2 	        = 0x71,   --  F2
-  VK_F3 	        = 0x72,   --  F3
-  VK_F4 	        = 0x73,   --  F4
-  VK_F5 	        = 0x74,   --  F5
-  VK_F6 	        = 0x75,   --  F6
-  VK_F7 	        = 0x76,   --  F7
-  VK_F8 	        = 0x77,   --  F8
-  VK_F9 	        = 0x78,   --  F9
-  VK_F10 	        = 0x79,   --  F10
-  VK_F11 	        = 0x7A,   --  F11
-  VK_F12 	        = 0x7B,   --  F12
-  VK_F13 	        = 0x7C,   --  F13
-  VK_F14 	        = 0x7D,   --  F14
-  VK_F15 	        = 0x7E,   --  F15
-  VK_F16 	        = 0x7F,   --  F16
-  VK_F17 	        = 0x80,   --  F17
-  VK_F18 	        = 0x81,   --  F18
-  VK_F19 	        = 0x82,   --  F19
-  VK_F20 	        = 0x83,   --  F20
-  VK_F21 	        = 0x84,   --  F21
-  VK_F22 	        = 0x85,   --  F22
-  VK_F23 	        = 0x86,   --  F23
-  VK_F24 	        = 0x87,   --  F24
-  VK_NUMLOCK 	    = 0x90,   --  Num Lock
-  VK_OEM_SCROLL 	= 0x91,   --  Scroll Lock
-  VK_OEM_1 	      = 0xBA,   --  ;
-  VK_OEM_PLUS 	  = 0xBB,   --  =
-  VK_OEM_COMMA 	  = 0xBC,   --  ,
-  VK_OEM_MINUS 	  = 0xBD,   --  -
-  VK_OEM_PERIOD 	= 0xBE,   --  .
-  VK_OEM_2 	      = 0xBF,   --  /
-  VK_OEM_3 	      = 0xC0,   --  `
-  VK_OEM_4 	      = 0xDB,   --  [
-  VK_OEM_5 	      = 0xDC,   --  \
-  VK_OEM_6 	      = 0xDD,   --  ]
-  VK_OEM_7 	      = 0xDE,   --  '
-  VK_OEM_8 	      = 0xDF,   --  (unknown)
-  VK_ICO_F17 	    = 0xE0,   --  F17 on Olivetti extended keyboard (internal use only)
-  VK_ICO_F18 	    = 0xE1,   --  F18 on Olivetti extended keyboard (internal use only)
-  VK_OEM_102 	    = 0xE2,   --  < or | on IBM-compatible 102 enhanced non-U.S. keyboard
-  VK_ICO_HELP 	  = 0xE3,   --  Help on Olivetti extended keyboard (internal use only)
-  VK_ICO_00 	    = 0xE4,   --  00 on Olivetti extended keyboard (internal use only)
-  VK_ICO_CLEAR 	  = 0xE6,   --  Clear on Olivette extended keyboard (internal use only)
-  VK_OEM_RESET 	  = 0xE9,   --  Reset (Nokia keyboards only)
-  VK_OEM_JUMP 	  = 0xEA,   --  Jump (Nokia keyboards only)
-  VK_OEM_PA1 	    = 0xEB,   --  PA1 (Nokia keyboards only)
-  VK_OEM_PA2 	    = 0xEC,   --  PA2 (Nokia keyboards only)
-  VK_OEM_PA3 	    = 0xED,   --  PA3 (Nokia keyboards only)
-  VK_OEM_WSCTRL 	= 0xEE,   --  WSCTRL (Nokia keyboards only)
-  VK_OEM_CUSEL 	  = 0xEF,   --  CUSEL (Nokia keyboards only)
-  VK_OEM_ATTN 	  = 0xF0,   --  ATTN (Nokia keyboards only)
-  VK_OEM_FINNISH 	= 0xF1,   --  FINNISH (Nokia keyboards only)
-  VK_OEM_COPY 	  = 0xF2,   --  COPY (Nokia keyboards only)
-  VK_OEM_AUTO 	  = 0xF3,   --  AUTO (Nokia keyboards only)
-  VK_OEM_ENLW 	  = 0xF4,   --  ENLW (Nokia keyboards only)
-  VK_OEM_BACKTAB 	= 0xF5,   --  BACKTAB (Nokia keyboards only)
-  VK_ATTN 	      = 0xF6,   --  ATTN
-  VK_CRSEL 	      = 0xF7,   --  CRSEL
-  VK_EXSEL 	      = 0xF8,   --  EXSEL
-  VK_EREOF 	      = 0xF9,   --  EREOF
-  VK_PLAY 	      = 0xFA,   --  PLAY
-  VK_ZOOM 	      = 0xFB,   --  ZOOM
-  VK_NONAME 	    = 0xFC,   --  NONAME
-  VK_PA1 	        = 0xFD,   --  PA1
-  VK_OEM_CLEAR 	  = 0xFE,   --  CLEAR
-}
 
 -- Direction constants
 local Direction = {

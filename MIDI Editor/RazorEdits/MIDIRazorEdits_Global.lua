@@ -7,11 +7,12 @@
 
 local Global = {}
 
-package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'RazorEdits/?.lua;' -- GET DIRECTORY FOR REQUIRE
+-- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'RazorEdits/?.lua;' -- GET DIRECTORY FOR REQUIRE
 local classes = require 'MIDIRazorEdits_Classes'
 
 local r = reaper
 
+Global.scriptID = 'sockmonkey72_MIDIRazorEdits'
 Global.DEBUG_LANES = false
 
 -- this this a problem, multiple initialization?

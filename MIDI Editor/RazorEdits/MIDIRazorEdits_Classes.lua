@@ -153,10 +153,16 @@ function MouseMods:all()
   return (self.shiftFlag and self.altFlag and self.ctrlFlag and self.superFlag)
 end
 
-function MouseMods:matchesFlags(modFlags)
-  if not modFlags or modFlags == 0 then return self:none()
+function MouseMods:matchesFlags(modFlags, optional)
+  if not optional and (not modFlags or modFlags == 0) then return self:none()
   else
-    return self:matches({ shift = modFlags & 1 ~= 0, ctrl = modFlags & 2 ~= 0, alt = modFlags & 4 ~= 0, super = modFlags & 8 ~= 0 })
+    modFlags = modFlags or 0
+    return self:matches({
+      shift = optional.shift and '' or (modFlags & 1 ~= 0),
+      ctrl = optional.ctrl and '' or (modFlags & 2 ~= 0),
+      alt = optional.alt and '' or (modFlags & 4 ~= 0),
+      super = optional.super and '' or (modFlags & 8 ~= 0)
+    })
   end
 end
 

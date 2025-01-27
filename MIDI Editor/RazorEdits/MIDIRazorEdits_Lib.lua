@@ -167,12 +167,12 @@ end
 
 local function getMod(someMods, mod)
   someMods = someMods or currentMods
-  if mod & 1 ~= 0 then return someMods:shift(), 'shiftFlag'
-  elseif mod & 2 ~= 0 then return someMods:ctrl(), 'ctrlFlag'
-  elseif mod & 4 ~= 0 then return someMods:alt(), 'altFlag'
-  elseif mod & 8 ~= 0 then return someMods:super(), 'superFlag'
+  if mod & 1 ~= 0 then return someMods:shift(), 'shift', 'shiftFlag'
+  elseif mod & 2 ~= 0 then return someMods:ctrl(), 'ctrl', 'ctrlFlag'
+  elseif mod & 4 ~= 0 then return someMods:alt(), 'alt', 'altFlag'
+  elseif mod & 8 ~= 0 then return someMods:super(), 'super', 'superFlag'
   end
-  return false, nil
+  return false, nil, nil
 end
 
 local function snapMod(someMods)
@@ -611,7 +611,7 @@ local processNotesWithGeneration
 local tInsertions
 local tDeletions
 
-local function getNoteSegments(ppqpos, endppqpos, pitch)
+local function getNoteSegments(ppqpos, endppqpos, pitch, onlyArea)
   -- First, find all areas that intersect with the pitch line
   local intersecting_areas = {}
 
@@ -648,8 +648,12 @@ local function getNoteSegments(ppqpos, endppqpos, pitch)
   end
 
   -- Check all areas
-  for _, area in ipairs(areas) do
-    checkAreaIntersection(area)
+  if onlyArea then
+    checkAreaIntersection(onlyArea)
+  else
+    for _, area in ipairs(areas) do
+      checkAreaIntersection(area)
+    end
   end
 
   if #intersecting_areas == 0 then
@@ -983,7 +987,7 @@ local function processNotes(activeTake, area, operation)
           deleteOrig = trimOverlappingNotes() -- this screws up most operations, but is necessary for OP_DUPLICATE
         end
 
-        local segments = getNoteSegments(ppqpos, endppqpos, pitch)
+        local segments = getNoteSegments(ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
         if segments then
           for i, seg in ipairs(segments) do
             local newEvent = mu.tableCopy(event)
@@ -2185,7 +2189,7 @@ local function swapCurrentMods()
   currentMods = hottestMods:clone()
 end
 
-local function keyMatches(vkState, info, someMods)
+local function keyMatches(vkState, info, allowOverlap, someMods)
   someMods = someMods or hottestMods
 
   local found = false
@@ -2196,7 +2200,8 @@ local function keyMatches(vkState, info, someMods)
       if vkState:byte(keys.vKeyLookup['back']) ~= 0 then found = true end
     end
     if found then
-      return someMods:matchesFlags(info.modifiers)
+      local hasOverlapMod, overlapModName = overlapMod(someMods)
+      return someMods:matchesFlags(info.modifiers, (allowOverlap and hasOverlapMod) and { [overlapModName] = true } or nil)
     end
   end
   return false
@@ -2233,10 +2238,10 @@ local function processKeys()
   -- fallback to old style, selective passthrough and that's it
   acquireKeyMods()
 
-  local hotSnap, snapName = snapMod(hottestMods)
+  local hotSnap, _, snapFlagName = snapMod(hottestMods)
   if hotSnap ~= snapMod() then
-    if snapName then
-      currentMods[snapName] = hottestMods[snapName]
+    if snapFlagName then
+      currentMods[snapFlagName] = hottestMods[snapFlagName]
     end
   end
 
@@ -2276,6 +2281,7 @@ local function processKeys()
 
   local function processAreaShortcuts(area)
 
+    -- only hovered
     if keyMatches(vState, keyMappings.fullLane) then
       if area.hovering then
         makeFullLane(area)
@@ -2294,34 +2300,34 @@ local function processKeys()
       return false
     end
 
-    if keyMatches(vState, keyMappings.retrograde) then
+    if keyMatches(vState, keyMappings.retrograde, true) then
       area.operation = OP_RETROGRADE
       return true
     end
 
-    if keyMatches(vState, keyMappings.retrograde2) then -- retrograde values
+    if keyMatches(vState, keyMappings.retrograde2, true) then -- retrograde values
       area.operation = OP_RETROGRADE_VALS
       return true
     end
 
     -- local singleMod = singleAreaProcessing()
     -- if (singleMod and area.hovering) or noMod or (not area.ccLane and hottestMods:alt()) then
-      if keyMatches(vState, keyMappings.deleteContents) then -- delete contents (or D?)
+      if keyMatches(vState, keyMappings.deleteContents, true) then -- delete contents (or D?)
         area.operation = OP_DELETE
         return true
-      elseif keyMatches(vState, keyMappings.duplicate) then -- duplicate
+      elseif keyMatches(vState, keyMappings.duplicate, true) then -- duplicate
         area.operation = OP_DUPLICATE
         return true
-      elseif keyMatches(vState, keyMappings.invert) then -- invert
+      elseif keyMatches(vState, keyMappings.invert, true) then -- invert
         area.operation = OP_INVERT
         return true
-      elseif keyMatches(vState, keyMappings.copy) then -- copy
-        area.operation = OP_COPY
-        return true
-      elseif keyMatches(vState, keyMappings.select) then -- select
+      -- elseif keyMatches(vState, keyMappings.copy, true) then -- copy
+      --   area.operation = OP_COPY
+      --   return true
+      elseif keyMatches(vState, keyMappings.select, true) then -- select
         area.operation = OP_SELECT
         return true
-      elseif keyMatches(vState, keyMappings.unselect) then -- unselect
+      elseif keyMatches(vState, keyMappings.unselect, true) then -- unselect
         area.operation = OP_UNSELECT
         return true
       end

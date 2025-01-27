@@ -52,6 +52,7 @@ Global.windowChanged = false
 Global.currentGrid = nil
 -- TODO: swing grid
 Global.currentSwing = nil
+Global.stretchMode = 0 -- default = compress/expand
 
 Global.areas = {}
 Global.liceData = nil

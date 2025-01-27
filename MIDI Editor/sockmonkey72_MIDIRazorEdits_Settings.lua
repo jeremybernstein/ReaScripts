@@ -289,6 +289,8 @@ end
 
 local lastKeyState
 local lastModState
+local prefsStretchMode
+local stretchMode
 
 local function handleSavedMappings()
   local state
@@ -318,6 +320,11 @@ local function handleSavedMappings()
       end
     end
   end
+
+  state = r.GetExtState(scriptID_Save, 'stretchMode')
+  prefsStretchMode = state ~= '' and tonumber(state) or 0
+  if not prefsStretchMode then prefsStretchMode = 0 end
+  stretchMode = prefsStretchMode
 end
 
 local function drawKeyMappings()
@@ -388,6 +395,7 @@ end
 local wantsQuit = false
 
 local function hasChanges() -- could throttle this if it's a performance concern
+  if stretchMode ~= prefsStretchMode then return true end
   if lastKeyState ~= toExtStateString(prepKeysForSaving()) then return true end
   if lastModState ~= toExtStateString(prepModsForSaving()) then return true end
   return false
@@ -400,6 +408,7 @@ local function drawButtons()
     ImGui.BeginDisabled(ctx)
   end
   if ImGui.Button(ctx, 'Save Changes') then
+    -- KEY mappings
     local extStateStr = toExtStateString(prepKeysForSaving())
     if extStateStr then
       r.SetExtState(scriptID_Save, 'keyMappings', extStateStr, true)
@@ -408,6 +417,8 @@ local function drawButtons()
       r.DeleteExtState(scriptID_Save, 'keyMappings', true)
       lastKeyState = nil
     end
+
+    -- MOD mappings
     extStateStr = toExtStateString(prepModsForSaving())
     if extStateStr then
       r.SetExtState(scriptID_Save, 'modMappings', extStateStr, true)
@@ -416,6 +427,16 @@ local function drawButtons()
       r.DeleteExtState(scriptID_Save, 'modMappings', true)
       lastModState = nil
     end
+
+    -- stretch mode
+    if stretchMode ~= 0 then
+      r.SetExtState(scriptID_Save, 'stretchMode', tostring(stretchMode), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'stretchMode', true)
+    end
+    prefsStretchMode = stretchMode
+
+    -- NOTIFY
     r.SetExtState(scriptID_Save, 'settingsUpdated', 'ping', false)
   end
   if not changed then
@@ -435,6 +456,18 @@ local function drawButtons()
     keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
     modMappings = tableCopySimpleKeys(keys.defaultModMappings)
   end
+end
+
+local function drawMiscOptions()
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Value Stretch Mode:')
+  local rv
+  local sm = stretchMode
+  ImGui.SameLine(ctx)
+  rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand', sm, 0)
+  ImGui.SameLine(ctx)
+  rv, sm = ImGui.RadioButtonEx(ctx, 'Offset', sm, 1)
+  stretchMode = sm
 end
 
 local inWindow = false
@@ -467,6 +500,14 @@ local function loop()
     ImGui.Spacing(ctx)
 
     drawModMappings()
+
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+
+    drawMiscOptions()
 
     ImGui.Spacing(ctx)
     ImGui.Separator(ctx)

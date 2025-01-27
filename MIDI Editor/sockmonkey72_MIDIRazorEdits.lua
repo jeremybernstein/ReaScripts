@@ -1,10 +1,14 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.13
+-- @version 0.1.0-beta.14
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix inadvertent deletion of notes outside of the target/source areas
+--   - further elimination of spatial rect-based processing where unnecessary
+--   - add option for pure-offset stretching (see settings script)
+--   - improve polyAT support (REAPER pre-releases only at the moment)
+--   - fix "delete area & contents" operation
+--   - fix horizontal scroll in piano roll "Project Time" timebase
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

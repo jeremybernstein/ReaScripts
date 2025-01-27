@@ -369,6 +369,7 @@ local updateAreaFromTimeValue
 
 local function updateTimeValueExtentsForArea(area, noCheck, force)
   local updated = true
+  local oldTicksMin, oldTicksMax = area.timeValue.ticks.min, area.timeValue.ticks.max
 
   if not noCheck then adjustFullLane(area, true) end
 
@@ -418,7 +419,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     else
       area.timeValue.vals.min = updateTimeValueBottom(area)
     end
-  elseif resizing == RS_MOVEAREA then
+  elseif resizing == RS_MOVEAREA and not force then
     local oldmin = area.timeValue.ticks.min
     local oldtop = area.timeValue.vals.max
     area.timeValue.ticks.min = updateTimeValueLeft(area)
@@ -438,18 +439,38 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     updated = false
   end
   if updated then
-    if area.active and (resizing == RS_LEFT or resizing == RS_RIGHT or resizing == RS_MOVEAREA) then
-      local min, max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
-      if resizing == RS_LEFT then
-        area.timeValue.ticks.min = min
-      elseif resizing == RS_RIGHT then
-        area.timeValue.ticks.max = max
-      elseif resizing == RS_MOVEAREA then
-        local delta = min - area.timeValue.ticks.min
-        area.timeValue.ticks.min = min
-        area.timeValue.ticks.max = area.timeValue.ticks.max + delta -- ensure that the area width doesn't change
+    if area.active then
+      local isMovingTime = resizing == RS_LEFT or resizing == RS_RIGHT or resizing == RS_MOVEAREA
+      if isMovingTime then
+        local min, max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
+        if resizing == RS_LEFT then
+          area.timeValue.ticks.min = min
+        elseif resizing == RS_RIGHT then
+          area.timeValue.ticks.max = max
+        elseif resizing == RS_MOVEAREA then
+          local delta = min - area.timeValue.ticks.min
+          area.timeValue.ticks.min = min
+          area.timeValue.ticks.max = area.timeValue.ticks.max + delta -- ensure that the area width doesn't change
+        end
       end
-      updateAreaFromTimeValue(area)
+
+      if isMovingTime or resizing == RS_NEWAREA then
+        if meState.timeBase == 'time' then
+          if oldTicksMin ~= area.timeValue.ticks.min then
+            local oldTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, oldTicksMin)
+            local newTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, area.timeValue.ticks.min)
+            local timeDelta = newTime - oldTime
+            area.timeValue.time.min = area.timeValue.time.min + timeDelta
+          end
+          if oldTicksMax ~= area.timeValue.ticks.max then
+            local oldTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, oldTicksMax)
+            local newTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, area.timeValue.ticks.max)
+            local timeDelta = newTime - oldTime
+            area.timeValue.time.max = area.timeValue.time.max + timeDelta
+          end
+        end
+        updateAreaFromTimeValue(area)
+      end
     end
     area.modified = true
   end
@@ -507,7 +528,7 @@ updateAreaFromTimeValue = function(area, noCheck)
       local topValue = area.ccLane and meLanes[area.ccLane].topValue or meState.topPitch
       local multi = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
       y1 = math.floor((topPixel + ((topValue - area.timeValue.vals.max) * multi)) + 0.5)
-      y2 = math.floor((topPixel + ((topValue - area.timeValue.vals.min + 1) * multi)) + 0.5)
+      y2 = math.min(math.floor((topPixel + ((topValue - area.timeValue.vals.min + 1) * multi)) + 0.5), meLanes[area.ccLane or -1].bottomPixel)
     end
     area.logicalRect = Rect.new(x1, y1, x2, y2)
     area.viewRect = viewIntersectionRect(area)
@@ -555,6 +576,27 @@ local function scaleValue(input, outputMin, outputMax, scalingFactorStart, scali
   elseif scalingFactor > 0.5 then
     local factor = (scalingFactor - 0.5) / 0.5
     return lerp(input, outputMax, factor)
+  end
+end
+
+local function offsetValue(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t)
+  -- Ensure t is clamped between 0 and 1
+  t = math.max(0, math.min(1, t))
+
+  local offsetFactor = lerp(offsetFactorStart, offsetFactorEnd, t)
+  offsetFactor = math.max(0, math.min(1, offsetFactor))
+
+  offsetFactor = 1 - offsetFactor -- offsetFactor is inverted
+
+  -- Adjust the output based on the scaling factor
+  if equalIsh(offsetFactor, 0.5) then
+    return input
+  elseif offsetFactor < 0.5 then
+    local factor = (0.5 - offsetFactor) / 0.5
+    return input - ((outputMax - outputMin) * factor)
+  elseif offsetFactor > 0.5 then
+    local factor = (offsetFactor - 0.5) / 0.5
+    return input + ((outputMax - outputMin) * factor)
   end
 end
 
@@ -677,75 +719,75 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
--- Returns true if two rectangles intersect
-local function doRectsIntersect(r1, r2)
-  return not (r1.x2 < r2.x1 or
-              r1.x1 > r2.x2 or
-              r1.y2 < r2.y1 or
-              r1.y1 > r2.y2)
+-- Returns true if two time-value extents intersect
+local function doExtentsIntersect(e1, e2)
+  return not (e1.ticks.max < e2.ticks.min or
+              e1.ticks.min > e2.ticks.max or
+              e1.vals.max < e2.vals.min or
+              e1.vals.min > e2.vals.max)
 end
 
--- Returns the intersection of two rectangles, or nil if they don't intersect
-local function getIntersection(r1, r2)
-  if not doRectsIntersect(r1, r2) then
+-- Returns the intersection of two time-value extents, or nil if they don't intersect
+local function getIntersection(e1, e2)
+  if not doExtentsIntersect(e1, e2) then
     return nil
   end
 
-  return Rect.new(
-    math.max(r1.x1, r2.x1),
-    math.max(r1.y1, r2.y1),
-    math.min(r1.x2, r2.x2),
-    math.min(r1.y2, r2.y2)
+  return TimeValueExtents.new(
+    math.max(e1.ticks.min, e2.ticks.min),
+    math.min(e1.ticks.max, e2.ticks.max),
+    math.max(e1.vals.min, e2.vals.min),
+    math.min(e1.vals.max, e2.vals.max)
   )
 end
 
--- Returns a table of Rect objects representing the non-intersecting parts of rect1
-local function getNonIntersectingAreas(r1, r2)
-  local intersection = getIntersection(r1, r2)
+-- Returns a table of TimeValueExtents objects representing the non-intersecting parts of extents1
+local function getNonIntersectingAreas(e1, e2)
+  local intersection = getIntersection(e1, e2)
   if not intersection then
-    -- If there's no intersection, return the first rectangle
-    return {r1}
+    -- If there's no intersection, return the first extents
+    return {e1}
   end
 
   local nonIntersecting = {}
 
-  -- Check left side of intersection
-  if intersection.x1 > r1.x1 then
-    table.insert(nonIntersecting, Rect.new(
-      r1.x1,
-      r1.y1,
-      intersection.x1,
-      r1.y2
+  -- Check earlier time side of intersection
+  if intersection.ticks.min > e1.ticks.min then
+    table.insert(nonIntersecting, TimeValueExtents.new(
+      e1.ticks.min,
+      intersection.ticks.min,
+      e1.vals.min,
+      e1.vals.max
     ))
   end
 
-  -- Check right side of intersection
-  if intersection.x2 < r1.x2 then
-    table.insert(nonIntersecting, Rect.new(
-      intersection.x2,
-      r1.y1,
-      r1.x2,
-      r1.y2
+  -- Check later time side of intersection
+  if intersection.ticks.max < e1.ticks.max then
+    table.insert(nonIntersecting, TimeValueExtents.new(
+      intersection.ticks.max,
+      e1.ticks.max,
+      e1.vals.min,
+      e1.vals.max
     ))
   end
 
-  -- Check top side of intersection
-  if intersection.y1 > r1.y1 then
-    table.insert(nonIntersecting, Rect.new(
-      intersection.x1,
-      r1.y1,
-      intersection.x2,
-      intersection.y1
+  -- Check lower value side of intersection
+  if intersection.vals.min > e1.vals.min then
+    table.insert(nonIntersecting, TimeValueExtents.new(
+      intersection.ticks.min,
+      intersection.ticks.max,
+      e1.vals.min,
+      intersection.vals.min
     ))
   end
 
-  -- Check bottom side of intersection
-  if intersection.y2 < r1.y2 then
-    table.insert(nonIntersecting, Rect.new(
-      intersection.x1,
-      intersection.y2,
-      intersection.x2,
-      r1.y2
+  -- Check upper value side of intersection
+  if intersection.vals.max < e1.vals.max then
+    table.insert(nonIntersecting, TimeValueExtents.new(
+      intersection.ticks.min,
+      intersection.ticks.max,
+      intersection.vals.max,
+      e1.vals.max
     ))
   end
 
@@ -782,7 +824,7 @@ local function processNotes(activeTake, area, operation)
   end
 
   if operation == OP_STRETCH and area.unstretched and (not singleMod() or area.active) then
-    ratio = (area.logicalRect:width()) / (area.unstretched:width())
+    ratio = area.timeValue.ticks:size() / area.unstretchedTimeValue.ticks:size()
     usingUnstretched = true
     if ratio == 1 and resizing < RS_MOVEAREA then return end
   end
@@ -817,19 +859,18 @@ local function processNotes(activeTake, area, operation)
   -- TODO: REFACTOR (can use same code, approximately, for CCs)
   -- potential second iteration, deal with deletions in the target area
   if operation == OP_DUPLICATE then
-    local tmpArea = Area.deserialize(area:serialize())
+    local tmpArea = Area.new(area:serialize())
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_TRIM)
   elseif movingArea then
      if deltaTicks ~= 0 or deltaPitch ~= 0 then
       -- extra work to avoid deleting the target area, if it intersects with the source area
-      local deletionRects = getNonIntersectingAreas(area.logicalRect, area.unstretched)
-      local tmpArea = Area.deserialize(area:serialize())
+      local deletionExtents = getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue)
+      local tmpArea = Area.new(area:serialize())
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
       if not glob.insertMode then
-        for _, rect in ipairs(deletionRects) do
-          tmpArea.logicalRect = rect
-          makeTimeValueExtentsForArea(tmpArea)
+        for _, extent in ipairs(deletionExtents) do
+          tmpArea.timeValue = extent
           processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
         end
       end
@@ -843,7 +884,7 @@ local function processNotes(activeTake, area, operation)
     end
   elseif stretchingArea and not (resizing == RS_TOP or resizing == RS_BOTTOM) then
     if deltaTicks ~= 0 or deltaPitch ~= 0 then
-      local tmpArea = Area.deserialize(area:serialize())
+      local tmpArea = Area.new(area:serialize())
       local altFlag = currentMods.altFlag
       currentMods.altFlag = false
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
@@ -1105,10 +1146,17 @@ local function processNotes(activeTake, area, operation)
   if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents then
     for _, event in ipairs(glob.widgetInfo.sourceEvents) do
       local val = event.vel
+      local newval
 
-      local newval = math.floor(scaleValue(val, 1, 127,
-                                area.widgetExtents.min, area.widgetExtents.max,
-                                (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      if glob.stretchMode == 1 then
+        newval = math.floor(offsetValue(val, 1, 127,
+                            area.widgetExtents.min, area.widgetExtents.max,
+                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      else
+        newval = math.floor(scaleValue(val, 1, 127,
+                            area.widgetExtents.min, area.widgetExtents.max,
+                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      end
 
       mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newval, nil)
       touchedMIDI = true
@@ -1160,10 +1208,8 @@ local function processCCs(activeTake, area, operation)
   end
 
   if operation == OP_STRETCH and area.unstretched and (not singleMod() or area.active) then
-    local logicalRect = area.logicalRect:clone() -- do this on a copy in case we're inDrag
-    logicalRect:conform()
-    hratio = (logicalRect:width()) / (area.unstretched:width())
-    vratio = (logicalRect:height()) / (area.unstretched:height())
+    hratio = (area.timeValue.ticks:size()) / (area.unstretchedTimeValue.ticks:size())
+    vratio = (area.timeValue.vals:size()) / (area.unstretchedTimeValue.vals:size())
     usingUnstretched = true
     if (hratio == 1 and (resizing == RS_LEFT or resizing == RS_RIGHT))
       or (vratio == 1 and (resizing == RS_TOP or resizing == RS_BOTTOM))
@@ -1210,7 +1256,7 @@ local function processCCs(activeTake, area, operation)
   -- TODO: REFACTOR (can use same code, approximately, for notes)
   -- potential second iteration, deal with deletions in the target area
   if operation == OP_DUPLICATE then
-    local tmpArea = Area.deserialize(area:serialize())
+    local tmpArea = Area.new(area:serialize())
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
   elseif movingArea then
@@ -1220,7 +1266,7 @@ local function processCCs(activeTake, area, operation)
         -- no move/copy support for vel/rel vel atm
         -- processNotes(activeTake, tmpArea, OP_DELETE)
       else
-        local tmpArea = Area.deserialize(area:serialize())
+        local tmpArea = Area.new(area:serialize())
         tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
         if not glob.insertMode then
           processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
@@ -1237,7 +1283,7 @@ local function processCCs(activeTake, area, operation)
   elseif stretchingArea then
     -- addControlPoints()
     if deltaTicks ~= 0 or deltaVal ~= 0 then
-      local tmpArea = Area.deserialize(area:serialize())
+      local tmpArea = Area.new(area:serialize())
       local altFlag = currentMods.altFlag
       currentMods.altFlag = false
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
@@ -1332,9 +1378,17 @@ local function processCCs(activeTake, area, operation)
             elseif resizing == RS_RIGHT then
               newppqpos = areaLeftmostTick + ((ppqpos - areaLeftmostTick) * hratio)
             elseif resizing == RS_TOP then
-              newval = bottomValue + ((val - bottomValue) * vratio)
+              if glob.stretchMode == 1 then
+                newval = math.min(math.max(val + (area.timeValue.vals.max - area.unstretchedTimeValue.vals.max), 0), meLanes[area.ccLane].range)
+              else
+                newval = bottomValue + ((val - bottomValue) * vratio)
+              end
             elseif resizing == RS_BOTTOM then
-              newval = topValue - ((topValue - val) * vratio)
+              if glob.stretchMode == 1 then
+                newval = math.min(math.max(val + (area.timeValue.vals.min - area.unstretchedTimeValue.vals.min), 0), meLanes[area.ccLane].range)
+              else
+                newval = topValue - ((topValue - val) * vratio)
+              end
             end
             if newval then
               newmsg2, newmsg3 = valToBytes(clipInt(newval, 0, meLanes[area.ccLane].range))
@@ -1423,10 +1477,16 @@ local function processCCs(activeTake, area, operation)
       local pitchbend = chanmsg == 0xE0
       local val = (chanmsg == 0xA0 or chanmsg == 0xB0) and event.msg3 or onebyte and event.msg2 or (event.msg3 << 7 | event.msg2)
 
-      local newval = math.floor(scaleValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
-                                area.widgetExtents.min, area.widgetExtents.max,
-                                (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-
+      local newval
+      if glob.stretchMode == 1 then
+        newval = math.floor(offsetValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
+                            area.widgetExtents.min, area.widgetExtents.max,
+                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      else
+        newval = math.floor(scaleValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
+                            area.widgetExtents.min, area.widgetExtents.max,
+                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      end
       -- TODO valToBytes, untangle here
       local newmsg2
       local newmsg3
@@ -1506,7 +1566,6 @@ local function addControlPoints(activeTake, area)
   end
 end
 
-
 local function generateSourceInfo(area, op, force)
   if not area.sourceInfo or force then
     local isNote = not area.ccLane and true or false
@@ -1573,6 +1632,21 @@ local function generateSourceInfo(area, op, force)
       local laneIsVel = laneIsVelocity(area)
       local isRelVelocity = ccType == 0x207
       local ccChanmsg, ccFilter = classes.ccTypeToChanmsg(ccType)
+      local selNotes
+
+      if ccChanmsg == 0xA0 then -- polyAT, we need to know which notes are selected
+        idx = -1
+        selNotes = {}
+        while true do
+          idx = mu.MIDI_EnumSelNotes(activeTake, idx)
+          if idx == -1 then break end
+          local rv, _, _, _, _, _, pitch = mu.MIDI_GetNote(activeTake, idx)
+          if rv and pitch then selNotes[pitch] = 1 end
+        end
+        if not next(selNotes) then selNotes = nil end -- select all, no selected notes
+        idx = -1
+      end
+
       local enumFn = laneIsVel and mu.MIDI_EnumNotes or mu.MIDI_EnumCC
 
       while true do
@@ -1595,8 +1669,9 @@ local function generateSourceInfo(area, op, force)
         -- local pitchbend = chanmsg == 0xE0
         local val = (event.chanmsg == 0xA0 or event.chanmsg == 0xB0) and event.msg3 or onebyte and event.msg2 or (event.msg3 << 7 | event.msg2)
 
-        if event.ppqpos >= leftmostTick and event.ppqpos < rightmostTick
+        if event.ppqpos >= leftmostTick and event.ppqpos <= rightmostTick
           and event.chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and event.msg2 == ccFilter))
+          and (not selNotes or selNotes[event.msg2]) -- handle PolyAT lane
           and val <= topValue and val >= bottomValue
         then
           event.idx = idx
@@ -1966,7 +2041,7 @@ local function toggleThisAreaToCCLanes(area)
 
   if not ccLanesToggled or area ~= ccLanesToggled then
     for i = #meLanes, 0, -1 do
-      local newArea = Area.deserialize({ fullLane = true,
+      local newArea = Area.new({ fullLane = true,
                                          timeValue = TimeValueExtents.new(area.timeValue.ticks.min, area.timeValue.ticks.max, 0, meLanes[i].range),
                                          ccLane = i,
                                          ccType = meLanes[i].type
@@ -2067,6 +2142,14 @@ local function restorePreferences()
       if stateVal then lice.compositeDelayBitmaps = math.min(math.max(1, stateVal), 100) end
     end
   end
+
+  glob.stretchMode = 0 -- default
+  stateVal = r.GetExtState(scriptID, 'stretchMode')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.stretchMode = math.min(math.max(0, math.floor(stateVal)), 1) end
+  end
+
   lice.reloadSettings() -- key/mod mappings
 end
 
@@ -2075,6 +2158,11 @@ local function savePreferences()
     r.SetExtState(scriptID, 'compositeDelayMin', string.format('%0.3f', lice.compositeDelayMin), true)
     r.SetExtState(scriptID, 'compositeDelayMax', string.format('%0.3f', lice.compositeDelayMax), true)
     r.SetExtState(scriptID, 'compositeDelayBitmaps', string.format('%0.3f', lice.compositeDelayBitmaps), true)
+  end
+  if glob.stretchMode ~= 0 then
+    r.SetExtState(scriptID, 'stretchMode', tostring(glob.stretchMode), true)
+  else
+    r.DeleteExtState(scriptID, 'stretchMode', true)
   end
 end
 
@@ -2167,9 +2255,6 @@ local function processKeys()
 
   if keyMatches(vState, keyMappings.exitScript) then
     wantsQuit = true
-    return
-  elseif keyMatches(vState, keyMappings.deleteAreaContents) then
-    doClearAll()
     return
   elseif keyMatches(vState, keyMappings.insertMode) then
     glob.insertMode = not glob.insertMode
@@ -2453,17 +2538,31 @@ local function updateAreaForAllEvents(area)
   local activeTake = glob.liceData.editorTake
   local idx = -1
   local timeMin, timeMax
-  local valMin, valMax -- only for notes
+  local valMin, valMax
   local ccType = area.ccLane and meLanes[area.ccLane].type or nil
   local ccChanmsg, ccFilter = classes.ccTypeToChanmsg(ccType)
 
   local laneIsVel = laneIsVelocity(area)
   local isNote = not area.ccLane or laneIsVel
   local chanmsg
+  local selNotes
 
   if isNote then
     ccChanmsg = 0x90
     chanmsg = 0x90
+  end
+
+  if ccChanmsg == 0xA0 then -- polyAT, we need to know which notes are selected
+    idx = -1
+    selNotes = {}
+    while true do
+      idx = mu.MIDI_EnumSelNotes(activeTake, idx)
+      if idx == -1 then break end
+      local rv, _, _, _, _, _, pitch = mu.MIDI_GetNote(activeTake, idx)
+      if rv and pitch then selNotes[pitch] = 1 end
+    end
+    if not next(selNotes) then selNotes = nil end -- select all, no selected notes
+    idx = -1
   end
 
   local ccValLimited = fullLaneMod() and not laneIsVel
@@ -2483,7 +2582,10 @@ local function updateAreaForAllEvents(area)
 
     chanmsg = chanmsg & 0xF0
 
-    if chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter)) then
+    if chanmsg == ccChanmsg
+      and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter))
+      and (not selNotes or selNotes[msg2]) -- handle PolyAT lane
+    then
       if not timeMin or ppqpos < timeMin then timeMin = ppqpos end
       local cmppos = isNote and endppqpos or ppqpos
       if not timeMax or cmppos > timeMax then timeMax = cmppos end
@@ -2508,7 +2610,7 @@ local function updateAreaForAllEvents(area)
     end
 
     area.timeValue = TimeValueExtents.new(timeMin, timeMax,
-                                          (isNote and not laneIsVel) and valMin - 1 or ccValLimited and valMin or 0, (isNote and not laneIsVel) and valMax or ccValLimited and valMax or meLanes[area.ccLane].range,
+                                          (isNote and not laneIsVel) and valMin or ccValLimited and valMin or 0, (isNote and not laneIsVel) and valMax or ccValLimited and valMax or meLanes[area.ccLane].range,
                                           leftmostTime, rightmostTime)
     updateAreaFromTimeValue(area)
   end
@@ -2555,7 +2657,7 @@ local function resolveIntersections()
     end
 
     if not is_contained then
-      table.insert(result, Area.new(areas[i], function(area) makeTimeValueExtentsForArea(area, true) end))
+      table.insert(result, Area.new(areas[i], updateAreaFromTimeValue))
     end
   end
 
@@ -2584,10 +2686,7 @@ local function resolveIntersections()
         local modify_idx = keep_first and j or i
 
         local function shipIt(res, idx, logicalRect)
-          local area = Area.new(result[idx])
-          area.logicalRect = logicalRect
-          area.viewRect = viewIntersectionRect(area)
-          makeTimeValueExtentsForArea(area)
+          local area = Area.new(result[idx], updateAreaFromTimeValue)
           res[idx] = area
         end
 
@@ -2949,7 +3048,7 @@ local function processMouse()
       resetState()
       processAreas(nil, true) -- get the state
 
-      areas[#areas + 1] = Area.new({ viewRect = Rect.new(mx, my, mx, my),
+      areas[#areas + 1] = Area.newFromRect({ viewRect = Rect.new(mx, my, mx, my),
                                       logicalRect = Rect.new(mx, my, mx, my),
                                       origin = Point.new(mx, my),
                                       ccLane = ccLane or nil,
@@ -3125,7 +3224,7 @@ local function processMouse()
 
       local fullLane = (ccLane and not fullLaneMod()) or (not ccLane and fullLaneMod())
 
-      areas[#areas + 1] = Area.new({ viewRect = Rect.new(mx, my, mx, my),
+      areas[#areas + 1] = Area.newFromRect({ viewRect = Rect.new(mx, my, mx, my),
                                       logicalRect = Rect.new(mx, my, mx, my),
                                       origin = Point.new(mx, my),
                                       ccLane = ccLane or nil,
@@ -3311,7 +3410,7 @@ local function processMouse()
                   updatePoint = false
                 end
                 updateTimeValueExtentsForArea(area)
-              end
+            end
             end
             if single then break end
           end
@@ -3412,7 +3511,7 @@ local function createAreaForSelectedNotes()
   end
 
   if minVal and maxVal and minTick and maxTick then
-    local newArea = Area.deserialize({ timeValue = TimeValueExtents.new(minTick, maxTick, minVal, maxVal) }, updateAreaFromTimeValue)
+    local newArea = Area.new({ timeValue = TimeValueExtents.new(minTick, maxTick, minVal, maxVal) }, updateAreaFromTimeValue)
     areas[#areas + 1] = newArea
     createUndoStep('Create Razor Area for Selected Notes')
   end
@@ -3423,7 +3522,7 @@ local function checkForSettingsUpdate()
   if state then
     r.DeleteExtState(scriptID, 'settingsUpdated', false)
     if state ~= '' then
-      lice.reloadSettings()
+      restorePreferences()
     end
   end
 end

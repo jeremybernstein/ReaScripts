@@ -399,7 +399,7 @@ end
 local Area = {}
 Area.__index = Area
 
-function Area.new(tab, completionFn)
+function Area.newFromRect(tab, completionFn)
   local self = setmetatable({}, Area)
 
   self.viewRect = tab.viewRect
@@ -417,7 +417,7 @@ function Area.new(tab, completionFn)
   return self
 end
 
-function Area.deserialize(tab, completionFn)
+function Area.new(tab, completionFn)
   local self = setmetatable({}, Area)
 
   self.ccLane = tab.ccLane
@@ -431,6 +431,10 @@ function Area.deserialize(tab, completionFn)
   end
 
   return self
+end
+
+function Area.deserialize(tab, completionFn)
+  return Area.new(tab, completionFn)
 end
 
 function Area:serialize()

@@ -1,11 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.15
+-- @version 0.1.0-beta.16
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - improve target area deletion during 'duplicate' operation
---   - reintroduce overlap modifier for (note) operations
+--   - update time value/area extents in "Project Time" on mouse-up
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

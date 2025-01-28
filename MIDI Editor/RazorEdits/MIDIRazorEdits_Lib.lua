@@ -3439,6 +3439,7 @@ local function processMouse()
       area.origin = nil
       area.specialDrag = nil
       if area.active then stretching = true end
+      updateTimeValueTime(area)
     end
 
     if resizing == RS_NEWAREA

@@ -1,10 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.16
+-- @version 0.1.0-beta.17
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - update time value/area extents in "Project Time" on mouse-up
+--   - drawing update, reducing blitted area to a minimum (at the cost of more bitmaps). is it faster on Windows?
+--   - fix some weird (non-)deletion behavior and missing MIDI updates
+--   - minor cleanup with hopefully no side effects
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

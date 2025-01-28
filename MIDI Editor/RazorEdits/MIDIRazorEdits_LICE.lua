@@ -17,6 +17,9 @@ local keys = require 'MIDIRazorEdits_Keys'
 local Rect = classes.Rect
 
 local winscale = classes.is_windows and 2 or 1
+local pixelScale
+
+local MOAR_BITMAPS = true
 
 -- magic numbers
 Lice.EDGE_SLOP = 0
@@ -28,6 +31,7 @@ Lice.MIDI_HANDLE_R = 0
 Lice.MIDI_SEPARATOR = 0
 
 winscale = classes.getDPIScale()
+pixelScale = math.floor((1 / winscale) + 0.5)
 
 -- the Klangfarben Numbers work best for me
 Lice.compositeDelayMin = 0.1 --0.020 -- 0.016 -- 0.05
@@ -41,6 +45,7 @@ local function recalcConstants(force)
 
   if not force and DPIScale ~= prevDPIScale then
     winscale = DPIScale
+    pixelScale = math.floor((1 / winscale) + 0.5)
     prevDPIScale = DPIScale
     force = true
   end
@@ -52,7 +57,7 @@ local function recalcConstants(force)
     Lice.MIDI_RULER_H = math.floor((val * winscale) + 0.5)
     val = classes.is_windows and 17 or 15
     Lice.MIDI_SCROLLBAR_B = math.floor((val * winscale) + 0.5)
-    val = classes.is_windows and 19 or 18
+    val = classes.is_windows and 19 or 17
     Lice.MIDI_SCROLLBAR_R = math.floor((val * winscale) + 0.5)
     Lice.MIDI_HANDLE_L = math.floor((26 * winscale) + 0.5)
     Lice.MIDI_HANDLE_R = math.floor((26 * winscale) + 0.5)
@@ -431,14 +436,66 @@ local function peekIntercepts(m_x, m_y)
   end
 end
 
+local function createFrameBitmaps(midiview, windRect)
+  local bitmaps = {}
+
+  local x1, y1 = pointConvertNative(windRect.x1, windRect.y1, windRect)
+  local x2, y2 = pointConvertNative(windRect.x2, windRect.y2, windRect)
+
+  if MOAR_BITMAPS then
+  local meLanes = glob.meLanes
+  if meLanes and next(meLanes) then
+    local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
+    local w, h = math.floor(windRect:width() + 0.5), math.floor( (bottomPixel - y1) + 0.5)
+    bitmaps.top = r.JS_LICE_CreateBitmap(true, 1, 1)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    numBitmaps = numBitmaps + 1
+    bitmaps.bottom = r.JS_LICE_CreateBitmap(true, 1, 1)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (bottomPixel - glob.liceData.screenRect.y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    numBitmaps = numBitmaps + 1
+    if meLanes[0] then
+      local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
+      bitmaps.middletop = r.JS_LICE_CreateBitmap(true, 1, 1)
+      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - glob.liceData.screenRect.y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+      numBitmaps = numBitmaps + 1
+      bitmaps.middlebottom = r.JS_LICE_CreateBitmap(true, 1, 1)
+      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - glob.liceData.screenRect.y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+      numBitmaps = numBitmaps + 1
+    end
+    bitmaps.left = r.JS_LICE_CreateBitmap(true, 1, 1)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    numBitmaps = numBitmaps + 1
+    bitmaps.right = r.JS_LICE_CreateBitmap(true, 1, 1)
+    r.JS_Composite(midiview, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    numBitmaps = numBitmaps + 1
+
+    if classes.is_windows then
+      -- should only need to do this once for the view
+      r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
+    end
+  end
+  end
+
+  return bitmaps, Rect.new(x1, y1, x2, y2)
+end
+
+local recompositeInit
+
 local function initLice(editor)
+  if not glob.meLanes then return end
   if glob.liceData and glob.liceData.editor == editor then
     local windChanged, windRect = prepMidiview(glob.liceData.midiview)
-    if windChanged then
+    if windChanged or not next(glob.liceData.bitmaps) or recompositeInit then
       glob.liceData.windRect = windRect
-      -- Create new bitmap
-      if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
-      glob.liceData.bitmap, glob.liceData.screenRect = createBitmap(glob.liceData.midiview, windRect)
+      -- Create new bitmaps
+      for _, bitmap in pairs(glob.liceData.bitmaps) do
+        if bitmap then destroyBitmap(bitmap) end
+      end
+      glob.liceData.bitmaps, glob.liceData.screenRect = createFrameBitmaps(glob.liceData.midiview, windRect)
+      if glob.DEBUG_LANES or not MOAR_BITMAPS then
+        if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
+        glob.liceData.bitmap = createBitmap(glob.liceData.midiview, windRect)
+      end
       glob.windowRect = glob.liceData.screenRect:clone()
       glob.meNeedsRecalc = true
       glob.needsRecomposite = true
@@ -449,14 +506,18 @@ local function initLice(editor)
     local midiview = r.JS_Window_FindChildByID(editor, 1001)
     if midiview then
       local _, windRect = prepMidiview(midiview)
-      local bitmap, screenRect = createBitmap(midiview, windRect)
-      glob.liceData = { editor = editor, midiview = midiview, bitmap = bitmap, windRect = windRect, screenRect = screenRect }
+      local bitmaps, screenRect = createFrameBitmaps(midiview, windRect)
+      glob.liceData = { editor = editor, midiview = midiview, bitmaps = bitmaps, windRect = windRect, screenRect = screenRect }
+      if glob.DEBUG_LANES or not MOAR_BITMAPS then
+        glob.liceData.bitmap = createBitmap(midiview, windRect)
+      end
       glob.windowRect = glob.liceData.screenRect:clone()
       glob.windowChanged = true
       peekAppIntercepts()
       startIntercepts()
     end
   end
+  recompositeInit = false
 end
 
 local function shutdownLice()
@@ -467,8 +528,18 @@ local function shutdownLice()
   end
 
   if glob.liceData then
-    if destroyBitmap(glob.liceData.bitmap) then
-      glob.liceData.bitmap = nil
+    if MOAR_BITMAPS then
+    if glob.liceData.bitmaps then
+      for _, bitmap in pairs(glob.liceData.bitmaps) do
+        if bitmap then destroyBitmap(bitmap) end
+      end
+      glob.liceData.bitmaps = nil
+    end
+    end
+    if glob.DEBUG_LANES or not MOAR_BITMAPS then
+      if destroyBitmap(glob.liceData.bitmap) then
+        glob.liceData.bitmap = nil
+      end
     end
   end
   endIntercepts()
@@ -638,7 +709,7 @@ local function clearBitmap(bitmap, x1, y1, width, height)
 end
 
 local function frameRect(bitmap, x1, y1, width, height, color, alpha, mode, antialias)
-  local scale = math.floor((1 / winscale) + 0.5)
+  local scale = pixelScale
 
   while scale > 0 do
     r.JS_LICE_RoundRect(bitmap, x1, y1, width, height, 0, color, alpha, mode, antialias)
@@ -650,8 +721,21 @@ local function frameRect(bitmap, x1, y1, width, height, color, alpha, mode, anti
   end
 end
 
+local function putPixel(bitmap, xx1, yy1, which, color, alpha, mode)
+  local scale = pixelScale
+
+  while scale > 0 do
+    r.JS_LICE_PutPixel(bitmap, xx1, yy1, color, alpha, mode)
+
+    xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or 0)
+    yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or 0)
+
+    scale = scale - 1
+  end
+end
+
 local function thickLine(bitmap, xx1, yy1, xx2, yy2, which, color, alpha, mode, antialias)
-  local scale = math.floor((1 / winscale) + 0.5)
+  local scale = pixelScale
 
   while scale > 0 do
     r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
@@ -693,6 +777,7 @@ local function drawLice()
   local antialias = true
   local recomposite = glob.needsRecomposite
   glob.needsRecomposite = false
+  recompositeInit = recomposite
   local mode = 'COPY,ALPHA' --classes.is_windows and 0 or 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
@@ -868,6 +953,37 @@ local function drawLice()
       end
     else
       if recomposite then
+        if MOAR_BITMAPS then
+        local bitmaps = glob.liceData.bitmaps
+        if bitmaps then
+          local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(glob.windowRect.x1, glob.windowRect.y1, glob.windowRect.x2 - Lice.MIDI_SCROLLBAR_R, glob.windowRect.y2 - 1))
+          local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
+            if bitmaps.top then
+              clearBitmap(bitmaps.top, 0, 0, 1, 1)
+              putPixel(bitmaps.top, 0, 0, 1, reBorderColor, alpha, mode)
+            end
+            if bitmaps.bottom then
+              clearBitmap(bitmaps.bottom, 0, 0, 1, 1)
+              putPixel(bitmaps.bottom, 0, 0, 3, reBorderColor, alpha, mode)
+            end
+            if bitmaps.middletop then
+              clearBitmap(bitmaps.middletop, 0, 0, 1, 1)
+              putPixel(bitmaps.middletop, 0, 0, 1, reBorderColor, alpha, mode)
+            end
+            if bitmaps.middlebottom then
+              clearBitmap(bitmaps.middlebottom, 0, 0, 1, 1)
+              putPixel(bitmaps.middlebottom, 0, 0, 3, reBorderColor, alpha, mode)
+            end
+            if bitmaps.left then
+              clearBitmap(bitmaps.left, 0, 0, 1, 1)
+              putPixel(bitmaps.left, 0, 0, 0, reBorderColor, alpha, mode)
+            end
+            if bitmaps.right then
+              clearBitmap(bitmaps.right, 0, 0, 1, 1)
+              putPixel(bitmaps.right, 0, 0, 2, reBorderColor, alpha, mode)
+            end
+        end
+        else
         local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(glob.windowRect.x1, glob.windowRect.y1, glob.windowRect.x2 - Lice.MIDI_SCROLLBAR_R, meLanes[0] and (meLanes[-1].bottomPixel - 1) or (glob.windowRect.y2 - 1)))
         local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
         clearBitmap(glob.liceData.bitmap, x1, y1 - Lice.MIDI_SEPARATOR, width, height + (2 * Lice.MIDI_SEPARATOR))
@@ -877,6 +993,7 @@ local function drawLice()
           height = math.abs(meLanes[#meLanes].bottomPixel - meLanes[0].topPixel)
           clearBitmap(glob.liceData.bitmap, x1, y1 - Lice.MIDI_SEPARATOR, width, height + (2 * Lice.MIDI_SEPARATOR))
           frameRect(glob.liceData.bitmap, x1, y1, width, height, reBorderColor, alpha, mode, antialias)
+        end
         end
       end
     end

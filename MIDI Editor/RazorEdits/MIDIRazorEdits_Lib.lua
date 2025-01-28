@@ -802,8 +802,6 @@ end
 ------------------------------------------------
 
 local function processNotes(activeTake, area, operation)
-  local changed = false
-
   local ratio = 1.
   local idx = -1
   local movingArea = operation == OP_STRETCH
@@ -863,24 +861,24 @@ local function processNotes(activeTake, area, operation)
   -- TODO: REFACTOR (can use same code, approximately, for CCs)
   -- potential second iteration, deal with deletions in the target area
   if operation == OP_DUPLICATE then
-    local tmpArea = Area.new(area:serialize())
+    local tmpArea = Area.new(area:serialize()) -- OP_DELETE_TRIM will use this area for the deletion itself (in addition to event selection)
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_TRIM)
   elseif movingArea then
      if deltaTicks ~= 0 or deltaPitch ~= 0 then
       -- extra work to avoid deleting the target area, if it intersects with the source area
       local deletionExtents = getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue)
-      local tmpArea = Area.new(area:serialize())
+      local tmpArea = Area.new(area:serialize()) -- only used for event selection
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
       if not glob.insertMode then
         for _, extent in ipairs(deletionExtents) do
           tmpArea.timeValue = extent
-          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
         end
       end
       if not duplicatingArea then
         tmpArea.timeValue = area.unstretchedTimeValue
-        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE)
+        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
       end
       insert = true
     else
@@ -888,16 +886,16 @@ local function processNotes(activeTake, area, operation)
     end
   elseif stretchingArea and not (resizing == RS_TOP or resizing == RS_BOTTOM) then
     if deltaTicks ~= 0 or deltaPitch ~= 0 then
-      local tmpArea = Area.new(area:serialize())
-      local altFlag = currentMods.altFlag
-      currentMods.altFlag = false
+      local tmpArea = Area.new(area:serialize()) -- only used for event selection
+      local cacheMods = currentMods
+      currentMods = MouseMods.new() -- clear out for the operation
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
       if not glob.insertMode then
-        processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE)
+        processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- target
       end
       tmpArea.timeValue = area.unstretchedTimeValue
       processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- source
-      currentMods.altFlag = altFlag
+      currentMods = cacheMods
       insert = true
     else
       return -- not doing anything? don't do anything.
@@ -906,7 +904,6 @@ local function processNotes(activeTake, area, operation)
 
   local process = true
   if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
-    changed = true --not selected and true or false
     process = false
   end
 
@@ -944,7 +941,6 @@ local function processNotes(activeTake, area, operation)
         mu.MIDI_SetNote(activeTake, idx, not (operation == OP_UNSELECT) and true or false, nil, nil, nil, nil, nil)
         touchedMIDI = true
       elseif operation == OP_INVERT then
-        changed = true
         local invertOrig = trimOverlappingNotes()
         if invertOrig then
           newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
@@ -952,7 +948,6 @@ local function processNotes(activeTake, area, operation)
           newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
         end
       elseif operation == OP_RETROGRADE then
-        changed = true
         local retroOrig = trimOverlappingNotes()
         if retroOrig then
           local firstppq = sourceEvents[1].ppqpos
@@ -968,7 +963,6 @@ local function processNotes(activeTake, area, operation)
           newendppqpos = newppqpos + (thisendppqpos - thisppqpos)
         end
       elseif operation == OP_RETROGRADE_VALS then
-        changed = true
         local retroOrig = trimOverlappingNotes()
         if retroOrig then
           newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
@@ -976,12 +970,10 @@ local function processNotes(activeTake, area, operation)
           newpitch = sourceEvents[#sourceEvents - (sidx - 1)].pitch
         end
       elseif operation == OP_DUPLICATE then
-        changed = true
         classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = (ppqpos >= leftmostTick and ppqpos or leftmostTick) + areaTickExtent:size(),
                           endppqpos = (endppqpos <= rightmostTick and endppqpos or rightmostTick + 1) + areaTickExtent:size(), chan = chan, pitch = pitch, vel = vel, relvel = relvel })
       elseif operation == OP_DELETE or operation == OP_STRETCH_DELETE or operation == OP_DELETE_TRIM then
         local deleteOrig = true
-        changed = true
 
         if operation == OP_DELETE_TRIM then
           deleteOrig = trimOverlappingNotes() -- this screws up most operations, but is necessary for OP_DUPLICATE
@@ -1054,6 +1046,16 @@ local function processNotes(activeTake, area, operation)
             if not duplicatingArea then
               newppqpos = ppqpos
               newendppqpos = leftmostTick
+              if ppqpos >= areaLeftmostTick and endppqpos <= areaRightmostTick
+                and pitch >= area.timeValue.vals.min and pitch <= area.timeValue.vals.max
+              then
+                newppqpos = nil
+                newendppqpos = nil
+                newpitch = nil
+                -- _P('i love you')
+              else
+                -- _P('i want to love you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick)
+              end
             end
             local insEnd = endppqpos + deltaTicks
             if insEnd > areaRightmostTick then insEnd = areaRightmostTick end
@@ -1066,6 +1068,16 @@ local function processNotes(activeTake, area, operation)
                 if not duplicatingArea then
                   newppqpos = rightmostTick
                   newendppqpos = endppqpos
+                  if ppqpos >= areaLeftmostTick and endppqpos <= areaRightmostTick
+                    and pitch >= area.timeValue.vals.min and pitch <= area.timeValue.vals.max
+                  then
+                    newppqpos = nil
+                    newendppqpos = nil
+                    newpitch = nil
+                    -- _P('i hate you')
+                  else
+                    -- _P('i want to hate you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick)
+                  end
                 end
                 classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + deltaTicks, endppqpos = rightmostTick + deltaTicks, chan = chan, pitch = pitch - deltaPitch, vel = vel, relvel = relvel })
               elseif not duplicatingArea then
@@ -1080,16 +1092,10 @@ local function processNotes(activeTake, area, operation)
             newendppqpos = endppqpos + deltaTicks
             newpitch = pitch - deltaPitch
           end
-          -- gotta make sure we're right on the grid if in grid mode
         end
-      else
-        -- copyback?
-        -- newppqpos = ppqpos -- make sure it gets copied back
-        -- newendppqpos = endppqpos -- make sure it gets copied back
       end
 
       if process then
-        if newppqpos or newendppqpos or newpitch then changed = true end
         if duplicatingArea then
           if newppqpos and newendppqpos then
             classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, endppqpos = newendppqpos, chan = chan, pitch = newpitch or pitch, vel = vel, relvel = relvel })
@@ -1164,10 +1170,9 @@ local function processNotes(activeTake, area, operation)
 
       mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newval, nil)
       touchedMIDI = true
-      changed = true
     end
   end
-  return changed
+  return
 end
 
 local processCCsWithGeneration
@@ -1177,8 +1182,6 @@ local function laneIsVelocity(area)
 end
 
 local function processCCs(activeTake, area, operation)
-  local changed = false
-
   local hratio, vratio = 1., 1.
   -- local insertions = {}
   -- local removals = {}
@@ -1251,7 +1254,6 @@ local function processCCs(activeTake, area, operation)
 
   local process = true
   if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
-    changed = true --not selected and true or false
     process = false
   end
 
@@ -1270,14 +1272,14 @@ local function processCCs(activeTake, area, operation)
         -- no move/copy support for vel/rel vel atm
         -- processNotes(activeTake, tmpArea, OP_DELETE)
       else
-        local tmpArea = Area.new(area:serialize())
+        local tmpArea = Area.new(area:serialize()) -- only used for event selection
         tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
         if not glob.insertMode then
-          processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
+          processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
         end
         if not duplicatingArea then
           tmpArea.timeValue = area.unstretchedTimeValue
-          processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
+          processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
         end
       end
       insert = true
@@ -1287,16 +1289,16 @@ local function processCCs(activeTake, area, operation)
   elseif stretchingArea then
     -- addControlPoints()
     if deltaTicks ~= 0 or deltaVal ~= 0 then
-      local tmpArea = Area.new(area:serialize())
-      local altFlag = currentMods.altFlag
-      currentMods.altFlag = false
+      local tmpArea = Area.new(area:serialize()) -- only used for event selection
+      local cacheMods = currentMods
+      currentMods = MouseMods.new() -- clear out for the operation
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
       if not glob.insertMode then
-        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
+        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
       end
       tmpArea.timeValue = area.unstretchedTimeValue
-      processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
-      currentMods.altFlag = altFlag
+      processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
+      currentMods = cacheMods
       insert = true
     else
       return
@@ -1344,21 +1346,18 @@ local function processCCs(activeTake, area, operation)
           end
           touchedMIDI = true
         elseif operation == OP_INVERT then
-          changed = true
           newmsg2, newmsg3 = valToBytes(area.timeValue.vals.max - (val - area.timeValue.vals.min))
           -- local newval = area.timeValue.vals.max - (val - area.timeValue.vals.min)
           -- newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
           -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
         elseif operation == OP_RETROGRADE then
           if not laneIsVel then
-            changed = true
             local firstppq = sourceEvents[1].ppqpos
             local lastppq = sourceEvents[#sourceEvents].ppqpos
             local delta = (firstppq - leftmostTick) - (rightmostTick - lastppq)
             newppqpos = (rightmostTick - (ppqpos - leftmostTick)) + delta
           end
         elseif operation == OP_RETROGRADE_VALS then
-          changed = true
           newmsg2, newmsg3 = valToBytes(sourceEvents[#sourceEvents - (sidx - 1)].val)
           -- local newval = sourceEvents[#sourceEvents - (sidx - 1)].val
           -- newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
@@ -1367,11 +1366,9 @@ local function processCCs(activeTake, area, operation)
           if laneIsVel then
             classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), endppqpos = endppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
-            changed = true
             classes.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, msg2 = msg2, msg3 = msg3 })
           end
         elseif operation == OP_DELETE then
-          changed = true
           classes.addUnique(tDeletions, { type = laneIsVel and mu.NOTE_TYPE or mu.CC_TYPE, idx = idx })
         else
           local newval
@@ -1406,7 +1403,6 @@ local function processCCs(activeTake, area, operation)
             newmsg2 = onebyte and clipInt(msg2 - deltaVal) or pitchbend and ((val - deltaVal) & 0x7F) or msg2
             newmsg3 = onebyte and msg3 or pitchbend and (((val - deltaVal) >> 7) & 0x7F) or clipInt(msg3 - deltaVal)
           end
-          if newppqpos or newmsg2 or newmsg3 then changed = true end
         end
       end
 
@@ -1505,10 +1501,9 @@ local function processCCs(activeTake, area, operation)
         mu.MIDI_SetCC(activeTake, event.idx, nil, nil, nil, event.chanmsg, nil, newmsg2, newmsg3)
       end
       touchedMIDI = true
-      changed = true
     end
   end
-  return changed
+  return
 end
 
 ------------------------------------------------
@@ -1773,9 +1768,9 @@ local function processAreas(singleArea, forceSourceInfo)
 
   local function runProcess(area)
     if not area.ccLane then
-      if processNotes(activeTake, area, operation) then changed = true end
+      processNotes(activeTake, area, operation)
     else
-      if processCCs(activeTake, area, operation) then changed = true end
+      processCCs(activeTake, area, operation)
     end
   end
 
@@ -1796,11 +1791,12 @@ local function processAreas(singleArea, forceSourceInfo)
   end
   processInsertions()
 
+  if touchedMIDI then changed = true end
+
   if changed ~= lastChanged then -- ensure that we return to the original state
     mu.MIDI_ForceNextTransaction()
     lastChanged = changed
     touchedMIDI = true
-    changed = true
   end
 
   if touchedMIDI then

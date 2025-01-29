@@ -375,24 +375,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
 
   if resizing == RS_NEWAREA then
     makeTimeValueExtentsForArea(area, true)
-
-    -- if area.specialDrag and area.specialDrag.left then
-    --   area.timeValue.ticks.min = updateTimeValueLeft(area)
-    -- else
-    --   area.timeValue.ticks.max = updateTimeValueRight(area)
-    -- end
-    -- area.timeValue.ticks.min, area.timeValue.ticks.max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
-
-    -- if area.fullLane then
-    --   area.timeValue.vals.min = 0
-    --   area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
-    -- else
-    --   if area.specialDrag and area.specialDrag.top then
-    --     area.timeValue.vals.max = updateTimeValueTop(area)
-    --   else
-    --     area.timeValue.vals.min = updateTimeValueBottom(area)
-    --   end
-    -- end
+    area.timeValue.ticks.min, area.timeValue.ticks.max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
   elseif resizing == RS_LEFT then
     area.timeValue.ticks.min = updateTimeValueLeft(area)
     area.timeValue.ticks.min = quantizeTimeValueTimeExtent(area.timeValue.ticks.min)

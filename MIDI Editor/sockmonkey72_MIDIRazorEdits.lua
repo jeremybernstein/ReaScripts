@@ -1,11 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.19
+-- @version 0.1.0-beta.20
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix some area creation/rect dragging bugs
---   - ensure that the border is consistently drawn
+--   - fix timing bug when creating new areas (introduced in beta.19)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

@@ -374,23 +374,25 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
   if not noCheck then adjustFullLane(area, true) end
 
   if resizing == RS_NEWAREA then
-    if area.specialDrag and area.specialDrag.left then
-      area.timeValue.ticks.min = updateTimeValueLeft(area)
-    else
-      area.timeValue.ticks.max = updateTimeValueRight(area)
-    end
-    area.timeValue.ticks.min, area.timeValue.ticks.max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
+    makeTimeValueExtentsForArea(area, true)
 
-    if area.fullLane then
-      area.timeValue.vals.min = 0
-      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
-    else
-      if area.specialDrag and area.specialDrag.top then
-        area.timeValue.vals.max = updateTimeValueTop(area)
-      else
-        area.timeValue.vals.min = updateTimeValueBottom(area)
-      end
-    end
+    -- if area.specialDrag and area.specialDrag.left then
+    --   area.timeValue.ticks.min = updateTimeValueLeft(area)
+    -- else
+    --   area.timeValue.ticks.max = updateTimeValueRight(area)
+    -- end
+    -- area.timeValue.ticks.min, area.timeValue.ticks.max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
+
+    -- if area.fullLane then
+    --   area.timeValue.vals.min = 0
+    --   area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
+    -- else
+    --   if area.specialDrag and area.specialDrag.top then
+    --     area.timeValue.vals.max = updateTimeValueTop(area)
+    --   else
+    --     area.timeValue.vals.min = updateTimeValueBottom(area)
+    --   end
+    -- end
   elseif resizing == RS_LEFT then
     area.timeValue.ticks.min = updateTimeValueLeft(area)
     area.timeValue.ticks.min = quantizeTimeValueTimeExtent(area.timeValue.ticks.min)
@@ -1290,17 +1292,21 @@ local function processCCs(activeTake, area, operation)
   elseif stretchingArea then
     -- addControlPoints()
     if deltaTicks ~= 0 or deltaVal ~= 0 then
-      local tmpArea = Area.new(area:serialize()) -- only used for event selection
-      local cacheMods = currentMods
-      currentMods = MouseMods.new() -- clear out for the operation
-      tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
-      if not glob.insertMode then
-        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
+      if resizing == RS_TOP or resizing == RS_BOTTOM then
+        skipiter = true
+      else
+        local tmpArea = Area.new(area:serialize()) -- only used for event selection
+        local cacheMods = currentMods
+        currentMods = MouseMods.new() -- clear out for the operation
+        tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
+        if not glob.insertMode then
+          processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
+        end
+        tmpArea.timeValue = area.unstretchedTimeValue
+        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
+        currentMods = cacheMods
+        insert = true
       end
-      tmpArea.timeValue = area.unstretchedTimeValue
-      processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
-      currentMods = cacheMods
-      insert = true
     else
       return
     end
@@ -1379,18 +1385,8 @@ local function processCCs(activeTake, area, operation)
               newppqpos = areaLeftmostTick + ((ppqpos - leftmostTick) * hratio)
             elseif resizing == RS_RIGHT then
               newppqpos = areaLeftmostTick + ((ppqpos - areaLeftmostTick) * hratio)
-            elseif resizing == RS_TOP then
-              if glob.stretchMode == 1 then
-                newval = math.min(math.max(val + (area.timeValue.vals.max - area.unstretchedTimeValue.vals.max), 0), meLanes[area.ccLane].range)
-              else
-                newval = bottomValue + ((val - bottomValue) * vratio)
-              end
-            elseif resizing == RS_BOTTOM then
-              if glob.stretchMode == 1 then
-                newval = math.min(math.max(val + (area.timeValue.vals.min - area.unstretchedTimeValue.vals.min), 0), meLanes[area.ccLane].range)
-              else
-                newval = topValue - ((topValue - val) * vratio)
-              end
+            elseif resizing == RS_TOP or resizing == RS_BOTTOM then
+              -- shouldn't ever get here
             end
             if newval then
               newmsg2, newmsg3 = valToBytes(clipInt(newval, 0, meLanes[area.ccLane].range))
@@ -1470,6 +1466,44 @@ local function processCCs(activeTake, area, operation)
   --   end
   --   touchedMIDI = true
   -- end
+
+  if stretchingArea and (resizing == RS_TOP or resizing == RS_BOTTOM) then
+    for _, event in ipairs(sourceEvents) do
+      local chanmsg = event.chanmsg & 0xF0 -- to be safe
+      local onebyte = laneIsVel or chanmsg == 0xC0 or chanmsg == 0xD0
+      local pitchbend = chanmsg == 0xE0
+      local val = event.val
+      local newval
+
+      if resizing == RS_TOP then
+        if glob.stretchMode == 1 then
+          newval = math.min(math.max(val + (area.timeValue.vals.max - area.unstretchedTimeValue.vals.max), 0), meLanes[area.ccLane].range)
+        else
+          newval = bottomValue + ((val - bottomValue) * vratio)
+        end
+      elseif resizing == RS_BOTTOM then
+        if glob.stretchMode == 1 then
+          newval = math.min(math.max(val + (area.timeValue.vals.min - area.unstretchedTimeValue.vals.min), 0), meLanes[area.ccLane].range)
+        else
+          newval = topValue - ((topValue - val) * vratio)
+        end
+      end
+
+      local newmsg2
+      local newmsg3
+      newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or event.msg2
+      newmsg3 = onebyte and event.msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+
+      if laneIsVel then
+        newmsg3 = isRelVelocity and newmsg2 or nil
+        newmsg2 = not isRelVelocity and newmsg2 or nil
+        mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newmsg2, newmsg3)
+      else
+        mu.MIDI_SetCC(activeTake, event.idx, nil, nil, nil, event.chanmsg, nil, newmsg2, newmsg3)
+      end
+      touchedMIDI = true
+    end
+  end
 
   if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents then
     for _, event in ipairs(glob.widgetInfo.sourceEvents) do
@@ -2469,13 +2503,11 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
   local newRectFull = visibleRect:clone()
 
   if draggingMode.move then
-    -- Move entire rect
     newRectFull.x1 = newRectFull.x1 + dx
     newRectFull.x2 = newRectFull.x2 + dx
     newRectFull.y1 = newRectFull.y1 + dy
     newRectFull.y2 = newRectFull.y2 + dy
   else
-    -- Resize edges
     if draggingMode.left then
       newRectFull.x1 = newRectFull.x1 + dx
       if originate then newRectFull.x2 = dragArea.origin.x end
@@ -2495,7 +2527,7 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
   end
 
   if justdoit or noConflicts(newRectFull, dragAreaIndex) then
-    -- Full move/resize accepted
+    -- do this delta thing so that the unmanipulated logical coords aren't lost
     local applyX1, applyY1, applyX2, applyY2 = newRectFull.x1 - dragArea.viewRect.x1, newRectFull.y1 - dragArea.viewRect.y1, newRectFull.x2 - dragArea.viewRect.x2, newRectFull.y2 - dragArea.viewRect.y2
     dragArea.logicalRect = Rect.new(dragArea.logicalRect.x1 + applyX1, dragArea.logicalRect.y1 + applyY1, dragArea.logicalRect.x2 + applyX2, dragArea.logicalRect.y2 + applyY2)
     dragArea.viewRect = viewIntersectionRect(dragArea)
@@ -3333,11 +3365,14 @@ local function processMouse()
             area.viewRect.y2 = meLanes[-1].bottomPixel
           end
           dy = 0
+          if area.origin and mx < area.origin.x then area.specialDrag.left = true end
+          if not area.specialDrag.left then area.specialDrag.right = true end
+        else
+          if area.origin and mx < area.origin.x then area.specialDrag.left = true end
+          if area.origin and my < area.origin.y then area.specialDrag.top = true end
+          if not area.specialDrag.top then area.specialDrag.bottom = true end
+          if not area.specialDrag.left then area.specialDrag.right = true end
         end
-        if area.origin and mx < area.origin.x then area.specialDrag.left = true end
-        if area.origin and my < area.origin.y then area.specialDrag.top = true end
-        if not area.specialDrag.top then area.specialDrag.bottom = true end
-        if not area.specialDrag.left then area.specialDrag.right = true end
 
         _, dx, dy = validateDeltaCoords(area, dx, dy)
 

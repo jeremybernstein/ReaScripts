@@ -485,6 +485,7 @@ local function createFrameBitmaps(midiview, windRect)
 end
 
 local recompositeInit
+local recompositeDraw
 
 local function initLice(editor)
   if not glob.meLanes then return end
@@ -502,8 +503,7 @@ local function initLice(editor)
         glob.liceData.bitmap = createBitmap(glob.liceData.midiview, windRect)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
-      glob.meNeedsRecalc = windChanged or not next(glob.liceData.bitmaps)
-      glob.needsRecomposite = glob.meNeedsRecalc
+      recompositeDraw = true
       glob.windowChanged = true
       peekAppIntercepts()
     end
@@ -517,6 +517,7 @@ local function initLice(editor)
         glob.liceData.bitmap = createBitmap(midiview, windRect)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
+      recompositeDraw = true
       glob.windowChanged = true
       peekAppIntercepts()
       startIntercepts()
@@ -779,10 +780,12 @@ end
 
 local function drawLice()
   checkThemeFile()
-  local antialias = true
-  local recomposite = glob.needsRecomposite
+  local recomposite = glob.needsRecomposite or recompositeDraw
+  recompositeInit = glob.needsRecomposite
   glob.needsRecomposite = false
-  recompositeInit = recomposite
+  recompositeDraw = false
+
+  local antialias = true
   local mode = 'COPY,ALPHA' --classes.is_windows and 0 or 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes

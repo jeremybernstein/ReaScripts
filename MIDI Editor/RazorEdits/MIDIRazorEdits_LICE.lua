@@ -33,10 +33,15 @@ Lice.MIDI_SEPARATOR = 0
 winscale = classes.getDPIScale()
 pixelScale = math.floor((1 / winscale) + 0.5)
 
--- the Klangfarben Numbers work best for me
-Lice.compositeDelayMin = 0.1 --0.020 -- 0.016 -- 0.05
-Lice.compositeDelayMax = 0.2 --0.033 -- 0.024 -- 0.15
-Lice.compositeDelayBitmaps = 10 -- 15 -- 10 -- 100
+-- the Klangfarben Numbers are good for the large bitmap
+-- for MOAR_BITMAPS, smaller defaults are more appropriate
+Lice.compositeDelayMinDefault = MOAR_BITMAPS and 0.032 or 0.1 --0.020 -- 0.016 -- 0.05
+Lice.compositeDelayMaxDefault = MOAR_BITMAPS and 0.048 or 0.2 --0.033 -- 0.024 -- 0.15
+Lice.compositeDelayBitmapsDefault = 10 -- 15 -- 10 -- 100
+
+Lice.compositeDelayMin = Lice.compositeDelayMinDefault
+Lice.compositeDelayMax = Lice.compositeDelayMaxDefault
+Lice.compositeDelayBitmaps = Lice.compositeDelayBitmapsDefault
 
 local prevDPIScale
 
@@ -497,8 +502,8 @@ local function initLice(editor)
         glob.liceData.bitmap = createBitmap(glob.liceData.midiview, windRect)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
-      glob.meNeedsRecalc = true
-      glob.needsRecomposite = true
+      glob.meNeedsRecalc = windChanged or not next(glob.liceData.bitmaps)
+      glob.needsRecomposite = glob.meNeedsRecalc
       glob.windowChanged = true
       peekAppIntercepts()
     end
@@ -1026,4 +1031,7 @@ Lice.rebuildColors = rebuildColors
 Lice.reloadSettings = reloadSettings
 
 Lice.drawLice = drawLice
+
+Lice.MOAR_BITMAPS = MOAR_BITMAPS
+
 return Lice

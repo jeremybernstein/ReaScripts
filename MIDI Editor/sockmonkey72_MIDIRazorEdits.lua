@@ -1,12 +1,17 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.17
+-- @version 0.1.0-beta.18
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - drawing update, reducing blitted area to a minimum (at the cost of more bitmaps). is it faster on Windows?
---   - fix some weird (non-)deletion behavior and missing MIDI updates
---   - minor cleanup with hopefully no side effects
+--   - eliminate unnecessary per-frame bounds calculation introduced in previous update
+--   - more (non-)deletion/addition fixes when moving areas in the piano roll
+--   - prevent areas in the Media Item "CC" lane
+--   - fix drag-left to create a new area
+--   - fix missing overlap prevention from above/below
+--   - fix crash when opening Windows config dialog
+--   - fix alt-drag (full-lane drag) in piano roll
+--   - change Windows compositing defaults to 0.032/0.048 due to (apparent) performance changes in last versions
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

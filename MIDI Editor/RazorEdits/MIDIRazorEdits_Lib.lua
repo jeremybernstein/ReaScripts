@@ -1044,9 +1044,11 @@ local function processNotes(activeTake, area, operation)
           local handled = false
           if ppqpos < leftmostTick then
             if not duplicatingArea then
+              local leftLeft = math.min(leftmostTick, areaLeftmostTick)
               newppqpos = ppqpos
-              newendppqpos = leftmostTick
-              if ppqpos >= areaLeftmostTick and endppqpos <= areaRightmostTick
+              newendppqpos = endppqpos < leftLeft and endppqpos or leftLeft
+              if ((ppqpos >= areaLeftmostTick and endppqpos < areaRightmostTick)
+                  or (newppqpos >= areaLeftmostTick and newendppqpos < areaRightmostTick))
                 and pitch >= area.timeValue.vals.min and pitch <= area.timeValue.vals.max
               then
                 newppqpos = nil
@@ -1054,11 +1056,11 @@ local function processNotes(activeTake, area, operation)
                 newpitch = nil
                 -- _P('i love you')
               else
-                -- _P('i want to love you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick)
+                -- _P('i want to love you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick, newppqpos, newendppqpos)
               end
             end
             local insEnd = endppqpos + deltaTicks
-            if insEnd > areaRightmostTick then insEnd = areaRightmostTick end
+            if insEnd >= areaRightmostTick then insEnd = areaRightmostTick - 1 end
             classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = areaLeftmostTick, endppqpos = insEnd, chan = chan, pitch = pitch - deltaPitch, vel = vel, relvel = relvel })
             handled = true
           end
@@ -1066,23 +1068,22 @@ local function processNotes(activeTake, area, operation)
             if not overlapMod() then
               if not handled then
                 if not duplicatingArea then
-                  newppqpos = rightmostTick
+                  local rightRight = math.max(rightmostTick, areaRightmostTick)
+                  newppqpos = ppqpos > rightRight and ppqpos or rightRight
                   newendppqpos = endppqpos
-                  if ppqpos >= areaLeftmostTick and endppqpos <= areaRightmostTick
+                  if ((ppqpos >= areaLeftmostTick and endppqpos < areaRightmostTick)
+                      or (newppqpos >= areaLeftmostTick and newendppqpos < areaRightmostTick))
                     and pitch >= area.timeValue.vals.min and pitch <= area.timeValue.vals.max
                   then
                     newppqpos = nil
                     newendppqpos = nil
                     newpitch = nil
-                    -- _P('i hate you')
+                    -- _P('i hate you', ppqpos, endppqpos)
                   else
-                    -- _P('i want to hate you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick)
+                    -- _P('i want to hate you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick, newppqpos, newendppqpos)
                   end
                 end
-                classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + deltaTicks, endppqpos = rightmostTick + deltaTicks, chan = chan, pitch = pitch - deltaPitch, vel = vel, relvel = relvel })
-              elseif not duplicatingArea then
-                -- this should be handled by the deletion code now
-                -- classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + deltaTicks, endppqpos = rightmostTick + deltaTicks - 1, chan = chan, pitch = pitch - deltaPitch, vel = vel, relvel = relvel })
               end
               handled = true
             end
@@ -2124,6 +2125,15 @@ local function restorePreferences()
   local stateVal
 
   if classes.is_windows then
+    if lice.MOAR_BITMAPS then
+      if r.GetExtState(scriptID, 'moarBitmaps') == '' then
+        r.DeleteExtState(scriptID, 'compositeDelayMin', true) -- delete the old prefs and reset to new defaults
+        r.DeleteExtState(scriptID, 'compositeDelayMax', true)
+        r.DeleteExtState(scriptID, 'compositeDelayBitmaps', true)
+        r.SetExtState(scriptID, 'moarBitmaps', '1', true)
+      end
+    end
+
     stateVal = r.GetExtState(scriptID, 'compositeDelayMin')
     if stateVal then
       stateVal = tonumber(stateVal)
@@ -2155,9 +2165,15 @@ end
 
 local function savePreferences()
   if classes.is_windows then
-    r.SetExtState(scriptID, 'compositeDelayMin', string.format('%0.3f', lice.compositeDelayMin), true)
-    r.SetExtState(scriptID, 'compositeDelayMax', string.format('%0.3f', lice.compositeDelayMax), true)
-    r.SetExtState(scriptID, 'compositeDelayBitmaps', string.format('%0.3f', lice.compositeDelayBitmaps), true)
+    if lice.compositeDelayMin ~= lice.compositeDelayMinDefault then
+      r.SetExtState(scriptID, 'compositeDelayMin', string.format('%0.3f', lice.compositeDelayMin), true)
+    end
+    if lice.compositeDelayMax ~= lice.compositeDelayMaxDefault then
+      r.SetExtState(scriptID, 'compositeDelayMax', string.format('%0.3f', lice.compositeDelayMax), true)
+    end
+    if lice.compositeDelayBitmaps ~= lice.compositeDelayBitmapsDefault then
+      r.SetExtState(scriptID, 'compositeDelayBitmaps', string.format('%0.3f', lice.compositeDelayBitmaps), true)
+    end
   end
   if glob.stretchMode ~= 0 then
     r.SetExtState(scriptID, 'stretchMode', tostring(glob.stretchMode), true)
@@ -2442,12 +2458,12 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
   local visibleRect = dragArea.viewRect
   local originate = resizing == RS_NEWAREA and dragArea.origin
 
-  local draggingMode = resizing == RS_LEFT and { left = true }
-    or resizing == RS_RIGHT and { right = true }
-    or resizing == RS_TOP and { top = true }
-    or resizing == RS_BOTTOM and { bottom = true }
-    or resizing == RS_MOVEAREA and { move = true }
-    or resizing == RS_NEWAREA and (dragArea.specialDrag and dragArea.specialDrag or { right = true, bottom = true })
+  local draggingMode = (resizing == RS_LEFT and { left = true })
+    or (resizing == RS_RIGHT and { right = true })
+    or (resizing == RS_TOP and { top = true })
+    or (resizing == RS_BOTTOM and { bottom = true })
+    or (resizing == RS_MOVEAREA and { move = true })
+    or (resizing == RS_NEWAREA and (not dragArea.specialDrag and { right = true, bottom = true } or dragArea.specialDrag))
     or {}
 
   local newRectFull = visibleRect:clone()
@@ -2621,45 +2637,54 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
--- Helper to check if rect1 fully contains rect2
-local function contains(rect1, rect2)
-  return rect1.x1 <= rect2.x1 and rect1.y1 <= rect2.y1 and
-         rect1.x2 >= rect2.x2 and rect1.y2 >= rect2.y2
+-- Helper to check if extents1 fully contains extents2
+local function contains(extents1, extents2)
+  return extents1.ticks.min <= extents2.ticks.min and
+         extents1.ticks.max >= extents2.ticks.max and
+         extents1.vals.min <= extents2.vals.min and
+         extents1.vals.max >= extents2.vals.max
 end
 
--- Helper to check if two rects intersect at all
-local function intersects(rect1, rect2)
-  return not (rect1.x2 < rect2.x1 or rect2.x2 < rect1.x1 or
-             rect1.y2 < rect2.y1 or rect2.y2 < rect1.y1)
+-- Helper to check if two extents intersect at all
+local function intersects(extents1, extents2)
+  local ticks_overlap = not (extents1.ticks.max < extents2.ticks.min or
+                           extents2.ticks.max < extents1.ticks.min)
+
+  -- Changed to catch equal values between min and max
+  local vals_overlap = not (extents1.vals.max < extents2.vals.min or
+                           extents2.vals.max < extents1.vals.min or
+                           extents1.vals.min > extents2.vals.max or
+                           extents2.vals.min > extents1.vals.max)
+
+  return ticks_overlap and vals_overlap
 end
 
--- Helper to get rect area
-local function calcArea(rect)
-  return (rect.x2 - rect.x1) * (rect.y2 - rect.y1)
+-- Helper to get extents area
+local function calcArea(extents)
+  return (extents.ticks.max - extents.ticks.min) *
+         (extents.vals.max - extents.vals.min)
 end
 
 -- Main function to resolve intersections
 local function resolveIntersections()
   local result = {}
 
-  -- First pass: remove fully enclosed rectangles
+  -- First pass: remove fully enclosed extents
   for i = 1, #areas do
-    local rect1 = areas[i].logicalRect
+    local extents1 = areas[i].timeValue
     local is_contained = false
-
     for j = 1, #areas do
       if i ~= j then
         if areas[i].ccLane == areas[j].ccLane
-          and contains(areas[j].logicalRect, rect1)
+          and contains(areas[j].timeValue, extents1)
         then
           is_contained = true
           break
         end
       end
     end
-
     if not is_contained then
-      table.insert(result, Area.new(areas[i], updateAreaFromTimeValue))
+      table.insert(result, Area.new(areas[i], updateAreaFromTimeValue)) -- Area.new(areas[i], updateAreaFromTimeValue))
     end
   end
 
@@ -2667,58 +2692,79 @@ local function resolveIntersections()
   local i = 1
   while i <= #result do
     local j = i + 1
-
     while j <= #result do
       if result[i].ccLane == result[j].ccLane
-        and intersects(result[i].logicalRect, result[j].logicalRect)
+        and intersects(result[i].timeValue, result[j].timeValue)
       then
-        -- Get current rectangles and their areas
-        local rect1 = result[i].logicalRect
-        local rect2 = result[j].logicalRect
-        local area1 = calcArea(rect1)
-        local area2 = calcArea(rect2)
+        -- Get current extents
+        local extents1 = result[i].timeValue
+        local extents2 = result[j].timeValue
 
-        -- Determine which rectangle should stay unchanged
+        -- Determine which extents should stay unchanged
         local keep_first = result[i].active or
-                          (not result[j].active and area1 > area2)
+                          (not result[j].active and calcArea(extents1) > calcArea(extents2))
 
-        -- Get the rectangles in the right order
-        local keep_rect = keep_first and rect1 or rect2
-        local modify_rect = keep_first and rect2 or rect1
+        -- Get the extents in the right order
+        local keep_extents = keep_first and extents1 or extents2
+        local modify_extents = keep_first and extents2 or extents1
         local modify_idx = keep_first and j or i
 
-        local function shipIt(res, idx, logicalRect)
-          local area = Area.new(result[idx], updateAreaFromTimeValue)
-          res[idx] = area
-        end
-
-        -- Truncate the smaller/non-active rectangle
-        if modify_rect.x2 > keep_rect.x1 and modify_rect.x1 < keep_rect.x1 then
-          -- modify_rect overlaps from the left, truncate it
-          shipIt(result, modify_idx, Rect.new(
-            modify_rect.x1,
-            modify_rect.y1,
-            keep_rect.x1,
-            modify_rect.y2
-          ))
-        elseif modify_rect.x1 < keep_rect.x2 and modify_rect.x2 > keep_rect.x2 then
-          -- modify_rect overlaps from the right, truncate it
-          shipIt(result, modify_idx, Rect.new(
-            keep_rect.x2,
-            modify_rect.y1,
-            modify_rect.x2,
-            modify_rect.y2
-          ))
+        if modify_extents.ticks.max > keep_extents.ticks.min
+          and modify_extents.ticks.min < keep_extents.ticks.min
+        then
+          local new_area = Area.new(result[modify_idx])
+          new_area.timeValue = TimeValueExtents.new(
+            modify_extents.ticks.min,
+            keep_extents.ticks.min,
+            modify_extents.vals.min,
+            modify_extents.vals.max
+          )
+          result[modify_idx] = new_area
+          updateAreaFromTimeValue(result[modify_idx])
+        elseif modify_extents.ticks.min < keep_extents.ticks.max
+          and modify_extents.ticks.max > keep_extents.ticks.max
+        then
+          local new_area = Area.new(result[modify_idx])
+          new_area.timeValue = TimeValueExtents.new(
+            keep_extents.ticks.max,
+            modify_extents.ticks.max,
+            modify_extents.vals.min,
+            modify_extents.vals.max
+          )
+          result[modify_idx] = new_area
+          updateAreaFromTimeValue(result[modify_idx])
+        -- Add vertical intersection handling (inverted for bottom-up coordinates)
+        elseif modify_extents.vals.max >= keep_extents.vals.min  -- if top of modify is above bottom of keep
+          and modify_extents.vals.min < keep_extents.vals.min   -- and bottom of modify is below bottom of keep
+        then
+          local new_area = Area.new(result[modify_idx])
+          new_area.timeValue = TimeValueExtents.new(
+            modify_extents.ticks.min,
+            modify_extents.ticks.max,
+            modify_extents.vals.min,
+            keep_extents.vals.min - 1
+          )
+          result[modify_idx] = new_area
+          updateAreaFromTimeValue(result[modify_idx])
+        elseif modify_extents.vals.min <= keep_extents.vals.max  -- if bottom of modify is below top of keep
+          and modify_extents.vals.max > keep_extents.vals.max   -- and top of modify is above top of keep
+        then
+          local new_area = Area.new(result[modify_idx])
+          new_area.timeValue = TimeValueExtents.new(
+            modify_extents.ticks.min,
+            modify_extents.ticks.max,
+            keep_extents.vals.max + 1,
+            modify_extents.vals.max
+          )
+          result[modify_idx] = new_area
+          updateAreaFromTimeValue(result[modify_idx])
         end
       end
       j = j + 1
     end
     i = i + 1
   end
-
-  for _, area in ipairs(result) do
-    updateTimeValueExtentsForArea(area)
-  end
+  updateAreasFromTimeValue()
   return result
 end
 
@@ -3224,6 +3270,10 @@ local function processMouse()
         deferredClearAll = true
       end
 
+      if ccLane and meLanes[ccLane].type == 0x210 then
+        resizing = RS_UNCLICKED return -- media item lane is verboten
+      end
+
       local fullLane = (ccLane and not fullLaneMod()) or (not ccLane and fullLaneMod())
 
       areas[#areas + 1] = Area.newFromRect({ viewRect = Rect.new(mx, my, mx, my),
@@ -3283,13 +3333,11 @@ local function processMouse()
             area.viewRect.y2 = meLanes[-1].bottomPixel
           end
           dy = 0
-          area.specialDrag.right = true
-        else
-          if area.origin and mx < area.origin.x then area.specialDrag.left = true end
-          if area.origin and my < area.origin.y then area.specialDrag.top = true end
-          if not area.specialDrag.top then area.specialDrag.bottom = true end
-          if not area.specialDrag.left then area.specialDrag.right = true end
         end
+        if area.origin and mx < area.origin.x then area.specialDrag.left = true end
+        if area.origin and my < area.origin.y then area.specialDrag.top = true end
+        if not area.specialDrag.top then area.specialDrag.bottom = true end
+        if not area.specialDrag.left then area.specialDrag.right = true end
 
         _, dx, dy = validateDeltaCoords(area, dx, dy)
 

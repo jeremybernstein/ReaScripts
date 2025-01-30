@@ -1,10 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.20
+-- @version 0.1.0-beta.21
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix timing bug when creating new areas (introduced in beta.19)
+--   - fix for "Project Time" new area creation regression, sorry!
+--   - minor cleanup
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

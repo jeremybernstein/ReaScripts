@@ -374,8 +374,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
   if not noCheck then adjustFullLane(area, true) end
 
   if resizing == RS_NEWAREA then
-    makeTimeValueExtentsForArea(area, true)
-    area.timeValue.ticks.min, area.timeValue.ticks.max = quantizeTimeValueTimeExtent(area.timeValue.ticks.min, area.timeValue.ticks.max)
+    makeTimeValueExtentsForArea(area) -- do quantize
   elseif resizing == RS_LEFT then
     area.timeValue.ticks.min = updateTimeValueLeft(area)
     area.timeValue.ticks.min = quantizeTimeValueTimeExtent(area.timeValue.ticks.min)
@@ -439,7 +438,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
         end
       end
 
-      if isMovingTime or resizing == RS_NEWAREA then
+      if isMovingTime then
         if meState.timeBase == 'time' then
           if oldTicksMin ~= area.timeValue.ticks.min then
             local oldTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, oldTicksMin)

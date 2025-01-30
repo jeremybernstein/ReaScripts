@@ -586,6 +586,8 @@ end
 Classes.dragDirectionToString = dragDirectionToString
 Classes.sortAreas = sortAreas
 
+----------------------------------------------------
+
 local os = r.GetOS()
 local is_windows = os:match('Win')
 local is_macos = os:match('OS')
@@ -610,11 +612,7 @@ local function getDPIScale()
   return editor_scale
 end
 
-Classes.is_windows = is_windows
-Classes.is_macos = is_macos
-Classes.is_linux = is_linux
-
-Classes.getDPIScale = getDPIScale
+----------------------------------------------------
 
 local function ccTypeToChanmsg(ccType)
   if not ccType then return nil, nil end
@@ -680,50 +678,51 @@ else
 end
 end
 
+Classes.is_windows = is_windows
+Classes.is_macos = is_macos
+Classes.is_linux = is_linux
+
+Classes.getDPIScale = getDPIScale
+
 Classes.ccTypeToChanmsg = ccTypeToChanmsg
 Classes.ccTypeToRange = ccTypeToRange
 Classes.convertCCTypeChunkToAPI = convertCCTypeChunkToAPI
 
--- Helper function to generate a hash key from a complex value
-local function hashValue(value)
-  if type(value) == "table" then
-    local parts = {}
-    -- Sort keys for consistent ordering
-    local keys = {}
-    for k in pairs(value) do
-      table.insert(keys, k)
-    end
-    table.sort(keys)
+----------------------------------------------------
 
-    -- Build hash string from sorted key-value pairs
-    for _, k in ipairs(keys) do
-      table.insert(parts, k .. ":" .. hashValue(value[k]))
-    end
-    return "{" .. table.concat(parts, ",") .. "}"
-  else
-    -- For non-table values, convert to string
+local function hashValue(value)
+  local t = type(value)
+  if t == "number" then
+    return value
+  end
+  if t ~= "table" then
     return tostring(value)
   end
+
+  local parts = {}
+  local keys = {}
+  for k in pairs(value) do
+    keys[#keys + 1] = k
+  end
+  table.sort(keys)
+  for i = 1, #keys do
+    local k = keys[i]
+    parts[i] = k .. ":" .. hashValue(value[k])
+  end
+  return "{" .. table.concat(parts, ",") .. "}"
 end
 
--- Main function to add unique values to a table
 local function addUnique(t, value)
-  -- Store hash lookup table in the table's metatable
-  if not getmetatable(t) then
-    setmetatable(t, {_hashes = {}})
-  end
   local mt = getmetatable(t)
-
-  -- Generate hash for the new value
+  if not mt then
+    mt = {_hashes = {}}
+    setmetatable(t, mt)
+  end
   local hash = hashValue(value)
-
-  -- Check if hash exists
   if not mt._hashes[hash] then
-    table.insert(t, value)
+    t[#t + 1] = value
     mt._hashes[hash] = true
     return true
-  else
-    -- r.ShowConsoleMsg('found hash\n')
   end
   return false
 end

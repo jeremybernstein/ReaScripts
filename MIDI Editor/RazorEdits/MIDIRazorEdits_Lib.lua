@@ -436,9 +436,8 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
           area.timeValue.ticks.min = min
           area.timeValue.ticks.max = area.timeValue.ticks.max + delta -- ensure that the area width doesn't change
         end
-      end
 
-      if isMovingTime then
+        -- correct for the timebase
         if meState.timeBase == 'time' then
           if oldTicksMin ~= area.timeValue.ticks.min then
             local oldTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, oldTicksMin)
@@ -477,16 +476,25 @@ local function updateTimeValueTime(area)
 end
 
 updateAreaFromTimeValue = function(area, noCheck)
-  if not noCheck then adjustFullLane(area) end
-
-  if area.ccLane and (not meLanes[area.ccLane] or meLanes[area.ccLane].type ~= area.ccType) then
+  if glob.meNeedsRecalc
+    and area.ccLane
+    and (not meLanes[area.ccLane] or meLanes[area.ccLane].type ~= area.ccType)
+  then
+    local found = false
     for ccLane = #meLanes, 0, -1 do
       if meLanes[ccLane].type == area.ccType then
         area.ccLane = ccLane -- should check for a collision and delete if it doesn't fit
+        found = true
         break
       end
     end
+    if not found then
+      return false -- should be deleted
+    end
   end
+
+  if not noCheck then adjustFullLane(area) end
+
   if area.timeValue then
     local x1, y1, x2, y2
     if meState.timeBase == 'time' then
@@ -518,6 +526,7 @@ updateAreaFromTimeValue = function(area, noCheck)
     area.viewRect = viewIntersectionRect(area)
     area.modified = true
   end
+  return true
 end
 
 local function makeFullLane(area)
@@ -527,14 +536,17 @@ local function makeFullLane(area)
 end
 
 local function updateAreasFromTimeValue()
-  -- lagorama when following along, but nothing unusual
   if glob.meNeedsRecalc
   then
-    for _, area in ipairs(areas) do
-      updateAreaFromTimeValue(area)
+    for i = #areas, 1, -1 do
+      local area = areas[i]
+      if not updateAreaFromTimeValue(area) then
+        table.remove(areas, i)
+      end
     end
     glob.meNeedsRecalc = false
   end
+
 end
 
 -- Function to interpolate between two values
@@ -584,6 +596,41 @@ local function offsetValue(input, outputMin, outputMax, offsetFactorStart, offse
   end
 end
 
+local function compExpValue(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t)
+  -- Ensure t is clamped between 0 and 1
+  t = math.max(0, math.min(1, t))
+
+  local offsetFactor = lerp(offsetFactorStart, offsetFactorEnd, t)
+  offsetFactor = math.max(0, math.min(1, offsetFactor))
+
+  offsetFactor = 1 - offsetFactor -- offsetFactor is inverted
+
+  -- Calculate the middle point of the output range
+  local middlePoint = (outputMax + outputMin) / 2
+
+  -- Calculate the full range
+  local fullRange = outputMax - outputMin
+
+  if equalIsh(offsetFactor, 0.5) then
+    return input
+  elseif offsetFactor < 0.5 then
+    -- Compress towards middle
+    local compressionFactor = (0.5 - offsetFactor) / 0.5
+    -- Calculate how far the input is from the middle point
+    local distanceFromMiddle = input - middlePoint
+    -- Compress this distance based on the factor
+    local compressedDistance = distanceFromMiddle * (1 - compressionFactor)
+    return middlePoint + compressedDistance
+  else
+    -- Expand towards extremes
+    local expansionFactor = (offsetFactor - 0.5) / 0.5
+    -- Determine which extreme to target based on input position
+    local targetValue = input < middlePoint and outputMin or outputMax
+    -- Lerp between current value and target extreme
+    return lerp(input, targetValue, expansionFactor)
+  end
+end
+
 local function resetWidgetMode()
   -- TODO really? 3 variables seems like overkill here. consolidate.
   glob.inWidgetMode = false
@@ -593,6 +640,7 @@ end
 
 local processNotesWithGeneration
 local tInsertions
+-- local tInsertionsToBoundsCheck
 local tDeletions
 
 local function getNoteSegments(ppqpos, endppqpos, pitch, onlyArea)
@@ -1040,7 +1088,7 @@ local function processNotes(activeTake, area, operation)
                 newpitch = nil
                 -- _P('i love you')
               else
-                -- _P('i want to love you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick, newppqpos, newendppqpos)
+                -- _P('i want to love you', ppqpos, endppqpos, leftmostTick, rightmostTick, areaLeftmostTick, areaRightmostTick, newppqpos, newendppqpos)
               end
             end
             local insEnd = endppqpos + deltaTicks
@@ -1114,6 +1162,8 @@ local function processNotes(activeTake, area, operation)
                   newEvent.pitch = newpitch or pitch
                   newEvent.type = mu.NOTE_TYPE
                   classes.addUnique(tInsertions, newEvent)
+                  -- newEvent.sourceArea = area
+                  -- classes.addUnique(tInsertionsToBoundsCheck, newEvent)
                 end
               else
                 mu.MIDI_SetNote(activeTake, idx, selected, nil, newppqpos, newendppqpos, nil, newpitch)
@@ -1143,7 +1193,11 @@ local function processNotes(activeTake, area, operation)
       local val = event.vel
       local newval
 
-      if glob.stretchMode == 1 then
+      if glob.stretchMode == 2 then
+        newval = math.floor(compExpValue(val, 1, 127,
+                            area.widgetExtents.min, area.widgetExtents.max,
+                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      elseif glob.stretchMode == 1 then
         newval = math.floor(offsetValue(val, 1, 127,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
@@ -1157,7 +1211,6 @@ local function processNotes(activeTake, area, operation)
       touchedMIDI = true
     end
   end
-  return
 end
 
 local processCCsWithGeneration
@@ -1294,6 +1347,11 @@ local function processCCs(activeTake, area, operation)
     end
   end
 
+  ccChanmsg = ccChanmsg & 0xF0 -- to be safe
+
+  local onebyte = laneIsVel or ccChanmsg == 0xC0 or ccChanmsg == 0xD0
+  local pitchbend = ccChanmsg == 0xE0
+
   -- third iteration
   if not skipiter then
     for sidx, event in ipairs(sourceEvents) do
@@ -1309,9 +1367,6 @@ local function processCCs(activeTake, area, operation)
 
       local newppqpos, newmsg2, newmsg3
 
-      chanmsg = chanmsg & 0xF0 -- to be safe
-      local onebyte = laneIsVel or chanmsg == 0xC0 or chanmsg == 0xD0
-      local pitchbend = chanmsg == 0xE0
       local val = event.val
 
       local function valToBytes(newval, numsg2, numsg3)
@@ -1336,9 +1391,6 @@ local function processCCs(activeTake, area, operation)
           touchedMIDI = true
         elseif operation == OP_INVERT then
           newmsg2, newmsg3 = valToBytes(area.timeValue.vals.max - (val - area.timeValue.vals.min))
-          -- local newval = area.timeValue.vals.max - (val - area.timeValue.vals.min)
-          -- newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
-          -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
         elseif operation == OP_RETROGRADE then
           if not laneIsVel then
             local firstppq = sourceEvents[1].ppqpos
@@ -1348,9 +1400,6 @@ local function processCCs(activeTake, area, operation)
           end
         elseif operation == OP_RETROGRADE_VALS then
           newmsg2, newmsg3 = valToBytes(sourceEvents[#sourceEvents - (sidx - 1)].val)
-          -- local newval = sourceEvents[#sourceEvents - (sidx - 1)].val
-          -- newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or msg2
-          -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
         elseif operation == OP_DUPLICATE then
           if laneIsVel then
             classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), endppqpos = endppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
@@ -1372,9 +1421,6 @@ local function processCCs(activeTake, area, operation)
             end
             if newval then
               newmsg2, newmsg3 = valToBytes(clipInt(newval, 0, meLanes[area.ccLane].range))
-              -- newval = clipInt(newval, 0, meLanes[area.ccLane].range)
-              -- newmsg2 = onebyte and newval or pitchbend and newval & 0x7F or msg2
-              -- newmsg3 = onebyte and msg3 or pitchbend and ((newval >> 7) & 0x7F) or newval
             end
           elseif movingArea then
             -- TODO valToBytes, untangle the value here
@@ -1451,13 +1497,10 @@ local function processCCs(activeTake, area, operation)
 
   if stretchingArea and (resizing == RS_TOP or resizing == RS_BOTTOM) then
     for _, event in ipairs(sourceEvents) do
-      local chanmsg = event.chanmsg & 0xF0 -- to be safe
-      local onebyte = laneIsVel or chanmsg == 0xC0 or chanmsg == 0xD0
-      local pitchbend = chanmsg == 0xE0
       local val = event.val
       local newval
 
-      if resizing == RS_TOP then
+      if resizing == RS_TOP then -- don't support stretchmode 2 for area stretching, only for widget
         if glob.stretchMode == 1 then
           newval = math.min(math.max(val + (area.timeValue.vals.max - area.unstretchedTimeValue.vals.max), 0), meLanes[area.ccLane].range)
         else
@@ -1481,7 +1524,7 @@ local function processCCs(activeTake, area, operation)
         newmsg2 = not isRelVelocity and newmsg2 or nil
         mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newmsg2, newmsg3)
       else
-        mu.MIDI_SetCC(activeTake, event.idx, nil, nil, nil, event.chanmsg, nil, newmsg2, newmsg3)
+        mu.MIDI_SetCC(activeTake, event.idx, nil, nil, nil, nil, nil, newmsg2, newmsg3)
       end
       touchedMIDI = true
     end
@@ -1489,13 +1532,14 @@ local function processCCs(activeTake, area, operation)
 
   if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents then
     for _, event in ipairs(glob.widgetInfo.sourceEvents) do
-      local chanmsg = event.chanmsg & 0xF0 -- to be safe
-      local onebyte = laneIsVel or chanmsg == 0xC0 or chanmsg == 0xD0
-      local pitchbend = chanmsg == 0xE0
-      local val = (chanmsg == 0xA0 or chanmsg == 0xB0) and event.msg3 or onebyte and event.msg2 or (event.msg3 << 7 | event.msg2)
+      local val = event.val
 
       local newval
-      if glob.stretchMode == 1 then
+      if glob.stretchMode == 2 then
+        newval = math.floor(compExpValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
+                            area.widgetExtents.min, area.widgetExtents.max,
+                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      elseif glob.stretchMode == 1 then
         newval = math.floor(offsetValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
@@ -1520,7 +1564,6 @@ local function processCCs(activeTake, area, operation)
       touchedMIDI = true
     end
   end
-  return
 end
 
 ------------------------------------------------
@@ -1539,6 +1582,27 @@ local function processInsertions()
       touchedMIDI = true
     end
   end
+
+  -- notes only, make sure that events created by one area aren't covered by another
+  -- for _, event in ipairs(tInsertionsToBoundsCheck) do
+  --   if event.ppqpos and event.endppqpos and event.ppqpos < event.endppqpos and event.endppqpos - event.ppqpos > GLOBAL_PREF_SLOP then
+  --     local insert = true
+  --     for _, area in ipairs(areas) do
+  --       _P(area.timeValue.ticks, event.ppqpos, event.endppqpos, event.area)
+  --       if event.sourceArea ~= area
+  --         and event.ppqpos + GLOBAL_PREF_SLOP >= area.timeValue.ticks.min
+  --         and event.endppqpos - GLOBAL_PREF_SLOP <= area.timeValue.ticks.max
+  --       then
+  --         insert = false
+  --         break
+  --       end
+  --     end
+  --     if insert then
+  --       mu.MIDI_InsertNote(activeTake, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel)
+  --       touchedMIDI = true
+  --     end
+  --   end
+  -- end
 
   for _, event in ipairs(tDeletions) do
     if event.type == mu.NOTE_TYPE then
@@ -1792,6 +1856,7 @@ local function processAreas(singleArea, forceSourceInfo)
   end
 
   tInsertions = {}
+  -- tInsertionsToBoundsCheck = {}
   tDeletions = {}
   if hovering then
     runProcess(hovering)
@@ -1803,6 +1868,7 @@ local function processAreas(singleArea, forceSourceInfo)
       end
     end
     for i, area in ipairs(areas) do
+      -- if i > 1 then _P(math.abs(area.timeValue.ticks.min - areas[i - 1].timeValue.ticks.min)) end
       runProcess(area)
     end
   end
@@ -2173,7 +2239,7 @@ local function restorePreferences()
   stateVal = r.GetExtState(scriptID, 'stretchMode')
   if stateVal then
     stateVal = tonumber(stateVal)
-    if stateVal then glob.stretchMode = math.min(math.max(0, math.floor(stateVal)), 1) end
+    if stateVal then glob.stretchMode = math.min(math.max(0, math.floor(stateVal)), 2) end
   end
 
   lice.reloadSettings() -- key/mod mappings
@@ -2378,7 +2444,7 @@ local function processKeys()
   end
 
   -- this one is special
-  if (vState:byte(keys.vKeyLookup['enter']) ~= 0) and glob.inWidgetMode then
+  if keyMatches(vState, keyMappings.enterKey) and glob.inWidgetMode then
     glob.changeWidget = { area = nil }
     return
   end
@@ -2419,7 +2485,7 @@ local function processKeys()
       -- if k ~= 0xD and keys:byte(k) ~= 0 then
       if vState:byte(k) ~= 0 then
         if lice.keyIsMapped(k) then
-          reaper.CF_SendActionShortcut(glob.liceData.editor, 0, k)
+          reaper.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
         end
       end
     end
@@ -3467,9 +3533,21 @@ local function processMouse()
                   end
                 end
 
+                local oldMinTicks, oldMaxTicks = areas[isActive].timeValue.ticks.min, areas[isActive].timeValue.ticks.max
+                local oldMinVals, oldMaxVals = areas[isActive].timeValue.vals.min, areas[isActive].timeValue.vals.max
+                -- only move one area via pixels, all others will be adjusted based on the time delta to ensure consistency
+                attemptDragRectPartial(isActive, dx, dy, true)
+                updateTimeValueExtentsForArea(areas[isActive])
+                local newMinTicks, newMaxTicks = areas[isActive].timeValue.ticks.min, areas[isActive].timeValue.ticks.max
+                local newMinVals, newMaxVals = areas[isActive].timeValue.vals.min, areas[isActive].timeValue.vals.max
+
                 for tidx, testArea in ipairs(areas) do
-                  attemptDragRectPartial(tidx, dx, dy, true)
-                  updateTimeValueExtentsForArea(testArea)
+                  if testArea ~= areas[isActive] then
+                    testArea.timeValue.ticks:shift(newMinTicks - oldMinTicks, newMaxTicks - oldMaxTicks)
+                    testArea.timeValue.vals:shift(newMinVals - oldMinVals, newMaxVals - oldMaxVals)
+                    updateTimeValueTime(testArea)
+                    updateAreaFromTimeValue(testArea)
+                  end
                 end
                 break
               else
@@ -3718,7 +3796,13 @@ local function startup(secID, cmdID)
   lice.recalcConstants(true)
 
   if PROFILING then
+    local lMu, lGlob, lClasses, lLice, lKeys = mu, glob, classes, lice, keys
     profiler.attachToWorld() -- after all functions have been defined
+    profiler.attachTo('lMu', { recursive = false })
+    profiler.attachTo('lGlob', { recursive = false })
+    profiler.attachTo('lClasses', { recursive = false })
+    profiler.attachTo('lLice', { recursive = false })
+    profiler.attachTo('lKeys', { recursive = false })
     profiler.run()
   end
 end

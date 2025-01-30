@@ -467,6 +467,8 @@ local function drawMiscOptions()
   rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand', sm, 0)
   ImGui.SameLine(ctx)
   rv, sm = ImGui.RadioButtonEx(ctx, 'Offset', sm, 1)
+  ImGui.SameLine(ctx)
+  rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand to Middle', sm, 2)
   stretchMode = sm
 end
 

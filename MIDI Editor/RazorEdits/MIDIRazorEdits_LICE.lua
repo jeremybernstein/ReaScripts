@@ -155,6 +155,8 @@ local function buildNewKeyMap()
       end
     end
   end
+  keyMappings.enterKey = { name = 'Enter Key', baseKey = 'enter', vKey = keys.vKeys.VK_ENTER } -- always listen to enter
+
   for k, map in pairs(keyMappings) do
     map.vKey = map.vKey or keys.vKeyLookup[map.baseKey]
   end

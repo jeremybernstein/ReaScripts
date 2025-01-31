@@ -6,7 +6,7 @@
 --]]
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '/?.lua;' -- GET DIRECTORY FOR REQUIRE
-local classes = require 'MIDIRazorEdits_Classes'
+local helper = require 'MIDIRazorEdits_Helper'
 
 local Keys = {}
 
@@ -163,7 +163,7 @@ local vKeys = {
   VK_OEM_CLEAR 	  = 0xFE,   --  CLEAR
 }
 
--- if classes.is_macos then -- is wrong, and they don't fire consistently
+-- if helper.is_macos then -- is wrong, and they don't fire consistently
 --   vKeys.VK_OEM_1      = 41 -- ;
 --   vKeys.VK_OEM_PLUS   = 24 -- =
 --   vKeys.VK_OEM_MINUS  = 27 -- -
@@ -323,7 +323,7 @@ local defaultKeyMappings = {
   select              = { name = 'Select Contents',                     baseKey = 's' },
   unselect            = { name = 'Unselect Contents',                   baseKey = 'u' },
   deleteAreaContents  = { name = 'Delete Area and Contents',            baseKey = 'del' },
-  deleteArea          = { name = 'Delete Area, Preserve Contents',      baseKey = 'x', modifiers = 4 },
+  deleteArea          = { name = 'Delete Area, Preserve Contents',      baseKey = 'x', modifiers = 1 },
   deleteContents      = { name = 'Delete Contents',                     baseKey = 'x' },
   widgetMode          = { name = 'Toggle Widget Mode',                  baseKey = 'w' },
   insertMode          = { name = 'Toggle Insert Mode',                  baseKey = 'i' },
@@ -332,7 +332,7 @@ local defaultKeyMappings = {
   exitScript          = { name = 'Exit MRE',                            baseKey = 'esc' },
 }
 
-if classes.is_windows then
+if helper.is_windows then
   defaultKeyMappings.compositingSetup = { name = 'Open Compositing Tweaks Dialog', baseKey = 'F10', modifiers = 6 }
 end
 

@@ -13,10 +13,11 @@ local r = reaper
 local classes = require 'MIDIRazorEdits_Classes'
 local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
+local helper = require 'MIDIRazorEdits_Helper'
 
 local Rect = classes.Rect
 
-local winscale = classes.is_windows and 2 or 1
+local winscale = helper.is_windows and 2 or 1
 local pixelScale
 
 local MOAR_BITMAPS = true
@@ -30,7 +31,7 @@ Lice.MIDI_HANDLE_L = 0
 Lice.MIDI_HANDLE_R = 0
 Lice.MIDI_SEPARATOR = 0
 
-winscale = classes.getDPIScale()
+winscale = helper.getDPIScale()
 pixelScale = math.floor((1 / winscale) + 0.5)
 
 -- the Klangfarben Numbers are good for the large bitmap
@@ -46,7 +47,7 @@ Lice.compositeDelayBitmaps = Lice.compositeDelayBitmapsDefault
 local prevDPIScale
 
 local function recalcConstants(force)
-  local DPIScale = classes.getDPIScale()
+  local DPIScale = helper.getDPIScale()
 
   if not force and DPIScale ~= prevDPIScale then
     winscale = DPIScale
@@ -58,11 +59,11 @@ local function recalcConstants(force)
   if force then
     local val
     Lice.EDGE_SLOP = math.floor((5 * winscale) + 0.5)
-    val = classes.is_windows and 64 or 64 -- slight geom variations on Windows
+    val = helper.is_windows and 64 or 64 -- slight geom variations on Windows
     Lice.MIDI_RULER_H = math.floor((val * winscale) + 0.5)
-    val = classes.is_windows and 17 or 15
+    val = helper.is_windows and 17 or 15
     Lice.MIDI_SCROLLBAR_B = math.floor((val * winscale) + 0.5)
-    val = classes.is_windows and 19 or 17
+    val = helper.is_windows and 19 or 17
     Lice.MIDI_SCROLLBAR_R = math.floor((val * winscale) + 0.5)
     Lice.MIDI_HANDLE_L = math.floor((26 * winscale) + 0.5)
     Lice.MIDI_HANDLE_R = math.floor((26 * winscale) + 0.5)
@@ -71,7 +72,7 @@ local function recalcConstants(force)
 end
 
 local function pointConvertNative(x, y, windRect)
-  if classes.is_macos then
+  if helper.is_macos then
     local x1, y1, x2, y2 = r.JS_Window_GetViewportFromRect(windRect.x1, windRect.y1, windRect.x2, windRect.y2, false)
     local height = math.abs(y2 - y1)
     return x, height - y
@@ -85,14 +86,14 @@ local function prepMidiview(midiview)
   local windChanged = false
   local oldy1 = rect.y1
 
-  rect.y1 = rect.y1 + Lice.MIDI_RULER_H * (classes.is_macos and -1 or 1)
+  rect.y1 = rect.y1 + Lice.MIDI_RULER_H * (helper.is_macos and -1 or 1)
 
   if not glob.liceData
     or not rect:equals(glob.liceData.windRect)
   then
     recalcConstants()
     windChanged = true
-    rect.y1 = oldy1 + Lice.MIDI_RULER_H * (classes.is_macos and -1 or 1)
+    rect.y1 = oldy1 + Lice.MIDI_RULER_H * (helper.is_macos and -1 or 1)
   end
   return windChanged, rect
 end
@@ -112,8 +113,8 @@ local function createBitmap(midiview, windRect)
   local w, h = math.floor(windRect:width() + 0.5), math.floor(windRect:height() + 0.5)
   local bitmap = r.JS_LICE_CreateBitmap(true, w, h)
   numBitmaps = numBitmaps + 1
-  r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h, not classes.is_windows and true) --, classes.is_windows and true or false)
-  if classes.is_windows then
+  r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h, not helper.is_windows and true) --, helper.is_windows and true or false)
+  if helper.is_windows then
     -- should only need to do this once for the view
     r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
   end
@@ -132,7 +133,7 @@ local midiIntercepts = {
   -- { timestamp = 0, passthrough = false, message = 'WM_MOUSEWHEEL' }, -- TODO
 }
 
-local appInterceptActiveMessageName = classes.is_linux and 'WM_ACTIVATEAPP' or 'WM_ACTIVATE'
+local appInterceptActiveMessageName = helper.is_linux and 'WM_ACTIVATEAPP' or 'WM_ACTIVATE'
 
 local appIntercepts = {
   { timestamp = 0, passthrough = true, message = appInterceptActiveMessageName },
@@ -455,28 +456,28 @@ local function createFrameBitmaps(midiview, windRect)
     local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
     local w, h = math.floor(windRect:width() + 0.5), math.floor( (bottomPixel - y1) + 0.5)
     bitmaps.top = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
     numBitmaps = numBitmaps + 1
     bitmaps.bottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (bottomPixel - glob.liceData.screenRect.y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (bottomPixel - glob.liceData.screenRect.y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
     numBitmaps = numBitmaps + 1
     if meLanes[0] then
       local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
       bitmaps.middletop = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - glob.liceData.screenRect.y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - glob.liceData.screenRect.y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
       numBitmaps = numBitmaps + 1
       bitmaps.middlebottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - glob.liceData.screenRect.y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - glob.liceData.screenRect.y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
       numBitmaps = numBitmaps + 1
     end
     bitmaps.left = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
     numBitmaps = numBitmaps + 1
     bitmaps.right = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, not classes.is_windows and true) --, classes.is_windows and true or false)
+    r.JS_Composite(midiview, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
     numBitmaps = numBitmaps + 1
 
-    if classes.is_windows then
+    if helper.is_windows then
       -- should only need to do this once for the view
       r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
     end
@@ -556,7 +557,7 @@ local function shutdownLice()
 end
 
 local function convertColorFromNative(col)
-  if classes.is_windows then
+  if helper.is_windows then
     col = (col & 0xFF000000)
         | (col & 0xFF) << 16
         | (col & 0xFF00)
@@ -699,7 +700,7 @@ local function rectToLiceCoords(rect)
 end
 
 local function getAlpha(color)
-  return classes.is_windows and (((color & 0xFF000000) >> 24) / 0xFF) or 1
+  return helper.is_windows and (((color & 0xFF000000) >> 24) / 0xFF) or 1
 end
 
 local colors = {}
@@ -709,7 +710,7 @@ end
 
 local function clearBitmap(bitmap, x1, y1, width, height)
   r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
-  -- if classes.is_windows then
+  -- if helper.is_windows then
   --   r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
   -- else
   --   r.JS_LICE_Clear(bitmap, 0x00000000)
@@ -788,7 +789,7 @@ local function drawLice()
   recompositeDraw = false
 
   local antialias = true
-  local mode = 'COPY,ALPHA' --classes.is_windows and 0 or 'COPY,ALPHA'
+  local mode = 'COPY,ALPHA' --helper.is_windows and 0 or 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
   if glob.liceData then
@@ -824,14 +825,14 @@ local function drawLice()
             end
           else
             clearBitmap(area.bitmap, 0, 0, bmWidth, bmHeight)
-            r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not classes.is_windows and true) --, classes.is_windows and true or false)
+            r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not helper.is_windows and true) --, helper.is_windows and true or false)
           end
         end
         if not skip and not area.bitmap then
           area.bitmap = r.JS_LICE_CreateBitmap(true, w + (upsizing and w or 0), h + (upsizing and h or 0)) -- when upsizing, make it double-the size so that we don't have to resize so often
           numBitmaps = numBitmaps + 1
           area.modified = true
-          r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not classes.is_windows and true) --, classes.is_windows and true or false)
+          r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not helper.is_windows and true) --, helper.is_windows and true or false)
         end
 
         if not skip and area.modified or area.hovering or area.washovering then
@@ -845,7 +846,7 @@ local function drawLice()
           local x1, y1, x2, y2 = (x1L - x1V) + Lice.EDGE_SLOP, (y1L - y1V) + Lice.EDGE_SLOP, (x2L - x1V) + Lice.EDGE_SLOP, (y2L - y1V) + Lice.EDGE_SLOP - 1
 
           local function maskTopBottom()
-            if classes.is_windows then
+            if helper.is_windows then
               r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0, 1, 'MUL') -- top
               r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0, 1, 'MUL') -- bottom
             else
@@ -858,7 +859,7 @@ local function drawLice()
           clearBitmap(area.bitmap, x1 - Lice.EDGE_SLOP, y1 - Lice.EDGE_SLOP, logWidth + (Lice.EDGE_SLOP * 2) + 1, logHeight + (Lice.EDGE_SLOP * 2) + 1)
 
           r.JS_LICE_FillRect(area.bitmap, x1, y1,
-                             logWidth, logHeight - 1, reFillColor, classes.is_windows and 0.3 or 1, mode)
+                             logWidth, logHeight - 1, reFillColor, helper.is_windows and 0.3 or 1, mode)
           frameRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reBorderColor, alpha, mode, antialias)
           if area.hovering then
             local visTop = (y1 + math.abs(y1L - y1V))
@@ -925,7 +926,7 @@ local function drawLice()
                 elseif glob.verticalLock then -- vertical lock scroll mode
                   -- r.JS_LICE_FillRect(area.bitmap, middleX - Lice.EDGE_SLOP * 3, middleY - (Lice.EDGE_SLOP * 3),
                   --                                     Lice.EDGE_SLOP * 6, (Lice.EDGE_SLOP * 6),
-                  --                                     ((reBorderColor & 0x00FFFFFF) | 0x88000000), classes.is_windows and 0x88/255 or 1, mode)
+                  --                                     ((reBorderColor & 0x00FFFFFF) | 0x88000000), helper.is_windows and 0x88/255 or 1, mode)
                   r.JS_LICE_FillTriangle(area.bitmap, mx2, middleY - (Lice.EDGE_SLOP * 2),
                                                       mx2 - Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
                                                       mx2 + Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,

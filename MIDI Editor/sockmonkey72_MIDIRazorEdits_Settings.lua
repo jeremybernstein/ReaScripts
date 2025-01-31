@@ -291,6 +291,8 @@ local lastKeyState
 local lastModState
 local prefsStretchMode
 local stretchMode
+local prefsWidgetStretchMode
+local widgetStretchMode
 
 local function handleSavedMappings()
   local state
@@ -325,6 +327,11 @@ local function handleSavedMappings()
   prefsStretchMode = state ~= '' and tonumber(state) or 0
   if not prefsStretchMode then prefsStretchMode = 0 end
   stretchMode = prefsStretchMode
+
+  state = r.GetExtState(scriptID_Save, 'widgetStretchMode')
+  prefsWidgetStretchMode = state ~= '' and tonumber(state) or 0
+  if not prefsWidgetStretchMode then prefsWidgetStretchMode = 0 end
+  widgetStretchMode = prefsWidgetStretchMode
 end
 
 local function drawKeyMappings()
@@ -396,6 +403,7 @@ local wantsQuit = false
 
 local function hasChanges() -- could throttle this if it's a performance concern
   if stretchMode ~= prefsStretchMode then return true end
+  if widgetStretchMode ~= prefsWidgetStretchMode then return true end
   if lastKeyState ~= toExtStateString(prepKeysForSaving()) then return true end
   if lastModState ~= toExtStateString(prepModsForSaving()) then return true end
   return false
@@ -436,6 +444,14 @@ local function drawButtons()
     end
     prefsStretchMode = stretchMode
 
+    -- widget stretch mode
+    if widgetStretchMode ~= 0 then
+      r.SetExtState(scriptID_Save, 'widgetStretchMode', tostring(widgetStretchMode), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'widgetStretchMode', true)
+    end
+    prefsWidgetStretchMode = widgetStretchMode
+
     -- NOTIFY
     r.SetExtState(scriptID_Save, 'settingsUpdated', 'ping', false)
   end
@@ -460,16 +476,28 @@ end
 
 local function drawMiscOptions()
   ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Value Stretch Mode:')
+  ImGui.Text(ctx, 'Value Stretch Mode (Area):')
   local rv
   local sm = stretchMode
   ImGui.SameLine(ctx)
-  rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand', sm, 0)
+  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 10)
+  local saveX = ImGui.GetCursorPosX(ctx)
+  rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand##sm', sm, 0)
   ImGui.SameLine(ctx)
-  rv, sm = ImGui.RadioButtonEx(ctx, 'Offset', sm, 1)
-  ImGui.SameLine(ctx)
-  rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand to Middle', sm, 2)
+  rv, sm = ImGui.RadioButtonEx(ctx, 'Offset##sm', sm, 1)
   stretchMode = sm
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Value Stretch Mode (Widget):')
+  local wsm = widgetStretchMode
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, saveX)
+  rv, wsm = ImGui.RadioButtonEx(ctx, 'Compress/Expand##wsm', wsm, 0)
+  ImGui.SameLine(ctx)
+  rv, wsm = ImGui.RadioButtonEx(ctx, 'Offset##wsm', wsm, 1)
+  ImGui.SameLine(ctx)
+  rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp to Middle##wsm', wsm, 2)
+  widgetStretchMode = wsm
 end
 
 local inWindow = false

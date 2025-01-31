@@ -17,8 +17,6 @@
 local r = reaper
 local Lib = {}
 
-local GLOBAL_PREF_SLOP = 10 -- ticks
-
 local DEBUG_UNDO = false
 local sectionID, commandID
 local hasSWS = true
@@ -67,6 +65,7 @@ local classes = require 'MIDIRazorEdits_Classes'
 local lice = require 'MIDIRazorEdits_LICE'
 local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
+local helper = require 'MIDIRazorEdits_Helper'
 
 local Area = classes.Area
 local Point = classes.Point
@@ -74,6 +73,8 @@ local Rect = classes.Rect
 local Extent = classes.Extent
 local TimeValueExtents = classes.TimeValueExtents
 local MouseMods = classes.MouseMods
+
+local GLOBAL_PREF_SLOP = glob.GLOBAL_PREF_SLOP
 
 local scriptID = glob.scriptID
 
@@ -147,10 +148,7 @@ local function nearValue(val, val2, slop)
   return val >= val2 - slop and val <= val2 + slop
 end
 
-local function equalIsh(a, b, epsilon)
-  epsilon = epsilon or 1e-9 -- Default tolerance (1e-9, or very small difference)
-  return math.abs(a - b) <= epsilon
-end
+local equalIsh = helper.equalIsh
 
 local function clipInt(val, min, max)
   if not val then return nil end
@@ -546,89 +544,6 @@ local function updateAreasFromTimeValue()
     end
     glob.meNeedsRecalc = false
   end
-
-end
-
--- Function to interpolate between two values
-local function lerp(a, b, t)
-  return a + (t * (b - a))
-end
-
-local function scaleValue(input, outputMin, outputMax, scalingFactorStart, scalingFactorEnd, t)
-  -- Ensure t is clamped between 0 and 1
-  t = math.max(0, math.min(1, t))
-
-  local scalingFactor = lerp(scalingFactorStart, scalingFactorEnd, t)
-  scalingFactor = math.max(0, math.min(1, scalingFactor))
-
-  scalingFactor = 1 - scalingFactor -- scalingFactor is inverted
-
-  -- Adjust the output based on the scaling factor
-  if equalIsh(scalingFactor, 0.5) then
-    return input
-  elseif scalingFactor < 0.5 then
-    local factor = (0.5 - scalingFactor) / 0.5
-    return lerp(input, outputMin, factor)
-  elseif scalingFactor > 0.5 then
-    local factor = (scalingFactor - 0.5) / 0.5
-    return lerp(input, outputMax, factor)
-  end
-end
-
-local function offsetValue(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t)
-  -- Ensure t is clamped between 0 and 1
-  t = math.max(0, math.min(1, t))
-
-  local offsetFactor = lerp(offsetFactorStart, offsetFactorEnd, t)
-  offsetFactor = math.max(0, math.min(1, offsetFactor))
-
-  offsetFactor = 1 - offsetFactor -- offsetFactor is inverted
-
-  -- Adjust the output based on the scaling factor
-  if equalIsh(offsetFactor, 0.5) then
-    return input
-  elseif offsetFactor < 0.5 then
-    local factor = (0.5 - offsetFactor) / 0.5
-    return input - ((outputMax - outputMin) * factor)
-  elseif offsetFactor > 0.5 then
-    local factor = (offsetFactor - 0.5) / 0.5
-    return input + ((outputMax - outputMin) * factor)
-  end
-end
-
-local function compExpValue(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t)
-  -- Ensure t is clamped between 0 and 1
-  t = math.max(0, math.min(1, t))
-
-  local offsetFactor = lerp(offsetFactorStart, offsetFactorEnd, t)
-  offsetFactor = math.max(0, math.min(1, offsetFactor))
-
-  offsetFactor = 1 - offsetFactor -- offsetFactor is inverted
-
-  -- Calculate the middle point of the output range
-  local middlePoint = (outputMax + outputMin) / 2
-
-  -- Calculate the full range
-  local fullRange = outputMax - outputMin
-
-  if equalIsh(offsetFactor, 0.5) then
-    return input
-  elseif offsetFactor < 0.5 then
-    -- Compress towards middle
-    local compressionFactor = (0.5 - offsetFactor) / 0.5
-    -- Calculate how far the input is from the middle point
-    local distanceFromMiddle = input - middlePoint
-    -- Compress this distance based on the factor
-    local compressedDistance = distanceFromMiddle * (1 - compressionFactor)
-    return middlePoint + compressedDistance
-  else
-    -- Expand towards extremes
-    local expansionFactor = (offsetFactor - 0.5) / 0.5
-    -- Determine which extreme to target based on input position
-    local targetValue = input < middlePoint and outputMin or outputMax
-    -- Lerp between current value and target extreme
-    return lerp(input, targetValue, expansionFactor)
-  end
 end
 
 local function resetWidgetMode()
@@ -640,195 +555,8 @@ end
 
 local processNotesWithGeneration
 local tInsertions
--- local tInsertionsToBoundsCheck
 local tDeletions
-
-local function getNoteSegments(ppqpos, endppqpos, pitch, onlyArea)
-  -- First, find all areas that intersect with the pitch line
-  local intersecting_areas = {}
-
-  local function checkAreaIntersection(area)
-    -- Check both unstretched and current positions
-    local positions = {
-      {
-        bottom = area.timeValue.vals.min,
-        top = area.timeValue.vals.max,
-        left = area.timeValue.ticks.min,
-        right = area.timeValue.ticks.max - 1
-      }
-    }
-    if area.unstretchedTimeValue then
-      table.insert(positions, 1, {
-        bottom = area.unstretchedTimeValue.vals.min,
-        top = area.unstretchedTimeValue.vals.max,
-        left = area.unstretchedTimeValue.ticks.min,
-        right = area.unstretchedTimeValue.ticks.max - 1
-      })
-    end
-
-    for _, pos in ipairs(positions) do
-      if pitch <= pos.top and pitch >= pos.bottom then
-        -- Only include if it overlaps with our note bounds
-        if pos.right >= ppqpos and pos.left <= endppqpos then
-          table.insert(intersecting_areas, {
-            left = math.max(pos.left, ppqpos),
-            right = math.min(pos.right, endppqpos)
-          })
-        end
-      end
-    end
-  end
-
-  -- Check all areas
-  if onlyArea then
-    checkAreaIntersection(onlyArea)
-  else
-    for _, area in ipairs(areas) do
-      checkAreaIntersection(area)
-    end
-  end
-
-  if #intersecting_areas == 0 then
-    return nil
-  end
-
-  -- Sort areas by left edge
-  table.sort(intersecting_areas, function(a, b)
-    return a.left < b.left
-  end)
-
-  -- Merge overlapping areas
-  local merged_areas = {intersecting_areas[1]}
-  for i = 2, #intersecting_areas do
-    local current = intersecting_areas[i]
-    local last = merged_areas[#merged_areas]
-
-    if current.left <= last.right then
-      -- Areas overlap, extend the last area if needed
-      last.right = math.max(last.right, current.right)
-    else
-      -- No overlap, add as new area
-      table.insert(merged_areas, current)
-    end
-  end
-
-  -- Find valid segments between areas and within note bounds
-  local valid_segments = {}
-
-  -- Check segment before first area
-  if merged_areas[1].left > ppqpos then
-    local length = merged_areas[1].left - ppqpos
-    if length >= GLOBAL_PREF_SLOP then
-      table.insert(valid_segments, {ppqpos, merged_areas[1].left})
-    end
-  end
-
-  -- Check segments between areas
-  for i = 1, #merged_areas - 1 do
-    local length = merged_areas[i + 1].left - merged_areas[i].right
-    if length >= GLOBAL_PREF_SLOP then
-      table.insert(valid_segments, {merged_areas[i].right, merged_areas[i + 1].left})
-    end
-  end
-
-  -- Check segment after last area
-  if merged_areas[#merged_areas].right < endppqpos then
-    local length = endppqpos - merged_areas[#merged_areas].right
-    if length >= GLOBAL_PREF_SLOP then
-      table.insert(valid_segments, {merged_areas[#merged_areas].right, endppqpos})
-    end
-  end
-
-  -- if merged_areas[#merged_areas].right < endppqpos then
-  --   local length = endppqpos - (overlapMod() and ppqpos or merged_areas[#merged_areas].right)
-  --   if length >= GLOBAL_PREF_SLOP then
-  --     table.insert(valid_segments, {overlapMap() and ppqpos or merged_areas[#merged_areas].right, endppqpos})
-  --   end
-  -- end
-
-  if #valid_segments > 0 then
-    return valid_segments
-  end
-  return nil
-end
-
-------------------------------------------------
-------------------------------------------------
-
--- Returns true if two time-value extents intersect
-local function doExtentsIntersect(e1, e2)
-  return not (e1.ticks.max < e2.ticks.min or
-              e1.ticks.min > e2.ticks.max or
-              e1.vals.max < e2.vals.min or
-              e1.vals.min > e2.vals.max)
-end
-
--- Returns the intersection of two time-value extents, or nil if they don't intersect
-local function getIntersection(e1, e2)
-  if not doExtentsIntersect(e1, e2) then
-    return nil
-  end
-
-  return TimeValueExtents.new(
-    math.max(e1.ticks.min, e2.ticks.min),
-    math.min(e1.ticks.max, e2.ticks.max),
-    math.max(e1.vals.min, e2.vals.min),
-    math.min(e1.vals.max, e2.vals.max)
-  )
-end
-
--- Returns a table of TimeValueExtents objects representing the non-intersecting parts of extents1
-local function getNonIntersectingAreas(e1, e2)
-  local intersection = getIntersection(e1, e2)
-  if not intersection then
-    -- If there's no intersection, return the first extents
-    return {e1}
-  end
-
-  local nonIntersecting = {}
-
-  -- Check earlier time side of intersection
-  if intersection.ticks.min > e1.ticks.min then
-    table.insert(nonIntersecting, TimeValueExtents.new(
-      e1.ticks.min,
-      intersection.ticks.min,
-      e1.vals.min,
-      e1.vals.max
-    ))
-  end
-
-  -- Check later time side of intersection
-  if intersection.ticks.max < e1.ticks.max then
-    table.insert(nonIntersecting, TimeValueExtents.new(
-      intersection.ticks.max,
-      e1.ticks.max,
-      e1.vals.min,
-      e1.vals.max
-    ))
-  end
-
-  -- Check lower value side of intersection
-  if intersection.vals.min > e1.vals.min then
-    table.insert(nonIntersecting, TimeValueExtents.new(
-      intersection.ticks.min,
-      intersection.ticks.max,
-      e1.vals.min,
-      intersection.vals.min
-    ))
-  end
-
-  -- Check upper value side of intersection
-  if intersection.vals.max < e1.vals.max then
-    table.insert(nonIntersecting, TimeValueExtents.new(
-      intersection.ticks.min,
-      intersection.ticks.max,
-      intersection.vals.max,
-      e1.vals.max
-    ))
-  end
-
-  return nonIntersecting
-end
+local tDelQueries
 
 ------------------------------------------------
 ------------------------------------------------
@@ -890,7 +618,6 @@ local function processNotes(activeTake, area, operation)
 
   local insert = false
 
-  -- TODO: REFACTOR (can use same code, approximately, for CCs)
   -- potential second iteration, deal with deletions in the target area
   if operation == OP_DUPLICATE then
     local tmpArea = Area.new(area:serialize()) -- OP_DELETE_TRIM will use this area for the deletion itself (in addition to event selection)
@@ -899,20 +626,25 @@ local function processNotes(activeTake, area, operation)
   elseif movingArea then
      if deltaTicks ~= 0 or deltaPitch ~= 0 then
       -- extra work to avoid deleting the target area, if it intersects with the source area
-      local deletionExtents = getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue)
+      local deletionExtents = not duplicatingArea
+        and helper.getExtentUnion(area.timeValue, area.unstretchedTimeValue)
+        or helper.getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue)
       local tmpArea = Area.new(area:serialize()) -- only used for event selection
-      tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
+      tmpArea.unstretched, tmpArea.unstretchedTimeValue = nil, nil
+      -- _P('src1', area.timeValue)
+      -- _P('src2', area.unstretchedTimeValue)
       if not glob.insertMode then
-        for _, extent in ipairs(deletionExtents) do
+        for ii, extent in ipairs(deletionExtents) do
+          -- _P(ii, 'output', extent)
           tmpArea.timeValue = extent
           processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
         end
       end
-      if not duplicatingArea then
-        tmpArea.timeValue = area.unstretchedTimeValue
-        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
-      end
-      insert = true
+      -- if not duplicatingArea then
+      --   tmpArea.timeValue = area.unstretchedTimeValue
+      --   processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
+      -- end
+      insert = true -- won't do anything anymore because we pre-process
     else
       return -- not doing anything? don't do anything.
     end
@@ -952,14 +684,14 @@ local function processNotes(activeTake, area, operation)
       if ppqpos + GLOBAL_PREF_SLOP < rightmostTick and endppqpos - GLOBAL_PREF_SLOP >= leftmostTick then
         if ppqpos < leftmostTick  then
           if not overlapMod() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+            helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
             canOperate = false
           end
         end
         if endppqpos > rightmostTick then
           if not overlapMod() then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+            helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           end
         end
       end
@@ -1002,7 +734,7 @@ local function processNotes(activeTake, area, operation)
           newpitch = sourceEvents[#sourceEvents - (sidx - 1)].pitch
         end
       elseif operation == OP_DUPLICATE then
-        classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = (ppqpos >= leftmostTick and ppqpos or leftmostTick) + areaTickExtent:size(),
+        helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = (ppqpos >= leftmostTick and ppqpos or leftmostTick) + areaTickExtent:size(),
                           endppqpos = (endppqpos <= rightmostTick and endppqpos or rightmostTick + 1) + areaTickExtent:size(), chan = chan, pitch = pitch, vel = vel, relvel = relvel })
       elseif operation == OP_DELETE or operation == OP_STRETCH_DELETE or operation == OP_DELETE_TRIM then
         local deleteOrig = true
@@ -1011,20 +743,24 @@ local function processNotes(activeTake, area, operation)
           deleteOrig = trimOverlappingNotes() -- this screws up most operations, but is necessary for OP_DUPLICATE
         end
 
-        local segments = getNoteSegments(ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
-        if segments then
-          for i, seg in ipairs(segments) do
-            local newEvent = mu.tableCopy(event)
-            newEvent.ppqpos = seg[1]
-            newEvent.endppqpos = seg[2]
-            newEvent.pitch = pitch
-            newEvent.type = mu.NOTE_TYPE
-            classes.addUnique(tInsertions, newEvent)
-            deleteOrig = true
+        -- don't unnecessarily repeat this calculation if we've already done it
+        if helper.addUnique(tDelQueries, { ppqpos = ppqpos, endppqpos = endppqpos, pitch = pitch, op = operation }) then
+          local segments = helper.getNoteSegments(areas, ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
+          if segments then
+            for i, seg in ipairs(segments) do
+              local newEvent = mu.tableCopy(event)
+              newEvent.ppqpos = seg[1]
+              newEvent.endppqpos = seg[2]
+              newEvent.pitch = pitch
+              newEvent.type = mu.NOTE_TYPE
+              helper.addUnique(tInsertions, newEvent)
+              -- _P('inserting', newEvent.ppqpos, newEvent.endppqpos, newEvent.pitch, area.timeValue.ticks)
+              deleteOrig = true
+            end
           end
         end
         if deleteOrig then
-          classes.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+          helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
         end
       elseif not singleMod() or ppqpos >= leftmostTick then
         if stretchingArea then
@@ -1067,110 +803,74 @@ local function processNotes(activeTake, area, operation)
             end
 
             if newendppqpos and newendppqpos < (newppqpos or ppqpos) then
-              classes.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+              helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
             end
           end
         end
 
         if movingArea or duplicatingArea then
-          local handled = false
-          if ppqpos < leftmostTick then
-            if not duplicatingArea then
-              local leftLeft = math.min(leftmostTick, areaLeftmostTick)
-              newppqpos = ppqpos
-              newendppqpos = endppqpos < leftLeft and endppqpos or leftLeft
-              if ((ppqpos >= areaLeftmostTick and endppqpos < areaRightmostTick)
-                  or (newppqpos >= areaLeftmostTick and newendppqpos < areaRightmostTick))
-                and pitch >= area.timeValue.vals.min and pitch <= area.timeValue.vals.max
-              then
-                newppqpos = nil
-                newendppqpos = nil
-                newpitch = nil
-                -- _P('i love you')
-              else
-                -- _P('i want to love you', ppqpos, endppqpos, leftmostTick, rightmostTick, areaLeftmostTick, areaRightmostTick, newppqpos, newendppqpos)
-              end
+          local segments = not event.segments and helper.getNoteSegments(areas, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil)
+          if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
+            for _, seg in ipairs(segments) do
+              helper.addUnique(tInsertions,
+                              { type = mu.NOTE_TYPE,
+                                selected = selected, muted = muted,
+                                ppqpos = seg[1],
+                                endppqpos = seg[2],
+                                chan = chan, pitch = newpitch or pitch,
+                                vel = vel, relvel = relvel }
+                              )
             end
-            local insEnd = endppqpos + deltaTicks
-            if insEnd >= areaRightmostTick then insEnd = areaRightmostTick - 1 end
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = areaLeftmostTick, endppqpos = insEnd, chan = chan, pitch = pitch - deltaPitch, vel = vel, relvel = relvel })
-            handled = true
+            event.segments = segments
           end
-          if endppqpos > rightmostTick then
-            if not overlapMod() then
-              if not handled then
-                if not duplicatingArea then
-                  local rightRight = math.max(rightmostTick, areaRightmostTick)
-                  newppqpos = ppqpos > rightRight and ppqpos or rightRight
-                  newendppqpos = endppqpos
-                  if ((ppqpos >= areaLeftmostTick and endppqpos < areaRightmostTick)
-                      or (newppqpos >= areaLeftmostTick and newendppqpos < areaRightmostTick))
-                    and pitch >= area.timeValue.vals.min and pitch <= area.timeValue.vals.max
-                  then
-                    newppqpos = nil
-                    newendppqpos = nil
-                    newpitch = nil
-                    -- _P('i hate you', ppqpos, endppqpos)
-                  else
-                    -- _P('i want to hate you', ppqpos, endppqpos, areaLeftmostTick, areaRightmostTick, newppqpos, newendppqpos)
-                  end
-                end
-                classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + deltaTicks, endppqpos = rightmostTick + deltaTicks - 1, chan = chan, pitch = pitch - deltaPitch, vel = vel, relvel = relvel })
-              end
-              handled = true
-            end
-          end
-          if not handled then
-            newppqpos = ppqpos + deltaTicks
-            newendppqpos = endppqpos + deltaTicks
-            newpitch = pitch - deltaPitch
-          end
+          helper.addUnique(tInsertions,
+                          { type = mu.NOTE_TYPE,
+                            selected = selected, muted = muted,
+                            ppqpos = ppqpos + deltaTicks < areaLeftmostTick and areaLeftmostTick or ppqpos + deltaTicks,
+                            endppqpos = endppqpos + deltaTicks > areaRightmostTick and areaRightmostTick or endppqpos + deltaTicks,
+                            chan = chan, pitch = pitch - deltaPitch,
+                            vel = vel, relvel = relvel }
+                          )
         end
       end
 
       if process then
         if duplicatingArea then
           if newppqpos and newendppqpos then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, endppqpos = newendppqpos, chan = chan, pitch = newpitch or pitch, vel = vel, relvel = relvel })
+            helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, endppqpos = newendppqpos, chan = chan, pitch = newpitch or pitch, vel = vel, relvel = relvel })
           end
         else
           if newppqpos and newendppqpos and newppqpos < newendppqpos then
             if newendppqpos - newppqpos > GLOBAL_PREF_SLOP then
-              if insert then
-                local segments
-                if overlapMod()
-                  and (ppqpos + GLOBAL_PREF_SLOP < leftmostTick
-                    or endppqpos - GLOBAL_PREF_SLOP > rightmostTick)
-                then
-                  -- nada
-                else
-                  segments = getNoteSegments(newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch)
-                end
-                if segments then
-                  for i, seg in ipairs(segments) do
-                    local newEvent = mu.tableCopy(event)
-                    newEvent.ppqpos = seg[1]
-                    newEvent.endppqpos = seg[2]
-                    newEvent.pitch = newpitch or pitch
-                    newEvent.type = mu.NOTE_TYPE
-                    classes.addUnique(tInsertions, newEvent)
+              if insert then -- only called for stretching
+                local segments = not event.segments and helper.getNoteSegments(areas, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch)
+                if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
+                  for _, seg in ipairs(segments) do
+                    helper.addUnique(tInsertions,
+                                    { type = mu.NOTE_TYPE,
+                                      selected = selected, muted = muted,
+                                      ppqpos = seg[1],
+                                      endppqpos = seg[2],
+                                      chan = chan, pitch = newpitch or pitch,
+                                      vel = vel, relvel = relvel }
+                                    )
                   end
-                else
-                  local newEvent = mu.tableCopy(event)
-                  newEvent.ppqpos = newppqpos or ppqpos
-                  newEvent.endppqpos = newendppqpos or endppqpos
-                  newEvent.pitch = newpitch or pitch
-                  newEvent.type = mu.NOTE_TYPE
-                  classes.addUnique(tInsertions, newEvent)
-                  -- newEvent.sourceArea = area
-                  -- classes.addUnique(tInsertionsToBoundsCheck, newEvent)
+                  event.segments = segments
                 end
+                helper.addUnique(tInsertions,
+                                { type = mu.NOTE_TYPE,
+                                  selected = selected, muted = muted,
+                                  ppqpos = newppqpos or ppqpos,
+                                  endppqpos = newendppqpos or endppqpos,
+                                  chan = chan, pitch = newpitch or pitch,
+                                  vel = vel, relvel = relvel }
+                                )
               else
                 mu.MIDI_SetNote(activeTake, idx, selected, nil, newppqpos, newendppqpos, nil, newpitch)
                 touchedMIDI = true
               end
             else
-              -- what to do here, maybe it's already deleted??
+              -- TODO: I don't think this is reachable anymore
               mu.MIDI_DeleteNote(activeTake, idx)
               touchedMIDI = true
             end
@@ -1193,16 +893,16 @@ local function processNotes(activeTake, area, operation)
       local val = event.vel
       local newval
 
-      if glob.stretchMode == 2 then
-        newval = math.floor(compExpValue(val, 1, 127,
+      if glob.widgetStretchMode == 2 then
+        newval = math.floor(helper.compExpValue(val, 1, 127,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      elseif glob.stretchMode == 1 then
-        newval = math.floor(offsetValue(val, 1, 127,
+      elseif glob.widgetStretchMode == 1 then
+        newval = math.floor(helper.offsetValue(val, 1, 127,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
       else
-        newval = math.floor(scaleValue(val, 1, 127,
+        newval = math.floor(helper.scaleValue(val, 1, 127,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
       end
@@ -1242,7 +942,7 @@ local function processCCs(activeTake, area, operation)
 
   local laneIsVel = laneIsVelocity(area)
   local isRelVelocity = ccType == 0x207
-  local ccChanmsg, ccFilter = classes.ccTypeToChanmsg(ccType)
+  local ccChanmsg, ccFilter = helper.ccTypeToChanmsg(ccType)
 
   if movingArea then
     deltaTicks = area.timeValue.ticks.min - area.unstretchedTimeValue.ticks.min
@@ -1402,12 +1102,12 @@ local function processCCs(activeTake, area, operation)
           newmsg2, newmsg3 = valToBytes(sourceEvents[#sourceEvents - (sidx - 1)].val)
         elseif operation == OP_DUPLICATE then
           if laneIsVel then
-            classes.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), endppqpos = endppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+            helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), endppqpos = endppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
-            classes.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, msg2 = msg2, msg3 = msg3 })
+            helper.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, msg2 = msg2, msg3 = msg3 })
           end
         elseif operation == OP_DELETE then
-          classes.addUnique(tDeletions, { type = laneIsVel and mu.NOTE_TYPE or mu.CC_TYPE, idx = idx })
+          helper.addUnique(tDeletions, { type = laneIsVel and mu.NOTE_TYPE or mu.CC_TYPE, idx = idx })
         else
           local newval
 
@@ -1438,11 +1138,11 @@ local function processCCs(activeTake, area, operation)
             -- newmsg2 = not isRelVelocity and newmsg2 or nil
             -- if newppqpos then
             --   _P(deltaTicks, ppqpos, newppqpos, endppqpos, endppqpos + deltaTicks)
-            --   classes.addUnique(tInsertions, { selected = selected, muted = muted, ppqpos = newppqpos, endppqpos = endppqpos + deltaTicks, chan = chan, pitch = pitch, vel = newmsg2 or vel, relvel = newmsg3 or relvel })
+            --   helper.addUnique(tInsertions, { selected = selected, muted = muted, ppqpos = newppqpos, endppqpos = endppqpos + deltaTicks, chan = chan, pitch = pitch, vel = newmsg2 or vel, relvel = newmsg3 or relvel })
             -- end
           else
             if newppqpos then
-              classes.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, chanmsg = chanmsg, chan = chan, msg2 = newmsg2 or msg2, msg3 = newmsg3 or msg3 })
+              helper.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, chanmsg = chanmsg, chan = chan, msg2 = newmsg2 or msg2, msg3 = newmsg3 or msg3 })
             end
           end
         else
@@ -1454,7 +1154,7 @@ local function processCCs(activeTake, area, operation)
                 local newEvent = mu.tableCopy(event)
                 newEvent.vel, newEvent.relvel = newmsg2 or vel, newmsg3 or relvel
                 newEvent.type = mu.NOTE_TYPE
-                classes.addUnique(tInsertions, newEvent)
+                helper.addUnique(tInsertions, newEvent)
               else
                 mu.MIDI_SetNote(activeTake, idx, selected, nil, nil, nil, nil, nil, newmsg2, newmsg3)
                 touchedMIDI = true
@@ -1467,7 +1167,7 @@ local function processCCs(activeTake, area, operation)
               newEvent.msg2 = newmsg2 or msg2
               newEvent.msg3 = newmsg3 or msg3
               newEvent.type = mu.CC_TYPE
-              classes.addUnique(tInsertions, newEvent)
+              helper.addUnique(tInsertions, newEvent)
             elseif newppqpos or newmsg2 or newmsg3 then
               mu.MIDI_SetCC(activeTake, idx, selected, nil, newppqpos, nil, nil, newmsg2, newmsg3)
               touchedMIDI = true
@@ -1485,15 +1185,6 @@ local function processCCs(activeTake, area, operation)
     updateTimeValueTime(area)
     updateAreaFromTimeValue(area)
   end
-
-  -- for _, rdx in ipairs(removals) do
-  --   if laneIsVel then
-  --     mu.MIDI_DeleteNote(activeTake, rdx) -- allow note deletion like this?
-  --   else
-  --     mu.MIDI_DeleteCC(activeTake, rdx)
-  --   end
-  --   touchedMIDI = true
-  -- end
 
   if stretchingArea and (resizing == RS_TOP or resizing == RS_BOTTOM) then
     for _, event in ipairs(sourceEvents) do
@@ -1535,16 +1226,16 @@ local function processCCs(activeTake, area, operation)
       local val = event.val
 
       local newval
-      if glob.stretchMode == 2 then
-        newval = math.floor(compExpValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
+      if glob.widgetStretchMode == 2 then
+        newval = math.floor(helper.compExpValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      elseif glob.stretchMode == 1 then
-        newval = math.floor(offsetValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
+      elseif glob.widgetStretchMode == 1 then
+        newval = math.floor(helper.offsetValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
       else
-        newval = math.floor(scaleValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
+        newval = math.floor(helper.scaleValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
                             area.widgetExtents.min, area.widgetExtents.max,
                             (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
       end
@@ -1582,27 +1273,6 @@ local function processInsertions()
       touchedMIDI = true
     end
   end
-
-  -- notes only, make sure that events created by one area aren't covered by another
-  -- for _, event in ipairs(tInsertionsToBoundsCheck) do
-  --   if event.ppqpos and event.endppqpos and event.ppqpos < event.endppqpos and event.endppqpos - event.ppqpos > GLOBAL_PREF_SLOP then
-  --     local insert = true
-  --     for _, area in ipairs(areas) do
-  --       _P(area.timeValue.ticks, event.ppqpos, event.endppqpos, event.area)
-  --       if event.sourceArea ~= area
-  --         and event.ppqpos + GLOBAL_PREF_SLOP >= area.timeValue.ticks.min
-  --         and event.endppqpos - GLOBAL_PREF_SLOP <= area.timeValue.ticks.max
-  --       then
-  --         insert = false
-  --         break
-  --       end
-  --     end
-  --     if insert then
-  --       mu.MIDI_InsertNote(activeTake, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel)
-  --       touchedMIDI = true
-  --     end
-  --   end
-  -- end
 
   for _, event in ipairs(tDeletions) do
     if event.type == mu.NOTE_TYPE then
@@ -1711,7 +1381,7 @@ local function generateSourceInfo(area, op, force)
       local ccType = meLanes[area.ccLane].type
       local laneIsVel = laneIsVelocity(area)
       local isRelVelocity = ccType == 0x207
-      local ccChanmsg, ccFilter = classes.ccTypeToChanmsg(ccType)
+      local ccChanmsg, ccFilter = helper.ccTypeToChanmsg(ccType)
       local selNotes
 
       if ccChanmsg == 0xA0 then -- polyAT, we need to know which notes are selected
@@ -1856,19 +1526,18 @@ local function processAreas(singleArea, forceSourceInfo)
   end
 
   tInsertions = {}
-  -- tInsertionsToBoundsCheck = {}
   tDeletions = {}
+  tDelQueries = {}
   if hovering then
     runProcess(hovering)
   else
     if dragDirection then
-      local ddString = classes.dragDirectionToString(dragDirection)
+      local ddString = helper.dragDirectionToString(dragDirection)
       if ddString then
-        swapAreas(classes.sortAreas(areas, ddString))
+        swapAreas(helper.sortAreas(areas, ddString))
       end
     end
     for i, area in ipairs(areas) do
-      -- if i > 1 then _P(math.abs(area.timeValue.ticks.min - areas[i - 1].timeValue.ticks.min)) end
       runProcess(area)
     end
   end
@@ -1996,13 +1665,13 @@ local function analyzeChunk()
     -- _P('VELLANE', laneType, ME_Height, inlineHeight, scroll, zoom)
 
     -- Lane number as used in the chunk differ from those returned by API functions such as MIDIEditor_GetSetting_int(editor, 'last_clicked')
-    laneType, ME_Height, inlineHeight = classes.convertCCTypeChunkToAPI(tonumber(laneType)), tonumber(ME_Height), tonumber(inlineHeight)
+    laneType, ME_Height, inlineHeight = helper.convertCCTypeChunkToAPI(tonumber(laneType)), tonumber(ME_Height), tonumber(inlineHeight)
     if not (laneType and ME_Height and inlineHeight) then
       r.MB('Could not parse the VELLANE fields in the item state chunk.', 'ERROR', 0)
         return false
     end
     laneID = laneID + 1
-    meLanes[laneID] = { VELLANE = vellaneStr, type = laneType, range = classes.ccTypeToRange(laneType), height = ME_Height, inlineHeight = inlineHeight, scroll = scroll, zoom = zoom }
+    meLanes[laneID] = { VELLANE = vellaneStr, type = laneType, range = helper.ccTypeToRange(laneType), height = ME_Height, inlineHeight = inlineHeight, scroll = scroll, zoom = zoom }
   end
 
   local laneBottomPixel = glob.windowRect.y1 + (glob.windowRect:height() - lice.MIDI_SCROLLBAR_B) -- magic numbers which work
@@ -2149,7 +1818,7 @@ local function getAreaTableForSerialization()
 end
 
 local function createUndoStep(undoText, override)
-  local undoData = override or (#areas ~= 0 and classes.serialize(getAreaTableForSerialization()) or '')
+  local undoData = override or (#areas ~= 0 and helper.serialize(getAreaTableForSerialization()) or '')
   r.Undo_BeginBlock2(0)
   r.GetSetMediaItemTakeInfo_String(glob.liceData.editorTake, 'P_EXT:'..scriptID, undoData, true)
   -- r.MarkTrackItemsDirty(r.GetMediaItem_Track(glob.liceData.editorItem), glob.liceData.editorItem)
@@ -2187,7 +1856,7 @@ end
 local function checkProjectExtState()
   local _, projState = r.GetSetMediaItemTakeInfo_String(glob.liceData.editorTake, 'P_EXT:'..scriptID, '', false)
   if #projState then
-    local areaTable = classes.deserialize(projState)
+    local areaTable = helper.deserialize(projState)
     clearAreas()
     if areaTable then
       wasDragged = true
@@ -2206,7 +1875,7 @@ end
 local function restorePreferences()
   local stateVal
 
-  if classes.is_windows then
+  if helper.is_windows then
     if lice.MOAR_BITMAPS then
       if r.GetExtState(scriptID, 'moarBitmaps') == '' then
         r.DeleteExtState(scriptID, 'compositeDelayMin', true) -- delete the old prefs and reset to new defaults
@@ -2239,14 +1908,21 @@ local function restorePreferences()
   stateVal = r.GetExtState(scriptID, 'stretchMode')
   if stateVal then
     stateVal = tonumber(stateVal)
-    if stateVal then glob.stretchMode = math.min(math.max(0, math.floor(stateVal)), 2) end
+    if stateVal then glob.stretchMode = math.min(math.max(0, math.floor(stateVal)), 1) end
+  end
+
+  glob.widgetStretchMode = 0 -- default
+  stateVal = r.GetExtState(scriptID, 'widgetStretchMode')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.widgetStretchMode = math.min(math.max(0, math.floor(stateVal)), 2) end -- more options
   end
 
   lice.reloadSettings() -- key/mod mappings
 end
 
 local function savePreferences()
-  if classes.is_windows then
+  if helper.is_windows then
     if lice.compositeDelayMin ~= lice.compositeDelayMinDefault then
       r.SetExtState(scriptID, 'compositeDelayMin', string.format('%0.3f', lice.compositeDelayMin), true)
     end
@@ -2261,6 +1937,11 @@ local function savePreferences()
     r.SetExtState(scriptID, 'stretchMode', tostring(glob.stretchMode), true)
   else
     r.DeleteExtState(scriptID, 'stretchMode', true)
+  end
+  if glob.widgetStretchMode ~= 0 then
+    r.SetExtState(scriptID, 'widgetStretchMode', tostring(glob.widgetStretchMode), true)
+  else
+    r.DeleteExtState(scriptID, 'widgetStretchMode', true)
   end
 end
 
@@ -2366,7 +2047,7 @@ local function processKeys()
     glob.verticalLock = not glob.verticalLock
     if glob.verticalLock and glob.horizontalLock then glob.horizontalLock = false end
     return
-  elseif classes.is_windows and keyMatches(vState, keyMappings.compositingSetup) then
+  elseif helper.is_windows and keyMatches(vState, keyMappings.compositingSetup) then
     showCompositingDialog()
     return
   end
@@ -2638,7 +2319,7 @@ local function updateAreaForAllEvents(area)
   local timeMin, timeMax
   local valMin, valMax
   local ccType = area.ccLane and meLanes[area.ccLane].type or nil
-  local ccChanmsg, ccFilter = classes.ccTypeToChanmsg(ccType)
+  local ccChanmsg, ccFilter = helper.ccTypeToChanmsg(ccType)
 
   local laneIsVel = laneIsVelocity(area)
   local isNote = not area.ccLane or laneIsVel
@@ -3033,7 +2714,7 @@ local function ValidateMouse()
     local x, y = r.GetMousePosition()
 
     local wx1, wy1, wx2, wy2 = glob.liceData.windRect:coords()
-    if classes.is_macos then  wy1, wy2 = wy2, wy1 end
+    if helper.is_macos then  wy1, wy2 = wy2, wy1 end
 
     local isMidiViewHovered = x >= wx1 and x <= wx2 and y >= wy1 and y <= wy2
     if not isMidiViewHovered then
@@ -3796,13 +3477,14 @@ local function startup(secID, cmdID)
   lice.recalcConstants(true)
 
   if PROFILING then
-    local lMu, lGlob, lClasses, lLice, lKeys = mu, glob, classes, lice, keys
+    local lMu, lGlob, lClasses, lLice, lKeys, lHelper = mu, glob, classes, lice, keys, helper
     profiler.attachToWorld() -- after all functions have been defined
     profiler.attachTo('lMu', { recursive = false })
     profiler.attachTo('lGlob', { recursive = false })
     profiler.attachTo('lClasses', { recursive = false })
     profiler.attachTo('lLice', { recursive = false })
     profiler.attachTo('lKeys', { recursive = false })
+    profiler.attachTo('lHelper', { recursive = false })
     profiler.run()
   end
 end

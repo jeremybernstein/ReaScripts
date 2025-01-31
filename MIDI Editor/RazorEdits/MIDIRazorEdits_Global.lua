@@ -7,8 +7,7 @@
 
 local Global = {}
 
--- package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'RazorEdits/?.lua;' -- GET DIRECTORY FOR REQUIRE
-local classes = require 'MIDIRazorEdits_Classes'
+local helper = require 'MIDIRazorEdits_Helper'
 
 local r = reaper
 
@@ -16,7 +15,7 @@ Global.scriptID = 'sockmonkey72_MIDIRazorEdits'
 Global.DEBUG_LANES = false
 
 -- this this a problem, multiple initialization?
-Global.normal_cursor = r.JS_Mouse_LoadCursor(classes.is_windows and 32512 or 0)
+Global.normal_cursor = r.JS_Mouse_LoadCursor(helper.is_windows and 32512 or 0)
 Global.razor_cursor1 = r.JS_Mouse_LoadCursor(599)
 Global.resize_left_cursor = r.JS_Mouse_LoadCursor(417)
 Global.resize_right_cursor = r.JS_Mouse_LoadCursor(418)
@@ -53,6 +52,7 @@ Global.currentGrid = nil
 -- TODO: swing grid
 Global.currentSwing = nil
 Global.stretchMode = 0 -- default = compress/expand
+Global.widgetStretchMode = 0
 
 Global.areas = {}
 Global.liceData = nil
@@ -71,5 +71,7 @@ Global.appIsForeground = true
 Global.currentTime = 0.
 
 Global.setCursor = setCursor
+
+Global.GLOBAL_PREF_SLOP = helper.GLOBAL_PREF_SLOP
 
 return Global

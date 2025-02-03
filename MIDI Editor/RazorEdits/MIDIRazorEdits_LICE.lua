@@ -123,13 +123,14 @@ local function createBitmap(midiview, windRect)
   return bitmap, Rect.new(x1, y1, x2, y2)
 end
 
-local midiIntercepts = {
+local mouseIntercepts = {
   { timestamp = 0, passthrough = false, message = 'WM_SETCURSOR' },
   { timestamp = 0, passthrough = false, message = 'WM_LBUTTONDOWN' },
   { timestamp = 0, passthrough = false, message = 'WM_LBUTTONUP' },
   { timestamp = 0, passthrough = false, message = 'WM_LBUTTONDBLCLK' },
-  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONDOWN' },
-  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONUP' }, -- need both
+  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONDOWN' }, -- ---------|
+  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONUP' }, -- need both -|
+  { timestamp = 0, passthrough = false, message = 'WM_RBUTTONDBLCLK' },
   -- { timestamp = 0, passthrough = false, message = 'WM_MOUSEWHEEL' }, -- TODO
 }
 
@@ -232,6 +233,35 @@ local function loadModMappingState(stateTab)
   end
 end
 
+local lastClickTime = 0
+local lButtonName = 'LBUTTON'
+local rButtonName = 'RBUTTON'
+
+local clickMsgName
+local releaseMsgName
+local dblClickMsgName
+
+local postMsgNames = {}
+
+local rClickMsgName
+
+local function updateInterceptNames()
+  lButtonName = glob.wantsRightButton and 'RBUTTON' or 'LBUTTON'
+  rButtonName = glob.wantsRightButton and 'LBUTTON' or 'RBUTTON'
+
+  clickMsgName = 'WM_' .. lButtonName .. 'DOWN'
+  releaseMsgName = 'WM_' .. lButtonName .. 'UP'
+  dblClickMsgName = 'WM_' .. lButtonName .. 'DBLCLK'
+
+  rClickMsgName = glob.wantsRightButton and '' or 'WM_' .. rButtonName .. 'DOWN'
+
+  postMsgNames = glob.wantsRightButton
+    and { 'WM_' .. rButtonName .. 'DOWN', 'WM_' .. rButtonName .. 'UP', 'WM_' .. rButtonName .. 'DBLCLK' }
+    or {}
+end
+
+-- updateInterceptNames()
+
 local function reloadSettings()
   shutdownLiceKeys()
 
@@ -254,6 +284,8 @@ local function reloadSettings()
   modMappings = nil
 
   initLiceKeys()
+
+  updateInterceptNames()
 end
 
 local interceptKeyInput = false
@@ -303,7 +335,7 @@ local function startIntercepts()
   if glob.isIntercept then return end
   glob.isIntercept = true
   if glob.liceData then
-    for _, intercept in ipairs(midiIntercepts) do
+    for _, intercept in ipairs(mouseIntercepts) do
       r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
     end
   end
@@ -316,7 +348,7 @@ local function endIntercepts()
   endAppIntercepts()
   if glob.liceData then
     shutdownLiceKeys()
-    for _, intercept in ipairs(midiIntercepts) do
+    for _, intercept in ipairs(mouseIntercepts) do
       r.JS_WindowMessage_Release(glob.liceData.midiview, intercept.message)
       intercept.timestamp = 0
     end
@@ -327,7 +359,7 @@ end
 
 local function passthroughIntercepts()
   if not glob.liceData then return end
-  for _, intercept in ipairs(midiIntercepts) do -- no app passthroughs
+  for _, intercept in ipairs(mouseIntercepts) do -- no app passthroughs
     local msg = intercept.message
     local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(glob.liceData.midiview, msg)
     if ret and time ~= intercept.timestamp then
@@ -338,6 +370,7 @@ local function passthroughIntercepts()
 end
 
 Lice.lbutton_press_x = nil
+Lice.lbutton_press_x_was = nil
 Lice.lbutton_click = nil
 Lice.lbutton_drag = nil
 Lice.lbutton_release = nil
@@ -345,8 +378,9 @@ Lice.lbutton_dblclick = nil
 Lice.lbutton_press_y = nil
 Lice.lbutton_dblclick_seen = nil
 
-local function resetButtons()
+local function resetButtons(wasPressed)
   Lice.lbutton_press_x = nil
+  Lice.lbutton_press_x_was = wasPressed and true or false
   Lice.lbutton_click = nil
   Lice.lbutton_drag = nil
   Lice.lbutton_release = nil
@@ -375,7 +409,7 @@ local function peekAppIntercepts()
       intercept.timestamp = time
 
       if msg == appInterceptActiveMessageName then
-        glob.appIsForeground = (wpl == 1)
+        glob.appIsForeground = (wpl ~= 0)
         if not glob.appIsForeground then
           glob.setCursor(glob.normal_cursor)
         end
@@ -384,13 +418,18 @@ local function peekAppIntercepts()
   end
 end
 
-local lastClickTime = 0
+local function messageShouldPost(msg)
+  for _, m in ipairs(postMsgNames) do
+    if msg == m then return true end
+  end
+  return false
+end
 
 local function peekIntercepts(m_x, m_y)
   if not glob.liceData then return end
   local DOUBLE_CLICK_DELAY = 0.2 -- 200ms, adjust based on system double-click time
 
-  for _, intercept in ipairs(midiIntercepts) do
+  for _, intercept in ipairs(mouseIntercepts) do
     local msg = intercept.message
     local ret, _, time, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(glob.liceData.midiview, msg)
 
@@ -401,9 +440,9 @@ local function peekIntercepts(m_x, m_y)
       --   glob._P('mousewheel', wpl, wph, lpl, lph)
       -- end
 
-      if msg == 'WM_RBUTTONDOWN' then
+      if msg == rClickMsgName then
         glob.handleRightClick()
-      elseif msg == 'WM_LBUTTONDBLCLK' then
+      elseif msg == dblClickMsgName then
         -- Got a double click - clear any pending single click state
         if not Lice.lbutton_dblclick then
           Lice.lbutton_press_x = nil
@@ -414,7 +453,7 @@ local function peekIntercepts(m_x, m_y)
           Lice.lbutton_dblclick_seen = false
           lastClickTime = time
         end
-      elseif msg == 'WM_LBUTTONDOWN' then
+      elseif msg == clickMsgName then
         local currentTime = glob.currentTime
         if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
           -- Only register the click if we're outside the double-click window
@@ -426,12 +465,18 @@ local function peekIntercepts(m_x, m_y)
           end
           Lice.lbutton_release = false
         end
-      elseif msg == 'WM_LBUTTONUP' then
+        if helper.is_windows then
+          -- on windows, we don't get focus back when clicking
+          -- into the midiview for some reason I cannot explain.
+          r.JS_Window_SetFocus(glob.liceData.midiview)
+        end
+      elseif msg == releaseMsgName then
         local currentTime = glob.currentTime
         if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
           -- Only process the release if we're outside the double-click window
-          if Lice.lbutton_press_x then
+          if Lice.lbutton_press_x or Lice.lbutton_press_x_was then
             Lice.lbutton_press_x, Lice.lbutton_press_y = nil, nil
+            Lice.lbutton_press_x_was = false
             Lice.lbutton_release = true
             Lice.lbutton_drag = false
           else
@@ -439,6 +484,8 @@ local function peekIntercepts(m_x, m_y)
             r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
           end
         end
+      elseif messageShouldPost(intercept.message) then
+        r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
       end
     end
   end

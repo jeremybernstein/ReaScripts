@@ -1,13 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.23
+-- @version 0.1.0-beta.24
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - vastly simplified and more accurate note move/duplicate
---   - improved note deletions
---   - separate area/widget stretch mode into two prefs
---   - default for delete area/preserve contents is now shift-x (from alt-x)
+--   - control points option for CC lanes (see settings)
+--   - experimental option to switch to right-button (right-click to delete area is disabled in that case; see settings)
+--   - fix some focus issues on Windows
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua

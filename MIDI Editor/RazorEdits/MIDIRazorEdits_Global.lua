@@ -53,6 +53,8 @@ Global.currentGrid = nil
 Global.currentSwing = nil
 Global.stretchMode = 0 -- default = compress/expand
 Global.widgetStretchMode = 0
+Global.wantsControlPoints = false
+Global.wantsRightButton = false
 
 Global.areas = {}
 Global.liceData = nil

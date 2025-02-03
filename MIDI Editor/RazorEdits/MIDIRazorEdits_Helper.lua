@@ -362,6 +362,7 @@ local function hashValue(value)
 end
 
 local function addUnique(t, value)
+  if not (t and value) then return false end
   local mt = getmetatable(t)
   if not mt then
     mt = {_hashes = {}}

@@ -293,6 +293,10 @@ local prefsStretchMode
 local stretchMode
 local prefsWidgetStretchMode
 local widgetStretchMode
+local prefsWantsControlPoints
+local wantsControlPoints
+local prefsWantsRightButton
+local wantsRightButton
 
 local function handleSavedMappings()
   local state
@@ -323,6 +327,11 @@ local function handleSavedMappings()
     end
   end
 
+  state = r.GetExtState(scriptID_Save, 'wantsControlPoints')
+  prefsWantsControlPoints = state ~= '' and tonumber(state) or 0
+  if not prefsWantsControlPoints then prefsWantsControlPoints = 0 end
+  wantsControlPoints = prefsWantsControlPoints
+
   state = r.GetExtState(scriptID_Save, 'stretchMode')
   prefsStretchMode = state ~= '' and tonumber(state) or 0
   if not prefsStretchMode then prefsStretchMode = 0 end
@@ -332,6 +341,11 @@ local function handleSavedMappings()
   prefsWidgetStretchMode = state ~= '' and tonumber(state) or 0
   if not prefsWidgetStretchMode then prefsWidgetStretchMode = 0 end
   widgetStretchMode = prefsWidgetStretchMode
+
+  state = r.GetExtState(scriptID_Save, 'wantsRightButton')
+  prefsWantsRightButton = state ~= '' and tonumber(state) or 0
+  if not prefsWantsRightButton then prefsWantsRightButton = 0 end
+  wantsRightButton = prefsWantsRightButton
 end
 
 local function drawKeyMappings()
@@ -402,6 +416,8 @@ end
 local wantsQuit = false
 
 local function hasChanges() -- could throttle this if it's a performance concern
+  if wantsRightButton ~= prefsWantsRightButton then return true end
+  if wantsControlPoints ~= prefsWantsControlPoints then return true end
   if stretchMode ~= prefsStretchMode then return true end
   if widgetStretchMode ~= prefsWidgetStretchMode then return true end
   if lastKeyState ~= toExtStateString(prepKeysForSaving()) then return true end
@@ -436,6 +452,13 @@ local function drawButtons()
       lastModState = nil
     end
 
+    if wantsControlPoints ~= 0 then
+      r.SetExtState(scriptID_Save, 'wantsControlPoints', tostring(stretchMode), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'wantsControlPoints', true)
+    end
+    prefsWantsControlPoints = wantsControlPoints
+
     -- stretch mode
     if stretchMode ~= 0 then
       r.SetExtState(scriptID_Save, 'stretchMode', tostring(stretchMode), true)
@@ -451,6 +474,13 @@ local function drawButtons()
       r.DeleteExtState(scriptID_Save, 'widgetStretchMode', true)
     end
     prefsWidgetStretchMode = widgetStretchMode
+
+    if wantsRightButton ~= 0 then
+      r.SetExtState(scriptID_Save, 'wantsRightButton', tostring(wantsRightButton), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'wantsRightButton', true)
+    end
+    prefsWantsRightButton = wantsRightButton
 
     -- NOTIFY
     r.SetExtState(scriptID_Save, 'settingsUpdated', 'ping', false)
@@ -476,12 +506,20 @@ end
 
 local function drawMiscOptions()
   ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Value Stretch Mode (Area):')
+  ImGui.Text(ctx, 'Add Control Points (CC):')
   local rv
+  local cp = wantsControlPoints
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 20)
+  local saveX = ImGui.GetCursorPosX(ctx)
+  rv, cp = ImGui.Checkbox(ctx, '##wantsControlPoints', cp == 1 and true or false)
+  wantsControlPoints = cp and 1 or 0
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Value Stretch Mode (Area):')
   local sm = stretchMode
   ImGui.SameLine(ctx)
-  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 10)
-  local saveX = ImGui.GetCursorPosX(ctx)
+  ImGui.SetCursorPosX(ctx, saveX)
   rv, sm = ImGui.RadioButtonEx(ctx, 'Compress/Expand##sm', sm, 0)
   ImGui.SameLine(ctx)
   rv, sm = ImGui.RadioButtonEx(ctx, 'Offset##sm', sm, 1)
@@ -498,6 +536,14 @@ local function drawMiscOptions()
   ImGui.SameLine(ctx)
   rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp to Middle##wsm', wsm, 2)
   widgetStretchMode = wsm
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Use Right Mouse Button (experimental):')
+  local rb = wantsRightButton
+  ImGui.SameLine(ctx)
+  -- ImGui.SetCursorPosX(ctx, saveX)
+  rv, rb = ImGui.Checkbox(ctx, '##wantsRightButton', rb == 1 and true or false)
+  wantsRightButton = rb and 1 or 0
 end
 
 local inWindow = false

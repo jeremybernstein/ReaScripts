@@ -919,6 +919,53 @@ local function laneIsVelocity(area)
   return area.ccLane and (meLanes[area.ccLane].type == 0x200 or meLanes[area.ccLane].type == 0x207)
 end
 
+local function addControlPoints(activeTake, area)
+  if glob.wantsControlPoints and
+    area.ccLane
+    and not laneIsVelocity(area)
+    and not area.controlPoints
+    and area.sourceInfo.sourceEvents
+    and #area.sourceInfo.sourceEvents ~= 0
+  then
+    local newEvent
+    local cp1, cp2, cp3, cp4
+    local sourceEvents = area.sourceInfo.sourceEvents
+
+    if area.sourceInfo.potentialControlPoints and #area.sourceInfo.potentialControlPoints == 4 then
+      area.controlPoints = {}
+      return
+    end
+
+    newEvent = mu.tableCopy(sourceEvents[1])
+    local rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, newEvent.chanmsg, newEvent.chan, newEvent.msg2, area.timeValue.ticks.min, true)
+    if rv then
+      newEvent.ppqpos = area.timeValue.ticks.min - 1
+      newEvent.msg2 = msg2out
+      newEvent.msg3 = msg3out
+      cp1 = newEvent
+    end
+
+    newEvent = mu.tableCopy(sourceEvents[1])
+    newEvent.ppqpos = area.timeValue.ticks.min
+    cp2 = newEvent
+
+    newEvent = mu.tableCopy(sourceEvents[#sourceEvents])
+    newEvent.ppqpos = area.timeValue.ticks.max
+    cp3 = newEvent
+
+    newEvent = mu.tableCopy(sourceEvents[#sourceEvents])
+    rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, newEvent.chanmsg, newEvent.chan, newEvent.msg2, area.timeValue.ticks.max, true)
+    if rv then
+      newEvent.ppqpos = area.timeValue.ticks.max + 1
+      newEvent.msg2 = msg2out
+      newEvent.msg3 = msg3out
+      cp4 = newEvent
+    end
+
+    area.controlPoints = { cp1, cp2, cp3, cp4 }
+  end
+end
+
 local function processCCs(activeTake, area, operation)
   local hratio, vratio = 1., 1.
   -- local insertions = {}
@@ -1004,7 +1051,7 @@ local function processCCs(activeTake, area, operation)
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
   elseif movingArea then
-    -- addControlPoints()
+    addControlPoints(activeTake, area)
     if deltaTicks ~= 0 or deltaVal ~= 0 then
       if laneIsVel then
         -- no move/copy support for vel/rel vel atm
@@ -1025,7 +1072,7 @@ local function processCCs(activeTake, area, operation)
       return
     end
   elseif stretchingArea then
-    -- addControlPoints()
+    addControlPoints(activeTake, area)
     if deltaTicks ~= 0 or deltaVal ~= 0 then
       if resizing == RS_TOP or resizing == RS_BOTTOM then
         skipiter = true
@@ -1179,6 +1226,12 @@ local function processCCs(activeTake, area, operation)
   end
 
   -- outside of the enumeration
+  if area.controlPoints then
+    helper.addUnique(tInsertions, area.controlPoints[1])
+    helper.addUnique(tInsertions, area.controlPoints[2])
+    helper.addUnique(tInsertions, area.controlPoints[3])
+    helper.addUnique(tInsertions, area.controlPoints[4])
+  end
 
   if operation == OP_DUPLICATE then
     area.timeValue.ticks:shift(areaTickExtent:size())
@@ -1281,38 +1334,6 @@ local function processInsertions()
       mu.MIDI_DeleteCC(activeTake, event.idx)
     end
     touchedMIDI = true
-  end
-end
-
-local function addControlPoints(activeTake, area)
-  if area.ccLane and not laneIsVelocity(area) and not area.controlPoints and area.sourceInfo.sourceEvents and #area.sourceInfo.sourceEvents ~= 0 then
-    local newEvent
-    local cp1, cp2
-    local sourceEvents = area.sourceInfo.sourceEvents
-
-    newEvent = mu.tableCopy(sourceEvents[1])
-    local rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, newEvent.chanmsg, newEvent.chan, newEvent.msg2, area.timeValue.ticks.min, true)
-    if rv then
-      newEvent.ppqpos = area.timeValue.ticks.min
-      newEvent.msg2 = msg2out
-      newEvent.msg3 = msg3out
-      cp1 = newEvent
-    end
-
-    newEvent = mu.tableCopy(sourceEvents[#sourceEvents])
-    rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, newEvent.chanmsg, newEvent.chan, newEvent.msg2, area.timeValue.ticks.max, true)
-    if rv then
-      newEvent.ppqpos = area.timeValue.ticks.max - 10
-      newEvent.msg2 = msg2out
-      newEvent.msg3 = msg3out
-      cp2 = newEvent
-    end
-    area.controlPoints = {}
-
-    if area.controlPoints then
-      table.insert(sourceEvents, 1, cp1)
-      table.insert(sourceEvents, cp2)
-    end
   end
 end
 
@@ -1419,19 +1440,21 @@ local function generateSourceInfo(area, op, force)
         -- local pitchbend = chanmsg == 0xE0
         local val = (event.chanmsg == 0xA0 or event.chanmsg == 0xB0) and event.msg3 or onebyte and event.msg2 or (event.msg3 << 7 | event.msg2)
 
-        if event.ppqpos >= leftmostTick and event.ppqpos <= rightmostTick
+        if event.ppqpos >= leftmostTick - 1 and event.ppqpos <= rightmostTick + 1
           and event.chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and event.msg2 == ccFilter))
           and (not selNotes or selNotes[event.msg2]) -- handle PolyAT lane
-          and val <= topValue and val >= bottomValue
         then
-          event.idx = idx
-          event.val = val
-          area.sourceInfo.sourceEvents[#area.sourceInfo.sourceEvents + 1] = event
+          if event.ppqpos <= leftmostTick or event.ppqpos >= rightmostTick then
+            area.sourceInfo.potentialControlPoints = area.sourceInfo.potentialControlPoints or {}
+            area.sourceInfo.potentialControlPoints[#area.sourceInfo.potentialControlPoints + 1] = event
+          elseif val <= topValue and val >= bottomValue then
+            event.idx = idx
+            event.val = val
+            area.sourceInfo.sourceEvents[#area.sourceInfo.sourceEvents + 1] = event
+          end
         end
       end
     end
-
-    -- addControlPoints(activeTake, area)
 
     if wantsWidget then
       glob.widgetInfo.sourceEvents = area.sourceInfo.sourceEvents
@@ -1916,6 +1939,20 @@ local function restorePreferences()
   if stateVal then
     stateVal = tonumber(stateVal)
     if stateVal then glob.widgetStretchMode = math.min(math.max(0, math.floor(stateVal)), 2) end -- more options
+  end
+
+  glob.wantsControlPoints = false -- default
+  stateVal = r.GetExtState(scriptID, 'wantsControlPoints')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.wantsControlPoints = stateVal == 1 and true or false end
+  end
+
+  glob.wantsRightButton = false -- default
+  stateVal = r.GetExtState(scriptID, 'wantsRightButton')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.wantsRightButton = stateVal == 1 and true or false end
   end
 
   lice.reloadSettings() -- key/mod mappings
@@ -2708,7 +2745,7 @@ local deadzone_lbutton_state = 0
 
 local function ValidateMouse()
 
-  local mState = r.JS_Mouse_GetState(1)
+  local mState = r.JS_Mouse_GetState(glob.wantsRightButton and 2 or 1)
 
   if deadzone_lbutton_state == 0 then
     local x, y = r.GetMousePosition()
@@ -2723,7 +2760,7 @@ local function ValidateMouse()
       y = y < wy1 and wy1 or y > wy2 and wy2 or y
     end
     local mx, my = r.JS_Window_ScreenToClient(glob.liceData.midiview, x, y)
-    local mouseLeftDown = mState == 1
+    local mouseLeftDown = mState == (glob.wantsRightButton and 2 or 1)
 
     local isValidMouseAction = lice.lbutton_drag and mouseLeftDown
     local inDeadZone = isDeadZone(mx, my)
@@ -2731,7 +2768,7 @@ local function ValidateMouse()
     if not isValidMouseAction then
       isValidMouseAction = isMidiViewHovered and not inDeadZone
       if lice.lbutton_drag and not mouseLeftDown then
-        lice.resetButtons()
+        lice.resetButtons(true) -- not in love with this, it's ugly
         lice.lbutton_release = true
       end
     end
@@ -3290,6 +3327,7 @@ local function processMouse()
         area.active = false
         area.unstretched = nil
         area.unstretchedTimeValue = nil
+        area.controlPoints = nil
       end
 
       for idx = #removals, 1, -1 do

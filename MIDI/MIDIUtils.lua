@@ -1,11 +1,12 @@
 -- @description MIDI Utils API
--- @version 0.2.07-beta.1
+-- @version 0.2.07-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
 --   - fix CORRECT_EXTENTS for MIDI items with a start offset
+--   - simplify MIDI_GetPPQ
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -2346,10 +2347,10 @@ local function MIDI_DebugInfo(take)
 end
 
 local function MIDI_GetPPQ(take)
-  EnsureTake(take)
+  -- EnsureTake(take) -- this doesn't need local data
   local qn1 = r.MIDI_GetProjQNFromPPQPos(take, 0)
   local qn2 = qn1 + 1
-  return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2) - r.MIDI_GetPPQPosFromProjQN(take, qn1))
+  return math.floor(r.MIDI_GetPPQPosFromProjQN(take, qn2))
 end
 
 local function MIDI_SelectAll(take, wantsSelect)

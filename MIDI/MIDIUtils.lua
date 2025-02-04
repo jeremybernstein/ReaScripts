@@ -1,5 +1,5 @@
 -- @description MIDI Utils API
--- @version 0.2.06
+-- @version 0.2.07-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
@@ -962,23 +962,28 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     local lastEventPPQ
 
     if item then
-      -- find the first and last _touched_ events
-      for _, event in ipairs(MIDIEvents) do
-        -- if event.ppqpos > itemStartPPQ then break end -- this list is unsorted, can't break early
-        if not event.delete and event.recalcMIDI then
-          if event.ppqpos < itemStartPPQ then
-            firstEventPPQ = event.ppqpos
-            break
+      if itemStartOffset ~= 0 then
+        firstEventPPQ = itemStartPPQ
+        lastEventPPQ = itemEndPPQ
+      else
+        -- find the first and last _touched_ events
+        for _, event in ipairs(MIDIEvents) do
+          -- if event.ppqpos > itemStartPPQ then break end -- this list is unsorted, can't break early
+          if not event.delete and event.recalcMIDI then
+            if event.ppqpos < itemStartPPQ then
+              firstEventPPQ = event.ppqpos
+              break
+            end
           end
         end
-      end
-      for i = #MIDIEvents, 1, -1 do
-        local event = MIDIEvents[i]
-        -- if event.ppqpos < itemEndPPQ then break end -- this list is unsorted, can't break early
-        if not event.delete and event.recalcMIDI then
-          if event.ppqpos > itemEndPPQ then
-            lastEventPPQ = event.ppqpos
-            break
+        for i = #MIDIEvents, 1, -1 do
+          local event = MIDIEvents[i]
+          -- if event.ppqpos < itemEndPPQ then break end -- this list is unsorted, can't break early
+          if not event.delete and event.recalcMIDI then
+            if event.ppqpos > itemEndPPQ then
+              lastEventPPQ = event.ppqpos
+              break
+            end
           end
         end
       end

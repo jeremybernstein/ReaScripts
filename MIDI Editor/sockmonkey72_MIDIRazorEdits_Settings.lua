@@ -57,6 +57,7 @@ end
 local intercepting = false
 local currentRow
 local prevKeys
+local overlapTestFailed = false
 
 local keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
 local modMappings = tableCopySimpleKeys(keys.defaultModMappings)
@@ -76,6 +77,8 @@ local function interceptKeys()
 end
 
 local function setup()
+  overlapTestFailed = false
+
   if not ImGui.IsWindowFocused(ctx) then
     releaseKeys()
     currentRow = nil
@@ -245,15 +248,32 @@ local function makeModRowTable(id, source, isDupe)
 
   local rv
   local modKey = source.modKey
-  rv, modKey = ImGui.RadioButtonEx(ctx, 'off##' .. id, modKey, 0)
-  ImGui.SameLine(ctx)
-  rv, modKey = ImGui.RadioButtonEx(ctx, ctrlName .. '##' .. id, modKey, 2)
-  ImGui.SameLine(ctx)
-  rv, modKey = ImGui.RadioButtonEx(ctx, shiftName .. '##' .. id, modKey, 1)
-  ImGui.SameLine(ctx)
-  rv, modKey = ImGui.RadioButtonEx(ctx, altName .. '##' .. id, modKey, 4)
-  ImGui.SameLine(ctx)
-  rv, modKey = ImGui.RadioButtonEx(ctx, superName .. '##' .. id, modKey, 8)
+  if source.check then
+    local val, v = 0, false
+    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 52)
+    rv, v = ImGui.Checkbox(ctx, ctrlName .. '##' .. id, modKey & 2 ~= 0)
+    if v then val = val | 2 end
+    ImGui.SameLine(ctx)
+    rv, v = ImGui.Checkbox(ctx, shiftName .. '##' .. id, modKey & 1 ~= 0)
+    if v then val = val | 1 end
+    ImGui.SameLine(ctx)
+    rv, v = ImGui.Checkbox(ctx, altName .. '##' .. id, modKey & 4 ~= 0)
+    if v then val = val | 4 end
+    ImGui.SameLine(ctx)
+    rv, v = ImGui.Checkbox(ctx, superName .. '##' .. id, modKey & 8 ~= 0)
+    if v then val = val | 8 end
+    modKey = val
+  else
+    rv, modKey = ImGui.RadioButtonEx(ctx, 'off##' .. id, modKey, 0)
+    ImGui.SameLine(ctx)
+    rv, modKey = ImGui.RadioButtonEx(ctx, ctrlName .. '##' .. id, modKey, 2)
+    ImGui.SameLine(ctx)
+    rv, modKey = ImGui.RadioButtonEx(ctx, shiftName .. '##' .. id, modKey, 1)
+    ImGui.SameLine(ctx)
+    rv, modKey = ImGui.RadioButtonEx(ctx, altName .. '##' .. id, modKey, 4)
+    ImGui.SameLine(ctx)
+    rv, modKey = ImGui.RadioButtonEx(ctx, superName .. '##' .. id, modKey, 8)
+  end
 
   source.modKey = modKey
 end
@@ -370,6 +390,13 @@ local function drawKeyMappings()
             if map.baseKey == v.baseKey and map.modifiers == v.modifiers then return true end
           end
         end
+        if v.testOverlap then
+          local modKey = modMappings[keys.MODTYPE_MOVE_OVERLAP].modKey
+          if v.modifiers == modKey then
+            overlapTestFailed = true
+            return true
+          end
+        end
         return false
       end
       makeKeyRowTable(k, v, isDuped())
@@ -390,7 +417,9 @@ local function drawModMappings()
 
     ImGui.TableHeadersRow(ctx)
     for k, v in spairs(modMappings, function(t, a, b)
-        if not t[a].cat then return true
+        if t[a].check then return false
+        elseif t[b].check then return true
+        elseif not t[a].cat then return true
         elseif not t[b].cat then return false
         else
           if t[a].cat ~= t[b].cat then return t[a].cat < t[b].cat
@@ -400,9 +429,16 @@ local function drawModMappings()
       end)
     do
       local function isDuped()
+        if k == keys.MODTYPE_MOVE_OVERLAP and overlapTestFailed then
+          return true
+        end
         for kk, mod in ipairs(modMappings) do
           if kk ~= k then
-            if mod.modKey == v.modKey and (not mod.cat or not v.cat or mod.cat == v.cat) then return true end
+            if mod.modKey == v.modKey
+              and (not mod.cat or not v.cat or mod.cat == v.cat)
+            then
+              return true
+            end
           end
         end
         return false
@@ -499,6 +535,10 @@ local function drawButtons()
   local contentMaxX = ImGui.GetWindowContentRegionMax(ctx)
   ImGui.SetCursorPosX(ctx, contentMaxX - 200)
   if ImGui.Button(ctx, 'Revert to Defaults', 200) then
+    wantsControlPoints = false
+    wantsRightButton = false
+    stretchMode = 0
+    widgetStretchMode = 0
     keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
     modMappings = tableCopySimpleKeys(keys.defaultModMappings)
   end
@@ -551,7 +591,7 @@ local inWindow = false
 local function shutdown()
   releaseKeys()
   if inWindow then
-    ImGui.End(ctx)
+    -- ImGui.End(ctx)
   end
 end
 

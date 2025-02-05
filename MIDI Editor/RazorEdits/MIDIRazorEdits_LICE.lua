@@ -15,6 +15,7 @@ local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
 local helper = require 'MIDIRazorEdits_Helper'
 
+local Point = classes.Point
 local Rect = classes.Rect
 
 local winscale = helper.is_windows and 2 or 1
@@ -234,33 +235,6 @@ local function loadModMappingState(stateTab)
 end
 
 local lastClickTime = 0
-local lButtonName = 'LBUTTON'
-local rButtonName = 'RBUTTON'
-
-local clickMsgName
-local releaseMsgName
-local dblClickMsgName
-
-local postMsgNames = {}
-
-local rClickMsgName
-
-local function updateInterceptNames()
-  lButtonName = glob.wantsRightButton and 'RBUTTON' or 'LBUTTON'
-  rButtonName = glob.wantsRightButton and 'LBUTTON' or 'RBUTTON'
-
-  clickMsgName = 'WM_' .. lButtonName .. 'DOWN'
-  releaseMsgName = 'WM_' .. lButtonName .. 'UP'
-  dblClickMsgName = 'WM_' .. lButtonName .. 'DBLCLK'
-
-  rClickMsgName = glob.wantsRightButton and '' or 'WM_' .. rButtonName .. 'DOWN'
-
-  postMsgNames = glob.wantsRightButton
-    and { 'WM_' .. rButtonName .. 'DOWN', 'WM_' .. rButtonName .. 'UP', 'WM_' .. rButtonName .. 'DBLCLK' }
-    or {}
-end
-
--- updateInterceptNames()
 
 local function reloadSettings()
   shutdownLiceKeys()
@@ -284,8 +258,6 @@ local function reloadSettings()
   modMappings = nil
 
   initLiceKeys()
-
-  updateInterceptNames()
 end
 
 local interceptKeyInput = false
@@ -369,23 +341,21 @@ local function passthroughIntercepts()
   end
 end
 
-Lice.lbutton_press_x = nil
-Lice.lbutton_press_x_was = nil
-Lice.lbutton_click = nil
-Lice.lbutton_drag = nil
-Lice.lbutton_release = nil
-Lice.lbutton_dblclick = nil
-Lice.lbutton_press_y = nil
-Lice.lbutton_dblclick_seen = nil
+Lice.button = { pressX = nil, pressY = nil, click = nil, drag = nil, release = nil, dblclick = nil, dblclickSeen = nil }
 
-local function resetButtons(wasPressed)
-  Lice.lbutton_press_x = nil
-  Lice.lbutton_press_x_was = wasPressed and true or false
-  Lice.lbutton_click = nil
-  Lice.lbutton_drag = nil
-  Lice.lbutton_release = nil
-  Lice.lbutton_dblclick = nil
-  Lice.lbutton_dblclick_seen = nil
+local function resetButtons()
+  Lice.button = {
+                   pressX = nil,
+                   pressY = nil,
+                   click = nil,
+                   drag = nil,
+                   release = nil,
+                   dblclick = nil,
+                   dblclickSeen = nil,
+                   which = nil,
+                   canDrag = nil,
+                   canNew = false
+                 }
 end
 
 local function peekAppIntercepts()
@@ -418,16 +388,44 @@ local function peekAppIntercepts()
   end
 end
 
-local function messageShouldPost(msg)
-  for _, m in ipairs(postMsgNames) do
-    if msg == m then return true end
+local function handleButtonDown(m_x, m_y, which, hovering)
+  Lice.button.which = which -- TODO refactor with below
+  -- Only register the click if we're outside the double-click window
+  if not Lice.button.pressX then
+    Lice.button.pressX, Lice.button.pressY = m_x, m_y
+    Lice.button.click = true
+  else
+    Lice.button.click = false
   end
-  return false
+  Lice.button.release = false
+  if hovering then
+    Lice.button.canDrag = hovering
+  else
+    Lice.button.canNew = true
+  end
+end
+
+local function handleButtonResetState(which, state)
+  resetButtons()
+  Lice.button[state] = true
+  Lice.button.which = which
 end
 
 local function peekIntercepts(m_x, m_y)
   if not glob.liceData then return end
   local DOUBLE_CLICK_DELAY = 0.2 -- 200ms, adjust based on system double-click time
+  local hovering
+
+  local pt = Point.new(m_x + glob.liceData.screenRect.x1, m_y + glob.liceData.screenRect.y1 - Lice.MIDI_RULER_H )
+  for _, area in ipairs(glob.areas) do
+    if area.viewRect:containsPoint(pt) then
+      hovering = area
+      break
+    end
+  end
+
+  local prevClickTime = lastClickTime
+  local currentTime = glob.currentTime
 
   for _, intercept in ipairs(mouseIntercepts) do
     local msg = intercept.message
@@ -440,52 +438,76 @@ local function peekIntercepts(m_x, m_y)
       --   glob._P('mousewheel', wpl, wph, lpl, lph)
       -- end
 
-      if msg == rClickMsgName then
-        glob.handleRightClick()
-      elseif msg == dblClickMsgName then
+      if msg == 'WM_RBUTTONDBLCLK' then
         -- Got a double click - clear any pending single click state
-        if not Lice.lbutton_dblclick then
-          Lice.lbutton_press_x = nil
-          Lice.lbutton_click = false
-          Lice.lbutton_release = false
-          Lice.lbutton_drag = false
-          Lice.lbutton_dblclick = true
-          Lice.lbutton_dblclick_seen = false
-          lastClickTime = time
+        if not Lice.button.dblclick then
+          handleButtonResetState(1, 'dblclick')
         end
-      elseif msg == clickMsgName then
-        local currentTime = glob.currentTime
-        if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
-          -- Only register the click if we're outside the double-click window
-          if not Lice.lbutton_press_x then
-            Lice.lbutton_press_x, Lice.lbutton_press_y = m_x, m_y
-            Lice.lbutton_click = true
+        lastClickTime = currentTime
+      elseif msg == 'WM_RBUTTONDOWN' then
+        if currentTime - prevClickTime > DOUBLE_CLICK_DELAY then
+          if not glob.wantsRightButton or hovering then
+            glob.handleRightClick()
+            if glob.wantsRightButton then
+              handleButtonResetState(1, 'clicked')
+              Lice.button.pressX, Lice.button.pressY = m_x, m_y
+            end
           else
-            Lice.lbutton_click = false
+            handleButtonDown(m_x, m_y, 1, hovering)
           end
-          Lice.lbutton_release = false
+        end
+        lastClickTime = currentTime
+      elseif msg == 'WM_RBUTTONUP' then
+        if glob.wantsRightButton then
+          if currentTime - prevClickTime > DOUBLE_CLICK_DELAY then
+            if Lice.button.which == 1 then
+              -- Only process the release if we're outside the double-click window
+              if Lice.button.pressX then
+                handleButtonResetState(1, 'release')
+                return
+              end
+            end
+            -- must have been pressed in a dead zone, post it
+            r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+          end
+        end
+        lastClickTime = currentTime
+        -- don't post if we're looking for the left button
+      elseif msg == 'WM_LBUTTONDBLCLK' then
+        -- Got a double click - clear any pending single click state
+        if not Lice.button.dblclick then
+          handleButtonResetState(0, 'dblclick')
+        end
+        lastClickTime = currentTime
+      elseif msg == 'WM_LBUTTONDOWN' then
+        if currentTime - prevClickTime > DOUBLE_CLICK_DELAY then
+          if glob.wantsRightButton and not hovering then
+            r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+          else
+            handleButtonDown(m_x, m_y, 0, hovering)
+          end
         end
         if helper.is_windows then
           -- on windows, we don't get focus back when clicking
           -- into the midiview for some reason I cannot explain.
           r.JS_Window_SetFocus(glob.liceData.midiview)
         end
-      elseif msg == releaseMsgName then
-        local currentTime = glob.currentTime
-        if currentTime - lastClickTime > DOUBLE_CLICK_DELAY then
-          -- Only process the release if we're outside the double-click window
-          if Lice.lbutton_press_x or Lice.lbutton_press_x_was then
-            Lice.lbutton_press_x, Lice.lbutton_press_y = nil, nil
-            Lice.lbutton_press_x_was = false
-            Lice.lbutton_release = true
-            Lice.lbutton_drag = false
-          else
-            -- must have been pressed in a dead zone, post it
-            r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+        lastClickTime = currentTime
+      elseif msg == 'WM_LBUTTONUP' then
+        if currentTime - prevClickTime > DOUBLE_CLICK_DELAY then
+          if Lice.button.which == 0 then
+            -- Only process the release if we're outside the double-click window
+            if Lice.button.pressX then
+              handleButtonResetState(0, 'release')
+              return
+            end
           end
+          -- must have been pressed in a dead zone, post it
+          r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+        elseif glob.wantsRightButton then
+          r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
         end
-      elseif messageShouldPost(intercept.message) then
-        r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+        lastClickTime = currentTime
       end
     end
   end
@@ -547,6 +569,7 @@ local function initLice(editor)
       for _, bitmap in pairs(glob.liceData.bitmaps) do
         if bitmap then destroyBitmap(bitmap) end
       end
+      local oldScreenRect = glob.liceData.screenRect
       glob.liceData.bitmaps, glob.liceData.screenRect = createFrameBitmaps(glob.liceData.midiview, windRect)
       if glob.DEBUG_LANES or not MOAR_BITMAPS then
         if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
@@ -555,6 +578,15 @@ local function initLice(editor)
       glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
       glob.windowChanged = true
+      if oldScreenRect then
+        local dx = glob.liceData.screenRect.x1 - oldScreenRect.x1
+        local dy = glob.liceData.screenRect.y1 - oldScreenRect.y1
+        for _, area in ipairs(glob.areas) do
+          area.logicalRect:offset(dx, dy)
+          area.viewRect:offset(dx, dy)
+        end
+      end
+
       peekAppIntercepts()
     end
   elseif editor then
@@ -859,7 +891,7 @@ local function drawLice()
           skip = true
         end
 
-        if not skip and area.bitmap and area.modified or recomposite then
+        if not skip and area.bitmap and (area.modified or recomposite) then
           local bmWidth, bmHeight = r.JS_LICE_GetWidth(area.bitmap), r.JS_LICE_GetHeight(area.bitmap)
           if w > bmWidth or h > bmHeight then
             upsizing = true

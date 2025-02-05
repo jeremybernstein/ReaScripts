@@ -1,15 +1,21 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.24
+-- @version 0.1.0-beta.25
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - control points option for CC lanes (see settings)
---   - experimental option to switch to right-button (right-click to delete area is disabled in that case; see settings)
---   - fix some focus issues on Windows
+--   - multi-item processing, initial version
+--   - second pass at right-mouse button option
+--   - fix overly strict left-drag limit to start of item
+--   - only allow stretching, etc. if the area > 20px tall/wide, otherwise move/copy takes precedence
+--   - using unofficial MIDIUtils for extents problem with items with a media offset (testing)
+--   - moving editor window doesn't de-sync area locations
+--   - add move area hotkey to settings
+--   - add a bit more error reporting to settings
+--   - change retrograde (preserve) default shortcut to shift+r
 -- @provides
 --   {RazorEdits}/*
---   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
+--   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_SelectedNotes.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_Settings.lua

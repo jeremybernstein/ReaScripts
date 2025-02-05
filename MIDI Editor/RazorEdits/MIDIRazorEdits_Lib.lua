@@ -125,7 +125,7 @@ local lastPoint, lastPointQuantized, hasMoved
 local wasDragged = false
 local wantsQuit = false
 local touchedMIDI = false
-local noRestore = false -- if we didn't touch the MIDI or change it significantly, we can avoid a restore
+local noRestore = {} -- if we didn't touch the MIDI or change it significantly, we can avoid a restore
 
 local dragDirection
 local areaTickExtent
@@ -199,6 +199,11 @@ end
 
 local function stretchMod(someMods)
   return getMod(someMods, lice.modMappings()[keys.MODTYPE_STRETCH].modKey)
+end
+
+local function onlyAreaMod(someMods)
+  someMods = someMods or currentMods
+  return someMods:matchesFlags(lice.modMappings()[keys.MODTYPE_MOVE_ONLYAREA].modKey)
 end
 
 ------------------------------------------------
@@ -566,7 +571,7 @@ local function processNotes(activeTake, area, operation)
   local idx = -1
   local movingArea = operation == OP_STRETCH
         and resizing == RS_MOVEAREA
-        and (not currentMods:all() or area.active)
+        and (not onlyAreaMod() or area.active)
   local duplicatingArea = movingArea and copyMod()
   local stretchingArea = operation == OP_STRETCH
         and stretchMod()
@@ -574,8 +579,19 @@ local function processNotes(activeTake, area, operation)
         and resizing > RS_UNCLICKED and resizing < RS_MOVEAREA
   local deltaTicks, deltaPitch
 
-  local sourceEvents = area.sourceInfo.sourceEvents
-  local usingUnstretched = area.sourceInfo.usingUnstretched
+  local sourceInfo = area.sourceInfo[activeTake]
+
+  if sourceInfo.skip then return end
+
+  local itemInfo = glob.liceData.itemInfo[activeTake]
+  local timeValue = area.timeValue:clone()
+  timeValue.ticks:shift(-itemInfo.offsetPPQ)
+
+  local unstretchedTimeValue = area.unstretchedTimeValue and area.unstretchedTimeValue:clone() or nil
+  if unstretchedTimeValue then unstretchedTimeValue.ticks:shift(-itemInfo.offsetPPQ) end
+
+  local sourceEvents = sourceInfo.sourceEvents
+  local usingUnstretched = sourceInfo.usingUnstretched
 
   if movingArea then
     deltaTicks = area.timeValue.ticks.min - area.unstretchedTimeValue.ticks.min
@@ -592,25 +608,25 @@ local function processNotes(activeTake, area, operation)
   end
 
   local leftmostTick, rightmostTick, topPitch, bottomPitch
-  local areaLeftmostTick = math.floor(area.timeValue.ticks.min + 0.5)
-  local areaRightmostTick = math.floor(area.timeValue.ticks.max + 0.5)
+  local areaLeftmostTick = math.floor(timeValue.ticks.min + 0.5)
+  local areaRightmostTick = math.floor(timeValue.ticks.max + 0.5)
 
   if usingUnstretched then
-    leftmostTick = area.sourceInfo.leftmostTick
-    rightmostTick = area.sourceInfo.rightmostTick
-    topPitch = area.sourceInfo.topValue
-    bottomPitch = area.sourceInfo.bottomValue
+    leftmostTick = sourceInfo.leftmostTick
+    rightmostTick = sourceInfo.rightmostTick
+    topPitch = sourceInfo.topValue
+    bottomPitch = sourceInfo.bottomValue
   else
     leftmostTick = areaLeftmostTick
     rightmostTick = areaRightmostTick
-    topPitch = area.timeValue.vals.max
-    bottomPitch = area.timeValue.vals.min
+    topPitch = timeValue.vals.max
+    bottomPitch = timeValue.vals.min
   end
 
   local skipiter = false
   local widgeting = false
   if glob.widgetInfo and area == glob.widgetInfo.area then
-    if glob.widgetInfo.sourceEvents then
+    if glob.widgetInfo.sourceEvents[activeTake] then
       skipiter = true
     end
     widgeting = true
@@ -626,9 +642,9 @@ local function processNotes(activeTake, area, operation)
   elseif movingArea then
      if deltaTicks ~= 0 or deltaPitch ~= 0 then
       -- extra work to avoid deleting the target area, if it intersects with the source area
-      local deletionExtents = not duplicatingArea
-        and helper.getExtentUnion(area.timeValue, area.unstretchedTimeValue)
-        or helper.getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue)
+      local deletionExtents = not duplicatingArea -- this calculation in the non-offset extents
+        and helper.getExtentUnion(area.timeValue, area.unstretchedTimeValue) -- since the offset will be applied
+        or helper.getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue) -- when performing the delete
       local tmpArea = Area.new(area:serialize()) -- only used for event selection
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = nil, nil
       -- _P('src1', area.timeValue)
@@ -640,10 +656,6 @@ local function processNotes(activeTake, area, operation)
           processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
         end
       end
-      -- if not duplicatingArea then
-      --   tmpArea.timeValue = area.unstretchedTimeValue
-      --   processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
-      -- end
       insert = true -- won't do anything anymore because we pre-process
     else
       return -- not doing anything? don't do anything.
@@ -685,6 +697,7 @@ local function processNotes(activeTake, area, operation)
         if ppqpos < leftmostTick  then
           if not overlapMod() then
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+
           else
             canOperate = false
           end
@@ -745,7 +758,7 @@ local function processNotes(activeTake, area, operation)
 
         -- don't unnecessarily repeat this calculation if we've already done it
         if helper.addUnique(tDelQueries, { ppqpos = ppqpos, endppqpos = endppqpos, pitch = pitch, op = operation }) then
-          local segments = helper.getNoteSegments(areas, ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
+          local segments = helper.getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
           if segments then
             for i, seg in ipairs(segments) do
               local newEvent = mu.tableCopy(event)
@@ -809,7 +822,7 @@ local function processNotes(activeTake, area, operation)
         end
 
         if movingArea or duplicatingArea then
-          local segments = not event.segments and helper.getNoteSegments(areas, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil)
+          local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil)
           if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
             for _, seg in ipairs(segments) do
               helper.addUnique(tInsertions,
@@ -843,7 +856,7 @@ local function processNotes(activeTake, area, operation)
           if newppqpos and newendppqpos and newppqpos < newendppqpos then
             if newendppqpos - newppqpos > GLOBAL_PREF_SLOP then
               if insert then -- only called for stretching
-                local segments = not event.segments and helper.getNoteSegments(areas, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch)
+                local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch)
                 if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
                   for _, seg in ipairs(segments) do
                     helper.addUnique(tInsertions,
@@ -882,14 +895,8 @@ local function processNotes(activeTake, area, operation)
   end
 
   -- outside of the enumeration
-  if operation == OP_DUPLICATE then
-    area.timeValue.ticks:shift(areaTickExtent:size())
-    updateTimeValueTime(area)
-    updateAreaFromTimeValue(area)
-  end
-
-  if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents then
-    for _, event in ipairs(glob.widgetInfo.sourceEvents) do
+  if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents[activeTake] then
+    for _, event in ipairs(glob.widgetInfo.sourceEvents[activeTake]) do
       local val = event.vel
       local newval
 
@@ -924,14 +931,15 @@ local function addControlPoints(activeTake, area)
     area.ccLane
     and not laneIsVelocity(area)
     and not area.controlPoints
-    and area.sourceInfo.sourceEvents
-    and #area.sourceInfo.sourceEvents ~= 0
+    and area.sourceInfo[activeTake].sourceEvents
+    and #area.sourceInfo[activeTake].sourceEvents ~= 0
   then
     local newEvent
     local cp1, cp2, cp3, cp4
-    local sourceEvents = area.sourceInfo.sourceEvents
+    local sourceInfo = area.sourceInfo[activeTake]
+    local sourceEvents = sourceInfo.sourceEvents
 
-    if area.sourceInfo.potentialControlPoints and #area.sourceInfo.potentialControlPoints == 4 then
+    if sourceInfo.potentialControlPoints and #sourceInfo.potentialControlPoints == 4 then
       area.controlPoints = {}
       return
     end
@@ -973,7 +981,7 @@ local function processCCs(activeTake, area, operation)
   local idx = -1
   local movingArea = operation == OP_STRETCH
         and resizing == RS_MOVEAREA
-        and (not currentMods:all() or area.active)
+        and (not onlyAreaMod() or area.active)
   local duplicatingArea = movingArea and copyMod()
   local stretchingArea = operation == OP_STRETCH
         and stretchMod()
@@ -981,8 +989,19 @@ local function processCCs(activeTake, area, operation)
         and resizing > RS_UNCLICKED and resizing < RS_MOVEAREA
   local deltaTicks, deltaVal
 
-  local sourceEvents = area.sourceInfo.sourceEvents
-  local usingUnstretched = area.sourceInfo.usingUnstretched
+  local sourceInfo = area.sourceInfo[activeTake]
+
+  if sourceInfo.skip then return end
+
+  local itemInfo = glob.liceData.itemInfo[activeTake]
+  local timeValue = area.timeValue:clone()
+  timeValue.ticks:shift(-itemInfo.offsetPPQ)
+
+  local unstretchedTimeValue = area.unstretchedTimeValue and area.unstretchedTimeValue:clone() or nil
+  if unstretchedTimeValue then unstretchedTimeValue.ticks:shift(-itemInfo.offsetPPQ) end
+
+  local sourceEvents = sourceInfo.sourceEvents
+  local usingUnstretched = sourceInfo.usingUnstretched
 
   local pixelsPerValue = meLanes[area.ccLane].pixelsPerValue
   local ccType = meLanes[area.ccLane].type
@@ -1011,19 +1030,19 @@ local function processCCs(activeTake, area, operation)
   end
 
   local leftmostTick, rightmostTick, topValue, bottomValue
-  local areaLeftmostTick = math.floor(area.timeValue.ticks.min + 0.5)
-  local areaRightmostTick = math.floor(area.timeValue.ticks.max + 0.5)
+  local areaLeftmostTick = math.floor(timeValue.ticks.min + 0.5)
+  local areaRightmostTick = math.floor(timeValue.ticks.max + 0.5)
 
   if usingUnstretched then
-    leftmostTick = area.sourceInfo.leftmostTick
-    rightmostTick = area.sourceInfo.rightmostTick
-    topValue = area.sourceInfo.topValue
-    bottomValue = area.sourceInfo.bottomValue
+    leftmostTick = sourceInfo.leftmostTick
+    rightmostTick = sourceInfo.rightmostTick
+    topValue = sourceInfo.topValue
+    bottomValue = sourceInfo.bottomValue
   else
     leftmostTick = areaLeftmostTick
     rightmostTick = areaRightmostTick
-    topValue = area.timeValue.vals.max
-    bottomValue = area.timeValue.vals.min
+    topValue = timeValue.vals.max
+    bottomValue = timeValue.vals.min
   end
 
   local enumFn = laneIsVel and mu.MIDI_EnumNotes or mu.MIDI_EnumCC
@@ -1031,7 +1050,7 @@ local function processCCs(activeTake, area, operation)
   local skipiter = false
   local widgeting = false
   if glob.widgetInfo and area == glob.widgetInfo.area then
-    if glob.widgetInfo.sourceEvents then
+    if glob.widgetInfo.sourceEvents[activeTake] then
       skipiter = true
     end
     widgeting = true
@@ -1274,8 +1293,8 @@ local function processCCs(activeTake, area, operation)
     end
   end
 
-  if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents then
-    for _, event in ipairs(glob.widgetInfo.sourceEvents) do
+  if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents[activeTake] then
+    for _, event in ipairs(glob.widgetInfo.sourceEvents[activeTake]) do
       local val = event.val
 
       local newval
@@ -1338,11 +1357,22 @@ local function processInsertions()
 end
 
 local function generateSourceInfo(area, op, force)
-  if not area.sourceInfo or force then
-    local isNote = not area.ccLane and true or false
-    local activeTake = glob.liceData.editorTake
+  local activeTake = glob.liceData.editorTake
+  local itemInfo = glob.liceData.itemInfo[activeTake]
 
-    area.sourceInfo = { sourceEvents = {}, localRect = area.logicalRect, usingUnstretched = false }
+  local relativePPQ, relativeEndPPQ, offsetPPQ = itemInfo.relativePPQ, itemInfo.relativeEndPPQ, itemInfo.offsetPPQ
+
+  area.sourceInfo = area.sourceInfo or {}
+  if not area.sourceInfo[activeTake] or force then
+
+    -- do an early return if it's obvious that this item is at a different time than our area
+    if relativePPQ > area.timeValue.ticks.max or relativeEndPPQ < area.timeValue.ticks.min then
+      area.sourceInfo[activeTake] = { sourceEvents = {}, skip = true }
+      return
+    end
+
+    local isNote = not area.ccLane and true or false
+    local sourceInfo = { sourceEvents = {}, localRect = area.logicalRect, usingUnstretched = false }
 
     local wantsWidget = false
 
@@ -1351,13 +1381,13 @@ local function generateSourceInfo(area, op, force)
       and (not singleMod()
         or area.active)
     then
-      area.sourceInfo.usingUnstretched = true
+      sourceInfo.usingUnstretched = true
     end
 
-    local usingUnstretched = area.sourceInfo.usingUnstretched
+    local usingUnstretched = sourceInfo.usingUnstretched
 
-    local leftmostTick = not usingUnstretched and area.timeValue.ticks.min or area.unstretchedTimeValue.ticks.min
-    local rightmostTick = not usingUnstretched and area.timeValue.ticks.max or area.unstretchedTimeValue.ticks.max
+    local leftmostTick = not usingUnstretched and area.timeValue.ticks.min - offsetPPQ or area.unstretchedTimeValue.ticks.min - offsetPPQ
+    local rightmostTick = not usingUnstretched and area.timeValue.ticks.max - offsetPPQ or area.unstretchedTimeValue.ticks.max - offsetPPQ
 
     leftmostTick = math.floor(leftmostTick + 0.5)
     rightmostTick = math.floor(rightmostTick + 0.5)
@@ -1365,13 +1395,14 @@ local function generateSourceInfo(area, op, force)
     local topValue = not usingUnstretched and area.timeValue.vals.max or area.unstretchedTimeValue.vals.max
     local bottomValue = not usingUnstretched and area.timeValue.vals.min or area.unstretchedTimeValue.vals.min
 
-    area.sourceInfo.leftmostTick = leftmostTick
-    area.sourceInfo.rightmostTick = rightmostTick
-    area.sourceInfo.topValue = topValue
-    area.sourceInfo.bottomValue = bottomValue
+    sourceInfo.leftmostTick = leftmostTick
+    sourceInfo.rightmostTick = rightmostTick
+    sourceInfo.topValue = topValue
+    sourceInfo.bottomValue = bottomValue
 
     if glob.widgetInfo and area == glob.widgetInfo.area then
-      if not glob.widgetInfo.sourceEvents then
+      glob.widgetInfo.sourceEvents = glob.widgetInfo.sourceEvents or {}
+      if not glob.widgetInfo.sourceEvents[activeTake] then
         wantsWidget = true
       end
     end
@@ -1394,7 +1425,7 @@ local function generateSourceInfo(area, op, force)
             -- ignore
           else
             event.idx = idx
-            area.sourceInfo.sourceEvents[#area.sourceInfo.sourceEvents + 1] = event
+            sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
           end
         end
       end
@@ -1445,20 +1476,21 @@ local function generateSourceInfo(area, op, force)
           and (not selNotes or selNotes[event.msg2]) -- handle PolyAT lane
         then
           if event.ppqpos <= leftmostTick or event.ppqpos >= rightmostTick then
-            area.sourceInfo.potentialControlPoints = area.sourceInfo.potentialControlPoints or {}
-            area.sourceInfo.potentialControlPoints[#area.sourceInfo.potentialControlPoints + 1] = event
+            sourceInfo.potentialControlPoints = sourceInfo.potentialControlPoints or {}
+            sourceInfo.potentialControlPoints[#sourceInfo.potentialControlPoints + 1] = event
           elseif val <= topValue and val >= bottomValue then
             event.idx = idx
             event.val = val
-            area.sourceInfo.sourceEvents[#area.sourceInfo.sourceEvents + 1] = event
+            sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
           end
         end
       end
     end
 
     if wantsWidget then
-      glob.widgetInfo.sourceEvents = area.sourceInfo.sourceEvents
+      glob.widgetInfo.sourceEvents[activeTake] = sourceInfo.sourceEvents
     end
+    area.sourceInfo[activeTake] = sourceInfo
   end
 end
 
@@ -1481,114 +1513,157 @@ local function swapAreas(newAreas)
   areas = glob.areas
 end
 
-local lastChanged = false
+local lastChanged = {}
+
+local function prepItemInfoForTake(take)
+  glob.liceData.editorTake = take
+
+  local activeTake = take
+  local activeItem = r.GetMediaItemTake_Item(activeTake)
+
+  local startTime = r.GetMediaItemInfo_Value(activeItem, 'D_POSITION')
+  local endTime = startTime + r.GetMediaItemInfo_Value(activeItem, 'D_LENGTH')
+  local relativePPQ = r.MIDI_GetPPQPosFromProjTime(glob.liceData.referenceTake, startTime)
+  local relativeEndPPQ = r.MIDI_GetPPQPosFromProjTime(glob.liceData.referenceTake, endTime)
+  local activeRelPPQ = r. MIDI_GetPPQPosFromProjTime(activeTake, startTime)
+  local activeRelEndPPQ = r. MIDI_GetPPQPosFromProjTime(activeTake, endTime)
+  local offsetPPQ = relativePPQ - activeRelPPQ
+
+  glob.liceData.itemInfo = glob.liceData.itemInfo or {}
+  glob.liceData.itemInfo[activeTake] = {
+    relativePPQ = relativePPQ,
+    relativeEndPPQ = relativeEndPPQ,
+    offsetPPQ = offsetPPQ,
+    activeRelPPQ = activeRelPPQ, -- maybe don't need here
+    activeRelEndPPQ = activeRelEndPPQ -- ditto
+  }
+  return activeTake, glob.liceData.itemInfo[activeTake]
+end
 
 local function processAreas(singleArea, forceSourceInfo)
-  local activeTake = glob.liceData.editorTake
+  glob.liceData.referenceTake = glob.liceData.editorTake
 
-  if not muState then
-    mu.MIDI_InitializeTake(activeTake)
-    muState = mu.MIDI_GetState()
-  else
-    if not noRestore then
-      mu.MIDI_RestoreState(muState)
-    end
-  end
+  for _, take in ipairs(glob.liceData.allTakes) do
+    local activeTake = prepItemInfoForTake(take)
 
-  noRestore = false
-
-  local operation
-
-  local hovering
-  if singleArea or singleAreaProcessing() then
-    if singleArea then hovering = singleArea
+    muState = muState or {}
+    if not muState[activeTake] then
+      mu.MIDI_InitializeTake(activeTake)
+      muState[activeTake] = mu.MIDI_GetState()
     else
-      for _, area in ipairs(areas) do
-        if area.hovering then
-          hovering = area
-          break
+      if not noRestore[activeTake] then
+        mu.MIDI_RestoreState(muState[activeTake])
+      end
+      noRestore[activeTake] = false
+    end
+
+    local operation
+
+    local hovering
+    if singleArea or singleAreaProcessing() then
+      if singleArea then hovering = singleArea
+      else
+        for _, area in ipairs(areas) do
+          if area.hovering then
+            hovering = area
+            break
+          end
         end
       end
     end
-  end
 
-  areaTickExtent = Extent.new(math.huge, -math.huge)
+    areaTickExtent = Extent.new(math.huge, -math.huge)
 
-  local function preProcessArea(area) -- captures 'operation'
-    if not operation then operation = area.operation end
-    area.operation = area.operation == OP_STRETCH and area.operation or nil
-    if area.timeValue.ticks.min < areaTickExtent.min then areaTickExtent.min = area.timeValue.ticks.min end
-    if area.timeValue.ticks.max > areaTickExtent.max then areaTickExtent.max = area.timeValue.ticks.max end
+    local function preProcessArea(area) -- captures 'operation'
+      if not operation then operation = area.operation end
+      -- area.operation = area.operation == OP_STRETCH and area.operation or nil
+      if area.timeValue.ticks.min < areaTickExtent.min then areaTickExtent.min = area.timeValue.ticks.min end
+      if area.timeValue.ticks.max > areaTickExtent.max then areaTickExtent.max = area.timeValue.ticks.max end
 
-    generateSourceInfo(area, operation, forceSourceInfo)
-  end
-
-  if hovering then
-    preProcessArea(hovering)
-  else
-    for _, area in ipairs(areas) do
-      preProcessArea(area)
+      generateSourceInfo(area, operation, forceSourceInfo)
     end
-  end
 
-  mu.MIDI_OpenWriteTransaction(activeTake)
-
-  if operation == OP_COPY or operation == OP_SELECT then
-    mu.MIDI_SelectAll(activeTake, false) -- should 'select' unselect everything else?
-    touchedMIDI = true
-  end
-
-  local changed = false
-
-  local function runProcess(area)
-    if not area.ccLane then
-      processNotes(activeTake, area, operation)
+    if hovering then
+      preProcessArea(hovering)
     else
-      processCCs(activeTake, area, operation)
-    end
-  end
-
-  tInsertions = {}
-  tDeletions = {}
-  tDelQueries = {}
-  if hovering then
-    runProcess(hovering)
-  else
-    if dragDirection then
-      local ddString = helper.dragDirectionToString(dragDirection)
-      if ddString then
-        swapAreas(helper.sortAreas(areas, ddString))
+      for _, area in ipairs(areas) do
+        preProcessArea(area)
       end
     end
-    for i, area in ipairs(areas) do
-      runProcess(area)
-    end
-  end
-  processInsertions()
-
-  if touchedMIDI then changed = true end
-
-  if changed ~= lastChanged then -- ensure that we return to the original state
-    mu.MIDI_ForceNextTransaction()
-    lastChanged = changed
-    touchedMIDI = true
-  end
-
-  if touchedMIDI then
-    mu.MIDI_CommitWriteTransaction(activeTake, false, true)
-  else
-    noRestore = true
-  end
-  touchedMIDI = false
-
-  if operation == OP_COPY then
-    r.MIDIEditor_OnCommand(glob.liceData.editor, 40010) -- copy
-
-    mu.MIDI_RestoreState(muState)
 
     mu.MIDI_OpenWriteTransaction(activeTake)
-    mu.MIDI_CommitWriteTransaction(activeTake, false, true)
+
+    if operation == OP_COPY or operation == OP_SELECT then
+      mu.MIDI_SelectAll(activeTake, false) -- should 'select' unselect everything else?
+      touchedMIDI = true
+    end
+
+    local changed = false
+
+    local function runProcess(area)
+      if not area.ccLane then
+        processNotes(activeTake, area, operation)
+      else
+        processCCs(activeTake, area, operation)
+      end
+    end
+
+    tInsertions = {}
+    tDeletions = {}
+    tDelQueries = {}
+    if hovering then
+      runProcess(hovering)
+    else
+      if dragDirection then
+        local ddString = helper.dragDirectionToString(dragDirection)
+        if ddString then
+          swapAreas(helper.sortAreas(areas, ddString))
+        end
+      end
+      for i, area in ipairs(areas) do
+        runProcess(area)
+      end
+    end
+    processInsertions()
+
+    if touchedMIDI then changed = true end
+
+    if changed ~= lastChanged[activeTake] then -- ensure that we return to the original state
+      mu.MIDI_ForceNextTransaction()
+      lastChanged[activeTake] = changed
+      touchedMIDI = true
+    end
+
+    if touchedMIDI then
+      mu.MIDI_CommitWriteTransaction(activeTake, false, true)
+    else
+      noRestore[activeTake] = true
+    end
+    touchedMIDI = false
+
+    if operation == OP_COPY then
+      r.MIDIEditor_OnCommand(glob.liceData.editor, 40010) -- copy
+
+      mu.MIDI_RestoreState(muState[activeTake])
+
+      mu.MIDI_OpenWriteTransaction(activeTake)
+      mu.MIDI_CommitWriteTransaction(activeTake, false, true)
+    end
   end
+
+  for i, area in ipairs(areas) do
+      -- TODO, this should only happen after all takes have been processed, no?
+    if area.operation == OP_DUPLICATE then
+      area.timeValue.ticks:shift(areaTickExtent:size())
+      updateTimeValueTime(area)
+      updateAreaFromTimeValue(area)
+    end
+    area.operation = area.operation == OP_STRETCH and area.operation or nil -- TODO, why do we do that?
+  end
+
+  glob.liceData.itemInfo = nil
+  glob.liceData.editorTake = glob.liceData.referenceTake
+  glob.liceData.referenceTake = nil
 end
 
 ------------------------------------------------
@@ -1658,7 +1733,14 @@ local function analyzeChunk()
     meState.pixelsPerTick = meState.horzZoom
   else
     meState.pixelsPerSecond = meState.horzZoom
-    meState.leftmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, meState.leftmostTick)
+  end
+  meState.leftmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, meState.leftmostTick)
+
+  if meState.timebase == 'time' then
+    meState.rightmostTime = meState.leftmostTime + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) * meState.pixelsPerSecond)
+  else
+    local rightmostTick = meState.leftmostTick + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) * meState.pixelsPerTick)
+    meState.rightmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, rightmostTick)
   end
 
   if mePrevState
@@ -2351,8 +2433,8 @@ local function quantizeMousePosition(mx, my, ccLane)
 end
 
 local function updateAreaForAllEvents(area)
-  local activeTake = glob.liceData.editorTake
-  local idx = -1
+  glob.liceData.referenceTake = glob.liceData.editorTake
+
   local timeMin, timeMax
   local valMin, valMax
   local ccType = area.ccLane and meLanes[area.ccLane].type or nil
@@ -2360,69 +2442,78 @@ local function updateAreaForAllEvents(area)
 
   local laneIsVel = laneIsVelocity(area)
   local isNote = not area.ccLane or laneIsVel
-  local chanmsg
-  local selNotes
-
-  if isNote then
-    ccChanmsg = 0x90
-    chanmsg = 0x90
-  end
-
-  if ccChanmsg == 0xA0 then -- polyAT, we need to know which notes are selected
-    idx = -1
-    selNotes = {}
-    while true do
-      idx = mu.MIDI_EnumSelNotes(activeTake, idx)
-      if idx == -1 then break end
-      local rv, _, _, _, _, _, pitch = mu.MIDI_GetNote(activeTake, idx)
-      if rv and pitch then selNotes[pitch] = 1 end
-    end
-    if not next(selNotes) then selNotes = nil end -- select all, no selected notes
-    idx = -1
-  end
-
   local ccValLimited = fullLaneMod() and not laneIsVel
-  local enumFn = isNote and mu.MIDI_EnumNotes or mu.MIDI_EnumCC
 
-  while true do
-    idx = enumFn(activeTake, idx)
-    if not idx or idx == -1 then break end
-
-    local rv, ppqpos, endppqpos, chan, msg2, msg3, pitch
+  for _, take in ipairs(glob.liceData.allTakes) do
+    local activeTake, itemInfo = prepItemInfoForTake(take)
+    local idx = -1
+    local chanmsg
+    local selNotes
 
     if isNote then
-      rv, _, _, ppqpos, endppqpos, chan, pitch = mu.MIDI_GetNote(activeTake, idx)
-    else
-      rv, _, _, ppqpos, chanmsg, chan, msg2, msg3 = mu.MIDI_GetCC(activeTake, idx)
+      ccChanmsg = 0x90
+      chanmsg = 0x90
     end
 
-    chanmsg = chanmsg & 0xF0
+    if ccChanmsg == 0xA0 then -- polyAT, we need to know which notes are selected
+      idx = -1
+      selNotes = {}
+      while true do
+        idx = mu.MIDI_EnumSelNotes(activeTake, idx)
+        if idx == -1 then break end
+        local rv, _, _, _, _, _, pitch = mu.MIDI_GetNote(activeTake, idx)
+        if rv and pitch then selNotes[pitch] = 1 end
+      end
+      if not next(selNotes) then selNotes = nil end -- select all, no selected notes
+      idx = -1
+    end
 
-    if chanmsg == ccChanmsg
-      and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter))
-      and (not selNotes or selNotes[msg2]) -- handle PolyAT lane
-    then
-      if not timeMin or ppqpos < timeMin then timeMin = ppqpos end
-      local cmppos = isNote and endppqpos or ppqpos
-      if not timeMax or cmppos > timeMax then timeMax = cmppos end
+    local enumFn = isNote and mu.MIDI_EnumNotes or mu.MIDI_EnumCC
+
+    while true do
+      idx = enumFn(activeTake, idx)
+      if not idx or idx == -1 then break end
+
+      local rv, ppqpos, endppqpos, chan, msg2, msg3, pitch
+
       if isNote then
-        if not valMin or pitch < valMin then valMin = pitch end
-        if not valMax or pitch > valMax then valMax = pitch end
-      elseif ccValLimited then
-        local val = (chanmsg == 0xC0 or chanmsg == 0xD0) and msg2 or (chanmsg == 0xA0 or chanmsg == 0xB0) and msg3 or msg2 or (msg3 << 7 | msg2)
-        if not valMin or val < valMin then valMin = val end
-        if not valMax or val > valMax then valMax = val end
+        rv, _, _, ppqpos, endppqpos, chan, pitch = mu.MIDI_GetNote(activeTake, idx)
+      else
+        rv, _, _, ppqpos, chanmsg, chan, msg2, msg3 = mu.MIDI_GetCC(activeTake, idx)
+      end
+
+      chanmsg = chanmsg & 0xF0
+
+      if ppqpos >= itemInfo.activeRelPPQ and ppqpos < itemInfo.activeRelEndPPQ then -- don't bother with events before or after the item starts/ends
+        ppqpos = ppqpos + itemInfo.offsetPPQ
+        endppqpos = endppqpos + itemInfo.offsetPPQ
+
+        if chanmsg == ccChanmsg
+          and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter))
+          and (not selNotes or selNotes[msg2]) -- handle PolyAT lane
+        then
+          if not timeMin or ppqpos < timeMin then timeMin = ppqpos end
+          local cmppos = isNote and endppqpos or ppqpos
+          if not timeMax or cmppos > timeMax then timeMax = cmppos end
+          if isNote then
+            if not valMin or pitch < valMin then valMin = pitch end
+            if not valMax or pitch > valMax then valMax = pitch end
+          elseif ccValLimited then
+            local val = (chanmsg == 0xC0 or chanmsg == 0xD0) and msg2 or (chanmsg == 0xA0 or chanmsg == 0xB0) and msg3 or msg2 or (msg3 << 7 | msg2)
+            if not valMin or val < valMin then valMin = val end
+            if not valMax or val > valMax then valMax = val end
+          end
+        end
       end
     end
   end
-
   if timeMin and timeMax then
     local leftmostTime
     local rightmostTime
 
     if meState.timeBase == 'time' then
-      leftmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, timeMin)
-      rightmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, timeMax)
+      leftmostTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.referenceTake, timeMin)
+      rightmostTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.referenceTake, timeMax)
     end
 
     area.timeValue = TimeValueExtents.new(timeMin, timeMax,
@@ -2430,6 +2521,10 @@ local function updateAreaForAllEvents(area)
                                           leftmostTime, rightmostTime)
     updateAreaFromTimeValue(area)
   end
+
+  glob.liceData.itemInfo = nil
+  glob.liceData.editorTake = glob.liceData.referenceTake
+  glob.liceData.referenceTake = nil
 end
 
 ------------------------------------------------
@@ -2741,13 +2836,14 @@ local function validateDeltaCoords(area, dx, dy)
   return false, dx, dy
 end
 
-local deadzone_lbutton_state = 0
+local deadzone_button_state = 0
+local wasValid = false
 
 local function ValidateMouse()
 
-  local mState = r.JS_Mouse_GetState(glob.wantsRightButton and 2 or 1)
+  local mState = r.JS_Mouse_GetState(glob.wantsRightButton and 3 or 1)
 
-  if deadzone_lbutton_state == 0 then
+  if deadzone_button_state == 0 then
     local x, y = r.GetMousePosition()
 
     local wx1, wy1, wx2, wy2 = glob.liceData.windRect:coords()
@@ -2760,31 +2856,50 @@ local function ValidateMouse()
       y = y < wy1 and wy1 or y > wy2 and wy2 or y
     end
     local mx, my = r.JS_Window_ScreenToClient(glob.liceData.midiview, x, y)
-    local mouseLeftDown = mState == (glob.wantsRightButton and 2 or 1)
 
-    local isValidMouseAction = lice.lbutton_drag and mouseLeftDown
+    local function testValidMouseAction()
+      return lice.button.drag
+        and ((lice.button.which == 0 and mState == 1)
+          or (lice.button.which == 1 and mState == 2))
+    end
+
+    local isValidMouseAction = testValidMouseAction()
+
+    if not isValidMouseAction and lice.button.drag and wasValid then
+      lice.peekIntercepts(mx, my) -- attempt to prevent annoying race condition
+      isValidMouseAction = testValidMouseAction() -- isValidMouseAction will remain false here, but for completeness...
+      -- if isValidMouseAction then _P('unexpected fortune!') end
+    end
+
     local inDeadZone = isDeadZone(mx, my)
     -- Check that mouse cursor is hovered over a valid midiview area
     if not isValidMouseAction then
       isValidMouseAction = isMidiViewHovered and not inDeadZone
-      if lice.lbutton_drag and not mouseLeftDown then
-        lice.resetButtons(true) -- not in love with this, it's ugly
-        lice.lbutton_release = true
+      --[[ I think that the point of this is to catch mouse-ups which happen
+           outside of the midiview and are thus lost, but it ends up being a race
+           condition with the window messages, which are first intercepted below.
+           Have now introduced a fallback, above, which should catch this. --]]
+      if lice.button.drag then
+        lice.resetButtons()
+        lice.button.release = true
       end
     end
 
     if isValidMouseAction then
+      wasValid = true
       lice.peekIntercepts(mx, my)
       return true, mx, my
     end
   end
 
-  deadzone_lbutton_state = mState
+  wasValid = false
+
+  deadzone_button_state = mState
   lice.passthroughIntercepts()
 
-  lice.lbutton_click = false
-  lice.lbutton_drag = false
-  lice.lbutton_release = true
+  lice.button.click = false
+  lice.button.drag = false
+  lice.button.release = true
   glob.prevCursor = -1
 
   doBail()
@@ -2850,6 +2965,7 @@ local function processMouse()
           isCC = true
           ccLane = i
           clickedLane = i
+          break
         end
       end
     end
@@ -2857,6 +2973,7 @@ local function processMouse()
 
   local inop = false
 
+  -- TODO: cleanup using glob.liceData.button .canDrag / .canNew
   for idx, area in ipairs(areas) do
     if area.active and resizing ~= RS_UNCLICKED then isActive = idx end
     if area.operation then inop = true end
@@ -2870,19 +2987,21 @@ local function processMouse()
     if my > meLanes[#meLanes].bottomPixel then my = meLanes[#meLanes].bottomPixel end
   end
 
-  local isDoubleClicked = lice.lbutton_dblclick and not lice.lbutton_dblclick_seen
+  local isDoubleClicked = lice.button.dblclick and not lice.button.dblclickSeen
 
   if isDoubleClicked then
     local wantsWidgetToggle = nil
     local areaCountPreClick = #areas
-    lice.lbutton_dblclick_seen = true
+    lice.button.dblclickSeen = true
 
-    for i = #areas, 1, -1 do
-      local area = areas[i]
-      if clickedLane == area.ccLane or (clickedLane == -1 and not area.ccLane) then
-        if area.hovering then
-          wantsWidgetToggle = area
-          break
+    if lice.button.which == 0 then
+      for i = #areas, 1, -1 do
+        local area = areas[i]
+        if clickedLane == area.ccLane or (clickedLane == -1 and not area.ccLane) then
+          if area.hovering then
+            wantsWidgetToggle = area
+            break
+          end
         end
       end
     end
@@ -2890,7 +3009,9 @@ local function processMouse()
     if wantsWidgetToggle then
       glob.changeWidget = { area = wantsWidgetToggle or nil }
       return
-    else
+    elseif ((glob.wantsRightButton and lice.button.which == 1)
+      or (not glob.wantsRightButton and lice.button.which == 0))
+    then
       resetState()
       processAreas(nil, true) -- get the state
 
@@ -2909,12 +3030,13 @@ local function processMouse()
       end
       return
     end
+    lice.button.which = nil
   end
 
-  local isDown = lice.lbutton_press_x and true or false
-  local isClicked = lice.lbutton_click and true or false
-  local isDragging = lice.lbutton_drag and true or false
-  local isReleased = lice.lbutton_release and true or false
+  local isDown = lice.button.pressX and true or false
+  local isClicked = lice.button.click and true or false
+  local isDragging = lice.button.drag and true or false
+  local isReleased = lice.button.release and true or false
   local isHovered = true
 
   local isOnlyHovered = not isDown and not isReleased and isHovered
@@ -2926,8 +3048,8 @@ local function processMouse()
   end
 
   -- correct/update state
-  if isDown and isClicked then lice.lbutton_click = false lice.lbutton_drag = true end
-  if not isDown and isReleased then lice.lbutton_drag = false lice.lbutton_release = false end
+  if isDown and isClicked then lice.button.click = false lice.button.drag = true end
+  if not isDown and isReleased then lice.button.drag = false lice.button.release = false end
 
   if not isDown and not isHovered then
     resetMouse()
@@ -2961,38 +3083,44 @@ local function processMouse()
 
       area.sourceInfo = nil
       if pointIsInRect(testPoint, area.viewRect) then
-        if equalIsh(area.logicalRect.x1, area.viewRect.x1) and nearValue(mx, area.viewRect.x1) then
-          hovering.left = true
-          addHover = true
-          glob.setCursor((stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_left_cursor
-                  or (stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
-                  or glob.resize_left_cursor)
-          cursorSet = true
-        elseif equalIsh(area.logicalRect.x2, area.viewRect.x2) and nearValue(mx, area.viewRect.x2) then
-          hovering.right = true
-          addHover = true
-          glob.setCursor((stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_right_cursor
-                  or (stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
-                  or glob.resize_right_cursor)
-          cursorSet = true
-        elseif equalIsh(area.logicalRect.y1, area.viewRect.y1) and nearValue(my, area.viewRect.y1) then
-          hovering.top = true
-          addHover = true
-          glob.setCursor((stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
-                  or (stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
-                  or glob.resize_top_cursor) -- stretch_top?
-          cursorSet = true
-        elseif equalIsh(area.logicalRect.y2, area.viewRect.y2) and nearValue(my, area.viewRect.y2) then
-          hovering.bottom = true
-          addHover = true
-          glob.setCursor((stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
-                  or (stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
-                  or glob.resize_bottom_cursor) -- stretch_bottom?
-          cursorSet = true
-        elseif pointIsInRect(testPoint, area.viewRect, 0) then
+        if not addHover and area.viewRect:width() > 20 then
+          if equalIsh(area.logicalRect.x1, area.viewRect.x1) and nearValue(mx, area.viewRect.x1) then
+            hovering.left = true
+            addHover = true
+            glob.setCursor((stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_left_cursor
+                    or (stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
+                    or glob.resize_left_cursor)
+            cursorSet = true
+          elseif equalIsh(area.logicalRect.x2, area.viewRect.x2) and nearValue(mx, area.viewRect.x2) then
+            hovering.right = true
+            addHover = true
+            glob.setCursor((stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_right_cursor
+                    or (stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
+                    or glob.resize_right_cursor)
+            cursorSet = true
+          end
+        end
+        if not addHover and area.viewRect:height() > 20 then
+          if equalIsh(area.logicalRect.y1, area.viewRect.y1) and nearValue(my, area.viewRect.y1) then
+            hovering.top = true
+            addHover = true
+            glob.setCursor((stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
+                    or (stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
+                    or glob.resize_top_cursor) -- stretch_top?
+            cursorSet = true
+          elseif equalIsh(area.logicalRect.y2, area.viewRect.y2) and nearValue(my, area.viewRect.y2) then
+            hovering.bottom = true
+            addHover = true
+            glob.setCursor((stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
+                    or (stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
+                    or glob.resize_bottom_cursor) -- stretch_bottom?
+            cursorSet = true
+          end
+        end
+        if not addHover and pointIsInRect(testPoint, area.viewRect, 0) then
           hovering.area = true
           addHover = true
-          glob.setCursor(laneIsVelocity(area) and (currentMods:all() and glob.razor_move_cursor or glob.forbidden_cursor)
+          glob.setCursor(laneIsVelocity(area) and (onlyAreaMod(theseMods) and glob.razor_move_cursor or glob.forbidden_cursor)
             or copyMod(theseMods) and glob.razor_copy_cursor
             or glob.razor_move_cursor)
           cursorSet = true
@@ -3018,12 +3146,12 @@ local function processMouse()
       if canResize and not isOnlyHovered then
         if isDown then resizing = rsz end
         area.active = rsz > RS_NEWAREA
-        area.unstretched = (not currentMods:all() or area.active) and area.logicalRect:clone() or nil
+        area.unstretched = (not onlyAreaMod() or area.active) and area.logicalRect:clone() or nil
         area.unstretchedTimeValue = area.unstretched and area.timeValue:clone() or nil
-        area.operation = (not currentMods:all() or area.active) and OP_STRETCH or nil
+        area.operation = (not onlyAreaMod() or area.active) and OP_STRETCH or nil
       else
         area.active = false
-        area.unstretched = (isDown and not currentMods:all()) and area.logicalRect:clone() or nil -- we need this for multi-area move/copy (only RS_MOVEAREA?)
+        area.unstretched = (isDown and not onlyAreaMod()) and area.logicalRect:clone() or nil -- we need this for multi-area move/copy (only RS_MOVEAREA?)
         area.unstretchedTimeValue = area.unstretched and area.timeValue:clone() or nil
       end
       if area.operation then doProcess = true end
@@ -3162,7 +3290,7 @@ local function processMouse()
             and (not singleMod() or laneIsVelocity(area))
           then
             if laneIsVelocity(area) then
-              if currentMods:all() then
+              if onlyAreaMod() then
                 dx = mx - lastPointQuantized.x
                 dy = my - lastPointQuantized.y
               else
@@ -3187,7 +3315,7 @@ local function processMouse()
               dy = my - lastPointQuantized.y
             end
 
-            stretching = not (resizing == RS_MOVEAREA and currentMods:all()) -- all = just move area
+            stretching = not (resizing == RS_MOVEAREA and onlyAreaMod()) -- all = just move area
             if not stretching then noProcessOnRelease = true end -- TODO hack
             found = true
 
@@ -3236,9 +3364,9 @@ local function processMouse()
                 local itemStartX
 
                 if meState.timeBase == 'time' then
-                  itemStartX = glob.windowRect.x1 + ((itemStartTime - glob.meState.leftmostTime) * meState.pixelsPerSecond)
+                  itemStartX = glob.windowRect.x1 + math.floor(((itemStartTime - glob.meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
                 else
-                  itemStartX = glob.windowRect.x1 + ((itemStartTick - glob.meState.leftmostTick) * meState.pixelsPerTick)
+                  itemStartX = glob.windowRect.x1 + math.floor(((itemStartTick - glob.meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
                 end
 
                 for i, testArea in ipairs(areas) do
@@ -3338,7 +3466,7 @@ local function processMouse()
       if stretching and resizing ~= RS_NEWAREA then
         if #removals ~= 0 then undoText = 'Delete Razor Edit Area'
         elseif resizing ~= RS_MOVEAREA then undoText = 'Scale Razor Edit Area'
-        elseif not currentMods:all() then undoText = 'Move Razor Edit Area Contents'
+        elseif not onlyAreaMod() then undoText = 'Move Razor Edit Area Contents'
         else undoText = 'Duplicate Razor Edit Area Contents'
         end
       else
@@ -3412,6 +3540,22 @@ local function onCrash(err)
   r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
 end
 
+local function getEditableTakes(me)
+  local take = nil
+  if me then
+    local takeTab = {}
+    local ct = 0
+    while true do
+      local t = r.MIDIEditor_EnumTakes(me, ct, true)
+      if not t then break end
+      takeTab[#takeTab + 1] = t
+      ct = ct + 1
+    end
+    return takeTab
+  end
+  return nil
+end
+
 local function loop()
 
   if wantsQuit then return end -- check once before doing anything, and again after processing keys
@@ -3445,6 +3589,7 @@ local function loop()
 
   glob.liceData.editorTake = editorTake
   glob.liceData.editorItem = r.GetMediaItemTake_Item(editorTake)
+  glob.liceData.allTakes = getEditableTakes(currEditor)
 
   if glob.appIsForeground -- no need to analyze in bg or during drag (TODO: expect when scrolling)
     and (not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2)

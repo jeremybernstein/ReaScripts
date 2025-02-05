@@ -379,7 +379,7 @@ end
 
 ----------------------------------------------------
 
-local function getNoteSegments(areas, ppqpos, endppqpos, pitch, onlyArea)
+local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyArea)
   local max, min = math.max, math.min
   local intersecting_areas = {}
 
@@ -389,16 +389,16 @@ local function getNoteSegments(areas, ppqpos, endppqpos, pitch, onlyArea)
       {
         bottom = area.timeValue.vals.min,
         top = area.timeValue.vals.max,
-        left = area.timeValue.ticks.min,
-        right = area.timeValue.ticks.max - 1
+        left = area.timeValue.ticks.min - itemInfo.offsetPPQ,
+        right = area.timeValue.ticks.max - itemInfo.offsetPPQ - 1
       }
     }
     if area.unstretchedTimeValue then
       table.insert(positions, 1, {
         bottom = area.unstretchedTimeValue.vals.min,
         top = area.unstretchedTimeValue.vals.max,
-        left = area.unstretchedTimeValue.ticks.min,
-        right = area.unstretchedTimeValue.ticks.max - 1
+        left = area.unstretchedTimeValue.ticks.min - itemInfo.offsetPPQ,
+        right = area.unstretchedTimeValue.ticks.max - itemInfo.offsetPPQ - 1
       })
     end
 
@@ -551,18 +551,15 @@ end
 ------------------------------------------------
 
 local function getExtentUnion(e1, e2)
-  -- If completely disjoint in time, return original extents
   if e1.ticks.max < e2.ticks.min - 0.0001 or e2.ticks.max < e1.ticks.min - 0.0001 then
     return {e1, e2}
   end
 
-  -- Round all values to integers
   local e1Min = math.floor(e1.vals.min + 0.5)
   local e1Max = math.floor(e1.vals.max + 0.5)
   local e2Min = math.floor(e2.vals.min + 0.5)
   local e2Max = math.floor(e2.vals.max + 0.5)
 
-  -- Helper function to create an extent
   local function makeExtent(vMin, vMax, useE1Time, useE2Time)
     return TimeValueExtents.new(
       math.min(useE1Time and e1.ticks.min or math.huge, useE2Time and e2.ticks.min or math.huge),
@@ -572,70 +569,27 @@ local function getExtentUnion(e1, e2)
     )
   end
 
-  -- If value ranges are identical, merge time ranges
   if e1Min == e2Min and e1Max == e2Max then
     return {makeExtent(e1Min, e1Max, true, true)}
   end
 
   local result = {}
 
-  -- Handle cases where extents touch at a value
-  if e1Min == e2Max or e2Min == e1Max then
-    local touchVal = e1Min == e2Max and e1Min or e2Min
-    local lowerExt = e1Min == e2Max and e2 or e1
-    local upperExt = e1Min == e2Max and e1 or e2
-
-    -- Add lower range if exists
-    if math.floor(lowerExt.vals.min + 0.5) < touchVal then
-      table.insert(result, makeExtent(
-        math.floor(lowerExt.vals.min + 0.5),
-        touchVal - 1,
-        lowerExt == e1,
-        lowerExt == e2
-      ))
-    end
-
-    -- Add touching value
-    table.insert(result, makeExtent(touchVal, touchVal, true, true))
-
-    -- Add upper range if exists
-    if math.floor(upperExt.vals.max + 0.5) > touchVal then
-      table.insert(result, makeExtent(
-        touchVal + 1,
-        math.floor(upperExt.vals.max + 0.5),
-        upperExt == e1,
-        upperExt == e2
-      ))
-    end
-
-    return result
-  end
-
-  -- Handle non-touching ranges
-  if e1Max < e2Min or e2Max < e1Min then
-    if e1Min < e2Min then
-      return {makeExtent(e1Min, e1Max, true, false), makeExtent(e2Min, e2Max, false, true)}
-    else
-      return {makeExtent(e2Min, e2Max, false, true), makeExtent(e1Min, e1Max, true, false)}
-    end
-  end
-
-  -- Handle overlapping ranges
   if e1Min < e2Min then
     table.insert(result, makeExtent(e1Min, e2Min - 1, true, false))
+    if e1Max >= e2Min then
+      table.insert(result, makeExtent(e2Min, math.min(e1Max, e2Max), true, true))
+    end
   elseif e2Min < e1Min then
     table.insert(result, makeExtent(e2Min, e1Min - 1, false, true))
+    if e2Max >= e1Min then
+      table.insert(result, makeExtent(e1Min, math.min(e1Max, e2Max), true, true))
+    end
   end
 
-  local overlapMin = math.max(e1Min, e2Min)
-  local overlapMax = math.min(e1Max, e2Max)
-  if overlapMax >= overlapMin then
-    table.insert(result, makeExtent(overlapMin, overlapMax, true, true))
-  end
-
-  if e1Max > e2Max + 1 then
+  if e1Max > e2Max then
     table.insert(result, makeExtent(e2Max + 1, e1Max, true, false))
-  elseif e2Max > e1Max + 1 then
+  elseif e2Max > e1Max then
     table.insert(result, makeExtent(e1Max + 1, e2Max, false, true))
   end
 

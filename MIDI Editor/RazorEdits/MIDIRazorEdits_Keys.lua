@@ -314,17 +314,17 @@ local vKeyLookup = {
 
 local defaultKeyMappings = {
   -- copy                = { name = 'Copy to Clipboard',                   baseKey = 'p' },
-  duplicate           = { name = 'Duplicate Area(s), Moving Area',      baseKey = 'd' },
+  duplicate           = { name = 'Duplicate Area(s), Moving Area',      baseKey = 'd', testOverlap = true },
   ccSpan              = { name = 'Span Area across CC Lanes',           baseKey = 'c', noteOnly = true },
   fullLane            = { name = 'Toggle Full Lane',                    baseKey = 'f' },
-  invert              = { name = 'Invert Contents',                     baseKey = 'v' },
-  retrograde          = { name = 'Reverse Contents',                    baseKey = 'r' },
-  retrograde2         = { name = 'Reverse Values, Preserving Position', baseKey = 'r', modifiers = 4 },
-  select              = { name = 'Select Contents',                     baseKey = 's' },
-  unselect            = { name = 'Unselect Contents',                   baseKey = 'u' },
-  deleteAreaContents  = { name = 'Delete Area and Contents',            baseKey = 'del' },
+  invert              = { name = 'Invert Contents',                     baseKey = 'v', testOverlap = true },
+  retrograde          = { name = 'Reverse Contents',                    baseKey = 'r', testOverlap = true },
+  retrograde2         = { name = 'Reverse Values, Preserving Position', baseKey = 'r', modifiers = 1, testOverlap = true },
+  select              = { name = 'Select Contents',                     baseKey = 's', testOverlap = true },
+  unselect            = { name = 'Unselect Contents',                   baseKey = 'u', testOverlap = true },
+  deleteAreaContents  = { name = 'Delete Area and Contents',            baseKey = 'del', testOverlap = true },
   deleteArea          = { name = 'Delete Area, Preserve Contents',      baseKey = 'x', modifiers = 1 },
-  deleteContents      = { name = 'Delete Contents',                     baseKey = 'x' },
+  deleteContents      = { name = 'Delete Contents',                     baseKey = 'x', testOverlap = true },
   widgetMode          = { name = 'Toggle Widget Mode',                  baseKey = 'w' },
   insertMode          = { name = 'Toggle Insert Mode',                  baseKey = 'i' },
   horzLockMode        = { name = 'Toggle Horizontal Lock Mode',         baseKey = 'h' },
@@ -341,11 +341,12 @@ Keys.MODTYPE_SNAP = 1
 Keys.MODTYPE_MOVE_COPY = 2
 Keys.MODTYPE_MOVE_OVERLAP = 3
 Keys.MODTYPE_MOVE_SINGLE = 4
+Keys.MODTYPE_MOVE_ONLYAREA = 5
 
-Keys.MODTYPE_NEW_PRESERVE = 5
-Keys.MODTYPE_NEW_FULLLANE = 6
+Keys.MODTYPE_NEW_PRESERVE = 6
+Keys.MODTYPE_NEW_FULLLANE = 7
 
-Keys.MODTYPE_STRETCH = 7
+Keys.MODTYPE_STRETCH = 8
 
 local defaultModMappings = {
   { name = 'Toggle Snap',               modKey = 1 },
@@ -353,6 +354,7 @@ local defaultModMappings = {
   { name = 'Copy',                      modKey = 2, cat = 'move' },
   { name = 'Preserve Overlaps (notes)', modKey = 4, cat = 'move' },
   { name = 'Single Area',               modKey = 8, cat = 'move' },
+  { name = 'Move Area Only',            modKey = 15, cat = 'move', check = true },
 
   { name = 'Preserve Existing',         modKey = 2, cat = 'new' },
   { name = 'Toggle Full-Lane',          modKey = 4, cat = 'new' },

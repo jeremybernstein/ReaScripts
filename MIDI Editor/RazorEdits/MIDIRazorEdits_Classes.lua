@@ -248,6 +248,11 @@ function Rect:conform()
   return self
 end
 
+function Rect:containsPoint(pt)
+  return pt.x >= self.x1 and pt.x <= self.x2
+     and pt.y >= self.y1 and pt.y <= self.y2
+end
+
 ----------------------------------------------------
 
 local TimeValueExtents = {}

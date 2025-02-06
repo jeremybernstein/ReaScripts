@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.07-beta.3
+-- @version 0.2.07-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - more fixing CORRECT_EXTENTS for MIDI items with a start offset
+--   - improve COMMIT_CANSKIP for multi-item usage
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -915,7 +915,7 @@ end
 -----------------------------------------------------------------------------
 ------------------------------- TRANSACTIONS --------------------------------
 
-local lastMIDIString
+local lastMIDIString = {}
 
 local function MIDI_OpenWriteTransaction(take)
   EnsureTake(take)
@@ -1050,14 +1050,14 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
   newMIDIString = newMIDIString .. TailMsg
 
   if MIDIUtils.COMMIT_CANSKIP
-    and newMIDIString == lastMIDIString
+    and newMIDIString == lastMIDIString[take]
   then
     -- don't resend the same MIDI if it's unchanged
     openTransaction = nil
     return true, false
   end
 
-  lastMIDIString = newMIDIString
+  lastMIDIString[take] = newMIDIString
 
   r.MIDI_DisableSort(take)
   -- local TailMsg = string.pack('i4Bs4', tailEvent.offset, tailEvent.flags, tailEvent.msg)
@@ -2452,7 +2452,13 @@ MIDIUtils.tableCopy = tableCopySimpleKeys
 MIDIUtils.MIDI_GetTimeOffset = MIDI_GetTimeOffset
 MIDIUtils.MIDI_GetState = MIDI_GetState
 MIDIUtils.MIDI_RestoreState = MIDI_RestoreState
-MIDIUtils.MIDI_ForceNextTransaction = function() lastMIDIString = nil end -- TODO: improve, what
+MIDIUtils.MIDI_ForceNextTransaction = function(take)  -- TODO: improve, what
+  if not take then
+    lastMIDIString = {}
+  else
+    lastMIDIString[take] = nil
+  end
+end
 
 -----------------------------------------------------------------------------
 ----------------------------------- EXPORT ----------------------------------

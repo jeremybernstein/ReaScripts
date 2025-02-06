@@ -1736,7 +1736,7 @@ local function analyzeChunk()
   end
   meState.leftmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, meState.leftmostTick)
 
-  if meState.timebase == 'time' then
+  if meState.timeBase == 'time' then
     meState.rightmostTime = meState.leftmostTime + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) * meState.pixelsPerSecond)
   else
     local rightmostTick = meState.leftmostTick + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) * meState.pixelsPerTick)

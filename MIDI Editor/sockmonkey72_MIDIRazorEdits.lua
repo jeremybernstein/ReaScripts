@@ -1,18 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.25
+-- @version 0.1.0-beta.26
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - multi-item processing, initial version
---   - second pass at right-mouse button option
---   - fix overly strict left-drag limit to start of item
---   - only allow stretching, etc. if the area > 20px tall/wide, otherwise move/copy takes precedence
---   - using unofficial MIDIUtils for extents problem with items with a media offset (testing)
---   - moving editor window doesn't de-sync area locations
---   - add move area hotkey to settings
---   - add a bit more error reporting to settings
---   - change retrograde (preserve) default shortcut to shift+r
+--   - 1-char fix for 'Project Time' mode
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

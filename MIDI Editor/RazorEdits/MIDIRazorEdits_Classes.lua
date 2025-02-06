@@ -60,6 +60,15 @@ function MouseMods:matches(mods)
      and (self.superFlag == (mods.super and true or false) or mods.super == '')
 end
 
+function MouseMods:flags()
+  local modFlags = 0
+  if self.shiftFlag then modFlags = modFlags | 1 end
+  if self.ctrlFlag then modFlags = modFlags | 2 end
+  if self.altFlag then modFlags = modFlags | 4 end
+  if self.superFlag then modFlags = modFlags | 8 end
+  return modFlags
+end
+
 function MouseMods:shift()
   return self.shiftFlag
 end

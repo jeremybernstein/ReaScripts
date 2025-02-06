@@ -2121,6 +2121,9 @@ local function showCompositingDialog()
   end
 end
 
+local contextMods = 0
+local contextCode = nil
+
 local function processKeys()
 
   -- attempts to suss out the keyboard section focus fail for various reasons
@@ -2281,11 +2284,16 @@ local function processKeys()
 
   -- pass anything else through, requires SWS
   if hasSWS and glob.liceData then
+    -- _P(contextMods, contextCode, hottestMods:flags())
+    local hotMods = hottestMods:flags() == contextMods
     for k = 1, #vState do
       -- if k ~= 0xD and keys:byte(k) ~= 0 then
-      if vState:byte(k) ~= 0 then
-        if lice.keyIsMapped(k) then
-          reaper.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
+      if not (hotMods and k == contextCode) then -- don't pass the key used to trigger the script
+        if vState:byte(k) ~= 0 then
+          if lice.keyIsMapped(k) then
+            -- _P('passing a key', k)
+            reaper.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
+          end
         end
       end
     end
@@ -3649,6 +3657,21 @@ end
 
 local function startup(secID, cmdID)
   sectionID, commandID = secID, cmdID
+
+  local _, _, _, _, _, _, _, contextstr = reaper.get_action_context()
+
+  contextMods = 0
+  local ctxFlags, ctxCode = string.match(contextstr, 'key:([%w%p]*):(%d+)')
+  if ctxFlags and ctxFlags ~= '' then
+    if string.match(ctxFlags, 'V') then
+      if string.match(ctxFlags, 'A') then contextMods = contextMods | 4 end
+      if string.match(ctxFlags, 'S') then contextMods = contextMods | 1 end
+      if string.match(ctxFlags, 'C') then contextMods = contextMods | 2 end
+      if string.match(ctxFlags, 'W') then contextMods = contextMods | 8 end
+    end
+  end
+  contextCode = tonumber(ctxCode)
+  -- _P(contextstr, ctxFlags, ctxCode, contextMods)
 
   r.set_action_options(1)
   r.SetToggleCommandState(sectionID, commandID, 1)

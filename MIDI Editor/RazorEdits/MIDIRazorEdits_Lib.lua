@@ -1629,7 +1629,7 @@ local function processAreas(singleArea, forceSourceInfo)
     if touchedMIDI then changed = true end
 
     if changed ~= lastChanged[activeTake] then -- ensure that we return to the original state
-      mu.MIDI_ForceNextTransaction()
+      mu.MIDI_ForceNextTransaction(activeTake)
       lastChanged[activeTake] = changed
       touchedMIDI = true
     end
@@ -2486,7 +2486,7 @@ local function updateAreaForAllEvents(area)
 
       if ppqpos >= itemInfo.activeRelPPQ and ppqpos < itemInfo.activeRelEndPPQ then -- don't bother with events before or after the item starts/ends
         ppqpos = ppqpos + itemInfo.offsetPPQ
-        endppqpos = endppqpos + itemInfo.offsetPPQ
+        endppqpos = endppqpos and endppqpos + itemInfo.offsetPPQ
 
         if chanmsg == ccChanmsg
           and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter))

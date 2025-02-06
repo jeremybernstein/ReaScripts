@@ -1,10 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.26
+-- @version 0.1.0-beta.27
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - 1-char fix for 'Project Time' mode
+--   - fix CC select all events crash
+--   - fix right-hand extents issue when moving events with a media start offset (MIDIUtils)
+--   - fix intermittent noop during item processing
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

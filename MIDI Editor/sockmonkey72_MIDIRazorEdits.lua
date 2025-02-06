@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.28
+-- @version 0.1.0-beta.29
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - prevent 'feedback loop' passing shortcut back to the action context
+--   - refine 'feedback loop' prevention wrt shortcut back to the action context
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

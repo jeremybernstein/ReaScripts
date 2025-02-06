@@ -2288,11 +2288,13 @@ local function processKeys()
     local hotMods = hottestMods:flags() == contextMods
     for k = 1, #vState do
       -- if k ~= 0xD and keys:byte(k) ~= 0 then
-      if not (hotMods and k == contextCode) then -- don't pass the key used to trigger the script
-        if vState:byte(k) ~= 0 then
+      if vState:byte(k) ~= 0 then
+        if hotMods and k == contextCode then -- don't pass the key used to trigger the script
+          wantsQuit = true -- quit instead, it's a toggle
+        else
           if lice.keyIsMapped(k) then
             -- _P('passing a key', k)
-            reaper.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
+            r.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
           end
         end
       end
@@ -3712,5 +3714,7 @@ if runState and runState ~= '' then
 else
   r.SetExtState(scriptID, 'MRERunning', 'true', false)
 end
+
+prevKeys = r.JS_VKeys_GetState(10)
 
 return Lib

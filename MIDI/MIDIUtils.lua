@@ -1,12 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.07-beta.2
+-- @version 0.2.07-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix CORRECT_EXTENTS for MIDI items with a start offset
---   - simplify MIDI_GetPPQ
+--   - more fixing CORRECT_EXTENTS for MIDI items with a start offset
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -963,50 +962,50 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
     local lastEventPPQ
 
     if item then
-      if itemStartOffset ~= 0 then
-        firstEventPPQ = itemStartPPQ
-        lastEventPPQ = itemEndPPQ
-      else
-        -- find the first and last _touched_ events
-        for _, event in ipairs(MIDIEvents) do
-          -- if event.ppqpos > itemStartPPQ then break end -- this list is unsorted, can't break early
-          if not event.delete and event.recalcMIDI then
-            if event.ppqpos < itemStartPPQ then
-              firstEventPPQ = event.ppqpos
-              break
-            end
-          end
-        end
-        for i = #MIDIEvents, 1, -1 do
-          local event = MIDIEvents[i]
-          -- if event.ppqpos < itemEndPPQ then break end -- this list is unsorted, can't break early
-          if not event.delete and event.recalcMIDI then
-            if event.ppqpos > itemEndPPQ then
-              lastEventPPQ = event.ppqpos
-              break
-            end
+      -- find the first and last _touched_ events
+      for _, event in ipairs(MIDIEvents) do
+        -- if event.ppqpos > itemStartPPQ then break end -- this list is unsorted, can't break early
+        if not event.delete and event.recalcMIDI then
+          if event.ppqpos < itemStartPPQ then
+            firstEventPPQ = event.ppqpos
+            break
           end
         end
       end
+      for i = #MIDIEvents, 1, -1 do
+        local event = MIDIEvents[i]
+        -- if event.ppqpos < itemEndPPQ then break end -- this list is unsorted, can't break early
+        if not event.delete and event.recalcMIDI then
+          if event.ppqpos > itemEndPPQ then
+            lastEventPPQ = event.ppqpos
+            break
+          end
+        end
+      end
+    end
 
-      if firstEventPPQ or lastEventPPQ then
-        local newItemStartQN, newItemEndQN
-        if firstEventPPQ then
-          newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ)
-        end
-        if lastEventPPQ then
-          newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ)
-        end
+    if itemStartOffset ~= 0 then
+      firstEventPPQ = itemStartPPQ
+      -- lastEventPPQ = itemEndPPQ
+    end
 
-        if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end
-        if not newItemEndQN then newItemEndQN = r.TimeMap2_timeToQN(0, itemEndTime) end
-        -- resize to nearest QN
-        local floorStartTime = math.floor(newItemStartQN + 0.5)
-        correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime - itemStartOffsetQN)
-        r.MIDI_SetItemExtents(item, floorStartTime, math.ceil(newItemEndQN))
-        if itemStartOffset ~= 0 then
-          r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', itemStartOffset)
-        end
+    if firstEventPPQ or lastEventPPQ then
+      local newItemStartQN, newItemEndQN
+      if firstEventPPQ then
+        newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ)
+      end
+      if lastEventPPQ then
+        newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ)
+      end
+
+      if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end
+      if not newItemEndQN then newItemEndQN = r.TimeMap2_timeToQN(0, itemEndTime) end
+      -- resize to nearest QN
+      local floorStartTime = math.floor(newItemStartQN + 0.5)
+      correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime - itemStartOffsetQN)
+      r.MIDI_SetItemExtents(item, floorStartTime, math.ceil(newItemEndQN))
+      if itemStartOffset ~= 0 then
+        r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', itemStartOffset)
       end
     end
   end

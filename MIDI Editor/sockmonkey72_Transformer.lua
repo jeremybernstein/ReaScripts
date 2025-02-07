@@ -1,5 +1,5 @@
 -- @description MIDI Transformer
--- @version 1.0.11-beta.1
+-- @version 1.0.11
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
@@ -7,10 +7,11 @@
 --   - huge refactor, not much in the way of functional change
 --   - update ReaImGui requirement to 9.0.3
 --   - fix isNearEvent grid range testing
+--   - use experimental MIDIUtils to fix extents+offset issue
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
---   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
+--   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   Transformer Presets/Factory Presets/**/*.tfmrPreset > ../$path
 --   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Transformer.lua
 
@@ -21,7 +22,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11-alpha.7'
+local versionStr = '1.0.11'
 
 local r = reaper
 

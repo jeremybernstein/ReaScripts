@@ -651,39 +651,75 @@ local function offsetValue(input, outputMin, outputMax, offsetFactorStart, offse
     return input + ((outputMax - outputMin) * factor)
   end
 end
-
-local function compExpValue(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t)
-  -- Ensure t is clamped between 0 and 1
+local function compExpValueMiddle(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
   t = math.max(0, math.min(1, t))
 
   local offsetFactor = lerp(offsetFactorStart, offsetFactorEnd, t)
   offsetFactor = math.max(0, math.min(1, offsetFactor))
 
-  offsetFactor = 1 - offsetFactor -- offsetFactor is inverted
+  offsetFactor = 1 - offsetFactor
 
-  -- Calculate the middle point of the output range
   local middlePoint = (outputMax + outputMin) / 2
-
-  -- Calculate the full range
-  local fullRange = outputMax - outputMin
+  local canClip = 0 --0.15 -- top N percent of values which can clip, not sure if that's so nice
 
   if equalIsh(offsetFactor, 0.5) then
     return input
   elseif offsetFactor < 0.5 then
-    -- Compress towards middle
     local compressionFactor = (0.5 - offsetFactor) / 0.5
-    -- Calculate how far the input is from the middle point
     local distanceFromMiddle = input - middlePoint
-    -- Compress this distance based on the factor
     local compressedDistance = distanceFromMiddle * (1 - compressionFactor)
     return middlePoint + compressedDistance
   else
-    -- Expand towards extremes
+    local inputRange = inputMax - inputMin
+    local inputMiddle = inputMin + inputRange * 0.5
+
+    -- Calculate normalized distance from middle (0 at middle, 1 at quartile boundaries)
+    local distanceFromMiddle = math.abs(input - inputMiddle) / (inputRange * (0.5 - canClip))
+    distanceFromMiddle = math.min(1, distanceFromMiddle)  -- Clamp to 1 for values beyond quartiles
+
+    -- For values below input midpoint, expand toward outputMin
+    -- For values above input midpoint, expand toward outputMax
+    local fullyExpandedValue = input < inputMiddle and outputMin or outputMax
+
+    -- Calculate expansion amount (0% at 0.5 offset, 100% at 1.0 offset)
+    local expansionAmount = (offsetFactor - 0.5) / 0.5
+    -- Scale expansion by distance from middle
+    expansionAmount = expansionAmount * distanceFromMiddle
+
+    -- Lerp from unity (input) to fully expanded value
+    return lerp(input, fullyExpandedValue, expansionAmount)
+  end
+end
+
+local function compExpValueTopBottom(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
+  t = math.max(0, math.min(1, t))
+
+  local offsetFactor = lerp(offsetFactorStart, offsetFactorEnd, t)
+  offsetFactor = math.max(0, math.min(1, offsetFactor))
+  offsetFactor = 1 - offsetFactor
+
+  if equalIsh(offsetFactor, 0.5) then
+    return input
+  elseif offsetFactor < 0.5 then
+    local compressionFactor = (0.5 - offsetFactor) / 0.5
+    local roomToCompress = input - outputMin
+    local normalizedInput = (inputMax - input) / (inputMax - inputMin)  -- Note: still inverted for compression
+    local curvedInput = normalizedInput ^ 1.5
+    if equalIsh(input, inputMin) then
+      curvedInput = 1
+    end
+    local scaledCompression = curvedInput * compressionFactor
+    return input - (roomToCompress * scaledCompression)
+  else
     local expansionFactor = (offsetFactor - 0.5) / 0.5
-    -- Determine which extreme to target based on input position
-    local targetValue = input < middlePoint and outputMin or outputMax
-    -- Lerp between current value and target extreme
-    return lerp(input, targetValue, expansionFactor)
+    local roomToExpand = outputMax - input
+    local normalizedInput = (input - inputMin) / (inputMax - inputMin)
+    local curvedInput = normalizedInput ^ 1.5
+    if equalIsh(input, inputMax) then
+      curvedInput = 1
+    end
+    local scaledExpansion = curvedInput * expansionFactor
+    return input + (roomToExpand * scaledExpansion)
   end
 end
 
@@ -714,7 +750,8 @@ Helper.getExtentUnion = getExtentUnion
 
 Helper.scaleValue = scaleValue
 Helper.offsetValue = offsetValue
-Helper.compExpValue = compExpValue
+Helper.compExpValueMiddle = compExpValueMiddle
+Helper.compExpValueTopBottom = compExpValueTopBottom
 
 Helper.GLOBAL_PREF_SLOP = GLOBAL_PREF_SLOP
 

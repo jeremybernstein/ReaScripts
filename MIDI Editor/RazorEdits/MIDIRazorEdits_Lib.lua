@@ -120,6 +120,7 @@ local justLoaded = true
 
 local hottestMods = MouseMods.new()
 local currentMods = MouseMods.new()
+local widgetMods
 
 local lastPoint, lastPointQuantized, hasMoved
 local wasDragged = false
@@ -206,8 +207,43 @@ local function onlyAreaMod(someMods)
   return someMods:matchesFlags(lice.modMappings()[keys.MODTYPE_MOVE_ONLYAREA].modKey)
 end
 
+local function matchesWidgetMod(which)
+  which = math.max(1, math.min(4, which))
+  return widgetMods:matchesFlags(lice.widgetMappings()[which].modKey)
+end
+
 ------------------------------------------------
 ------------------------------------------------
+
+local function getWidgetProcessor(mode)
+  local fun = (mode == keys.WIDGET_MODE_PUSHPULL) and helper.scaleValue
+           or (mode == keys.WIDGET_MODE_OFFSET) and helper.offsetValue
+           or (mode == keys.WIDGET_MODE_COMPEXPMID) and helper.compExpValueMiddle
+           or (mode == keys.WIDGET_MODE_COMPEXPTB) and helper.compExpValueTopBottom
+  return fun
+end
+
+local function callWidgetProcessingMode(val, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
+  local found = false
+  local newval
+  for k, _ in ipairs(lice.widgetMappings()) do
+    if k ~= glob.widgetStretchMode and matchesWidgetMod(k, hottestMods) then
+      local fun = getWidgetProcessor(k)
+      if fun then
+        newval = fun(val, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
+        found = true
+      end
+      break
+    end
+  end
+  if not found then
+    local fun = getWidgetProcessor(glob.widgetStretchMode)
+    if fun then
+      newval = fun(val, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
+    end
+  end
+  return newval and math.floor(newval + 0.5)
+end
 
 -- the fruits of 2 hours of hard labor with chatGPT 4 -- in the end, I had to fix it for the AI
 local function calculateVisibleRangeWithMargin(scroll, zoom, marginSize, viewHeight, minValue, maxValue)
@@ -417,7 +453,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
       area.timeValue.vals.max = updateTimeValueTop(area)
     end
     local deltaX = area.timeValue.ticks.min - oldmin
-    local deltaY = area.timeValue.vals.max - oldtop
+    local deltaY = area.fullLane and 0 or area.timeValue.vals.max - oldtop
     area.timeValue.ticks.max = area.timeValue.ticks.max + deltaX
     area.timeValue.vals.min = area.timeValue.vals.min + deltaY
   elseif force then
@@ -460,14 +496,6 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     end
     area.modified = true
   end
-end
-
-local function viewIntersectionRect(area)
-  local idx = area.ccLane and area.ccLane or -1
-  return Rect.new(math.max(area.logicalRect.x1, glob.windowRect.x1),
-                  math.max(area.logicalRect.y1, meLanes[idx].topPixel),
-                  math.min(area.logicalRect.x2, glob.windowRect.x2),
-                  math.min(area.logicalRect.y2, meLanes[idx].bottomPixel))
 end
 
 local function updateTimeValueTime(area)
@@ -526,7 +554,7 @@ updateAreaFromTimeValue = function(area, noCheck)
       y2 = math.min(math.floor((topPixel + ((topValue - area.timeValue.vals.min + 1) * multi)) + 0.5), meLanes[area.ccLane or -1].bottomPixel)
     end
     area.logicalRect = Rect.new(x1, y1, x2, y2)
-    area.viewRect = viewIntersectionRect(area)
+    area.viewRect = lice.viewIntersectionRect(area)
     area.modified = true
   end
   return true
@@ -538,8 +566,8 @@ local function makeFullLane(area)
   updateAreaFromTimeValue(area, true)
 end
 
-local function updateAreasFromTimeValue()
-  if glob.meNeedsRecalc
+local function updateAreasFromTimeValue(force)
+  if glob.meNeedsRecalc or force
   then
     for i = #areas, 1, -1 do
       local area = areas[i]
@@ -550,6 +578,7 @@ local function updateAreasFromTimeValue()
     glob.meNeedsRecalc = false
   end
 end
+glob.updateAreasFromTimeValue = updateAreasFromTimeValue
 
 local function resetWidgetMode()
   -- TODO really? 3 variables seems like overkill here. consolidate.
@@ -898,24 +927,14 @@ local function processNotes(activeTake, area, operation)
   if widgeting and glob.widgetInfo and glob.widgetInfo.sourceEvents[activeTake] then
     for _, event in ipairs(glob.widgetInfo.sourceEvents[activeTake]) do
       local val = event.vel
-      local newval
-
-      if glob.widgetStretchMode == 2 then
-        newval = math.floor(helper.compExpValue(val, 1, 127,
-                            area.widgetExtents.min, area.widgetExtents.max,
-                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      elseif glob.widgetStretchMode == 1 then
-        newval = math.floor(helper.offsetValue(val, 1, 127,
-                            area.widgetExtents.min, area.widgetExtents.max,
-                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      else
-        newval = math.floor(helper.scaleValue(val, 1, 127,
-                            area.widgetExtents.min, area.widgetExtents.max,
-                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
+      local newval = callWidgetProcessingMode(val, 1, 127,
+                                              area.widgetExtents.min, area.widgetExtents.max,
+                                              (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min),
+                                              glob.widgetInfo.sourceMin[activeTake], glob.widgetInfo.sourceMax[activeTake])
+      if newval then
+        mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newval, nil)
+        touchedMIDI = true
       end
-
-      mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newval, nil)
-      touchedMIDI = true
     end
   end
 end
@@ -1297,34 +1316,26 @@ local function processCCs(activeTake, area, operation)
     for _, event in ipairs(glob.widgetInfo.sourceEvents[activeTake]) do
       local val = event.val
 
-      local newval
-      if glob.widgetStretchMode == 2 then
-        newval = math.floor(helper.compExpValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
-                            area.widgetExtents.min, area.widgetExtents.max,
-                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      elseif glob.widgetStretchMode == 1 then
-        newval = math.floor(helper.offsetValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
-                            area.widgetExtents.min, area.widgetExtents.max,
-                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      else
-        newval = math.floor(helper.scaleValue(val, area.timeValue.vals.min, area.timeValue.vals.max,
-                            area.widgetExtents.min, area.widgetExtents.max,
-                            (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min)) + 0.5)
-      end
+      local newval = callWidgetProcessingMode(val, area.timeValue.vals.min, area.timeValue.vals.max,
+                                              area.widgetExtents.min, area.widgetExtents.max,
+                                              (event.ppqpos - area.timeValue.ticks.min) / (area.timeValue.ticks.max - area.timeValue.ticks.min),
+                                              glob.widgetInfo.sourceMin[activeTake], glob.widgetInfo.sourceMax[activeTake])
       -- TODO valToBytes, untangle here
-      local newmsg2
-      local newmsg3
-      newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or event.msg2
-      newmsg3 = onebyte and event.msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+      if newval then
+        local newmsg2
+        local newmsg3
+        newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or event.msg2
+        newmsg3 = onebyte and event.msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
 
-      if laneIsVel then
-        newmsg3 = isRelVelocity and newmsg2 or nil
-        newmsg2 = not isRelVelocity and newmsg2 or nil
-        mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newmsg2, newmsg3)
-      else
-        mu.MIDI_SetCC(activeTake, event.idx, nil, nil, nil, event.chanmsg, nil, newmsg2, newmsg3)
+        if laneIsVel then
+          newmsg3 = isRelVelocity and newmsg2 or nil
+          newmsg2 = not isRelVelocity and newmsg2 or nil
+          mu.MIDI_SetNote(activeTake, event.idx, nil, nil, nil, nil, nil, nil, newmsg2, newmsg3)
+        else
+          mu.MIDI_SetCC(activeTake, event.idx, nil, nil, nil, event.chanmsg, nil, newmsg2, newmsg3)
+        end
+        touchedMIDI = true
       end
-      touchedMIDI = true
     end
   end
 end
@@ -1475,10 +1486,15 @@ local function generateSourceInfo(area, op, force)
           and event.chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and event.msg2 == ccFilter))
           and (not selNotes or selNotes[event.msg2]) -- handle PolyAT lane
         then
+          local wants = true
           if event.ppqpos <= leftmostTick or event.ppqpos >= rightmostTick then
             sourceInfo.potentialControlPoints = sourceInfo.potentialControlPoints or {}
             sourceInfo.potentialControlPoints[#sourceInfo.potentialControlPoints + 1] = event
-          elseif val <= topValue and val >= bottomValue then
+            if event.ppqpos < leftmostTick or event.ppqpos > rightmostTick then
+              wants = false
+            end
+          end
+          if wants and val <= topValue and val >= bottomValue then
             event.idx = idx
             event.val = val
             sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
@@ -1488,7 +1504,25 @@ local function generateSourceInfo(area, op, force)
     end
 
     if wantsWidget then
+      local ccType = isNote and 0 or meLanes[area.ccLane].type
+      local laneIsVel = laneIsVelocity(area)
+      local isRelVelocity = laneIsVel and ccType == 0x207
+
       glob.widgetInfo.sourceEvents[activeTake] = sourceInfo.sourceEvents
+      glob.widgetInfo.sourceMin = glob.widgetInfo.sourceMin or {}
+      glob.widgetInfo.sourceMax = glob.widgetInfo.sourceMax or {}
+      if isNote or laneIsVel then
+        for _, event in ipairs(glob.widgetInfo.sourceEvents[activeTake]) do
+          local val = isRelVelocity and event.relvel or event.vel
+          if not glob.widgetInfo.sourceMin[activeTake] or val < glob.widgetInfo.sourceMin[activeTake] then glob.widgetInfo.sourceMin[activeTake] = val end
+          if not glob.widgetInfo.sourceMax[activeTake] or val > glob.widgetInfo.sourceMax[activeTake] then glob.widgetInfo.sourceMax[activeTake] = val end
+        end
+      else
+        for _, event in ipairs(glob.widgetInfo.sourceEvents[activeTake]) do
+          if not glob.widgetInfo.sourceMin[activeTake] or event.val < glob.widgetInfo.sourceMin[activeTake] then glob.widgetInfo.sourceMin[activeTake] = event.val end
+          if not glob.widgetInfo.sourceMax[activeTake] or event.val > glob.widgetInfo.sourceMax[activeTake] then glob.widgetInfo.sourceMax[activeTake] = event.val end
+        end
+      end
     end
     area.sourceInfo[activeTake] = sourceInfo
   end
@@ -1915,9 +1949,16 @@ end
 local prjStateChangeCt
 
 local function getAreaTableForSerialization()
+  local widgetArea
+  if glob.widgetInfo and glob.widgetInfo.area and glob.inWidgetMode then
+    widgetArea = glob.widgetInfo.area
+  end
   local areaTable = {}
-  for _, area in ipairs(areas) do
+  for i, area in ipairs(areas) do
     areaTable[#areaTable + 1] = area:serialize()
+    if area == widgetArea then
+      areaTable[-1] = i
+    end
   end
   return areaTable
 end
@@ -1932,6 +1973,7 @@ local function createUndoStep(undoText, override)
     _P(undoText, #areas)
   end
   prjStateChangeCt = r.GetProjectStateChangeCount(0) -- don't reload due to this
+  return prjStateChangeCt
 end
 
 glob.handleRightClick = function() -- a little smelly, but whatever works
@@ -1958,21 +2000,32 @@ local function doClearAll()
   end
 end
 
-local function checkProjectExtState()
+local function checkProjectExtState(noWidget)
   local _, projState = r.GetSetMediaItemTakeInfo_String(glob.liceData.editorTake, 'P_EXT:'..scriptID, '', false)
   if #projState then
     local areaTable = helper.deserialize(projState)
     clearAreas()
+    local widgetArea
     if areaTable then
+      if areaTable[-1] then
+        widgetArea = not noWidget and areaTable[-1] or nil
+        areaTable[-1] = nil
+      end
       wasDragged = true
       for idx = #areaTable, 1, -1 do
         local area = Area.deserialize(areaTable[idx], updateAreaFromTimeValue)
         if not (area.viewRect and area.logicalRect and area.timeValue) then
+          widgetArea = nil
         else
           areas[#areas + 1] = area
+          if widgetArea == #areas then
+            glob.widgetInfo = glob.widgetInfo or {}
+            glob.widgetInfo.area = area
+            glob.inWidgetMode = true
+          end
         end
       end
-      resetWidgetMode()
+      if not widgetArea then resetWidgetMode() end
     end
   end
 end
@@ -2016,11 +2069,11 @@ local function restorePreferences()
     if stateVal then glob.stretchMode = math.min(math.max(0, math.floor(stateVal)), 1) end
   end
 
-  glob.widgetStretchMode = 0 -- default
+  glob.widgetStretchMode = 1 -- default
   stateVal = r.GetExtState(scriptID, 'widgetStretchMode')
   if stateVal then
     stateVal = tonumber(stateVal)
-    if stateVal then glob.widgetStretchMode = math.min(math.max(0, math.floor(stateVal)), 2) end -- more options
+    if stateVal then glob.widgetStretchMode = math.min(math.max(1, math.floor(stateVal)), 4) end -- more options
   end
 
   glob.wantsControlPoints = false -- default
@@ -2057,7 +2110,7 @@ local function savePreferences()
   else
     r.DeleteExtState(scriptID, 'stretchMode', true)
   end
-  if glob.widgetStretchMode ~= 0 then
+  if glob.widgetStretchMode ~= 1 then
     r.SetExtState(scriptID, 'widgetStretchMode', tostring(glob.widgetStretchMode), true)
   else
     r.DeleteExtState(scriptID, 'widgetStretchMode', true)
@@ -2124,6 +2177,27 @@ end
 local contextMods = 0
 local contextCode = nil
 
+local function passUnconsumedKeys(vState)
+  -- pass anything else through, requires SWS
+  if hasSWS and glob.liceData then
+    -- _P(contextMods, contextCode, hottestMods:flags())
+    local hotMods = hottestMods:flags() == contextMods
+    for k = 1, #vState do
+      -- if k ~= 0xD and keys:byte(k) ~= 0 then
+      if vState:byte(k) ~= 0 then
+        if hotMods and k == contextCode then -- don't pass the key used to trigger the script
+          wantsQuit = true -- quit instead, it's a toggle
+        else
+          if lice.keyIsMapped(k) then
+            -- _P('passing a key', k)
+            r.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
+          end
+        end
+      end
+    end
+  end
+end
+
 local function processKeys()
 
   -- attempts to suss out the keyboard section focus fail for various reasons
@@ -2174,7 +2248,10 @@ local function processKeys()
     return
   end
 
-  if not glob.isIntercept or #areas == 0 then return end -- early return for non-essential/area stuff
+  if not glob.isIntercept or #areas == 0 then -- early return for non-essential/area stuff
+    passUnconsumedKeys(vState) -- we might not want this
+    return
+  end
 
   local function processAreaShortcuts(area)
 
@@ -2282,24 +2359,7 @@ local function processKeys()
     return
   end
 
-  -- pass anything else through, requires SWS
-  if hasSWS and glob.liceData then
-    -- _P(contextMods, contextCode, hottestMods:flags())
-    local hotMods = hottestMods:flags() == contextMods
-    for k = 1, #vState do
-      -- if k ~= 0xD and keys:byte(k) ~= 0 then
-      if vState:byte(k) ~= 0 then
-        if hotMods and k == contextCode then -- don't pass the key used to trigger the script
-          wantsQuit = true -- quit instead, it's a toggle
-        else
-          if lice.keyIsMapped(k) then
-            -- _P('passing a key', k)
-            r.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
-          end
-        end
-      end
-    end
-  end
+  passUnconsumedKeys(vState)
 
   -- if ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
   --   reaper.CF_SendActionShortcut(reaper.GetMainHwnd(), 0, 0xD)
@@ -2388,7 +2448,7 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
     -- do this delta thing so that the unmanipulated logical coords aren't lost
     local applyX1, applyY1, applyX2, applyY2 = newRectFull.x1 - dragArea.viewRect.x1, newRectFull.y1 - dragArea.viewRect.y1, newRectFull.x2 - dragArea.viewRect.x2, newRectFull.y2 - dragArea.viewRect.y2
     dragArea.logicalRect = Rect.new(dragArea.logicalRect.x1 + applyX1, dragArea.logicalRect.y1 + applyY1, dragArea.logicalRect.x2 + applyX2, dragArea.logicalRect.y2 + applyY2)
-    dragArea.viewRect = viewIntersectionRect(dragArea)
+    dragArea.viewRect = lice.viewIntersectionRect(dragArea)
     return true
   end
 
@@ -2691,7 +2751,7 @@ local function processWidget(mx, my, mouseState)
   then
     local area = glob.widgetInfo.area
     processAreas(area, true)
-    createUndoStep('Adjust Razor Edit Area Trim')
+    createUndoStep('Adjust Razor Edit Area (Widget)')
 
     area.widgetExtents = nil
     resetWidgetMode()
@@ -2733,18 +2793,23 @@ local function processWidget(mx, my, mouseState)
 
     -- we have a widget
     local area = found
-    local widgetSide = glob.widgetInfo and glob.widgetInfo.side or nil
+    local widgetSide = glob.widgetInfo and glob.widgetInfo.side
     local middle = area.viewRect.x1 + (area.viewRect:width() / 2)
 
+    local bothArea = area.viewRect:width() * 0.375
+
+    area.hovering = { area = true }
+
     if not widgetSide and mouseState.down then
-      if mx <= middle then
+      if mx <= middle - bothArea then
         widgetSide = 0
-      else
+      elseif mx >= middle + bothArea then
         widgetSide = 1
+      else
+        widgetSide = -1
       end
     end
 
-    local bothArea = area.viewRect:width() * 0.375
     if not mouseState.dragging and not pointIsInRect(testPoint, area.viewRect) then
       glob.setCursor(glob.forbidden_cursor)
     else
@@ -2758,12 +2823,25 @@ local function processWidget(mx, my, mouseState)
     end
 
     if area.widgetExtents then
+      if glob.widgetInfo and (not mouseState.down or not mouseState.dragging) then
+        acquireKeyMods()
+        if widgetMods and hottestMods:flags() ~= widgetMods:flags() then
+          local pscc = r.GetProjectStateChangeCount(0)
+          processAreas(area, true)
+          if pscc ~= createUndoStep('Adjust Razor Edit Area (Widget)') then
+            muState = nil
+          end
+          widgetMods = hottestMods:clone()
+          area.widgetExtents = Extent.new(0.5, 0.5)
+          glob.widgetInfo = { area = area, side = nil }
+        end
+      end
+
       if mouseState.clicked or (mouseState.down and not lastPoint) then
         lastPoint = testPoint
         if glob.widgetInfo then
-          local middleX = area.viewRect.x1 + (area.viewRect:width() / 2)
           local halfway = area.viewRect.y1 + (((area.viewRect:height() * area.widgetExtents.min) + (area.viewRect:height() * area.widgetExtents.max)) / 2)
-          if pointIsInRect(testPoint, Rect.new(middleX - lice.EDGE_SLOP, halfway - lice.EDGE_SLOP, middleX + lice.EDGE_SLOP, halfway + lice.EDGE_SLOP)) then
+          if pointIsInRect(testPoint, Rect.new(middle - lice.EDGE_SLOP, halfway - lice.EDGE_SLOP, middle + lice.EDGE_SLOP, halfway + lice.EDGE_SLOP)) then
             area.widgetExtents = Extent.new(0.5, 0.5)
             return true
           end
@@ -2787,8 +2865,7 @@ local function processWidget(mx, my, mouseState)
           area.widgetExtents.max = (maxValue - area.viewRect.y1) / area.viewRect:height()
         end
 
-        local middleX = area.viewRect.x1 + (area.viewRect:width() / 2)
-        if pointIsInRect(testPoint, Rect.new(middleX - bothArea, area.viewRect.y1, middleX + bothArea, area.viewRect.y2)) then
+        if widgetSide == -1 then
           handleMin()
           handleMax()
         elseif widgetSide == 0 then
@@ -2806,6 +2883,8 @@ local function processWidget(mx, my, mouseState)
     else
       area.widgetExtents = Extent.new(0.5, 0.5)
       glob.widgetInfo = { area = area, side = nil }
+      acquireKeyMods()
+      widgetMods = hottestMods:clone()
     end
     return true
   end
@@ -3602,22 +3681,23 @@ local function loop()
   glob.liceData.allTakes = getEditableTakes(currEditor)
 
   if glob.appIsForeground -- no need to analyze in bg or during drag (TODO: expect when scrolling)
-    and (not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2)
+    and (glob.wantsAnalyze or not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2)
   then
     analyzeCheckTime = analyzeCheckTime and glob.currentTime or nil
     analyzeChunk()
   end
 
+  local wantsUndo = false
   local stateChangeCt = r.GetProjectStateChangeCount(0)
   if prjStateChangeCt and prjStateChangeCt ~= stateChangeCt then
-    justLoaded = true
+    wantsUndo = true
     mu.MIDI_ForceNextTransaction()
   end
   prjStateChangeCt = stateChangeCt
 
-  if justLoaded then
+  if justLoaded or wantsUndo then
+    checkProjectExtState(justLoaded)
     justLoaded = false
-    checkProjectExtState()
 
     if startupOptions and startupOptions & STARTUP_SELECTED_NOTES ~= 0 then
       clearAreas()
@@ -3643,7 +3723,9 @@ local function loop()
 
   if wantsQuit then return end
 
-  updateAreasFromTimeValue()
+  updateAreasFromTimeValue(glob.wantsAnalyze)
+  glob.wantsAnalyze = false
+
   processMouse()
   lice.drawLice()
 

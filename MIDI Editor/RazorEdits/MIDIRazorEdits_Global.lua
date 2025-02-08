@@ -52,7 +52,7 @@ Global.currentGrid = nil
 -- TODO: swing grid
 Global.currentSwing = nil
 Global.stretchMode = 0 -- default = compress/expand
-Global.widgetStretchMode = 0
+Global.widgetStretchMode = 1
 Global.wantsControlPoints = false
 Global.wantsRightButton = false
 

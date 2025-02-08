@@ -362,9 +362,22 @@ local defaultModMappings = {
   { name = 'Stretch Area',              modKey = 4, cat = 'stretch' },
 }
 
+Keys.WIDGET_MODE_PUSHPULL = 1
+Keys.WIDGET_MODE_OFFSET = 2
+Keys.WIDGET_MODE_COMPEXPMID = 3
+Keys.WIDGET_MODE_COMPEXPTB = 4
+
+local defaultWidgetMappings = {
+  { name = 'Push/Pull',           modKey = 0 },
+  { name = 'Offset',              modKey = 1 },
+  { name = 'Comp/Exp Middle',     modKey = 4 },
+  { name = 'Comp/Exp',            modKey = 2 },
+}
+
 Keys.defaultKeyMappings = defaultKeyMappings
 Keys.defaultModMappings = defaultModMappings
+Keys.defaultWidgetMappings = defaultWidgetMappings
 Keys.vKeyLookup = vKeyLookup
--- Keys.vKeys = vKeys
+
 
 return Keys

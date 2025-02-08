@@ -1,10 +1,16 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.29
+-- @version 0.1.0-beta.30
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - refine 'feedback loop' prevention wrt shortcut back to the action context
+--   - new and improved comp/exp behaviors
+--   - add widget modkeys & default selection (Settings)
+--   - fix edge CC point inclusion in source events (broken with control point addition)
+--   - improvements to widget mousing mechanics
+--   - improvements to widget undo
+--   - fix fullLane behavior for piano roll
+--   - some windowing/area sync touchups for ME resizing
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

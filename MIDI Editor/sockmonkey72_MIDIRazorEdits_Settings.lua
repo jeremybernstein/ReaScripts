@@ -61,6 +61,19 @@ local overlapTestFailed = false
 
 local keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
 local modMappings = tableCopySimpleKeys(keys.defaultModMappings)
+local widgetMappings = tableCopySimpleKeys(keys.defaultWidgetMappings)
+
+local lastKeyState
+local lastModState
+local lastWidgetState
+local prefsStretchMode
+local stretchMode
+local prefsWidgetStretchMode
+local widgetStretchMode
+local prefsWantsControlPoints
+local wantsControlPoints
+local prefsWantsRightButton
+local wantsRightButton
 
 local function releaseKeys()
   if intercepting then
@@ -186,7 +199,7 @@ local function makeKeyRowTable(id, source, isDupe)
   ImGui.Text(ctx, source.name)
 
   ImGui.TableNextColumn(ctx)
-  rv, v = ImGui.Checkbox(ctx, '##' .. ctrlName .. '_' .. id, (source.modifiers & 0x02 ~= 0))
+  rv, v = ImGui.Checkbox(ctx, '##' .. ctrlName .. '_key_' .. id, (source.modifiers & 0x02 ~= 0))
   if rv then
     if v then source.modifiers = source.modifiers | 0x02
     else source.modifiers = source.modifiers & ~0x02
@@ -194,7 +207,7 @@ local function makeKeyRowTable(id, source, isDupe)
   end
 
   ImGui.TableNextColumn(ctx)
-  rv, v = ImGui.Checkbox(ctx, '##' .. shiftName .. '_' .. id, (source.modifiers & 0x01 ~= 0))
+  rv, v = ImGui.Checkbox(ctx, '##' .. shiftName .. '_key_' .. id, (source.modifiers & 0x01 ~= 0))
   if rv then
     if v then source.modifiers = source.modifiers | 0x01
     else source.modifiers = source.modifiers & ~0x01
@@ -202,7 +215,7 @@ local function makeKeyRowTable(id, source, isDupe)
   end
 
   ImGui.TableNextColumn(ctx)
-  rv, v = ImGui.Checkbox(ctx, '##' .. altName .. '_' .. id, (source.modifiers & 0x04 ~= 0))
+  rv, v = ImGui.Checkbox(ctx, '##' .. altName .. '_key_' .. id, (source.modifiers & 0x04 ~= 0))
   if rv then
     if v then source.modifiers = source.modifiers | 0x04
     else source.modifiers = source.modifiers & ~0x04
@@ -210,7 +223,7 @@ local function makeKeyRowTable(id, source, isDupe)
   end
 
   ImGui.TableNextColumn(ctx)
-  rv, v = ImGui.Checkbox(ctx, '##' .. superName .. '_' .. id, (source.modifiers & 0x08 ~= 0))
+  rv, v = ImGui.Checkbox(ctx, '##' .. superName .. '_key_' .. id, (source.modifiers & 0x08 ~= 0))
   if rv then
     if v then source.modifiers = source.modifiers | 0x08
     else source.modifiers = source.modifiers & ~0x08
@@ -251,30 +264,71 @@ local function makeModRowTable(id, source, isDupe)
   if source.check then
     local val, v = 0, false
     ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 52)
-    rv, v = ImGui.Checkbox(ctx, ctrlName .. '##' .. id, modKey & 2 ~= 0)
+    rv, v = ImGui.Checkbox(ctx, ctrlName .. '##mod_' .. id, modKey & 2 ~= 0)
     if v then val = val | 2 end
     ImGui.SameLine(ctx)
-    rv, v = ImGui.Checkbox(ctx, shiftName .. '##' .. id, modKey & 1 ~= 0)
+    rv, v = ImGui.Checkbox(ctx, shiftName .. '##mod_' .. id, modKey & 1 ~= 0)
     if v then val = val | 1 end
     ImGui.SameLine(ctx)
-    rv, v = ImGui.Checkbox(ctx, altName .. '##' .. id, modKey & 4 ~= 0)
+    rv, v = ImGui.Checkbox(ctx, altName .. '##mod_' .. id, modKey & 4 ~= 0)
     if v then val = val | 4 end
     ImGui.SameLine(ctx)
-    rv, v = ImGui.Checkbox(ctx, superName .. '##' .. id, modKey & 8 ~= 0)
+    rv, v = ImGui.Checkbox(ctx, superName .. '##mod_' .. id, modKey & 8 ~= 0)
     if v then val = val | 8 end
     modKey = val
   else
-    rv, modKey = ImGui.RadioButtonEx(ctx, 'off##' .. id, modKey, 0)
+    rv, modKey = ImGui.RadioButtonEx(ctx, 'off##mod_' .. id, modKey, 0)
     ImGui.SameLine(ctx)
-    rv, modKey = ImGui.RadioButtonEx(ctx, ctrlName .. '##' .. id, modKey, 2)
+    rv, modKey = ImGui.RadioButtonEx(ctx, ctrlName .. '##mod_' .. id, modKey, 2)
     ImGui.SameLine(ctx)
-    rv, modKey = ImGui.RadioButtonEx(ctx, shiftName .. '##' .. id, modKey, 1)
+    rv, modKey = ImGui.RadioButtonEx(ctx, shiftName .. '##mod_' .. id, modKey, 1)
     ImGui.SameLine(ctx)
-    rv, modKey = ImGui.RadioButtonEx(ctx, altName .. '##' .. id, modKey, 4)
+    rv, modKey = ImGui.RadioButtonEx(ctx, altName .. '##mod_' .. id, modKey, 4)
     ImGui.SameLine(ctx)
-    rv, modKey = ImGui.RadioButtonEx(ctx, superName .. '##' .. id, modKey, 8)
+    rv, modKey = ImGui.RadioButtonEx(ctx, superName .. '##mod_' .. id, modKey, 8)
   end
 
+  source.modKey = modKey
+end
+
+local function makeWidgetRowTable(id, source, isDupe)
+
+  ImGui.TableNextRow(ctx)
+
+  if isDupe then
+    local col
+    col = ImGui.GetColor(ctx, ImGui.Col_TableRowBg)
+    ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, col + 0xBB0000BB)
+  end
+
+  ImGui.TableNextColumn(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, (source.cat and '[' .. source.cat .. '] ' or '') .. source.name)
+  ImGui.TableNextColumn(ctx)
+
+  local rv
+  local modKey = source.modKey
+  local val, v = 0, false
+  rv, widgetStretchMode = ImGui.RadioButtonEx(ctx, 'default##wid_' .. id, widgetStretchMode, id)
+  if widgetStretchMode == id then
+    ImGui.BeginDisabled(ctx)
+  end
+  ImGui.SameLine(ctx)
+  rv, v = ImGui.Checkbox(ctx, ctrlName .. '##wid_' .. id, modKey & 2 ~= 0)
+  if v then val = val | 2 end
+  ImGui.SameLine(ctx)
+  rv, v = ImGui.Checkbox(ctx, shiftName .. '##wid_' .. id, modKey & 1 ~= 0)
+  if v then val = val | 1 end
+  ImGui.SameLine(ctx)
+  rv, v = ImGui.Checkbox(ctx, altName .. '##wid_' .. id, modKey & 4 ~= 0)
+  if v then val = val | 4 end
+  ImGui.SameLine(ctx)
+  rv, v = ImGui.Checkbox(ctx, superName .. '##wid_' .. id, modKey & 8 ~= 0)
+  if v then val = val | 8 end
+  if widgetStretchMode == id then
+    ImGui.EndDisabled(ctx)
+  end
+  modKey = val
   source.modKey = modKey
 end
 
@@ -307,16 +361,17 @@ local function prepModsForSaving()
   return output
 end
 
-local lastKeyState
-local lastModState
-local prefsStretchMode
-local stretchMode
-local prefsWidgetStretchMode
-local widgetStretchMode
-local prefsWantsControlPoints
-local wantsControlPoints
-local prefsWantsRightButton
-local wantsRightButton
+local function prepWidgetsForSaving()
+  local output = {}
+  local defaults = keys.defaultWidgetMappings
+  for k, v in ipairs(widgetMappings) do
+    if defaults[k] and defaults[k].modKey == v.modKey then
+    else
+      output[k] = { modKey = v.modKey }
+    end
+  end
+  return output
+end
 
 local function handleSavedMappings()
   local state
@@ -347,6 +402,19 @@ local function handleSavedMappings()
     end
   end
 
+  state = r.GetExtState(scriptID_Save, 'widgetMappings')
+  lastWidgetState = state ~= '' and state or nil
+  if state then
+    state = fromExtStateString(state)
+    if state then
+      for k, v in pairs(state) do
+        if widgetMappings[k] and v.modKey then
+          widgetMappings[k].modKey = v.modKey
+        end
+      end
+    end
+  end
+
   state = r.GetExtState(scriptID_Save, 'wantsControlPoints')
   prefsWantsControlPoints = state ~= '' and tonumber(state) or 0
   if not prefsWantsControlPoints then prefsWantsControlPoints = 0 end
@@ -358,8 +426,8 @@ local function handleSavedMappings()
   stretchMode = prefsStretchMode
 
   state = r.GetExtState(scriptID_Save, 'widgetStretchMode')
-  prefsWidgetStretchMode = state ~= '' and tonumber(state) or 0
-  if not prefsWidgetStretchMode then prefsWidgetStretchMode = 0 end
+  prefsWidgetStretchMode = state ~= '' and tonumber(state)
+  prefsWidgetStretchMode = math.max(prefsWidgetStretchMode or 1, 1)
   widgetStretchMode = prefsWidgetStretchMode
 
   state = r.GetExtState(scriptID_Save, 'wantsRightButton')
@@ -449,6 +517,34 @@ local function drawModMappings()
   end
 end
 
+local function drawWidgetMappings()
+  ImGui.Text(ctx, 'Widget Mode Mappings')
+
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  if ImGui.BeginTable(ctx, '##widgetMappings', 2, ImGui.TableFlags_RowBg, 600) then
+    ImGui.TableSetupColumn(ctx, 'Description', ImGui.TableColumnFlags_WidthStretch, 300)
+    ImGui.TableSetupColumn(ctx, 'ModKey', ImGui.TableColumnFlags_WidthFixed, 0)
+
+    ImGui.TableHeadersRow(ctx)
+    for k, v in ipairs(widgetMappings) do
+      local function isDuped()
+        for kk, mod in ipairs(widgetMappings) do
+          if kk ~= k then
+            if mod.modKey == v.modKey then
+              return true
+            end
+          end
+        end
+        return false
+      end
+      makeWidgetRowTable(k, v, isDuped())
+    end
+    ImGui.EndTable(ctx)
+  end
+end
+
 local wantsQuit = false
 
 local function hasChanges() -- could throttle this if it's a performance concern
@@ -458,6 +554,7 @@ local function hasChanges() -- could throttle this if it's a performance concern
   if widgetStretchMode ~= prefsWidgetStretchMode then return true end
   if lastKeyState ~= toExtStateString(prepKeysForSaving()) then return true end
   if lastModState ~= toExtStateString(prepModsForSaving()) then return true end
+  if lastWidgetState ~= toExtStateString(prepWidgetsForSaving()) then return true end
   return false
 end
 
@@ -488,6 +585,16 @@ local function drawButtons()
       lastModState = nil
     end
 
+    -- WIDGET mappings
+    extStateStr = toExtStateString(prepWidgetsForSaving())
+    if extStateStr then
+      r.SetExtState(scriptID_Save, 'widgetMappings', extStateStr, true)
+      lastWidgetState = extStateStr
+    else
+      r.DeleteExtState(scriptID_Save, 'widgetMappings', true)
+      lastWidgetState = nil
+    end
+
     if wantsControlPoints ~= 0 then
       r.SetExtState(scriptID_Save, 'wantsControlPoints', tostring(stretchMode), true)
     else
@@ -504,7 +611,7 @@ local function drawButtons()
     prefsStretchMode = stretchMode
 
     -- widget stretch mode
-    if widgetStretchMode ~= 0 then
+    if widgetStretchMode ~= 1 then
       r.SetExtState(scriptID_Save, 'widgetStretchMode', tostring(widgetStretchMode), true)
     else
       r.DeleteExtState(scriptID_Save, 'widgetStretchMode', true)
@@ -538,9 +645,10 @@ local function drawButtons()
     wantsControlPoints = false
     wantsRightButton = false
     stretchMode = 0
-    widgetStretchMode = 0
+    widgetStretchMode = 1
     keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
     modMappings = tableCopySimpleKeys(keys.defaultModMappings)
+    widgetMappings = tableCopySimpleKeys(keys.defaultWidgetMappings)
   end
 end
 
@@ -565,17 +673,19 @@ local function drawMiscOptions()
   rv, sm = ImGui.RadioButtonEx(ctx, 'Offset##sm', sm, 1)
   stretchMode = sm
 
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Value Stretch Mode (Widget):')
-  local wsm = widgetStretchMode
-  ImGui.SameLine(ctx)
-  ImGui.SetCursorPosX(ctx, saveX)
-  rv, wsm = ImGui.RadioButtonEx(ctx, 'Compress/Expand##wsm', wsm, 0)
-  ImGui.SameLine(ctx)
-  rv, wsm = ImGui.RadioButtonEx(ctx, 'Offset##wsm', wsm, 1)
-  ImGui.SameLine(ctx)
-  rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp to Middle##wsm', wsm, 2)
-  widgetStretchMode = wsm
+  -- ImGui.AlignTextToFramePadding(ctx)
+  -- ImGui.Text(ctx, 'Value Stretch Mode (Widget):')
+  -- local wsm = widgetStretchMode
+  -- ImGui.SameLine(ctx)
+  -- ImGui.SetCursorPosX(ctx, saveX)
+  -- rv, wsm = ImGui.RadioButtonEx(ctx, 'Push Up/Down##wsm', wsm, 0)
+  -- ImGui.SameLine(ctx)
+  -- rv, wsm = ImGui.RadioButtonEx(ctx, 'Offset##wsm', wsm, 1)
+  -- ImGui.SameLine(ctx)
+  -- rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp Mid##wsm', wsm, 2)
+  -- ImGui.SameLine(ctx)
+  -- rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp##wsm', wsm, 3)
+  -- widgetStretchMode = wsm
 
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Use Right Mouse Button (experimental):')
@@ -624,6 +734,13 @@ local function loop()
 
 
     drawMiscOptions()
+
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    drawWidgetMappings()
 
     ImGui.Spacing(ctx)
     ImGui.Separator(ctx)

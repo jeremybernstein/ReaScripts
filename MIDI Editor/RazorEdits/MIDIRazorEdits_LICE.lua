@@ -143,11 +143,13 @@ local appIntercepts = {
 
 local keyMappings
 local modMappings
+local widgetMappings
 
 local keyCt = 0
 
 local userKeyMappings
 local userModMappings
+local userWidgetMappings
 
 local function buildNewKeyMap()
   keyMappings = tableCopy(keys.defaultKeyMappings)
@@ -169,6 +171,15 @@ local function buildNewKeyMap()
     for k, map in pairs(userModMappings) do
       if modMappings[k] and map.modKey then
         modMappings[k].modKey = map.modKey
+      end
+    end
+  end
+
+  widgetMappings = tableCopy(keys.defaultWidgetMappings)
+  if userWidgetMappings then
+    for k, map in pairs(userWidgetMappings) do
+      if widgetMappings[k] and map.modKey then
+        widgetMappings[k].modKey = map.modKey
       end
     end
   end
@@ -234,6 +245,18 @@ local function loadModMappingState(stateTab)
   end
 end
 
+local function loadWidgetMappingState(stateTab)
+  if userWidgetMappings then userWidgetMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.modKey then
+        if not userWidgetMappings then userWidgetMappings = {} end
+        userWidgetMappings[k] = { modKey = map.modKey }
+      end
+    end
+  end
+end
+
 local lastClickTime = 0
 
 local function reloadSettings()
@@ -254,8 +277,15 @@ local function reloadSettings()
   end
   loadModMappingState(stateTab)
 
+  stateVal = r.GetExtState(glob.scriptID, 'widgetMappings')
+  if stateVal then
+    stateTab = fromExtStateString(stateVal)
+  end
+  loadWidgetMappingState(stateTab)
+
   keyMappings = nil
   modMappings = nil
+  widgetMappings = nil
 
   initLiceKeys()
 end
@@ -358,8 +388,8 @@ local function resetButtons()
                  }
 end
 
-local function peekAppIntercepts()
-  if glob.windowChanged or not appInterceptsHWND then
+local function peekAppIntercepts(force)
+  if force or not appInterceptsHWND then
     endAppIntercepts()
     startAppIntercepts()
   end
@@ -369,7 +399,6 @@ local function peekAppIntercepts()
   if lastPeekAppInterceptsTime and glob.currentTime < lastPeekAppInterceptsTime + 0.5 then return end
 
   lastPeekAppInterceptsTime = glob.currentTime
-  glob.windowChanged = false
 
   for _, intercept in ipairs(appIntercepts) do
     local msg = intercept.message
@@ -559,6 +588,14 @@ end
 local recompositeInit
 local recompositeDraw
 
+local function viewIntersectionRect(area)
+  local idx = area.ccLane and area.ccLane or -1
+  return Rect.new(math.max(area.logicalRect.x1, glob.windowRect.x1),
+                  math.max(area.logicalRect.y1, glob.meLanes[idx].topPixel),
+                  math.min(area.logicalRect.x2, glob.windowRect.x2),
+                  math.min(area.logicalRect.y2, glob.meLanes[idx].bottomPixel))
+end
+
 local function initLice(editor)
   if not glob.meLanes then return end
   if glob.liceData and glob.liceData.editor == editor then
@@ -569,7 +606,6 @@ local function initLice(editor)
       for _, bitmap in pairs(glob.liceData.bitmaps) do
         if bitmap then destroyBitmap(bitmap) end
       end
-      local oldScreenRect = glob.liceData.screenRect
       glob.liceData.bitmaps, glob.liceData.screenRect = createFrameBitmaps(glob.liceData.midiview, windRect)
       if glob.DEBUG_LANES or not MOAR_BITMAPS then
         if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
@@ -577,17 +613,8 @@ local function initLice(editor)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
-      glob.windowChanged = true
-      if oldScreenRect then
-        local dx = glob.liceData.screenRect.x1 - oldScreenRect.x1
-        local dy = glob.liceData.screenRect.y1 - oldScreenRect.y1
-        for _, area in ipairs(glob.areas) do
-          area.logicalRect:offset(dx, dy)
-          area.viewRect:offset(dx, dy)
-        end
-      end
-
-      peekAppIntercepts()
+      glob.wantsAnalyze = true
+      peekAppIntercepts(true)
     end
   elseif editor then
     local midiview = r.JS_Window_FindChildByID(editor, 1001)
@@ -600,8 +627,7 @@ local function initLice(editor)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
-      glob.windowChanged = true
-      peekAppIntercepts()
+      peekAppIntercepts(true)
       startIntercepts()
     end
   end
@@ -1107,13 +1133,14 @@ Lice.peekAppIntercepts = peekAppIntercepts
 
 Lice.keyMappings = function() return keyMappings end
 Lice.modMappings = function() return modMappings end
-Lice.loadKeyMappingState = loadKeyMappingState
-Lice.loadModMappingState = loadModMappingState
+Lice.widgetMappings = function() return widgetMappings end
 Lice.keyIsMapped = keyIsMapped
 
 Lice.resetButtons = resetButtons
 Lice.rebuildColors = rebuildColors
 Lice.reloadSettings = reloadSettings
+
+Lice.viewIntersectionRect = viewIntersectionRect
 
 Lice.drawLice = drawLice
 

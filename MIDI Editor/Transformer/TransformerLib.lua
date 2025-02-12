@@ -647,6 +647,8 @@ local function findTabsFromTarget(row)
         param2Tab = fdefs.findPositionMusicalSlopEntries
       elseif condition.notation == ':undereditcursor' then
         param1Tab = fdefs.findPositionMusicalSlopEntries
+      elseif condition.notation == ':onmetronome' then
+        param1Tab = fdefs.findPositionMetronomeEntries
       end
     end
   elseif notation == '$length' then
@@ -1054,6 +1056,7 @@ context.InRazorArea = ffuns.inRazorArea
 context.IsNearEvent = ffuns.isNearEvent
 context.InScale = ffuns.inScale
 context.CCHasCurve = ffuns.ccHasCurve
+context.OnMetronome = ffuns.onMetronome
 
 context.OP_EQ = fdefs.OP_EQ
 context.OP_GT = fdefs.OP_GT

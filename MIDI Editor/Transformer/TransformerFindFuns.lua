@@ -345,6 +345,28 @@ local function onMetricGrid(take, PPQ, ppqpos, mgParams)
   return false
 end
 
+local function onMetronome(event, take, PPQ, param1, param2)
+  local projtime = r.MIDI_GetProjTimeFromPPQPos(take, event.ppqpos)
+  local tsDenom, metroStr = r.TimeMap_GetMetronomePattern(0, projtime, 'EXTENDED')
+  local slop = param2 / 100
+
+  local tsNum = #metroStr
+  local beatPPQ = (4 / tsDenom) * PPQ
+  local measppq = r.MIDI_GetPPQPos_StartOfMeasure(take, event.ppqpos)
+  for i = 1, tsNum do
+    -- Shared.mu.post(slop, param1, param2, metroStr:sub(i, i), event.ppqpos)
+    local tgtPPQ = measppq + ((i - 1) * beatPPQ)
+    local slopPPQ = slop * beatPPQ
+    if metroStr:sub(i, i) == param1
+      and event.ppqpos >= tgtPPQ - slopPPQ
+      and event.ppqpos < tgtPPQ + slopPPQ
+    then
+      return true
+    end
+  end
+  return false
+end
+
 local function inScale(event, scale, root)
   if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return false end
 
@@ -459,6 +481,7 @@ FindFuns.cursorPosition = cursorPosition
 FindFuns.underEditCursor = underEditCursor
 FindFuns.isNearEvent = isNearEvent
 FindFuns.onMetricGrid = onMetricGrid
+FindFuns.onMetronome = onMetronome
 FindFuns.inScale = inScale
 FindFuns.onGrid = onGrid
 FindFuns.inBarRange = inBarRange

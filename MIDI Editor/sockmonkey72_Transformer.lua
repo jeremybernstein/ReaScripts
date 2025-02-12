@@ -1,13 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.11
+-- @version 1.0.12-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - huge refactor, not much in the way of functional change
---   - update ReaImGui requirement to 9.0.3
---   - fix isNearEvent grid range testing
---   - use experimental MIDIUtils to fix extents+offset issue
+--   - add On Metronome Tick position criteria
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -22,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.11'
+local versionStr = '1.0.12-beta.1'
 
 local r = reaper
 
@@ -50,6 +47,11 @@ end
 
 if canStart and not tx.startup() then
   r.ShowConsoleMsg('MIDI Transformer requires MIDIUtils, which appears to not be present (should have been installed by ReaPack when installing this script. Please reinstall.\n')
+  canStart = false
+end
+
+if canStart and not r.APIExists('ImGui_GetBuiltinPath') then
+  r.ShowConsoleMsg('MIDI Transformer requires \'ReaImGui\' 0.9.3+ (install from ReaPack)\n')
   canStart = false
 end
 

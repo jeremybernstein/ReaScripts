@@ -157,6 +157,7 @@ local findPositionConditionEntries = {
   { notation = ':intimesel', label = 'Inside Time Selection', text = 'TestEvent2(event, {tgt}, OP_INRANGE_EXCL, GetTimeSelectionStart(), GetTimeSelectionEnd())', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { menu = true, default = 4 }}, freeterm = true },
+  { notation = ':onmetronome', label = 'On Metronome Tick', text = 'OnMetronome(event, take, PPQ, {param1}, {param2})', terms = 2, split = {{ menu = true, default = 1 }, { floateditor = true, percent = true }}, freeterm = true },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 
@@ -191,6 +192,13 @@ local typeEntries = {
   { notation = '$pc', label = 'Program Change', text = '0xC0' },
   { notation = '$at', label = 'Aftertouch', text = '0xD0' },
   { notation = '$pb', label = 'Pitch Bend', text = '0xE0' },
+}
+
+local findPositionMetronomeEntries = {
+  { notation = '$a', label = 'A', text = '\'A\'' },
+  { notation = '$b', label = 'B', text = '\'B\'' },
+  { notation = '$c', label = 'C', text = '\'C\'' },
+  { notation = '$d', label = 'D', text = '\'D\'' },
 }
 
 local findTypeParam1Entries = tg.tableCopy(typeEntries)
@@ -363,6 +371,7 @@ FindDefs.findPropertyParam1Entries = findPropertyParam1Entries
 FindDefs.findPropertyParam2Entries = findPropertyParam2Entries
 FindDefs.findMusicalParam1Entries = findMusicalParam1Entries
 FindDefs.findPositionMusicalSlopEntries = findPositionMusicalSlopEntries
+FindDefs.findPositionMetronomeEntries = findPositionMetronomeEntries
 
 FindDefs.OP_EQ = OP_EQ
 FindDefs.OP_GT = OP_GT

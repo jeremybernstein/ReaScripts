@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.12-beta.1
+-- @version 1.0.12-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add On Metronome Tick position criteria
+--   - fix On Metronome Tick 0% bug
+--   - fix Scale/Offset crash
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.12-beta.1'
+local versionStr = '1.0.12-beta.2'
 
 local r = reaper
 

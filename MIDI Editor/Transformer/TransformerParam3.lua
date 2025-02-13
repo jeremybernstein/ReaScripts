@@ -23,7 +23,7 @@ local gdefs = require 'TransformerGeneralDefs'
 -- param3Formatter
 local function param3FormatPositionScaleOffset(row)
   -- reverse p2 and p3, another param3 user might need to do weirder stuff
-  local rowText, param1Val, param2Val = Shared.getRowTextAndParameterValuesetRowTextAndParameterValues(row)
+  local rowText, param1Val, param2Val = Shared.getRowTextAndParameterValues(row)
   rowText = rowText .. '('
   if tg.isValidString(param1Val) then
     rowText = rowText .. param1Val

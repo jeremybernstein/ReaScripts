@@ -359,7 +359,7 @@ local function onMetronome(event, take, PPQ, param1, param2)
     local slopPPQ = slop * beatPPQ
     if metroStr:sub(i, i) == param1
       and event.ppqpos >= tgtPPQ - slopPPQ
-      and event.ppqpos < tgtPPQ + slopPPQ
+      and event.ppqpos <= tgtPPQ + slopPPQ
     then
       return true
     end

@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.12-beta.2
+-- @version 1.0.12-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix On Metronome Tick 0% bug
---   - fix Scale/Offset crash
+--   - add toggle state
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.12-beta.2'
+local versionStr = '1.0.12-beta.3'
 
 local r = reaper
 
@@ -548,8 +547,19 @@ local function handleExtState()
   end
 end
 
+local _, _, sectionID, commandID = reaper.get_action_context()
+
 local function prepRandomShit()
+  r.set_action_options(1)
+  r.SetToggleCommandState(sectionID, commandID, 1)
+  r.RefreshToolbar2(sectionID, commandID)
+
   handleExtState()
+end
+
+local function shutdown()
+  r.SetToggleCommandState(sectionID, commandID, 0)
+  r.RefreshToolbar2(sectionID, commandID)
 end
 
 local function gooseAutoOverlap()
@@ -3547,6 +3557,7 @@ local function onCrash(err)
     gooseAutoOverlap()
   end
   r.ShowConsoleMsg(err .. '\n' .. debug.traceback() .. '\n')
+  shutdown()
 end
 
 -----------------------------------------------------------------------------
@@ -3763,6 +3774,7 @@ prepRandomShit()
 prepWindowAndFont()
 windowInfo.left, windowInfo.top, windowInfo.width, windowInfo.height = initializeWindowPosition()
 r.defer(function() xpcall(loop, onCrash) end)
+r.atexit(shutdown)
 
 -----------------------------------------------------------------------------
 ----------------------------------- FIN -------------------------------------

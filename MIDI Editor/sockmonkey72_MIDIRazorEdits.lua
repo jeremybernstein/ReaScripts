@@ -1,16 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.30
+-- @version 0.1.0-beta.31
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - new and improved comp/exp behaviors
---   - add widget modkeys & default selection (Settings)
---   - fix edge CC point inclusion in source events (broken with control point addition)
---   - improvements to widget mousing mechanics
---   - improvements to widget undo
---   - fix fullLane behavior for piano roll
---   - some windowing/area sync touchups for ME resizing
+--   - fix multi-area value range changing (unless on the same lane)
+--   - add some prep work for support of hidden note rows (probably disabled until cockos helps with https://forum.cockos.com/showthread.php?t=298446)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

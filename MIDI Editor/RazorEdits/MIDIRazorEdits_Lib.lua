@@ -227,7 +227,7 @@ local function callWidgetProcessingMode(val, outputMin, outputMax, offsetFactorS
   local found = false
   local newval
   for k, _ in ipairs(lice.widgetMappings()) do
-    if k ~= glob.widgetStretchMode and matchesWidgetMod(k, hottestMods) then
+    if k ~= glob.widgetStretchMode and matchesWidgetMod(k) then
       local fun = getWidgetProcessor(k)
       if fun then
         newval = fun(val, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
@@ -350,12 +350,26 @@ local function updateTimeValueTop(area)
   local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
 
-  return topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5)
+  if area.ccLane or not meState.noteTab then
+    return topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5)
+  else
+    -- let's assume a topValue of 0 for now
+    local numRows = #meState.noteTab
+    local idx = numRows - math.floor(((area.logicalRect.y1 - glob.windowRect.y1) / divisor) + 0.5)
+    return math.min(math.max(idx, 1), #meState.noteTab)
+  end
 end
 
 local function updateTimeValueBottom(area)
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
-  return equalIsh(area.logicalRect.y2, area.logicalRect.y1) and area.timeValue.vals.max or (area.timeValue.vals.max - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1)
+  if equalIsh(area.logicalRect.y2, area.logicalRect.y1) then return area.timeValue.vals.max end
+  if area.ccLane or not meState.noteTab then
+    return area.timeValue.vals.max - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1
+  else
+    local numRows = #meState.noteTab
+    local idx = numRows - math.floor(((area.logicalRect.y2 - glob.windowRect.y1) / divisor) + 0.5) + 1
+    return math.min(math.max(idx, 1), #meState.noteTab)
+  end
 end
 
 local function makeTimeValueExtentsForArea(area, noQuantize)
@@ -382,8 +396,22 @@ local function makeTimeValueExtentsForArea(area, noQuantize)
   local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
 
-  local valMax = area.fullLane and topValue or (topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5))
-  local valMin = area.fullLane and bottomValue or (equalIsh(area.logicalRect.y2, area.logicalRect.y1) and valMax or (valMax - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1))
+  local valMin, valMax
+  if area.ccLane or not meState.noteTab then
+    valMax = area.fullLane and topValue or (topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5))
+    valMin = area.fullLane and bottomValue or (equalIsh(area.logicalRect.y2, area.logicalRect.y1) and valMax or (valMax - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1))
+  else
+    local numRows = #meState.noteTab
+    if area.fullLane then
+      valMax = numRows
+      valMin = 1-- not sure if this is really what we want
+    else
+      local idx = numRows - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5)
+      valMax = math.min(math.max(idx, 1), #meState.noteTab)
+      idx = numRows - math.floor(((area.logicalRect.y2 - glob.windowRect.y1) / divisor) + 0.5) + 1
+      valMin = math.min(math.max(idx, 1), #meState.noteTab)
+    end
+  end
   area.timeValue = TimeValueExtents.new(leftmostTick, rightmostTick, valMin, valMax, leftmostTime, rightmostTime)
 end
 
@@ -419,26 +447,26 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     area.timeValue.ticks.min = quantizeTimeValueTimeExtent(area.timeValue.ticks.min)
     if area.fullLane then
       area.timeValue.vals.min = 0
-      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
+      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range -- TODO noterow
     end
   elseif resizing == RS_RIGHT then
     area.timeValue.ticks.max = updateTimeValueRight(area)
     _, area.timeValue.ticks.max = quantizeTimeValueTimeExtent(nil, area.timeValue.ticks.max)
     if area.fullLane then
       area.timeValue.vals.min = 0
-      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
+      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range -- TODO noterow
     end
   elseif resizing == RS_TOP then
     if area.fullLane then
       area.timeValue.vals.min = 0
-      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
+      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range -- TODO noterow
     else
       area.timeValue.vals.max = updateTimeValueTop(area)
     end
   elseif resizing == RS_BOTTOM then
     if area.fullLane then
       area.timeValue.vals.min = 0
-      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
+      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range -- TODO noterow
     else
       area.timeValue.vals.min = updateTimeValueBottom(area)
     end
@@ -448,7 +476,7 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
     area.timeValue.ticks.min = updateTimeValueLeft(area)
     if area.fullLane then
       area.timeValue.vals.min = 0
-      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range
+      area.timeValue.vals.max = meLanes[area.ccLane and area.ccLane or -1].range -- TODO noterow
     else
       area.timeValue.vals.max = updateTimeValueTop(area)
     end
@@ -539,6 +567,7 @@ updateAreaFromTimeValue = function(area, noCheck)
       x2 = math.floor((glob.windowRect.x1 + ((area.timeValue.ticks.max - meState.leftmostTick) * meState.pixelsPerTick)) + 0.5)
     end
     if area.fullLane then
+      -- TODO noterow
       if area.ccLane then
         y1 = math.floor((meLanes[area.ccLane].topPixel - ((meLanes[area.ccLane].range - meLanes[area.ccLane].topValue) * meLanes[area.ccLane].pixelsPerValue)) + 0.5) -- hack RANGE
         y2 = math.floor((meLanes[area.ccLane].bottomPixel + ((meLanes[area.ccLane].bottomValue) * meLanes[area.ccLane].pixelsPerValue)) + 0.5)
@@ -547,11 +576,19 @@ updateAreaFromTimeValue = function(area, noCheck)
         y2 = math.floor((meLanes[-1].bottomPixel + (meState.bottomPitch * meState.pixelsPerPitch)) + 0.5)
       end
     else
-      local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
-      local topValue = area.ccLane and meLanes[area.ccLane].topValue or meState.topPitch
-      local multi = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
-      y1 = math.floor((topPixel + ((topValue - area.timeValue.vals.max) * multi)) + 0.5)
-      y2 = math.min(math.floor((topPixel + ((topValue - area.timeValue.vals.min + 1) * multi)) + 0.5), meLanes[area.ccLane or -1].bottomPixel)
+      if meState.noteTab then
+        local topPixel = glob.windowRect.y1
+        local multi = meState.pixelsPerPitch
+        local numRows = #meState.noteTab
+        y1 = math.floor(topPixel + ((numRows - area.timeValue.vals.max) * multi) + 0.5)
+        y2 = math.min(math.floor((topPixel + ((numRows - (area.timeValue.vals.min - 1)) * multi)) + 0.5), meLanes[-1].bottomPixel)
+      else
+        local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
+        local topValue = area.ccLane and meLanes[area.ccLane].topValue or meState.topPitch
+        local multi = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
+        y1 = math.floor((topPixel + ((topValue - area.timeValue.vals.max) * multi)) + 0.5)
+        y2 = math.min(math.floor((topPixel + ((topValue - area.timeValue.vals.min + 1) * multi)) + 0.5), meLanes[area.ccLane or -1].bottomPixel)
+      end
     end
     area.logicalRect = Rect.new(x1, y1, x2, y2)
     area.viewRect = lice.viewIntersectionRect(area)
@@ -578,7 +615,6 @@ local function updateAreasFromTimeValue(force)
     glob.meNeedsRecalc = false
   end
 end
-glob.updateAreasFromTimeValue = updateAreasFromTimeValue
 
 local function resetWidgetMode()
   -- TODO really? 3 variables seems like overkill here. consolidate.
@@ -594,6 +630,20 @@ local tDelQueries
 
 ------------------------------------------------
 ------------------------------------------------
+
+local function pitchInRange(pitch, bottomPitch, topPitch)
+  if meState.noteTab then
+    if meState.noteTabReverse[pitch] then
+      for i = bottomPitch, topPitch do
+        if pitch == meState.noteTab[i] then return true end
+      end
+    end
+  else
+    return pitch >= bottomPitch and pitch <= topPitch
+  end
+  return false
+end
+_G.pitchInRange = pitchInRange -- find a better place for this
 
 local function processNotes(activeTake, area, operation)
   local ratio = 1.
@@ -741,7 +791,7 @@ local function processNotes(activeTake, area, operation)
     end
 
     if endppqpos > leftmostTick and ppqpos < rightmostTick
-      and pitch <= topPitch and pitch >= bottomPitch
+      and pitchInRange(pitch, bottomPitch, topPitch)
     then
       if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
         mu.MIDI_SetNote(activeTake, idx, not (operation == OP_UNSELECT) and true or false, nil, nil, nil, nil, nil)
@@ -751,7 +801,12 @@ local function processNotes(activeTake, area, operation)
         if invertOrig then
           newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
           newendppqpos = (endppqpos <= rightmostTick or overlapMod()) and endppqpos or rightmostTick + 1
-          newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
+          if meState.noteTab then
+            local newidx = area.timeValue.vals.max - (meState.noteTabReverse[pitch] - area.timeValue.vals.min)
+            newpitch = meState.noteTab[newidx]
+          else
+            newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
+          end
         end
       elseif operation == OP_RETROGRADE then
         local retroOrig = trimOverlappingNotes()
@@ -865,12 +920,27 @@ local function processNotes(activeTake, area, operation)
             end
             event.segments = segments
           end
+          if meState.noteTab then
+            local pitchidx = meState.noteTabReverse[pitch]
+            if not pitchidx then
+              _P('fatal error')
+              newpitch = pitch
+            else
+              local save = pitchidx
+              pitchidx = pitchidx - deltaPitch
+              pitchidx = math.min(math.max(pitchidx, 1), #meState.noteTab)
+              newpitch = meState.noteTab[pitchidx]
+              -- _P(save, pitchidx, pitch, newpitch)
+            end
+          else
+            newpitch = pitch - deltaPitch
+          end
           helper.addUnique(tInsertions,
                           { type = mu.NOTE_TYPE,
                             selected = selected, muted = muted,
                             ppqpos = ppqpos + deltaTicks < areaLeftmostTick and areaLeftmostTick or ppqpos + deltaTicks,
                             endppqpos = endppqpos + deltaTicks > areaRightmostTick and areaRightmostTick or endppqpos + deltaTicks,
-                            chan = chan, pitch = pitch - deltaPitch,
+                            chan = chan, pitch = newpitch,
                             vel = vel, relvel = relvel }
                           )
         end
@@ -1427,7 +1497,7 @@ local function generateSourceInfo(area, op, force)
         _, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel = mu.MIDI_GetNote(activeTake, idx)
 
         if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
-          and event.pitch <= topValue and event.pitch >= bottomValue
+          and pitchInRange(event.pitch, bottomValue, topValue)
         then
           if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
             and overlapMod()
@@ -1758,9 +1828,88 @@ local function analyzeChunk()
     r.MB('Could not determine the MIDI editor\'s zoom and scroll positions.', 'ERROR', 0)
     return false
   end
-  activeChannel, meState.timeBase = activeTakeChunk:match('\nCFGEDIT %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+)')
+  activeChannel, meState.showNoteRows, meState.timeBase = activeTakeChunk:match('\nCFGEDIT %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) (%S+)')
 
+  --[[
+  0 = show all
+  1 = hide unused
+  2 = hide unused and unnamed
+  3 = custom
+  -- ]]
   -- _P('CFGEDIT', activeChannel, meState.timeBase)
+
+  -- when does this need to be rebuilt? could add names, etc. per API
+  -- so probably every tick
+  -- REAPER BUG prevents this from being good: https://forum.cockos.com/showthread.php?t=298446
+  meState.showNoteRows = 0 -- DISABLED FOR NOW -- tonumber(meState.showNoteRows)
+  if meState.showNoteRows ~= 0 then
+    meState.noteTab = {}
+    meState.noteTabReverse = {}
+    local usedPitches = {}
+    if meState.showNoteRows ~= 0 then
+      local tChunkOk, tChunk
+      if meState.showNoteRows == 2 or meState.showNoteRows == 3 then
+        tChunkOk, tChunk = r.GetTrackStateChunk(r.GetMediaItemTrack(activeItem), '', false)
+      end
+      if meState.showNoteRows == 1 or meState.showNoteRows == 2 then
+        local _, noteCt = mu.MIDI_CountEvts(activeTake) -- performance consideration?
+        for i = 0, noteCt - 1 do
+          local ret, _, _, _, _, _, pitch = mu.MIDI_GetNote(activeTake, i)
+          if ret and pitch then
+            usedPitches[pitch] = 1
+          end
+        end
+
+        if tChunkOk and tChunk and meState.showNoteRows == 2 then
+          local tNoteNames = tChunk:match('<MIDINOTENAMES%s+([^>]*)%s+>')
+          if tNoteNames then
+            for line in tNoteNames:gmatch('[^\r\n]+') do
+              local noteNum, noteNum2 = line:match('%S+ (%S+) %S+ %S+ (%S+)')
+              noteNum = tonumber(noteNum)
+              noteNum2 = tonumber(noteNum2)
+              if noteNum and noteNum == noteNum2 then -- sanity check, could remove
+                usedPitches[noteNum] = 1
+              end
+            end
+          end
+        end
+
+        for k in spairs(usedPitches, function(t, a, b) return a < b end) do
+          table.insert(meState.noteTab, k) -- insert low to high
+        end
+        for k, v in ipairs(meState.noteTab) do
+          meState.noteTabReverse[v] = k
+        end
+      end
+
+      -- there appears to be a bug in REAPER where switching back and forth between note row modes may cause
+      -- the number of custom notes to change out from under the user. Just going to collect what REAPER reports.
+      if tChunkOk and tChunk and meState.showNoteRows == 3 then
+        local tNoteOrder = tChunk:match('CUSTOM_NOTE_ORDER%s+([^\r\n]*)')
+        if tNoteOrder then
+          local fs, fe, fv
+          fe = 0
+          -- this is in the order bottom -> top
+          while true do
+            fs, fe, fv = tNoteOrder:find('(%S+)%s*', fe + 1)
+            if fs and fe then
+              local noteNum = tonumber(fv)
+              if noteNum then
+                table.insert(meState.noteTab, noteNum) -- insert low to high
+              end
+            else break
+            end
+          end
+          for k, v in ipairs(meState.noteTab) do
+            meState.noteTabReverse[v] = k
+          end
+        end
+      end
+    end
+  else
+    meState.noteTab = nil
+    meState.noteTabReverse = nil
+  end
 
   meState.timeBase = (meState.timeBase == '0' or meState.timeBase == '4') and 'beats' or 'time'
   if meState.timeBase == 'beats' then
@@ -3479,7 +3628,9 @@ local function processMouse()
                 for tidx, testArea in ipairs(areas) do
                   if testArea ~= areas[isActive] then
                     testArea.timeValue.ticks:shift(newMinTicks - oldMinTicks, newMaxTicks - oldMaxTicks)
-                    testArea.timeValue.vals:shift(newMinVals - oldMinVals, newMaxVals - oldMaxVals)
+                    if not testArea.fullLane and testArea.ccLane == areas[isActive].ccLane then
+                      testArea.timeValue.vals:shift(newMinVals - oldMinVals, newMaxVals - oldMaxVals)
+                    end
                     updateTimeValueTime(testArea)
                     updateAreaFromTimeValue(testArea)
                   end

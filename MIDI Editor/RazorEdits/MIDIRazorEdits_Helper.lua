@@ -403,7 +403,7 @@ local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyAr
     end
 
     for _, pos in ipairs(positions) do
-      if pitch <= pos.top and pitch >= pos.bottom then
+      if pitchInRange(pitch, pos.bottom, pos.top) then
         if pos.right >= ppqpos and pos.left <= endppqpos then
           table.insert(intersecting_areas, {
             left = max(pos.left, ppqpos),

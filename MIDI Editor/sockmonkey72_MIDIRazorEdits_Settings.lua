@@ -13,10 +13,16 @@ if not keys then
   r.ShowConsoleMsg("MIDI Razor Edits (Settings) cannot find necessary files, please reinstall\n")
 end
 
+if not r.APIExists('ImGui_GetBuiltinPath') then
+  r.ShowConsoleMsg('MIDI Razor Edits (Settings) requires \'ReaImGui\' 0.9.3+ (install from ReaPack)\n')
+  return
+end
+
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 local ImGui = require 'imgui' '0.9.3'
 if not ImGui then
   r.ShowConsoleMsg('MIDI Razor Edits (Settings) requires \'ReaImGui\' 0.9.3+ (install from ReaPack)\n')
+  return
 end
 
 local scriptID = 'sockmonkey72_MRE_Settings'

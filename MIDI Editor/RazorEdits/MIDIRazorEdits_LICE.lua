@@ -294,6 +294,7 @@ local interceptKeyInput = false
 
 local function attendKeyIntercepts()
   if not interceptKeyInput then
+    glob.refreshNoteTab = true
     interceptKeyInput = true
     initLiceKeys()
   end
@@ -316,7 +317,6 @@ local function startAppIntercepts()
   else
     appInterceptsHWND = glob.liceData.editor
   end
-  glob.appIsForeground = true
   for _, intercept in ipairs(appIntercepts) do
     r.JS_WindowMessage_Intercept(appInterceptsHWND, intercept.message, intercept.passthrough)
   end
@@ -408,8 +408,8 @@ local function peekAppIntercepts(force)
       intercept.timestamp = time
 
       if msg == appInterceptActiveMessageName then
-        glob.appIsForeground = (wpl ~= 0)
-        if not glob.appIsForeground then
+        glob.editorIsForeground = (wpl ~= 0)
+        if not glob.editorIsForeground then
           glob.setCursor(glob.normal_cursor)
         end
       end
@@ -557,15 +557,15 @@ local function createFrameBitmaps(midiview, windRect)
     r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
     numBitmaps = numBitmaps + 1
     bitmaps.bottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (bottomPixel - glob.liceData.screenRect.y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
     numBitmaps = numBitmaps + 1
     if meLanes[0] then
       local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
       bitmaps.middletop = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - glob.liceData.screenRect.y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
       numBitmaps = numBitmaps + 1
       bitmaps.middlebottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - glob.liceData.screenRect.y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
       numBitmaps = numBitmaps + 1
     end
     bitmaps.left = r.JS_LICE_CreateBitmap(true, 1, 1)
@@ -627,6 +627,7 @@ local function initLice(editor)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
+      glob.wantsAnalyze = true
       peekAppIntercepts(true)
       startIntercepts()
     end

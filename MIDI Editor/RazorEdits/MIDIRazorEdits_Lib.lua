@@ -6,13 +6,9 @@
 --]]
 
 -- TODOs
---   x insert control points when moving CC areas [in progress]
 --   x multiple widget support {post-public}
 --   x move/copy area to next lane {post-public}
---   x all editable items {post-public}
---   x anything to be done about the repeated erasure cost of the unstretched rect? preErasedMUState f.e.? {post-public}
 --   x rewrite to use LICE coords (although it's not a big deal, isn't causing performance issues)
---   x note selection edge cases (preceding note collides with a moved region note)
 
 local r = reaper
 local Lib = {}
@@ -353,8 +349,8 @@ local function updateTimeValueTop(area)
   if area.ccLane or not meState.noteTab then
     return topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5)
   else
-    -- let's assume a topValue of 0 for now
-    local numRows = #meState.noteTab
+    -- in noteTab mode, topValue is 127 (or less if scrolled)
+    local numRows = #meState.noteTab - (127 - meState.topPitch)
     local idx = numRows - math.floor(((area.logicalRect.y1 - glob.windowRect.y1) / divisor) + 0.5)
     return math.min(math.max(idx, 1), #meState.noteTab)
   end
@@ -366,7 +362,8 @@ local function updateTimeValueBottom(area)
   if area.ccLane or not meState.noteTab then
     return area.timeValue.vals.max - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1
   else
-    local numRows = #meState.noteTab
+    -- in noteTab mode, topValue is 127 (or less if scrolled)
+    local numRows = #meState.noteTab - (127 - meState.topPitch)
     local idx = numRows - math.floor(((area.logicalRect.y2 - glob.windowRect.y1) / divisor) + 0.5) + 1
     return math.min(math.max(idx, 1), #meState.noteTab)
   end
@@ -401,7 +398,8 @@ local function makeTimeValueExtentsForArea(area, noQuantize)
     valMax = area.fullLane and topValue or (topValue - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5))
     valMin = area.fullLane and bottomValue or (equalIsh(area.logicalRect.y2, area.logicalRect.y1) and valMax or (valMax - math.floor((area.logicalRect:height() / divisor) + 0.5) + 1))
   else
-    local numRows = #meState.noteTab
+    -- in noteTab mode, topValue is 127 (or less if scrolled)
+    local numRows = #meState.noteTab - (127 - meState.topPitch)
     if area.fullLane then
       valMax = numRows
       valMin = 1-- not sure if this is really what we want
@@ -579,7 +577,8 @@ updateAreaFromTimeValue = function(area, noCheck)
       if meState.noteTab then
         local topPixel = glob.windowRect.y1
         local multi = meState.pixelsPerPitch
-        local numRows = #meState.noteTab
+        -- in noteTab mode, topValue is 127 (or less if scrolled)
+        local numRows = #meState.noteTab - (127 - meState.topPitch)
         y1 = math.floor(topPixel + ((numRows - area.timeValue.vals.max) * multi) + 0.5)
         y2 = math.min(math.floor((topPixel + ((numRows - (area.timeValue.vals.min - 1)) * multi)) + 0.5), meLanes[-1].bottomPixel)
       else
@@ -1773,6 +1772,103 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
+local function clearArea(idx, areaa)
+  if not idx then
+    for iidx, aarea in ipairs(areas) do
+      if aarea == areaa then idx = iidx break end
+    end
+  end
+
+  if idx and idx > 0 and idx <= #areas then
+    local area = areas[idx]
+    if lice.destroyBitmap(area.bitmap) then
+      area.bitmap = nil
+    end
+    table.remove(areas, idx)
+  end
+end
+
+local function clearAreas()
+  for _, area in ipairs(areas) do
+    if lice.destroyBitmap(area.bitmap) then
+      area.bitmap = nil
+    end
+  end
+  swapAreas({})
+  resetWidgetMode()
+end
+
+------------------------------------------------
+------------------------------------------------
+
+-- thanks FeedTheCat for this absolutely disgusting hack
+
+local function setCustomOrder(hwnd, visible_note_rows)
+  local take = reaper.MIDIEditor_GetTake(hwnd)
+  if not take then return end
+
+  local track = reaper.GetMediaItemTake_Track(take)
+  if not track then return end
+
+  local custom_order = table.concat(visible_note_rows, ' ')
+
+  local _, chunk = reaper.GetTrackStateChunk(track, '', false)
+
+  local new_chunk, occ = chunk:gsub('(CUSTOM_NOTE_ORDER )(.-)\n',
+                                    '%1' .. custom_order .. '\n',
+                                    1)
+
+  if occ == 0 then
+    new_chunk = chunk:gsub('<TRACK',
+                           '<TRACK\nCUSTOM_NOTE_ORDER ' .. custom_order,
+                           1)
+  end
+
+  if new_chunk ~= chunk then
+    reaper.SetTrackStateChunk(track, new_chunk, false)
+  end
+  reaper.MIDIEditor_OnCommand(hwnd, 40143)
+end
+
+local function getVisibleNoteRows(hwnd, mode, chunk)
+  local visible_rows = {}
+
+  if mode == 0 then -- reaper.GetToggleCommandStateEx(32060, 40452) == 1 then
+    for n = 0, 127 do visible_rows[n + 1] = n end -- won't be called
+  elseif mode == 3 then -- reaper.GetToggleCommandStateEx(32060, 40143) == 1 then
+    local note_order
+    if chunk then
+      note_order = chunk:match('CUSTOM_NOTE_ORDER (.-)\n')
+    end
+    if note_order then
+      for value in (note_order .. ' '):gmatch('(.-) ') do
+        visible_rows[#visible_rows + 1] = tonumber(value)
+      end
+    else
+      for n = 0, 127 do visible_rows[n + 1] = n end
+    end
+  else -- mode == 1 or mode == 2
+    local GetSetting = reaper.MIDIEditor_GetSetting_int
+    local SetSetting = reaper.MIDIEditor_SetSetting_int
+    local key = 'active_note_row'
+
+    local prev_row = GetSetting(hwnd, key)
+
+    local highest_row = -1
+    for i = 0, 127 do
+      SetSetting(hwnd, key, i)
+      local row = GetSetting(hwnd, key)
+      if row > highest_row then
+        highest_row = row
+        visible_rows[#visible_rows + 1] = row
+      end
+    end
+
+    SetSetting(hwnd, key, prev_row)
+  end
+  return visible_rows
+end
+
 -- cribbed from Julian Sader
 
 local function analyzeChunk()
@@ -1793,7 +1889,8 @@ local function analyzeChunk()
   local mePrevLanes = meLanes
   meLanes = {}
   local mePrevState = meState
-  meState = {}
+  -- this needs to persist!
+  meState = { noteTab = mePrevState.noteTab, noteTabReverse = mePrevState.noteTabReverse}
   glob.deadZones = {} -- does this need to be more efficient?
 
   local takeNum = r.GetMediaItemTakeInfo_Value(activeTake, 'IP_TAKENUMBER')
@@ -1830,83 +1927,36 @@ local function analyzeChunk()
   end
   activeChannel, meState.showNoteRows, meState.timeBase = activeTakeChunk:match('\nCFGEDIT %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) (%S+)')
 
+  -- _P('CFGEDIT', activeChannel, meState.timeBase)
+
   --[[
   0 = show all
   1 = hide unused
   2 = hide unused and unnamed
   3 = custom
   -- ]]
-  -- _P('CFGEDIT', activeChannel, meState.timeBase)
 
   -- when does this need to be rebuilt? could add names, etc. per API
   -- so probably every tick
   -- REAPER BUG prevents this from being good: https://forum.cockos.com/showthread.php?t=298446
-  meState.showNoteRows = 0 -- DISABLED FOR NOW -- tonumber(meState.showNoteRows)
-  if meState.showNoteRows ~= 0 then
-    meState.noteTab = {}
-    meState.noteTabReverse = {}
-    local usedPitches = {}
-    if meState.showNoteRows ~= 0 then
-      local tChunkOk, tChunk
-      if meState.showNoteRows == 2 or meState.showNoteRows == 3 then
-        tChunkOk, tChunk = r.GetTrackStateChunk(r.GetMediaItemTrack(activeItem), '', false)
-      end
-      if meState.showNoteRows == 1 or meState.showNoteRows == 2 then
-        local _, noteCt = mu.MIDI_CountEvts(activeTake) -- performance consideration?
-        for i = 0, noteCt - 1 do
-          local ret, _, _, _, _, _, pitch = mu.MIDI_GetNote(activeTake, i)
-          if ret and pitch then
-            usedPitches[pitch] = 1
-          end
-        end
-
-        if tChunkOk and tChunk and meState.showNoteRows == 2 then
-          local tNoteNames = tChunk:match('<MIDINOTENAMES%s+([^>]*)%s+>')
-          if tNoteNames then
-            for line in tNoteNames:gmatch('[^\r\n]+') do
-              local noteNum, noteNum2 = line:match('%S+ (%S+) %S+ %S+ (%S+)')
-              noteNum = tonumber(noteNum)
-              noteNum2 = tonumber(noteNum2)
-              if noteNum and noteNum == noteNum2 then -- sanity check, could remove
-                usedPitches[noteNum] = 1
-              end
-            end
-          end
-        end
-
-        for k in spairs(usedPitches, function(t, a, b) return a < b end) do
-          table.insert(meState.noteTab, k) -- insert low to high
-        end
-        for k, v in ipairs(meState.noteTab) do
-          meState.noteTabReverse[v] = k
-        end
-      end
-
-      -- there appears to be a bug in REAPER where switching back and forth between note row modes may cause
-      -- the number of custom notes to change out from under the user. Just going to collect what REAPER reports.
-      if tChunkOk and tChunk and meState.showNoteRows == 3 then
-        local tNoteOrder = tChunk:match('CUSTOM_NOTE_ORDER%s+([^\r\n]*)')
-        if tNoteOrder then
-          local fs, fe, fv
-          fe = 0
-          -- this is in the order bottom -> top
-          while true do
-            fs, fe, fv = tNoteOrder:find('(%S+)%s*', fe + 1)
-            if fs and fe then
-              local noteNum = tonumber(fv)
-              if noteNum then
-                table.insert(meState.noteTab, noteNum) -- insert low to high
-              end
-            else break
-            end
-          end
-          for k, v in ipairs(meState.noteTab) do
-            meState.noteTabReverse[v] = k
-          end
-        end
-      end
+  meState.showNoteRows = tonumber(meState.showNoteRows)
+  if mePrevState.showNoteRows ~= meState.showNoteRows then
+    glob.refreshNoteTab = true
+    clearAreas()
+  end
+  if meState.showNoteRows ~= 0 and (not meState.noteTab or glob.refreshNoteTab) then
+    local tChunkOk, tChunk
+    if meState.showNoteRows == 2 or meState.showNoteRows == 3 then
+      tChunkOk, tChunk = r.GetTrackStateChunk(r.GetMediaItemTrack(activeItem), '', false)
     end
-  else
+    meState.noteTab = getVisibleNoteRows(glob.liceData.editor, meState.showNoteRows, tChunk)
+    glob.refreshNoteTab = false
+
+    meState.noteTabReverse = {}
+    for k, v in ipairs(meState.noteTab) do
+      meState.noteTabReverse[v] = k
+    end
+  elseif meState.showNoteRows == 0 then
     meState.noteTab = nil
     meState.noteTabReverse = nil
   end
@@ -2043,32 +2093,6 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
-local function clearArea(idx, areaa)
-  if not idx then
-    for iidx, aarea in ipairs(areas) do
-      if aarea == areaa then idx = iidx break end
-    end
-  end
-
-  if idx and idx > 0 and idx <= #areas then
-    local area = areas[idx]
-    if lice.destroyBitmap(area.bitmap) then
-      area.bitmap = nil
-    end
-    table.remove(areas, idx)
-  end
-end
-
-local function clearAreas()
-  for _, area in ipairs(areas) do
-    if lice.destroyBitmap(area.bitmap) then
-      area.bitmap = nil
-    end
-  end
-  swapAreas({})
-  resetWidgetMode()
-end
-
 local ccLanesToggled = nil
 
 local function toggleThisAreaToCCLanes(area)
@@ -2095,7 +2119,18 @@ local function toggleThisAreaToCCLanes(area)
   return ccLanesToggled
 end
 
-local prjStateChangeCt
+local currentMode
+
+local function getCurrentMode(force)
+  local modesToTest = { 40452, 40453, 40454, 40143 }
+  for _, v in ipairs(modesToTest) do
+    if force or v ~= currentMode then
+      if r.GetToggleCommandStateEx(32060, v) == 1 then
+        return v
+      end
+    end
+  end
+end
 
 local function getAreaTableForSerialization()
   local widgetArea
@@ -2109,8 +2144,11 @@ local function getAreaTableForSerialization()
       areaTable[-1] = i
     end
   end
+  areaTable[-2] = currentMode
   return areaTable
 end
+
+local prjStateChangeCt
 
 local function createUndoStep(undoText, override)
   local undoData = override or (#areas ~= 0 and helper.serialize(getAreaTableForSerialization()) or '')
@@ -2161,6 +2199,18 @@ local function checkProjectExtState(noWidget)
         areaTable[-1] = nil
       end
       wasDragged = true
+
+      local savedMode = 40452 -- all notes
+      if areaTable[-2] then
+        savedMode = areaTable[-2]
+        areaTable[-2] = nil
+      end
+
+      if savedMode ~= getCurrentMode(true) then
+        resetWidgetMode()
+        return -- do not restore to a different mode
+      end
+
       for idx = #areaTable, 1, -1 do
         local area = Area.deserialize(areaTable[idx], updateAreaFromTimeValue)
         if not (area.viewRect and area.logicalRect and area.timeValue) then
@@ -3176,7 +3226,7 @@ local function processMouse()
     return
   end
 
-  if not glob.appIsForeground then return end
+  if not glob.editorIsForeground then return end
 
   local isCC = false
   local ccLane
@@ -3461,6 +3511,9 @@ local function processMouse()
 
     if not hasMoved then -- first drag
       isMoving = math.abs(lastPoint.x - mx) > 3 or math.abs(lastPoint.y - my) > 3
+      if meState.showNoteRows ~= 0 then
+        setCustomOrder(glob.liceData.editor, meState.noteTab) -- disgusting hack from FTC (thank you!)
+      end
     else
       isMoving = lastPoint.x ~= mx or lastPoint.y ~= my
     end
@@ -3609,7 +3662,11 @@ local function processMouse()
 
                 for i, testArea in ipairs(areas) do
                   if (testArea.ccLane == area.ccLane or (not testArea.ccLane and not area.ccLane)) then
-                    if testArea.viewRect.y2 + dy > meLanes[area.ccLane or -1].bottomPixel then dy = 0 break end
+                    local bottomPixel = meLanes[area.ccLane or -1].bottomPixel
+                    if meState.noteTab then
+                      bottomPixel = math.min(bottomPixel, meLanes[-1].topPixel + math.floor(((#meState.noteTab - (127 - meState.topPitch)) * meState.pixelsPerPitch) + 0.5))
+                    end
+                    if testArea.viewRect.y2 + dy > bottomPixel then dy = 0 break end
                     if testArea.viewRect.y1 + dy < meLanes[area.ccLane or -1].topPixel then dy = 0 break end
 
                     -- prevent motion past item start
@@ -3667,15 +3724,30 @@ local function processMouse()
       updateTimeValueTime(area)
     end
 
-    if resizing == RS_NEWAREA
-      and (areas[#areas].logicalRect:width() < 5 or areas[#areas].logicalRect:height() < 5)
-      and deferredClearAll
-    then
-      doClearAll()
-      resetState()
-      lastPoint = nil
-      lastPointQuantized = nil
-      return
+    if resizing == RS_NEWAREA then
+      local earlyReturn = false
+      if areas[#areas].logicalRect then
+        if (areas[#areas].logicalRect:width() < 5 or areas[#areas].logicalRect:height() < 5)
+          and deferredClearAll
+        then
+          earlyReturn = true
+        end
+
+        if meState.noteTab then
+          local bottomPixel =  glob.windowRect.y1 + math.floor(((#meState.noteTab - (127 - meState.topPitch)) * meState.pixelsPerPitch) + 0.5)
+          if areas[#areas].logicalRect.y1 > bottomPixel then
+            earlyReturn = true
+          end
+        end
+      end
+
+      if earlyReturn then
+        clearArea(#areas)
+        resetState()
+        lastPoint = nil
+        lastPointQuantized = nil
+        return
+      end
     end
 
     if hasMoved then -- only if we dragged
@@ -3831,10 +3903,19 @@ local function loop()
   glob.liceData.editorItem = r.GetMediaItemTake_Item(editorTake)
   glob.liceData.allTakes = getEditableTakes(currEditor)
 
-  if glob.appIsForeground -- no need to analyze in bg or during drag (TODO: expect when scrolling)
-    and (glob.wantsAnalyze or not analyzeCheckTime or glob.currentTime > analyzeCheckTime + 0.2)
-  then
-    analyzeCheckTime = analyzeCheckTime and glob.currentTime or nil
+  glob.wantsAnalyze = glob.wantsAnalyze or glob.editorIsForeground
+  if not glob.wantsAnalyze then
+    analyzeCheckTime = analyzeCheckTime or glob.currentTime -- check periodically
+    if glob.currentTime > analyzeCheckTime + 0.2 then glob.wantsAnalyze = true end
+  end
+
+  if not currentMode or r.GetToggleCommandStateEx(32060, currentMode) ~= 1 then
+    glob.wantsAnalyze = true
+    currentMode = getCurrentMode()
+  end
+
+  if glob.wantsAnalyze then
+    analyzeCheckTime = (analyzeCheckTime and glob.editorIsForeground) and glob.currentTime or nil
     analyzeChunk()
   end
 
@@ -3859,7 +3940,7 @@ local function loop()
   end
 
   -- Intercept keyboard when focused and areas are present
-  local focusWindow = glob.appIsForeground and r.JS_Window_GetFocus() or nil
+  local focusWindow = glob.editorIsForeground and r.JS_Window_GetFocus() or nil
   if focusWindow
     and (focusWindow == currEditor
       or focusWindow == glob.liceData.midiview -- don't call into JS_Window_IsChild unless necessary

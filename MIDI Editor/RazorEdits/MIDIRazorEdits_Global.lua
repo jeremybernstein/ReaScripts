@@ -69,10 +69,11 @@ Global.insertMode = false
 Global.horizontalLock = false
 Global.verticalLock = false
 
-Global.appIsForeground = true
+Global.editorIsForeground = true
 Global.currentTime = 0.
 
 Global.setCursor = setCursor
+Global.refreshNoteTab = true
 
 Global.GLOBAL_PREF_SLOP = helper.GLOBAL_PREF_SLOP
 

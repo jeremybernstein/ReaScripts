@@ -1,11 +1,13 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.31
+-- @version 0.1.0-beta.32
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix multi-area value range changing (unless on the same lane)
---   - add some prep work for support of hidden note rows (probably disabled until cockos helps with https://forum.cockos.com/showthread.php?t=298446)
+--   - stomach-churning, but ingenious workaround for REAPER's scripted note row issues
+--     (mega-thanks to FeedTheCat for having the digestive fortitude to pursue this)
+--   - fix potential crash if enabled when a new MIDI item is created and opened in an existing editor
+--   - some cleanup of reduced update frequency when the ME is not foremost
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

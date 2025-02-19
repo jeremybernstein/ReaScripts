@@ -397,18 +397,54 @@ local function onGrid(event, property, take, PPQ)
   return false
 end
 
-local function inBarRange(take, PPQ, ppqpos, rangeStart, rangeEnd)
+local function inBarRange(take, PPQ, event, rangeStart, rangeEnd)
   if not take then return false end
 
-  local tpos = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos) + Shared.getTimeOffset()
+  local tpos = event.projtime
   local _, _, cml, _, cdenom = r.TimeMap2_timeToBeats(0, tpos)
   local beatPPQ = (4 / cdenom) * PPQ
   local measurePPQ = beatPPQ * cml
 
-  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
-  local barpos = (ppqpos - som) / measurePPQ
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, event.ppqpos)
+  local barpos = (event.ppqpos - som) / measurePPQ
 
-  return barpos >= (rangeStart / 100) and barpos <= (rangeEnd / 100)
+  return barpos >= (rangeStart / 100) and barpos < (rangeEnd / 100)
+end
+
+local function inTakeRange(take, event, rangeStart, rangeEnd)
+  if not take then return false end
+
+  local takeStart = Shared.contextInfo.takeInfo.takeStart
+  local takeEnd = Shared.contextInfo.takeInfo.takeEnd
+
+  local norm = (event.projtime - takeStart) / (takeEnd - takeStart)
+  local normend
+
+  if Shared.getEventType(event) == gdefs.NOTE_TYPE then
+    local projend = event.projtime + event.projlen
+    normend = (projend - takeStart) / (takeEnd - takeStart)
+  end
+
+  return (norm >= (rangeStart / 100) and norm < (rangeEnd / 100))
+    or (normend and normend >= (rangeStart / 100) and normend < (rangeEnd / 100))
+end
+
+local function inTimeSelectionRange(take, event, rangeStart, rangeEnd)
+  if not take then return false end
+
+  local tsStart = Shared.contextInfo.tsInfo.tsStart
+  local tsEnd = Shared.contextInfo.tsInfo.tsEnd
+
+  local norm = (event.projtime - tsStart) / (tsEnd - tsStart)
+  local normend
+
+  if Shared.getEventType(event) == gdefs.NOTE_TYPE then
+    local projend = event.projtime + event.projlen
+    normend = (projend - tsStart) / (tsEnd - tsStart)
+  end
+
+  return (norm >= (rangeStart / 100) and norm < (rangeEnd / 100))
+    or (normend and normend >= (rangeStart / 100) and normend < (rangeEnd / 100))
 end
 
 local function inRazorArea(event, take)
@@ -487,5 +523,7 @@ FindFuns.onGrid = onGrid
 FindFuns.inBarRange = inBarRange
 FindFuns.inRazorArea = inRazorArea
 FindFuns.ccHasCurve = ccHasCurve
+FindFuns.inTakeRange = inTakeRange
+FindFuns.inTimeSelectionRange = inTimeSelectionRange
 
 return FindFuns

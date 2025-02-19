@@ -1057,6 +1057,8 @@ context.IsNearEvent = ffuns.isNearEvent
 context.InScale = ffuns.inScale
 context.CCHasCurve = ffuns.ccHasCurve
 context.OnMetronome = ffuns.onMetronome
+context.InTakeRange = ffuns.inTakeRange
+context.InTimeSelectionRange = ffuns.inTimeSelectionRange
 
 context.OP_EQ = fdefs.OP_EQ
 context.OP_GT = fdefs.OP_GT
@@ -1339,6 +1341,16 @@ local function handleFindPostProcessing(found, unfound)
   return found, unfound
 end
 
+local function makeContextInfo(take)
+  if take then
+    Shared.contextInfo = { take = take, tsInfo = {}, takeInfo = {} }
+    Shared.contextInfo.tsInfo.tsStart = getTimeSelectionStart()
+    Shared.contextInfo.tsInfo.tsEnd = getTimeSelectionEnd()
+    Shared.contextInfo.takeInfo.takeStart = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_POSITION') + getTimeOffset()
+    Shared.contextInfo.takeInfo.takeEnd = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_LENGTH') + Shared.contextInfo.takeInfo.takeStart
+  end
+end
+
 local function runFind(findFn, params, runFn)
 
   local wantsEventPreprocessing = params and params.wantsEventPreprocessing or false
@@ -1350,6 +1362,8 @@ local function runFind(findFn, params, runFn)
   local firstTime = 0xFFFFFFFF
   local lastTime = -0xFFFFFFFF
   local lastNoteEnd = -0xFFFFFFFF
+
+  makeContextInfo(params.take)
 
   if wantsEventPreprocessing then
     local firstNotePpq
@@ -1464,6 +1478,8 @@ local function runFind(findFn, params, runFn)
       end
     end
   end
+
+  Shared.contextInfo = nil
 
   local contextTab = {
     firstTime = firstTime,
@@ -2610,6 +2626,8 @@ local function processAction(execute, fromScript)
     local take = v.take
     initializeTake(take)
 
+    makeContextInfo(take)
+
     Shared.moveCursorInfo().moveCursorFirstEventPosition_Take = nil
     Shared.addLengthInfo().addLengthFirstEventOffset_Take = nil
     Shared.addLengthInfo().addLengthFirstEventStartTime = nil
@@ -2756,6 +2774,7 @@ local function processAction(execute, fromScript)
       end
       mu.CORRECT_EXTENTS = extentsstate
     end
+    Shared.contextInfo = nil
   end
 
   r.PreventUIRefresh(-1)

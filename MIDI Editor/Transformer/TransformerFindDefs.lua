@@ -150,7 +150,7 @@ local findPositionConditionEntries = {
   findConditionAddSelectRange(findConditionInRangeExcl, SELECT_TIME_RANGE),
   findConditionAddSelectRange(findConditionSimilarSlopTime, SELECT_TIME_INDIVIDUAL),
   { notation = ':ongrid', label = 'On Grid', text = 'OnGrid(event, {tgt}, take, PPQ)', terms = 0, timeselect = SELECT_TIME_INDIVIDUAL },
-  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event.ppqpos, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
+  { notation = ':inbarrange', label = 'Inside Bar Range %', text = 'InBarRange(take, PPQ, event, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   { notation = ':onmetricgrid', label = 'On Metric Grid', text = 'OnMetricGrid(take, PPQ, event.ppqpos, {metricgridparams})', terms = 2, metricgrid = true, split = {{ }, { bitfield = true, default = '0', rangelabel = 'bitfield' }}, timeselect = SELECT_TIME_INDIVIDUAL },
   { notation = ':cursorpos', label = 'Cursor Position', text = 'CursorPosition(event, {tgt}, r.GetCursorPositionEx(0) + GetTimeOffset(), {param1})', terms = 1, menu = true, notnot = true },
   { notation = ':undereditcursor', label = 'Under Edit Cursor (Slop)', text = 'UnderEditCursor(event, take, PPQ, r.GetCursorPositionEx(0), {param1}, {param2})', terms = 2, split = { { menu = true, default = 4 }, { hidden = true, literal = true } }, freeterm = true },
@@ -158,6 +158,8 @@ local findPositionConditionEntries = {
   { notation = ':inrazor', label = 'Inside Razor Area', text = 'InRazorArea(event, take)', terms = 0, timeselect = SELECT_TIME_RANGE },
   { notation = ':nearevent', label = 'Is Near Event', text = 'IsNearEvent(event, take, PPQ, {eventselectorparams}, {param2})', terms = 2, split = {{ eventselector = true }, { menu = true, default = 4 }}, freeterm = true },
   { notation = ':onmetronome', label = 'On Metronome Tick', text = 'OnMetronome(event, take, PPQ, {param1}, {param2})', terms = 2, split = {{ menu = true, default = 1 }, { floateditor = true, percent = true }}, freeterm = true },
+  { notation = ':intakerange', label = 'In Take Range %', text = 'InTakeRange(take, event, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
+  { notation = ':intimeselrange', label = 'In Time Selection Range %', text = 'InTimeSelectionRange(take, event, {param1}, {param2})', terms = 2, split = {{ floateditor = true, percent = true }, { floateditor = true, percent = true, default = 100 }}, timeselect = SELECT_TIME_RANGE },
   -- { label = 'Inside Selected Marker', text = { '>= GetSelectedRegionStart() and', '<= GetSelectedRegionEnd()' }, terms = 0 } -- region?
 }
 

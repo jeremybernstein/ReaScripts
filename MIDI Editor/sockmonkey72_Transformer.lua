@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.12-beta.4
+-- @version 1.0.12
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add new position criteria: 'In Take Range %', 'In Time Selection Range %'
---   - improve efficiency of some selection operations
+--   - back to official (identical to beta.4)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.12-beta.4'
+local versionStr = '1.0.12'
 
 local r = reaper
 

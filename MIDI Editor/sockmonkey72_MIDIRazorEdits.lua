@@ -1,13 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 0.1.0-beta.32
+-- @version 1.0.0
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - stomach-churning, but ingenious workaround for REAPER's scripted note row issues
---     (mega-thanks to FeedTheCat for having the digestive fortitude to pursue this)
---   - fix potential crash if enabled when a new MIDI item is created and opened in an existing editor
---   - some cleanup of reduced update frequency when the ME is not foremost
+--   - official release (identical to v0.1.0-beta.32)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.0.0
+-- @version 1.0.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - official release (identical to v0.1.0-beta.32)
+--   - fix CC lane double-increment of duplicate bounds
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

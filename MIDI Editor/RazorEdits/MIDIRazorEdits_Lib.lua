@@ -1340,12 +1340,6 @@ local function processCCs(activeTake, area, operation)
     helper.addUnique(tInsertions, area.controlPoints[4])
   end
 
-  if operation == OP_DUPLICATE then
-    area.timeValue.ticks:shift(areaTickExtent:size())
-    updateTimeValueTime(area)
-    updateAreaFromTimeValue(area)
-  end
-
   if stretchingArea and (resizing == RS_TOP or resizing == RS_BOTTOM) then
     for _, event in ipairs(sourceEvents) do
       local val = event.val

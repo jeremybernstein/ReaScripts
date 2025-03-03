@@ -255,6 +255,17 @@ local function ensureNumString(str, range, floor)
   return tostring(num)
 end
 
+local notesInChord = 3
+
+local function getNotesInChord()
+  return notesInChord
+end
+
+local function setNotesInChord(nic)
+  nic = tonumber(nic)
+  notesInChord = nic and (nic < 2 and 2 or math.floor(nic)) or 3
+end
+
 TransformerGlobal.class = class
 TransformerGlobal.ParamInfo = ParamInfo
 TransformerGlobal.isREAPER7 = isREAPER7
@@ -268,5 +279,7 @@ TransformerGlobal.base64decode = b64dec
 TransformerGlobal.filePathExists = filePathExists
 TransformerGlobal.dirExists = dirExists
 TransformerGlobal.ensureNumString = ensureNumString
+TransformerGlobal.getNotesInChord = getNotesInChord
+TransformerGlobal.setNotesInChord = setNotesInChord
 
 return TransformerGlobal

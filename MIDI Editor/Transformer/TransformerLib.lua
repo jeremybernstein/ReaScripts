@@ -1384,24 +1384,28 @@ local function runFind(findFn, params, runFn)
           local notePpq = r.MIDI_GetPPQPosFromProjTime(take, noteOnset)
           local matched = false
           local updateFirstNote = true
+          local notesInChord = tg.getNotesInChord()
+
           if firstNotePpq then
             if notePpq >= firstNotePpq - (params.PPQ * 0.05) and notePpq <= firstNotePpq + (params.PPQ * 0.05) then
-              if prevEvents[1] and prevEvents[2] then
+              local isChord = true
+              for i = 1, notesInChord - 1 do
+                if not prevEvents[i] then isChord = false break end
+              end
+              if isChord then
                 event.flags = event.flags | 4
                 counts.noteCount = firstNoteCount
                 event.count = counts.noteCount
-                if prevEvents[1] then
-                  prevEvents[1].flags = prevEvents[1].flags | 4
-                  prevEvents[1].count = counts.noteCount
-                end
-                if prevEvents[2] then
-                  prevEvents[2].flags = prevEvents[2].flags | 4
-                  prevEvents[2].count = counts.noteCount
+                for i = 1, notesInChord - 1 do
+                  prevEvents[i].flags = prevEvents[i].flags | 4
+                  prevEvents[i].count = counts.noteCount
                 end
                 matched = true
               end
 
-              prevEvents[2] = prevEvents[1]
+              for i = notesInChord - 1, 2, -1 do
+                prevEvents[i] = prevEvents[i - 1]
+              end
               prevEvents[1] = event
               updateFirstNote = false
               firstNotePpq = (firstNotePpq + notePpq) / 2 -- running avg
@@ -1416,8 +1420,7 @@ local function runFind(findFn, params, runFn)
               firstNotePpq = notePpq
               firstNoteIndex = k
               firstNoteCount = counts.noteCount + 1
-              prevEvents[1] = event
-              prevEvents[2] = nil
+              prevEvents = { event }
             end
           end
           updateEventCount(event, counts, matched)
@@ -2811,7 +2814,8 @@ local function getCurrentPresetState()
     actionMacro = actionRowsToNotation(),
     actionScopeFlags = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation,
     notes = libPresetNotesBuffer,
-    scriptIgnoreSelectionInArrangeView = false
+    scriptIgnoreSelectionInArrangeView = false,
+    notesInChord = tg.getNotesInChord(),
   }
   return presetTab
 end
@@ -2905,6 +2909,7 @@ local function loadPresetFromTable(presetTab)
   adefs.clearActionRowTable()
   processActionMacro(presetTab.actionMacro)
   scriptIgnoreSelectionInArrangeView = presetTab.scriptIgnoreSelectionInArrangeView
+  tg.setNotesInChord(presetTab.notesInChord)
   return presetTab.notes
 end
 

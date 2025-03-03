@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.13
+-- @version 1.0.14-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix Metric Grid criteria bar restart
+--   - new preset property/preference: How many notes does it take to make a chord? 2-N
+--   - indicate 'dirtiness' of loaded presets. probably a little permissive.
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.12'
+local versionStr = '1.0.14-beta.1'
 
 local r = reaper
 
@@ -160,6 +161,7 @@ local actionConsoleText = ''
 local presetTable = {}
 local presetFolders = {}
 local presetLabel = ''
+local presetIsEdited = false
 local presetInputVisible = false
 local presetInputDoesScript = false
 local presetNotesBuffer = ''
@@ -227,6 +229,7 @@ local function doUpdate(action)
     }
     r.SetExtState(scriptID, 'lastState', tg.base64encode(tg.serialize(lastState)), true)
   end
+  presetIsEdited = true
 end
 
 local function doFindUpdate()
@@ -523,6 +526,11 @@ local function handleExtState()
     scriptPrefix = (state and state ~= scriptPrefix_Empty) and state or ''
   end
 
+  state = r.GetExtState(scriptID, 'notesInChord')
+  if tg.isValidString(state) then
+    tg.setNotesInChord(tonumber(state))
+  end
+
   state = r.GetExtState(scriptID, 'restoreLastState')
   if tg.isValidString(state) then
     restoreLastState = tonumber(state) == 1 and true or false
@@ -535,6 +543,8 @@ local function handleExtState()
           if lastState then
             if lastState.state then
               presetNameTextBuffer = lastState.presetName
+              presetLabel = string.gsub(presetNameTextBuffer, '%.tfmrPreset', '')
+              presetIsEdited = true
               if tg.dirExists(lastState.presetSubPath) then presetSubPath = lastState.presetSubPath end
               presetNotesBuffer = tx.loadPresetFromTable(lastState.state)
               overrideEditorTypeForAllRows()
@@ -852,20 +862,22 @@ local function windowFn()
     ImGui.SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 2) - (10 * canvasScale))
     ImGui.Button(ctx, 'Clear All', DEFAULT_ITEM_WIDTH * 1.5)
     if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
-        tx.suspendUndo()
-        tx.clearFindRows()
-        selectedFindRow = 0
-        tx.setCurrentFindScope(3)
-        tx.setFindScopeFlags(0)
-        tx.clearFindPostProcessingInfo()
-        tx.clearActionRows()
-        selectedActionRow = 0
-        tx.setCurrentActionScope(1)
-        tx.setCurrentActionScopeFlags(1)
-        presetLabel = ''
-        presetNotesBuffer = ''
-        tx.resumeUndo()
-        doActionUpdate()
+      tg.setNotesInChord()
+      tx.suspendUndo()
+      tx.clearFindRows()
+      selectedFindRow = 0
+      tx.setCurrentFindScope(3)
+      tx.setFindScopeFlags(0)
+      tx.clearFindPostProcessingInfo()
+      tx.clearActionRows()
+      selectedActionRow = 0
+      tx.setCurrentActionScope(1)
+      tx.setCurrentActionScopeFlags(1)
+      presetLabel = ''
+      presetIsEdited = false
+      presetNotesBuffer = ''
+      tx.resumeUndo()
+      doActionUpdate()
     end
   end
 
@@ -1261,6 +1273,7 @@ local function windowFn()
             if success then
               presetLabel = source[i].label
               endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
+              presetIsEdited = false
             end
           end
           ImGui.CloseCurrentPopup(ctx)
@@ -1427,7 +1440,7 @@ local function windowFn()
   end
 
   ImGui.SameLine(ctx)
-  ImGui.TextColored(ctx, 0x00AAFFFF, presetLabel)
+  ImGui.TextColored(ctx, 0x00AAFFFF, presetLabel .. (presetIsEdited and '*' or ''))
 
   ---------------------------------------------------------------------------
   ----------------------------------- GEAR ----------------------------------
@@ -2774,9 +2787,27 @@ local function windowFn()
 
   generateFindPostProcessingPopup()
 
+  ImGui.SameLine(ctx)
+
+  local crx = ImGui.GetContentRegionMax(ctx)
+  local frame_padding_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
+
+  ImGui.SetCursorPos(ctx, crx - (DEFAULT_ITEM_WIDTH * 1.5), saveY)
+  ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
+  local rv, buf = ImGui.InputText(ctx, '##notesInChord', tostring(tg.getNotesInChord()),
+                                  inputFlag | ImGui.InputTextFlags_CallbackCharFilter,
+                                  numbersOnlyCallback)
+  if kbdEntryIsCompleted(rv) then
+    tg.setNotesInChord(buf)
+    r.SetExtState(scriptID, 'notesInChord', tostring(tg.getNotesInChord()), true)
+    ImGui.SetKeyboardFocusHere(ctx)
+  end
+  generateLabelOnLine('# Notes in Chord', true)
+
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, findParserError)
   ImGui.SameLine(ctx)
+
 
   ImGui.PopStyleColor(ctx, 4)
 
@@ -3287,6 +3318,7 @@ local function windowFn()
     else
       presetLabel = ''
     end
+    presetIsEdited = false
   end
 
   local function manageSaveAndOverwrite(pathFn, saveFn, statusCtx, suppressOverwrite)
@@ -3746,6 +3778,7 @@ local function loop()
           local success, notes, ignoreSelectInArrange = tx.loadPreset(filedrag)
           if success then
             presetLabel = string.match(filedrag, '.*[/\\](.*)' .. presetExt)
+            presetIsEdited = false
             endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
           end
         end

@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.12
+-- @version 1.0.13
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - back to official (identical to beta.4)
+--   - fix Metric Grid criteria bar restart
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*

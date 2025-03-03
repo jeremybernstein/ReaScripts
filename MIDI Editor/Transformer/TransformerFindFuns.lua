@@ -283,8 +283,10 @@ local function isNearEvent(event, take, PPQ, evSelParams, param2)
   return false
 end
 
-local function onMetricGrid(take, PPQ, ppqpos, mgParams)
+local function onMetricGrid(take, PPQ, event, mgParams)
   if not take then return false end
+
+  local ppqpos = event.ppqpos
 
   local subdiv = mgParams.param1
   local gridStr = mgParams.param2
@@ -301,7 +303,9 @@ local function onMetricGrid(take, PPQ, ppqpos, mgParams)
   -- handle cycle lengths > measure
   if mgParams.wantsBarRestart then
     if not Shared.cachedSOM then Shared.cachedSOM = som end
-    if som - Shared.cachedSOM > cycleLength then
+    if som ~= Shared.cachedSOM
+      or som - Shared.cachedSOM > cycleLength
+    then
       Shared.cachedSOM = som
       Shared.cachedMetric = nil
       Shared.cachedWrapped = nil

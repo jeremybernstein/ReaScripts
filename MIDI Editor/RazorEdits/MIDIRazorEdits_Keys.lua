@@ -313,10 +313,9 @@ local vKeyLookup = {
 -- (macOS: add 1 for shift, 2 for command, 4 for opt, 8 for control.)
 
 local defaultKeyMappings = {
-  -- copy                = { name = 'Copy to Clipboard',                   baseKey = 'p' },
   duplicate           = { name = 'Duplicate Area(s), Moving Area',      baseKey = 'd', testOverlap = true },
   ccSpan              = { name = 'Span Area across CC Lanes',           baseKey = 'c', noteOnly = true },
-  fullLane            = { name = 'Toggle Full Lane',                    baseKey = 'f' },
+  fullLane            = { name = 'Set Full Lane',                       baseKey = 'f' },
   invert              = { name = 'Invert Contents',                     baseKey = 'v', testOverlap = true },
   retrograde          = { name = 'Reverse Contents',                    baseKey = 'r', testOverlap = true },
   retrograde2         = { name = 'Reverse Values, Preserving Position', baseKey = 'r', modifiers = 1, testOverlap = true },
@@ -329,7 +328,10 @@ local defaultKeyMappings = {
   insertMode          = { name = 'Toggle Insert Mode',                  baseKey = 'i' },
   horzLockMode        = { name = 'Toggle Horizontal Lock Mode',         baseKey = 'h' },
   vertLockMode        = { name = 'Toggle Vertical Lock Mode',           baseKey = 'l' },
-  exitScript          = { name = 'Exit MRE',                            baseKey = 'esc' },
+  exitScript          = { name = 'Exit MRE',                            baseKey = 'esc', global = true },
+  cut                 = { name = 'Cut Area',                            baseKey = 'x', modifiers = 2 },
+  copy                = { name = 'Copy Area',                           baseKey = 'c', modifiers = 2 },
+  paste               = { name = 'Paste Area',                          baseKey = 'v', modifiers = 2, global = true },
 }
 
 if helper.is_windows then
@@ -348,11 +350,13 @@ Keys.MODTYPE_NEW_FULLLANE = 7
 
 Keys.MODTYPE_STRETCH = 8
 
+Keys.MODTYPE_CLICK_SETCURSOR = 9
+
 local defaultModMappings = {
   { name = 'Toggle Snap',               modKey = 1 },
 
   { name = 'Copy',                      modKey = 2, cat = 'move' },
-  { name = 'Preserve Overlaps (notes)', modKey = 4, cat = 'move' },
+  { name = 'Preserve Overlaps (notes)', modKey = 4, cat = 'process' },
   { name = 'Single Area',               modKey = 8, cat = 'move' },
   { name = 'Move Area Only',            modKey = 15, cat = 'move', check = true },
 
@@ -360,6 +364,8 @@ local defaultModMappings = {
   { name = 'Toggle Full-Lane',          modKey = 4, cat = 'new' },
 
   { name = 'Stretch Area',              modKey = 4, cat = 'stretch' },
+
+  { name = 'Set Cursor',                modKey = 2, cat = 'click' },
 }
 
 Keys.WIDGET_MODE_PUSHPULL = 1

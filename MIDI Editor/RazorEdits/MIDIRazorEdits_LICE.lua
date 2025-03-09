@@ -195,11 +195,11 @@ local function keyIsMapped(k)
   return false
 end
 
-local function initLiceKeys()
+local function initLiceKeys(onlyGlobal)
   if not keyMappings then buildNewKeyMap() end
   if glob.liceData and keyCt == 0 then
     for _, map in pairs(keyMappings) do
-      if map.vKey then
+      if map.vKey and (not onlyGlobal or map.global) then
         r.JS_VKeys_Intercept(map.vKey, 1)
       end
     end
@@ -207,10 +207,10 @@ local function initLiceKeys()
   end
 end
 
-local function shutdownLiceKeys()
+local function shutdownLiceKeys(onlyGlobal)
   if glob.liceData and keyCt > 0 then
     for _, map in pairs(keyMappings) do
-      if map.vKey then
+      if map.vKey and (not onlyGlobal or map.global) then
         r.JS_VKeys_Intercept(map.vKey, -1)
       end
     end
@@ -259,8 +259,13 @@ end
 
 local lastClickTime = 0
 
+local attendKeyIntercepts
+local ignoreKeyIntercepts
+local interceptKeyInput = false
+local interceptOnlyGlobal = false
+
 local function reloadSettings()
-  shutdownLiceKeys()
+  local oldState, oldGlobal = ignoreKeyIntercepts()
 
   local stateVal
   local stateTab
@@ -287,24 +292,34 @@ local function reloadSettings()
   modMappings = nil
   widgetMappings = nil
 
-  initLiceKeys()
+  if oldState then attendKeyIntercepts(oldGlobal) end
 end
 
-local interceptKeyInput = false
+attendKeyIntercepts = function(onlyGlobal)
+  if not interceptKeyInput or interceptOnlyGlobal ~= onlyGlobal then
+    if interceptKeyInput then
+      -- _P('shutdown', 'global? ' .. (interceptOnlyGlobal and 'true' or 'false'))
+      shutdownLiceKeys(interceptOnlyGlobal)
+    end
 
-local function attendKeyIntercepts()
-  if not interceptKeyInput then
     glob.refreshNoteTab = true
     interceptKeyInput = true
-    initLiceKeys()
+    interceptOnlyGlobal = onlyGlobal or false
+    -- _P('init', 'global? ' .. (interceptOnlyGlobal and 'true' or 'false'))
+    initLiceKeys(onlyGlobal)
   end
 end
 
-local function ignoreKeyIntercepts()
+ignoreKeyIntercepts = function()
   if interceptKeyInput then
+    local wasGlobal = interceptOnlyGlobal
+    -- _P('shutdown', 'global? ' .. (interceptOnlyGlobal and 'true' or 'false'))
+    shutdownLiceKeys(interceptOnlyGlobal)
     interceptKeyInput = false
-    shutdownLiceKeys()
+    interceptOnlyGlobal = false
+    return true, wasGlobal
   end
+  return false, false
 end
 
 local appInterceptsHWND
@@ -967,6 +982,9 @@ local function drawLice()
           r.JS_LICE_FillRect(area.bitmap, x1, y1,
                              logWidth, logHeight - 1, reFillColor, helper.is_windows and 0.3 or 1, mode)
           frameRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reBorderColor, alpha, mode, antialias)
+          -- if area.onClipboard then
+          --   frameRect(area.bitmap, x1 + 3, y1 + 3, logWidth - 6, logHeight - 7, reBorderContrastColor, alpha, mode, antialias)
+          -- end
           if area.hovering then
             local visTop = (y1 + math.abs(y1L - y1V))
             local visBottom = (y2 - math.abs(y2L - y2V) + 1)

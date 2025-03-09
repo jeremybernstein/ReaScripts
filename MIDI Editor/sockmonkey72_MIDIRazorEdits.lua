@@ -1,10 +1,15 @@
 -- @description MIDI Razor Edits
--- @version 1.0.1
+-- @version 1.0.2-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix CC lane double-increment of duplicate bounds
+--   - copy/cut/paste areas
+--   - cmd/ctrl on ME background while left-clicking will move the edit cursor
+--   - copy/cut: from hovered lane
+--   - paste: to hovered lane (at edit cursor)
+--   - numerous fixes to note overlap mode
+--   - added MRE.md documentation in progress
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

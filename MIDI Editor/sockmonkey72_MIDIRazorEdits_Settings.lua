@@ -466,7 +466,7 @@ local function drawKeyMappings()
         end
         if v.testOverlap then
           local modKey = modMappings[keys.MODTYPE_MOVE_OVERLAP].modKey
-          if v.modifiers == modKey then
+          if v.modifiers ~= 0 and v.modifiers == modKey then
             overlapTestFailed = true
             return true
           end
@@ -493,8 +493,8 @@ local function drawModMappings()
     for k, v in spairs(modMappings, function(t, a, b)
         if t[a].check then return false
         elseif t[b].check then return true
-        elseif not t[a].cat then return true
-        elseif not t[b].cat then return false
+        elseif not t[a].cat and t[b].cat then return true
+        elseif not t[b].cat and t[a].cat then return false
         else
           if t[a].cat ~= t[b].cat then return t[a].cat < t[b].cat
           else return t[a].name < t[b].name
@@ -508,7 +508,7 @@ local function drawModMappings()
         end
         for kk, mod in ipairs(modMappings) do
           if kk ~= k then
-            if mod.modKey == v.modKey
+            if mod.modKey ~= 0 and mod.modKey == v.modKey
               and (not mod.cat or not v.cat or mod.cat == v.cat)
             then
               return true

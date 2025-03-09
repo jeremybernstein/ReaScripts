@@ -406,8 +406,8 @@ local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyAr
       if pitchInRange(pitch, pos.bottom, pos.top) then
         if pos.right >= ppqpos and pos.left <= endppqpos then
           table.insert(intersecting_areas, {
-            left = max(pos.left, ppqpos),
-            right = min(pos.right, endppqpos)
+            left = max(pos.left, ppqpos), --overlapMod() and ppqpos or max(pos.left, ppqpos),
+            right = min(pos.right, endppqpos) --overlapMod() and endppqpos or min(pos.right, endppqpos)
           })
         end
       end
@@ -602,6 +602,7 @@ local function equalIsh(a, b, epsilon)
   epsilon = epsilon or 1e-9 -- Default tolerance (1e-9, or very small difference)
   return math.abs(a - b) <= epsilon
 end
+_G.equalIsh = equalIsh
 
 ----------------------------------------------------
 

@@ -301,6 +301,13 @@ function TimeValueExtents:serialize()
   return rv
 end
 
+function TimeValueExtents:compare(other)
+  return equalIsh(self.ticks.min, other.ticks.min)
+     and equalIsh(self.ticks.max, other.ticks.max)
+     and equalIsh(self.vals.min, other.vals.min)
+     and equalIsh(self.vals.max, other.vals.max)
+end
+
 ----------------------------------------------------
 
 local Area = {}
@@ -316,6 +323,7 @@ function Area.newFromRect(tab, completionFn)
   self.ccType = tab.ccType
   self.active = tab.active or false
   self.fullLane = tab.fullLane or false
+  self.onClipboard = tab.onClipbooard or false
 
   if completionFn then
     completionFn(self)
@@ -332,6 +340,7 @@ function Area.new(tab, completionFn)
   self.timeValue = TimeValueExtents.deserialize(tab.timeValue)
   self.active = false
   self.fullLane = tab.fullLane or false
+  self.onClipboard = tab.onClipbooard or false
 
   if completionFn then
     completionFn(self)
@@ -349,8 +358,12 @@ function Area:serialize()
     ccLane = self.ccLane,
     ccType = self.ccType,
     fullLane = self.fullLane,
-    timeValue = self.timeValue:serialize()
+    timeValue = self.timeValue:serialize(),
   }
+end
+
+function Area:clone()
+  return self:serialize()
 end
 
 ----------------------------------------------------

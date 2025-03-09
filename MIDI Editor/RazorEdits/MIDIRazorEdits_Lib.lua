@@ -103,9 +103,12 @@ local OP_DUPLICATE        = 3
 local OP_INVERT           = 4
 local OP_RETROGRADE       = 5
 local OP_RETROGRADE_VALS  = 6
-local OP_COPY             = 7
-local OP_SELECT           = 8
-local OP_UNSELECT         = 9
+local OP_SELECT           = 7
+local OP_UNSELECT         = 8
+local OP_CUT              = 9
+local OP_COPY             = 10
+local OP_PASTE            = 11
+local OP_DELETE_USER      = 12
 
 local OP_STRETCH          = 20 -- behaves a little differently
 local OP_STRETCH_DELETE   = 21 -- behaves a little differently
@@ -121,6 +124,7 @@ local widgetMods
 local lastPoint, lastPointQuantized, hasMoved
 local wasDragged = false
 local wantsQuit = false
+local wantsPaste = false
 local touchedMIDI = false
 local noRestore = {} -- if we didn't touch the MIDI or change it significantly, we can avoid a restore
 
@@ -181,6 +185,7 @@ end
 local function overlapMod(someMods)
   return getMod(someMods, lice.modMappings()[keys.MODTYPE_MOVE_OVERLAP].modKey)
 end
+_G.overlapMod = overlapMod
 
 local function singleMod(someMods)
   return getMod(someMods, lice.modMappings()[keys.MODTYPE_MOVE_SINGLE].modKey)
@@ -206,6 +211,10 @@ end
 local function matchesWidgetMod(which)
   which = math.max(1, math.min(4, which))
   return widgetMods:matchesFlags(lice.widgetMappings()[which].modKey)
+end
+
+local function setCursorMod(someMods)
+  return getMod(someMods, lice.modMappings()[keys.MODTYPE_CLICK_SETCURSOR].modKey)
 end
 
 ------------------------------------------------
@@ -623,9 +632,12 @@ local function resetWidgetMode()
 end
 
 local processNotesWithGeneration
+local clipboardEvents
 local tInsertions
 local tDeletions
 local tDelQueries
+local clickedLane
+local lastHoveredOrClickedLane
 
 ------------------------------------------------
 ------------------------------------------------
@@ -713,7 +725,31 @@ local function processNotes(activeTake, area, operation)
   local insert = false
 
   -- potential second iteration, deal with deletions in the target area
-  if operation == OP_DUPLICATE then
+  if operation == OP_COPY or operation == OP_CUT then
+    area.onClipboard = area.ccLane and lastHoveredOrClickedLane == area.ccLane or lastHoveredOrClickedLane == -1
+    if area.onClipboard then
+      local events
+      for _, ev in ipairs(clipboardEvents) do
+        if ev.ref == area then
+          events = ev
+          break
+        end
+      end
+      if not events then
+        events = { ref = area, area = area:clone(), events = {} }
+        table.insert(clipboardEvents, events)
+      end
+      events.events[activeTake] = sourceEvents
+
+      if operation == OP_CUT then
+        local tmpArea = Area.new(area:serialize()) -- only used for event selection
+        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_USER)
+      end
+    end
+    skipiter = true
+  elseif wantsPaste or operation == OP_PASTE then
+    skipiter = true
+  elseif operation == OP_DUPLICATE then
     local tmpArea = Area.new(area:serialize()) -- OP_DELETE_TRIM will use this area for the deletion itself (in addition to event selection)
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_TRIM)
@@ -728,10 +764,10 @@ local function processNotes(activeTake, area, operation)
       -- _P('src1', area.timeValue)
       -- _P('src2', area.unstretchedTimeValue)
       if not glob.insertMode then
-        for ii, extent in ipairs(deletionExtents) do
+        for _, extent in ipairs(deletionExtents) do
           -- _P(ii, 'output', extent)
           tmpArea.timeValue = extent
-          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
+          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE, overlapMod() and sourceEvents) -- target
         end
       end
       insert = true -- won't do anything anymore because we pre-process
@@ -757,7 +793,7 @@ local function processNotes(activeTake, area, operation)
   end
 
   local process = true
-  if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
+  if wantsPaste or operation == OP_COPY or operation == OP_CUT or operation == OP_PASTE or operation == OP_SELECT or operation == OP_UNSELECT then
     process = false
   end
 
@@ -775,7 +811,6 @@ local function processNotes(activeTake, area, operation)
         if ppqpos < leftmostTick  then
           if not overlapMod() then
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-
           else
             canOperate = false
           end
@@ -783,79 +818,81 @@ local function processNotes(activeTake, area, operation)
         if endppqpos > rightmostTick then
           if not overlapMod() then
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+          else
+            canOperate = false
           end
         end
       end
       return canOperate
     end
 
+    local overlapped = overlapMod()
+
     if endppqpos > leftmostTick and ppqpos < rightmostTick
       and pitchInRange(pitch, bottomPitch, topPitch)
     then
-      if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
+      if operation == OP_SELECT or operation == OP_UNSELECT then
         mu.MIDI_SetNote(activeTake, idx, not (operation == OP_UNSELECT) and true or false, nil, nil, nil, nil, nil)
         touchedMIDI = true
       elseif operation == OP_INVERT then
-        local invertOrig = trimOverlappingNotes()
-        if invertOrig then
-          newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
-          newendppqpos = (endppqpos <= rightmostTick or overlapMod()) and endppqpos or rightmostTick + 1
-          if meState.noteTab then
-            local newidx = area.timeValue.vals.max - (meState.noteTabReverse[pitch] - area.timeValue.vals.min)
-            newpitch = meState.noteTab[newidx]
-          else
-            newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
-          end
+        trimOverlappingNotes()
+        newppqpos = (overlapped or ppqpos >= leftmostTick) and ppqpos or leftmostTick
+        newendppqpos = (overlapped or endppqpos <= rightmostTick) and endppqpos or rightmostTick + 1
+        if meState.noteTab then
+          local newidx = area.timeValue.vals.max - (meState.noteTabReverse[pitch] - area.timeValue.vals.min)
+          newpitch = meState.noteTab[newidx]
+        else
+          newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
         end
       elseif operation == OP_RETROGRADE then
-        local retroOrig = trimOverlappingNotes()
-        if retroOrig then
-          local firstppq = sourceEvents[1].ppqpos
-          local lastendppq = sourceEvents[#sourceEvents].endppqpos
-          if firstppq < leftmostTick then firstppq = leftmostTick end
-          if lastendppq > rightmostTick then lastendppq = rightmostTick end
+        trimOverlappingNotes()
+        local firstppq = sourceEvents[1].ppqpos
+        local lastendppq = sourceEvents[#sourceEvents].endppqpos
+        if not overlapped and firstppq < leftmostTick then firstppq = leftmostTick end
+        if not overlapped and lastendppq > rightmostTick then lastendppq = rightmostTick end
 
-          local thisppqpos = ppqpos < leftmostTick and leftmostTick or ppqpos
-          local thisendppqpos = endppqpos > rightmostTick and rightmostTick or endppqpos
-          local delta = (firstppq - leftmostTick) - (rightmostTick - lastendppq)
+        local thisppqpos = (not overlapped and ppqpos < leftmostTick) and leftmostTick or ppqpos
+        local thisendppqpos = (not overlapped and endppqpos > rightmostTick) and rightmostTick or endppqpos
+        local delta = (firstppq - leftmostTick) - (rightmostTick - lastendppq)
 
+        if not overlapped then
           newppqpos = (rightmostTick - ((thisppqpos >= leftmostTick and thisppqpos or leftmostTick) - leftmostTick)) - (thisendppqpos - thisppqpos) + delta
-          newendppqpos = newppqpos + (thisendppqpos - thisppqpos)
+        else
+          newppqpos = firstppq + (lastendppq - thisendppqpos) - delta
         end
+        newendppqpos = newppqpos + (thisendppqpos - thisppqpos)
       elseif operation == OP_RETROGRADE_VALS then
-        local retroOrig = trimOverlappingNotes()
-        if retroOrig then
-          newppqpos = ppqpos >= leftmostTick and ppqpos or leftmostTick
-          newendppqpos = (endppqpos <= rightmostTick or overlapMod()) and endppqpos or rightmostTick + 1
-          newpitch = sourceEvents[#sourceEvents - (sidx - 1)].pitch
-        end
+        trimOverlappingNotes()
+        newppqpos = (overlapped or ppqpos >= leftmostTick) and ppqpos or leftmostTick
+        newendppqpos = (overlapped or endppqpos <= rightmostTick) and endppqpos or rightmostTick + 1
+        newpitch = sourceEvents[#sourceEvents - (sidx - 1)].pitch
       elseif operation == OP_DUPLICATE then
         helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = (ppqpos >= leftmostTick and ppqpos or leftmostTick) + areaTickExtent:size(),
                           endppqpos = (endppqpos <= rightmostTick and endppqpos or rightmostTick + 1) + areaTickExtent:size(), chan = chan, pitch = pitch, vel = vel, relvel = relvel })
-      elseif operation == OP_DELETE or operation == OP_STRETCH_DELETE or operation == OP_DELETE_TRIM then
+      elseif operation == OP_DELETE_USER or operation == OP_DELETE or operation == OP_STRETCH_DELETE or operation == OP_DELETE_TRIM then
         local deleteOrig = true
+        local isOverlapped = operation == OP_DELETE_USER and overlapped
 
         if operation == OP_DELETE_TRIM then
           deleteOrig = trimOverlappingNotes() -- this screws up most operations, but is necessary for OP_DUPLICATE
         end
 
         -- don't unnecessarily repeat this calculation if we've already done it
-        if helper.addUnique(tDelQueries, { ppqpos = ppqpos, endppqpos = endppqpos, pitch = pitch, op = operation }) then
+        if not isOverlapped and helper.addUnique(tDelQueries, { ppqpos = ppqpos, endppqpos = endppqpos, pitch = pitch, op = operation }) then
           local segments = helper.getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
           if segments then
-            for i, seg in ipairs(segments) do
+            for _, seg in ipairs(segments) do
               local newEvent = mu.tableCopy(event)
               newEvent.ppqpos = seg[1]
               newEvent.endppqpos = seg[2]
               newEvent.pitch = pitch
               newEvent.type = mu.NOTE_TYPE
               helper.addUnique(tInsertions, newEvent)
-              -- _P('inserting', newEvent.ppqpos, newEvent.endppqpos, newEvent.pitch, area.timeValue.ticks)
               deleteOrig = true
             end
           end
         end
-        if deleteOrig then
+        if isOverlapped or deleteOrig then
           helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
         end
       elseif not singleMod() or ppqpos >= leftmostTick then
@@ -937,11 +974,14 @@ local function processNotes(activeTake, area, operation)
           helper.addUnique(tInsertions,
                           { type = mu.NOTE_TYPE,
                             selected = selected, muted = muted,
-                            ppqpos = ppqpos + deltaTicks < areaLeftmostTick and areaLeftmostTick or ppqpos + deltaTicks,
-                            endppqpos = endppqpos + deltaTicks > areaRightmostTick and areaRightmostTick or endppqpos + deltaTicks,
+                            ppqpos = (ppqpos + deltaTicks < areaLeftmostTick and not overlapMod()) and areaLeftmostTick or ppqpos + deltaTicks,
+                            endppqpos = (endppqpos + deltaTicks > areaRightmostTick and not overlapMod()) and areaRightmostTick or endppqpos + deltaTicks,
                             chan = chan, pitch = newpitch,
                             vel = vel, relvel = relvel }
                           )
+          if not glob.insertMode and overlapMod() then
+            helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+          end
         end
       end
 
@@ -1145,7 +1185,7 @@ local function processCCs(activeTake, area, operation)
   end
 
   local process = true
-  if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
+  if wantsPaste or operation == OP_COPY or operation == OP_CUT or operation == OP_PASTE or operation == OP_SELECT or operation == OP_UNSELECT then
     process = false
   end
 
@@ -1153,7 +1193,31 @@ local function processCCs(activeTake, area, operation)
 
   -- TODO: REFACTOR (can use same code, approximately, for notes)
   -- potential second iteration, deal with deletions in the target area
-  if operation == OP_DUPLICATE then
+  if operation == OP_COPY or operation == OP_CUT then
+    area.onClipboard = area.ccLane and lastHoveredOrClickedLane == area.ccLane or lastHoveredOrClickedLane == -1
+    if area.onClipboard then
+      local events
+      for _, ev in ipairs(clipboardEvents) do
+        if ev.ref == area then
+          events = ev
+          break
+        end
+      end
+      if not events then
+        events = { ref = area, area = area:clone(), events = {} }
+        table.insert(clipboardEvents, events)
+      end
+      events.events[activeTake] = sourceEvents
+      if operation == OP_CUT then
+        for _, event in ipairs(sourceEvents) do
+          helper.addUnique(tDeletions, { type = laneIsVel and mu.NOTE_TYPE or mu.CC_TYPE, idx = event.idx })
+        end
+      end
+    end
+    skipiter = true
+  elseif wantsPaste or operation == OP_PASTE then
+    -- do nothing
+  elseif operation == OP_DUPLICATE then
     local tmpArea = Area.new(area:serialize())
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
@@ -1236,7 +1300,7 @@ local function processCCs(activeTake, area, operation)
         and chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and msg2 == ccFilter))
         and val <= topValue and val >= bottomValue
       then
-        if operation == OP_COPY or operation == OP_SELECT or operation == OP_UNSELECT then
+        if operation == OP_SELECT or operation == OP_UNSELECT then
           if laneIsVel then
             mu.MIDI_SetNote(activeTake, idx, not (operation == OP_UNSELECT) and true or false) -- allow note deletion like this?
           else
@@ -1430,7 +1494,23 @@ local function processInsertions()
   end
 end
 
-local function generateSourceInfo(area, op, force)
+local function eventInOverlap(event, overlap)
+  for _, ev in ipairs(overlap) do
+    if ev.type == event.type
+      and ev.ppqpos == event.ppqpos
+      and (ev.type ~= mu.NOTE_TYPE or ev.endppqpos == event.endppqpos)
+      and ev.chan == event.chan
+      and ev.msg2 == event.msg2
+      and ev.msg3 == event.msg3
+    then
+      -- _P(ev.ppqpos, ev.endppqpos, ev.pitch)
+      return true
+    end
+  end
+  return false
+end
+
+local function generateSourceInfo(area, op, force, overlap)
   local activeTake = glob.liceData.editorTake
   local itemInfo = glob.liceData.itemInfo[activeTake]
 
@@ -1486,16 +1566,18 @@ local function generateSourceInfo(area, op, force)
       while true do
         idx = mu.MIDI_EnumNotes(activeTake, idx)
         if not idx or idx == -1 then break end
-        local event = {}
+        local event = { type = mu.NOTE_TYPE }
         _, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel = mu.MIDI_GetNote(activeTake, idx)
 
         if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
           and pitchInRange(event.pitch, bottomValue, topValue)
         then
           if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
-            and overlapMod()
-            and event.ppqpos + GLOBAL_PREF_SLOP < leftmostTick
+            and overlapMod() and overlap and eventInOverlap(event, overlap)
+            -- and (event.ppqpos + GLOBAL_PREF_SLOP < leftmostTick
+            --   or event.endppqpos - GLOBAL_PREF_SLOP > rightmostTick)
           then
+            -- _P('event in overlap')
             -- ignore
           else
             event.idx = idx
@@ -1528,7 +1610,7 @@ local function generateSourceInfo(area, op, force)
       while true do
         idx = enumFn(activeTake, idx)
         if not idx or idx == -1 then break end
-        local event = {}
+        local event = { type = (laneIsVel and mu.NOTE_TYPE or mu.CC_TYPE) }
         -- local rv, selected, muted, ppqpos, endppqpos, chanmsg, chan, msg2, msg3, pitch, vel, relvel
 
         if laneIsVel then
@@ -1595,8 +1677,8 @@ local function singleAreaProcessing()
   return hottestMods:matches({ shift = true, alt = true, super = '' })
 end
 
-processNotesWithGeneration = function(take, area, op)
-  generateSourceInfo(area, op, true)
+processNotesWithGeneration = function(take, area, op, overlap)
+  generateSourceInfo(area, op, true, overlap)
   processNotes(take, area, op)
 end
 
@@ -1605,10 +1687,42 @@ processCCsWithGeneration = function(take, area, op)
   processCCs(take, area, op)
 end
 
+------------------------------------------------
+------------------------------------------------
+
 local function swapAreas(newAreas)
   glob.areas = newAreas
   areas = glob.areas
 end
+
+local function clearArea(idx, areaa)
+  if not idx then
+    for iidx, aarea in ipairs(areas) do
+      if aarea == areaa then idx = iidx break end
+    end
+  end
+
+  if idx and idx > 0 and idx <= #areas then
+    local area = areas[idx]
+    if lice.destroyBitmap(area.bitmap) then
+      area.bitmap = nil
+    end
+    table.remove(areas, idx)
+  end
+end
+
+local function clearAreas()
+  for _, area in ipairs(areas) do
+    if lice.destroyBitmap(area.bitmap) then
+      area.bitmap = nil
+    end
+  end
+  swapAreas({})
+  resetWidgetMode()
+end
+
+------------------------------------------------
+------------------------------------------------
 
 local lastChanged = {}
 
@@ -1637,25 +1751,131 @@ local function prepItemInfoForTake(take)
   return activeTake, glob.liceData.itemInfo[activeTake]
 end
 
-local function processAreas(singleArea, forceSourceInfo)
-  glob.liceData.referenceTake = glob.liceData.editorTake
+local function handleOpenTransaction(activeTake)
+  muState = muState or {}
+  if not muState[activeTake] then
+    mu.MIDI_InitializeTake(activeTake)
+    muState[activeTake] = mu.MIDI_GetState()
+  else
+    if not noRestore[activeTake] then
+      mu.MIDI_RestoreState(muState[activeTake])
+    end
+    noRestore[activeTake] = false
+  end
+  mu.MIDI_OpenWriteTransaction(activeTake)
+end
+
+local function handleCommitTransaction(activeTake)
+  local changed = touchedMIDI
+
+  if changed ~= lastChanged[activeTake] then -- ensure that we return to the original state
+    mu.MIDI_ForceNextTransaction(activeTake)
+    lastChanged[activeTake] = changed
+    touchedMIDI = true
+  end
+
+  if touchedMIDI then
+    mu.MIDI_CommitWriteTransaction(activeTake, false, true)
+  else
+    noRestore[activeTake] = true
+  end
+  touchedMIDI = false
+end
+
+-- paste needs to clear the target area
+local function handlePaste()
+  if not clipboardEvents or #clipboardEvents == 0 then return end
+
+  clearAreas()
+  local insertionPPQ = r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, r.GetCursorPositionEx(0))
+
+  local fromLane = clipboardEvents[1].area.ccLane or -1
+  local toLane = lastHoveredOrClickedLane or -1
+
+  local fromLaneType = fromLane ~= -1 and clipboardEvents[1].area.ccType
+  local toLaneType = toLane ~= -1 and meLanes[toLane].type
+
+  if fromLane ~= toLane
+    and (fromLane == -1 or toLane == -1
+      or fromLaneType == 0x200 or fromLaneType == 0x207
+      or toLaneType == 0x200 or toLaneType == 0x207)
+  then
+    return
+  end
+
+  local newchanmsg, newmsg2 = helper.ccTypeToChanmsg(toLaneType)
+
+  table.sort(clipboardEvents, function(t1, t2)
+    return t1.area.timeValue.ticks.min < t2.area.timeValue.ticks.min
+  end)
+  local firstOffset = insertionPPQ - clipboardEvents[1].area.timeValue.ticks.min
+
+  local cherry = false
+
+  for _, v in ipairs(clipboardEvents) do
+    local area = Area.deserialize(v.area)
+    local offset = not cherry and firstOffset or firstOffset + (area.timeValue.ticks.min - clipboardEvents[1].area.timeValue.ticks.min)
+    area.timeValue.ticks:shift(offset)
+    area.ccLane = toLane ~= -1 and toLane or nil
+    area.ccType = toLane ~= -1 and toLaneType or nil
+
+    updateAreaFromTimeValue(area)
+    areas[#areas + 1] = area
+
+    for take, events in pairs(v.events) do
+      local activeTake, _ = prepItemInfoForTake(take)
+      tInsertions = {}
+      tDeletions = {}
+      tDelQueries = {}
+
+      handleOpenTransaction(activeTake)
+
+      local tmpArea = Area.new(area:serialize())
+      if area.ccLane then
+        processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
+      else
+        processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_TRIM)
+      end
+      for _, e in ipairs(events) do
+        local event = mu.tableCopy(e)
+        event.ppqpos = event.ppqpos + offset
+        if event.type == mu.NOTE_TYPE then
+          event.endppqpos = event.endppqpos + offset
+        end
+        if area.ccLane then
+          event.chanmsg = newchanmsg or event.chanmsg
+          event.msg2 = newmsg2 or event.msg2
+          -- might need to scale value based on mismatch between 14- and 7-bit?
+          helper.addUnique(tInsertions, event)
+        else
+          local overlapped = overlapMod()
+          helper.addUnique(tInsertions,
+                          { type = mu.NOTE_TYPE,
+                            selected = event.selected, muted = event.muted,
+                            ppqpos = (not overlapped and event.ppqpos < area.timeValue.ticks.min) and area.timeValue.ticks.min or event.ppqpos,
+                            endppqpos = (not overlapped and event.endppqpos > area.timeValue.ticks.max) and area.timeValue.ticks.max or event.endppqpos,
+                            chan = event.chan, pitch = event.pitch,
+                            vel = event.vel, relvel = event.relvel }
+                          )
+
+        end
+      end
+
+      processInsertions()
+      handleCommitTransaction(activeTake)
+    end
+  end
+end
+
+local function handleProcessAreas(singleArea, forceSourceInfo)
+  local clipboardInited = false
 
   for _, take in ipairs(glob.liceData.allTakes) do
     local activeTake = prepItemInfoForTake(take)
 
-    muState = muState or {}
-    if not muState[activeTake] then
-      mu.MIDI_InitializeTake(activeTake)
-      muState[activeTake] = mu.MIDI_GetState()
-    else
-      if not noRestore[activeTake] then
-        mu.MIDI_RestoreState(muState[activeTake])
-      end
-      noRestore[activeTake] = false
-    end
+    handleOpenTransaction(activeTake)
 
     local operation
-
     local hovering
     if singleArea or singleAreaProcessing() then
       if singleArea then hovering = singleArea
@@ -1673,7 +1893,8 @@ local function processAreas(singleArea, forceSourceInfo)
 
     local function preProcessArea(area) -- captures 'operation'
       if not operation then operation = area.operation end
-      -- area.operation = area.operation == OP_STRETCH and area.operation or nil
+
+      -- used by OP_DUPLICATE
       if area.timeValue.ticks.min < areaTickExtent.min then areaTickExtent.min = area.timeValue.ticks.min end
       if area.timeValue.ticks.max > areaTickExtent.max then areaTickExtent.max = area.timeValue.ticks.max end
 
@@ -1690,12 +1911,10 @@ local function processAreas(singleArea, forceSourceInfo)
 
     mu.MIDI_OpenWriteTransaction(activeTake)
 
-    if operation == OP_COPY or operation == OP_SELECT then
+    if operation == OP_SELECT then
       mu.MIDI_SelectAll(activeTake, false) -- should 'select' unselect everything else?
       touchedMIDI = true
     end
-
-    local changed = false
 
     local function runProcess(area)
       if not area.ccLane then
@@ -1705,6 +1924,10 @@ local function processAreas(singleArea, forceSourceInfo)
       end
     end
 
+    if (operation == OP_COPY or operation == OP_CUT) and not clipboardInited then
+      clipboardEvents = {} -- otherwise let it persist
+      clipboardInited = true
+    end
     tInsertions = {}
     tDeletions = {}
     tDelQueries = {}
@@ -1722,74 +1945,46 @@ local function processAreas(singleArea, forceSourceInfo)
       end
     end
     processInsertions()
+    handleCommitTransaction(activeTake)
+  end
+end
 
-    if touchedMIDI then changed = true end
+local function processAreas(singleArea, forceSourceInfo)
+  glob.liceData.referenceTake = glob.liceData.editorTake
+  local doPaste = false
+  local doCut = false
 
-    if changed ~= lastChanged[activeTake] then -- ensure that we return to the original state
-      mu.MIDI_ForceNextTransaction(activeTake)
-      lastChanged[activeTake] = changed
-      touchedMIDI = true
-    end
-
-    if touchedMIDI then
-      mu.MIDI_CommitWriteTransaction(activeTake, false, true)
-    else
-      noRestore[activeTake] = true
-    end
-    touchedMIDI = false
-
-    if operation == OP_COPY then
-      r.MIDIEditor_OnCommand(glob.liceData.editor, 40010) -- copy
-
-      mu.MIDI_RestoreState(muState[activeTake])
-
-      mu.MIDI_OpenWriteTransaction(activeTake)
-      mu.MIDI_CommitWriteTransaction(activeTake, false, true)
-    end
+  local operation = singleArea and singleArea.operation or #areas ~= 0 and areas[1].operation or wantsPaste and OP_PASTE or nil
+  if operation == OP_PASTE then
+    doPaste = true
+  elseif operation == OP_CUT then
+    doCut = true
   end
 
-  for i, area in ipairs(areas) do
+  if doPaste then
+    handlePaste()
+    wantsPaste = false
+  else
+    handleProcessAreas(singleArea, forceSourceInfo)
+  end
+
+  if doCut then
+    clearAreas()
+  else
+    for i, area in ipairs(areas) do
       -- TODO, this should only happen after all takes have been processed, no?
-    if area.operation == OP_DUPLICATE then
-      area.timeValue.ticks:shift(areaTickExtent:size())
-      updateTimeValueTime(area)
-      updateAreaFromTimeValue(area)
+      if area.operation == OP_DUPLICATE then
+        area.timeValue.ticks:shift(areaTickExtent:size())
+        updateTimeValueTime(area)
+        updateAreaFromTimeValue(area)
+      end
+      area.operation = area.operation == OP_STRETCH and area.operation or nil -- TODO, why do we do that?
     end
-    area.operation = area.operation == OP_STRETCH and area.operation or nil -- TODO, why do we do that?
   end
 
   glob.liceData.itemInfo = nil
   glob.liceData.editorTake = glob.liceData.referenceTake
   glob.liceData.referenceTake = nil
-end
-
-------------------------------------------------
-------------------------------------------------
-
-local function clearArea(idx, areaa)
-  if not idx then
-    for iidx, aarea in ipairs(areas) do
-      if aarea == areaa then idx = iidx break end
-    end
-  end
-
-  if idx and idx > 0 and idx <= #areas then
-    local area = areas[idx]
-    if lice.destroyBitmap(area.bitmap) then
-      area.bitmap = nil
-    end
-    table.remove(areas, idx)
-  end
-end
-
-local function clearAreas()
-  for _, area in ipairs(areas) do
-    if lice.destroyBitmap(area.bitmap) then
-      area.bitmap = nil
-    end
-  end
-  swapAreas({})
-  resetWidgetMode()
 end
 
 ------------------------------------------------
@@ -2099,12 +2294,16 @@ local function toggleThisAreaToCCLanes(area)
 
   if not ccLanesToggled or area ~= ccLanesToggled then
     for i = #meLanes, 0, -1 do
-      local newArea = Area.new({ fullLane = true,
-                                         timeValue = TimeValueExtents.new(area.timeValue.ticks.min, area.timeValue.ticks.max, 0, meLanes[i].range),
-                                         ccLane = i,
-                                         ccType = meLanes[i].type
-                                       }, updateAreaFromTimeValue)
-      areas[#areas + 1] = newArea
+      if meLanes[i].type == 0x200 or meLanes[i].type == 0x207 then
+        -- do nothing
+      else
+        local newArea = Area.new({ fullLane = true,
+                                          timeValue = TimeValueExtents.new(area.timeValue.ticks.min, area.timeValue.ticks.max, 0, meLanes[i].range),
+                                          ccLane = i,
+                                          ccType = meLanes[i].type
+                                        }, updateAreaFromTimeValue)
+        areas[#areas + 1] = newArea
+      end
     end
     ccLanesToggled = area
   else
@@ -2185,6 +2384,20 @@ local function checkProjectExtState(noWidget)
   local _, projState = r.GetSetMediaItemTakeInfo_String(glob.liceData.editorTake, 'P_EXT:'..scriptID, '', false)
   if #projState then
     local areaTable = helper.deserialize(projState)
+
+    -- this can be called at any time (in particular, the 'del' key will cause the project state
+    -- index to change for some reason, and will trigger this function). We need to ensure that
+    -- hovering state doesn't lose continuity when that happens. Thus this painful bit of code.
+    local hovering
+    if areas and areaTable then
+      for _, area in ipairs(areas) do
+        if area.hovering then
+          hovering = area
+          break
+        end
+      end
+    end
+
     clearAreas()
     local widgetArea
     if areaTable then
@@ -2216,6 +2429,9 @@ local function checkProjectExtState(noWidget)
             glob.widgetInfo.area = area
             glob.inWidgetMode = true
           end
+        end
+        if hovering and area.timeValue and area.timeValue:compare(hovering.timeValue) then
+          area.hovering = hovering.hovering
         end
       end
       if not widgetArea then resetWidgetMode() end
@@ -2439,6 +2655,9 @@ local function processKeys()
   elseif helper.is_windows and keyMatches(vState, keyMappings.compositingSetup) then
     showCompositingDialog()
     return
+  elseif keyMatches(vState, keyMappings.paste, true) then
+    wantsPaste = true
+    return
   end
 
   if not glob.isIntercept or #areas == 0 then -- early return for non-essential/area stuff
@@ -2479,18 +2698,21 @@ local function processKeys()
 
     -- local singleMod = singleAreaProcessing()
     -- if (singleMod and area.hovering) or noMod or (not area.ccLane and hottestMods:alt()) then
-      if keyMatches(vState, keyMappings.deleteContents, true) then -- delete contents (or D?)
-        area.operation = OP_DELETE
+      if keyMatches(vState, keyMappings.deleteContents, true) then -- delete contents
+        area.operation = OP_DELETE_USER
         return true
-      elseif keyMatches(vState, keyMappings.duplicate, true) then -- duplicate
+      elseif keyMatches(vState, keyMappings.duplicate, false) then -- duplicate
         area.operation = OP_DUPLICATE
         return true
       elseif keyMatches(vState, keyMappings.invert, true) then -- invert
         area.operation = OP_INVERT
         return true
-      -- elseif keyMatches(vState, keyMappings.copy, true) then -- copy
-      --   area.operation = OP_COPY
-      --   return true
+      elseif keyMatches(vState, keyMappings.copy, true) then -- copy
+        area.operation = OP_COPY
+        return true
+      elseif keyMatches(vState, keyMappings.cut, true) then -- cut
+        area.operation = OP_CUT
+        return true
       elseif keyMatches(vState, keyMappings.select, true) then -- select
         area.operation = OP_SELECT
         return true
@@ -2524,7 +2746,7 @@ local function processKeys()
 
   local deleteArea = false
   local deleteOnlyArea = false
-  if keyMatches(vState, keyMappings.deleteAreaContents) then
+  if keyMatches(vState, keyMappings.deleteAreaContents, false) then
     deleteArea = true
   end
   if keyMatches(vState, keyMappings.deleteArea) then
@@ -2562,8 +2784,6 @@ local function processKeys()
   -- end
 
 end
-
-local clickedLane
 
 local function resetState()
   resizing = RS_UNCLICKED
@@ -2648,10 +2868,7 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
   return false
 end
 
-local function quantizeToGrid(mx)
-  local wantsSnap = getEditorAndSnapWish()
-  if not wantsSnap then return mx end
-
+local function mouseXToTick(mx)
   local activeTake = glob.liceData.editorTake
 
   local itemStartTime = r.GetMediaItemInfo_Value(glob.liceData.editorItem, 'D_POSITION')
@@ -2666,6 +2883,15 @@ local function quantizeToGrid(mx)
     currentTick = meState.leftmostTick + math.floor(((mx - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5)
   end
   if currentTick < itemStartTick then currentTick = itemStartTick end
+  return currentTick
+end
+
+local function quantizeToGrid(mx, wantsTick)
+  local wantsSnap = getEditorAndSnapWish()
+  if not wantsSnap then return mx, (wantsTick and mouseXToTick(mx)) end
+
+  local activeTake = glob.liceData.editorTake
+  local currentTick = mouseXToTick(mx)
   local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, currentTick)
 
   local tickInMeasure = currentTick - som -- get the position from the start of the measure
@@ -2678,7 +2904,7 @@ local function quantizeToGrid(mx)
   else
     mx = glob.windowRect.x1 + math.floor(((quantizedTick - meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
   end
-  return mx
+  return mx, (wantsTick and quantizedTick)
 end
 
 local function quantizeMousePosition(mx, my, ccLane)
@@ -3200,10 +3426,13 @@ end
 local deferredClearAll = false
 local noProcessOnRelease = false
 
-local function runOperation()
+local function runOperation(op)
   swapCurrentMods()
   processAreas(nil, true)
-  createUndoStep('Process Razor Area Contents')
+  createUndoStep(op == OP_COPY and 'Copy Razor Area' -- copy doesn't actually change anything, this is actually pointless
+              or op == OP_CUT and 'Cut Razor Area'
+              or op == OP_PASTE and 'Paste Razor Area'
+              or 'Process Razor Area Contents')
 end
 
 local function processMouse()
@@ -3213,7 +3442,7 @@ local function processMouse()
   if not rv then
     for _, area in ipairs(areas) do
       if area.operation then
-        runOperation()
+        runOperation(area.operation)
         break
       end
     end
@@ -3252,6 +3481,7 @@ local function processMouse()
       end
     end
   end
+  lastHoveredOrClickedLane = clickedLane
 
   local inop = false
 
@@ -3357,6 +3587,8 @@ local function processMouse()
     resetState()
 
     local cursorSet = false
+    local operation = wantsPaste and OP_PASTE or nil
+    if wantsPaste then doProcess = true end
 
     for _, area in ipairs(areas) do
       local hovering = { left = false, top = false, right = false, bottom = false, widget = false, area = false }
@@ -3364,6 +3596,7 @@ local function processMouse()
       local theseMods = isClicked and currentMods or hottestMods
 
       area.sourceInfo = nil
+      operation = operation or area.operation
       if pointIsInRect(testPoint, area.viewRect) then
         if not addHover and area.viewRect:width() > 20 then
           if equalIsh(area.logicalRect.x1, area.viewRect.x1) and nearValue(mx, area.viewRect.x1) then
@@ -3449,7 +3682,7 @@ local function processMouse()
 
     if isOnlyHovered then
       if doProcess then
-        runOperation()
+        runOperation(operation)
       end
       return
     end
@@ -3676,7 +3909,7 @@ local function processMouse()
                 local newMinTicks, newMaxTicks = areas[isActive].timeValue.ticks.min, areas[isActive].timeValue.ticks.max
                 local newMinVals, newMaxVals = areas[isActive].timeValue.vals.min, areas[isActive].timeValue.vals.max
 
-                for tidx, testArea in ipairs(areas) do
+                for _, testArea in ipairs(areas) do
                   if testArea ~= areas[isActive] then
                     testArea.timeValue.ticks:shift(newMinTicks - oldMinTicks, newMaxTicks - oldMaxTicks)
                     if not testArea.fullLane and testArea.ccLane == areas[isActive].ccLane then
@@ -3721,10 +3954,10 @@ local function processMouse()
     if resizing == RS_NEWAREA then
       local earlyReturn = false
       if areas[#areas].logicalRect then
-        if (areas[#areas].logicalRect:width() < 5 or areas[#areas].logicalRect:height() < 5)
-          and deferredClearAll
-        then
-          earlyReturn = true
+        if (areas[#areas].logicalRect:width() < 5 or areas[#areas].logicalRect:height() < 5) then
+          if deferredClearAll or setCursorMod() then
+            earlyReturn = true
+          end
         end
 
         if meState.noteTab then
@@ -3737,6 +3970,12 @@ local function processMouse()
 
       if earlyReturn then
         clearArea(#areas)
+        if setCursorMod() then
+          local _, currentTick = quantizeToGrid(mx, true)
+          r.SetEditCurPos2(0, r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, currentTick), false, false)
+          createUndoStep('Move edit cursor') -- ... to b.b.u?
+        end
+
         resetState()
         lastPoint = nil
         lastPointQuantized = nil
@@ -3939,9 +4178,8 @@ local function loop()
     and (focusWindow == currEditor
       or focusWindow == glob.liceData.midiview -- don't call into JS_Window_IsChild unless necessary
       or r.JS_Window_IsChild(currEditor, focusWindow))
-    and #areas > 0
   then
-    lice.attendKeyIntercepts()
+    lice.attendKeyIntercepts(#areas == 0)
     processKeys()
   else
     lice.ignoreKeyIntercepts()

@@ -1,5 +1,22 @@
 ## MIDI Razor Edits
 
+MIDI Razor Edits adds the ability to:
+
+- Select, copy, and manipulate MIDI notes and CC data with the precision of Razor Edits.
+- Use workflows similar to REAPER’s native Razor Edits but designed specifically for MIDI editing.
+- Stretch, scale, invert, duplicate, copy your MIDI data quickly and conveniently.
+
+**<u>Basic usage</u>**
+
+When enabled, click-drag to create a new *area* around some notes or some CC-lane events. Click-drag on the area to move it. That's it.
+
+Of course, there's more to it. You can cmd/ctrl-click-drag to create multiple areas. You can cmd/ctrl-drag existing areas to copy their contents. You can stretch values in time, or scale them within an area's range. Copy, cut, paste, and plenty of other useful, common and less common operations to apply to the events you've captured inside of areas.
+
+**<u>Performance Tips</u>**
+
+* On Windows, MRE can be flickery and laggy. This is not my fault per se, it's a limitation of the kind of drawing required by the script, and REAPER's handling of such. There's a secret performance settings dialog available if you press ctrl-alt-F10, where you can try to adjust the compositing settings. If you find something which works particularly well, please tell me about it.
+* On Mac, I recommend enabling Move throttling in the Advanced UI/system tweaks preference dialog (in the General tab), which will smooth out performance (particularly if you have external, high-DPI input devices and/or multiple displays).
+
 **<u>Key Mapping / Operations</u>**
 
 * **Copy Area**: copy the area bounds and contents to the (private) clipboard of the script. **Copy Area** will copy all areas on the last-clicked or hovered section/lane of the MIDI Editor. Also see **Cut Area** and **Paste Area**. *[o]*

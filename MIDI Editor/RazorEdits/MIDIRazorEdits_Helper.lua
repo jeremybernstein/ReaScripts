@@ -377,6 +377,14 @@ local function addUnique(t, value)
   return false
 end
 
+local function inUniqueTab(t, value)
+  if not (t and value) then return false end
+  local mt = getmetatable(t)
+  if not mt then return false end
+  local hash = hashValue(value)
+  return mt._hashes[hash] and true or false
+end
+
 ----------------------------------------------------
 
 local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyArea)
@@ -743,6 +751,7 @@ Helper.ccTypeToRange = ccTypeToRange
 Helper.convertCCTypeChunkToAPI = convertCCTypeChunkToAPI
 
 Helper.addUnique = addUnique
+Helper.inUniqueTab = inUniqueTab
 Helper.equalIsh = equalIsh
 
 Helper.getNoteSegments = getNoteSegments

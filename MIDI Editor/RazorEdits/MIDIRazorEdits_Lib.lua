@@ -1494,22 +1494,6 @@ local function processInsertions()
   end
 end
 
-local function eventInOverlap(event, overlap)
-  for _, ev in ipairs(overlap) do
-    if ev.type == event.type
-      and ev.ppqpos == event.ppqpos
-      and (ev.type ~= mu.NOTE_TYPE or ev.endppqpos == event.endppqpos)
-      and ev.chan == event.chan
-      and ev.msg2 == event.msg2
-      and ev.msg3 == event.msg3
-    then
-      -- _P(ev.ppqpos, ev.endppqpos, ev.pitch)
-      return true
-    end
-  end
-  return false
-end
-
 local function generateSourceInfo(area, op, force, overlap)
   local activeTake = glob.liceData.editorTake
   local itemInfo = glob.liceData.itemInfo[activeTake]
@@ -1563,6 +1547,25 @@ local function generateSourceInfo(area, op, force, overlap)
 
     local idx = -1
     if isNote then
+      local overlapTab
+      if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
+        and overlapMod() and overlap
+      then
+        overlapTab = {}
+        for _, event in ipairs(overlap) do
+          helper.addUnique(overlapTab, { type = mu.NOTE_TYPE,
+                                         selected = event.selected,
+                                         muted = event.muted,
+                                         ppqpos = event.ppqpos,
+                                         endppqpos = event.endppqpos,
+                                         chan = event.chan,
+                                         pitch = event.pitch,
+                                         vel = event.vel,
+                                         relvel = event.relvel
+                                       })
+        end
+      end
+
       while true do
         idx = mu.MIDI_EnumNotes(activeTake, idx)
         if not idx or idx == -1 then break end
@@ -1572,12 +1575,7 @@ local function generateSourceInfo(area, op, force, overlap)
         if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
           and pitchInRange(event.pitch, bottomValue, topValue)
         then
-          if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
-            and overlapMod() and overlap and eventInOverlap(event, overlap)
-            -- and (event.ppqpos + GLOBAL_PREF_SLOP < leftmostTick
-            --   or event.endppqpos - GLOBAL_PREF_SLOP > rightmostTick)
-          then
-            -- _P('event in overlap')
+          if overlapTab and helper.inUniqueTab(overlapTab, event) then
             -- ignore
           else
             event.idx = idx

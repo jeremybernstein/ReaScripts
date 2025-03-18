@@ -1,11 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.0.2-beta.2
+-- @version 1.0.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - efficiency fix to note overlap mode
---   - more work on MRE.md
+--   - promote 1.0.2 betas to release (no changes)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

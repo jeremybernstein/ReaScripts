@@ -11,6 +11,8 @@ local lib = require 'MIDIRazorEdits_Lib'
 ------------------------------------------------
 ------------------------------------------------
 
+if not lib then return end
+
 local _, _, sectionID, commandID = reaper.get_action_context()
 
 lib.setStartupOptions(1)

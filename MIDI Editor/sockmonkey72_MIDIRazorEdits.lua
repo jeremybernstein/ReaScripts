@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.0.2
+-- @version 1.1.0-alpha.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - promote 1.0.2 betas to release (no changes)
+--   - if reaper_childwindow is installed (ReaPack), improved drawing performance
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
@@ -20,6 +20,8 @@ local lib = require 'MIDIRazorEdits_Lib'
 
 ------------------------------------------------
 ------------------------------------------------
+
+if not lib then return end
 
 local _, _, sectionID, commandID = reaper.get_action_context()
 lib.startup(sectionID, commandID)

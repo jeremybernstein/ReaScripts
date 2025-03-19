@@ -110,12 +110,17 @@ local function destroyBitmap(bitmap)
   return false
 end
 
+local childHWND
+
 local function createBitmap(midiview, windRect)
+  local hwnd = childHWND and childHWND or midiview
+  local integrated = not helper.is_windows or hwnd == childHWND
+
   local w, h = math.floor(windRect:width() + 0.5), math.floor(windRect:height() + 0.5)
   local bitmap = r.JS_LICE_CreateBitmap(true, w, h)
   numBitmaps = numBitmaps + 1
-  r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h, not helper.is_windows and true) --, helper.is_windows and true or false)
-  if helper.is_windows then
+  r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h, true)
+  if not integrated then
     -- should only need to do this once for the view
     r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
   end
@@ -292,6 +297,8 @@ local function reloadSettings()
   modMappings = nil
   widgetMappings = nil
 
+  buildNewKeyMap()
+
   if oldState then attendKeyIntercepts(oldGlobal) end
 end
 
@@ -356,6 +363,9 @@ local function startIntercepts()
       r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
     end
   end
+  if helper.is_windows and r.APIExists('CreateChildWindowForHWND') then
+    childHWND = r.CreateChildWindowForHWND(glob.liceData.midiview, "*MRE")
+  end
   startAppIntercepts()
 end
 
@@ -370,6 +380,10 @@ local function endIntercepts()
       intercept.timestamp = 0
     end
     glob.setCursor(glob.normal_cursor)
+    if helper.is_windows and r.APIExists('DestroyChildWindow') and childHWND then
+      r.DestroyChildWindow(childHWND)
+      childHWND = nil
+    end  
   end
   glob.prevCursor = -1
 end
@@ -560,6 +574,9 @@ end
 local function createFrameBitmaps(midiview, windRect)
   local bitmaps = {}
 
+  local hwnd = childHWND and childHWND or midiview
+  local integrated = not helper.is_windows or hwnd == childHWND
+
   local x1, y1 = pointConvertNative(windRect.x1, windRect.y1, windRect)
   local x2, y2 = pointConvertNative(windRect.x2, windRect.y2, windRect)
 
@@ -569,28 +586,28 @@ local function createFrameBitmaps(midiview, windRect)
     local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
     local w, h = math.floor(windRect:width() + 0.5), math.floor( (bottomPixel - y1) + 0.5)
     bitmaps.top = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+    r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
     bitmaps.bottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+    r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
     if meLanes[0] then
       local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
       bitmaps.middletop = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+      r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, true)
       numBitmaps = numBitmaps + 1
       bitmaps.middlebottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+      r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, true)
       numBitmaps = numBitmaps + 1
     end
     bitmaps.left = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+    r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
     bitmaps.right = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(midiview, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, not helper.is_windows and true) --, helper.is_windows and true or false)
+    r.JS_Composite(hwnd, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
 
-    if helper.is_windows then
+    if not integrated then
       -- should only need to do this once for the view
       r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
     end
@@ -677,7 +694,7 @@ local function shutdownLice()
   glob.setCursor(glob.normal_cursor)
 end
 
-local function convertColorFromNative(col)
+local function convertColorFromNative(col)  
   if helper.is_windows then
     col = (col & 0xFF000000)
         | (col & 0xFF) << 16
@@ -798,8 +815,8 @@ local function generatePalette32(argb)
   }
 end
 
-local reFillContrastColor = generateVibrantContrast32(reFillColor)
-local reBorderContrastColor = generateVibrantContrast32(reBorderColor)
+local reFillContrastColor
+local reBorderContrastColor
 
 local function rebuildColors()
   reFillColor = convertColorFromNative(r.GetThemeColor('areasel_fill', 0) + (0x5F << 24))
@@ -808,9 +825,7 @@ local function rebuildColors()
   reBorderContrastColor = generateVibrantContrast32(reBorderColor)
 end
 
--- Example usage:
--- local r, g, b = getContrastingColor(255, 100, 0)  -- Orange
--- print(r, g, b)  -- Will output: 0, 155, 255 (Blue)
+rebuildColors()
 
 local function rectToLiceCoords(rect)
   -- macos
@@ -903,6 +918,9 @@ local function checkThemeFile()
 end
 
 local function drawLice()
+  local hwnd = childHWND and childHWND or glob.liceData.midiview
+  local integrated = not helper.is_windows or hwnd == childHWND
+
   checkThemeFile()
   local recomposite = glob.needsRecomposite or recompositeDraw
   recompositeInit = glob.needsRecomposite
@@ -946,14 +964,14 @@ local function drawLice()
             end
           else
             clearBitmap(area.bitmap, 0, 0, bmWidth, bmHeight)
-            r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not helper.is_windows and true) --, helper.is_windows and true or false)
+            r.JS_Composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, true)
           end
         end
         if not skip and not area.bitmap then
           area.bitmap = r.JS_LICE_CreateBitmap(true, w + (upsizing and w or 0), h + (upsizing and h or 0)) -- when upsizing, make it double-the size so that we don't have to resize so often
           numBitmaps = numBitmaps + 1
           area.modified = true
-          r.JS_Composite(glob.liceData.midiview, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, not helper.is_windows and true) --, helper.is_windows and true or false)
+          r.JS_Composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, true)
         end
 
         if not skip and area.modified or area.hovering or area.washovering then
@@ -980,7 +998,7 @@ local function drawLice()
           clearBitmap(area.bitmap, x1 - Lice.EDGE_SLOP, y1 - Lice.EDGE_SLOP, logWidth + (Lice.EDGE_SLOP * 2) + 1, logHeight + (Lice.EDGE_SLOP * 2) + 1)
 
           r.JS_LICE_FillRect(area.bitmap, x1, y1,
-                             logWidth, logHeight - 1, reFillColor, helper.is_windows and 0.3 or 1, mode)
+                             logWidth, logHeight - 1, reFillColor, not integrated and 0.3 or 1, mode)
           frameRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reBorderColor, alpha, mode, antialias)
           -- if area.onClipboard then
           --   frameRect(area.bitmap, x1 + 3, y1 + 3, logWidth - 6, logHeight - 7, reBorderContrastColor, alpha, mode, antialias)
@@ -1163,6 +1181,7 @@ Lice.viewIntersectionRect = viewIntersectionRect
 
 Lice.drawLice = drawLice
 
+Lice.childHWND = function() return childHWND end
 Lice.MOAR_BITMAPS = MOAR_BITMAPS
 
 return Lice

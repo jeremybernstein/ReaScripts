@@ -4175,6 +4175,7 @@ local function loop()
   if focusWindow
     and (focusWindow == currEditor
       or focusWindow == glob.liceData.midiview -- don't call into JS_Window_IsChild unless necessary
+      or (helper.is_windows and focusWindow == lice.childHWND())
       or r.JS_Window_IsChild(currEditor, focusWindow))
   then
     lice.attendKeyIntercepts(#areas == 0)

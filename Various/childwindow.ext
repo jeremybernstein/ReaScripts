@@ -1,0 +1,6 @@
+@description childwindow (MIDI Razor Edits)
+@author sockmonkey72
+@version 1.0.0-alpha.1
+@provides
+  [win64] childwindow/reaper_childwindow_x64.dll > reaper_childwindow_x64.dll
+  [win32] childwindow/reaper_childwindow_w32.dll > reaper_childwindow_w32.dll

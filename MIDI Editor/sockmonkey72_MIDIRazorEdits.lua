@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0-alpha.1
+-- @version 1.1.0-alpha.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - if reaper_childwindow is installed (ReaPack), improved drawing performance
+--   - fix crash when creating new area in 'Hide unused note rows' mode
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

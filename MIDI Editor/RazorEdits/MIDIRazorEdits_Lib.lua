@@ -2015,6 +2015,7 @@ local function setCustomOrder(hwnd, visible_note_rows)
     reaper.SetTrackStateChunk(track, new_chunk, false)
   end
   reaper.MIDIEditor_OnCommand(hwnd, 40143)
+  meState.showNoteRows = 3
 end
 
 local function getVisibleNoteRows(hwnd, mode, chunk)

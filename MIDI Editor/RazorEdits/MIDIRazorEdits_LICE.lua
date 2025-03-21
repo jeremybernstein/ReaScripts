@@ -383,7 +383,7 @@ local function endIntercepts()
     if helper.is_windows and r.APIExists('DestroyChildWindow') and childHWND then
       r.DestroyChildWindow(childHWND)
       childHWND = nil
-    end  
+    end
   end
   glob.prevCursor = -1
 end
@@ -694,7 +694,7 @@ local function shutdownLice()
   glob.setCursor(glob.normal_cursor)
 end
 
-local function convertColorFromNative(col)  
+local function convertColorFromNative(col)
   if helper.is_windows then
     col = (col & 0xFF000000)
         | (col & 0xFF) << 16

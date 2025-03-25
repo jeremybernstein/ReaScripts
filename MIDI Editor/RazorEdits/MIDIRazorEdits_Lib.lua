@@ -726,7 +726,7 @@ local function processNotes(activeTake, area, operation)
 
   -- potential second iteration, deal with deletions in the target area
   if operation == OP_COPY or operation == OP_CUT then
-    area.onClipboard = area.ccLane and lastHoveredOrClickedLane == area.ccLane or lastHoveredOrClickedLane == -1
+    area.onClipboard = true --area.ccLane and lastHoveredOrClickedLane == area.ccLane or lastHoveredOrClickedLane == -1
     if area.onClipboard then
       local events
       for _, ev in ipairs(clipboardEvents) do
@@ -1194,7 +1194,7 @@ local function processCCs(activeTake, area, operation)
   -- TODO: REFACTOR (can use same code, approximately, for notes)
   -- potential second iteration, deal with deletions in the target area
   if operation == OP_COPY or operation == OP_CUT then
-    area.onClipboard = area.ccLane and lastHoveredOrClickedLane == area.ccLane or lastHoveredOrClickedLane == -1
+    area.onClipboard = true --area.ccLane and lastHoveredOrClickedLane == area.ccLane or lastHoveredOrClickedLane == -1
     if area.onClipboard then
       local events
       for _, ev in ipairs(clipboardEvents) do
@@ -1784,6 +1784,8 @@ end
 local function handlePaste()
   if not clipboardEvents or #clipboardEvents == 0 then return end
 
+  local multi = #clipboardEvents > 1
+
   clearAreas()
   local insertionPPQ = r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, r.GetCursorPositionEx(0))
 
@@ -1793,7 +1795,8 @@ local function handlePaste()
   local fromLaneType = fromLane ~= -1 and clipboardEvents[1].area.ccType
   local toLaneType = toLane ~= -1 and meLanes[toLane].type
 
-  if fromLane ~= toLane
+  if not multi
+    and fromLane ~= toLane
     and (fromLane == -1 or toLane == -1
       or fromLaneType == 0x200 or fromLaneType == 0x207
       or toLaneType == 0x200 or toLaneType == 0x207)
@@ -1801,7 +1804,10 @@ local function handlePaste()
     return
   end
 
-  local newchanmsg, newmsg2 = helper.ccTypeToChanmsg(toLaneType)
+  local newchanmsg, newmsg2
+  if not multi  then
+    newchanmsg, newmsg2 = helper.ccTypeToChanmsg(toLaneType)
+  end
 
   table.sort(clipboardEvents, function(t1, t2)
     return t1.area.timeValue.ticks.min < t2.area.timeValue.ticks.min
@@ -1814,8 +1820,8 @@ local function handlePaste()
     local area = Area.deserialize(v.area)
     local offset = not cherry and firstOffset or firstOffset + (area.timeValue.ticks.min - clipboardEvents[1].area.timeValue.ticks.min)
     area.timeValue.ticks:shift(offset)
-    area.ccLane = toLane ~= -1 and toLane or nil
-    area.ccType = toLane ~= -1 and toLaneType or nil
+    area.ccLane = (not multi and (toLane ~= -1 and toLane or nil)) or area.ccLane
+    area.ccType = (not multi and (toLane ~= -1 and toLaneType or nil)) or area.ccType
 
     updateAreaFromTimeValue(area)
     areas[#areas + 1] = area
@@ -1860,9 +1866,12 @@ local function handlePaste()
       end
 
       processInsertions()
+      noRestore[activeTake] = true -- force
       handleCommitTransaction(activeTake)
     end
   end
+  noRestore = {}
+  muState = nil
 end
 
 local function handleProcessAreas(singleArea, forceSourceInfo)
@@ -2297,10 +2306,10 @@ local function toggleThisAreaToCCLanes(area)
         -- do nothing
       else
         local newArea = Area.new({ fullLane = true,
-                                          timeValue = TimeValueExtents.new(area.timeValue.ticks.min, area.timeValue.ticks.max, 0, meLanes[i].range),
-                                          ccLane = i,
-                                          ccType = meLanes[i].type
-                                        }, updateAreaFromTimeValue)
+                                   timeValue = TimeValueExtents.new(area.timeValue.ticks.min, area.timeValue.ticks.max, 0, meLanes[i].range),
+                                   ccLane = i,
+                                   ccType = meLanes[i].type
+                                 }, updateAreaFromTimeValue)
         areas[#areas + 1] = newArea
       end
     end

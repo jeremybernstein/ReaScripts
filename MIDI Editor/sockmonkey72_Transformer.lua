@@ -1,11 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.1
+-- @version 1.0.14-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - new preset property/preference: How many notes does it take to make a chord? 2-N
---   - indicate 'dirtiness' of loaded presets. probably a little permissive.
+--   - add a "focus" icon at the top-right to focus the active MIDI editor (SWS required)
+--   - add a "Threshold" action to force values above/below a threshold value to a fixed value
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -94,6 +94,8 @@ local UndoImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[
 if UndoImage then ImGui.Attach(ctx, UndoImage) end
 local RedoImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'right-arrow_9144322.png')
 if RedoImage then ImGui.Attach(ctx, RedoImage) end
+local FocusImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'focus.png')
+if FocusImage then ImGui.Attach(ctx, FocusImage) end
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -855,11 +857,22 @@ local function windowFn()
 
   local currentRect = {}
 
-  local gearPopupLeft
+  local gearPopupLeft, undoRedoLeft
+
+  local function MakeFocusME()
+    if canReveal then
+      ImGui.SetCursorPosX(ctx, gearPopupLeft)
+      local ibSize = FONTSIZE_LARGE * canvasScale
+      ImGui.ImageButton(ctx, 'focusME', FocusImage, ibSize, ibSize)
+      if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
+        r.SN_FocusMIDIEditor()
+      end
+    end
+  end
 
   local function MakeClearAll()
     ImGui.SameLine(ctx)
-    ImGui.SetCursorPosX(ctx, gearPopupLeft - (DEFAULT_ITEM_WIDTH * 2) - (10 * canvasScale))
+    ImGui.SetCursorPosX(ctx, undoRedoLeft - (DEFAULT_ITEM_WIDTH * 2) - (10 * canvasScale))
     ImGui.Button(ctx, 'Clear All', DEFAULT_ITEM_WIDTH * 1.5)
     if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
       tg.setNotesInChord()
@@ -887,7 +900,7 @@ local function windowFn()
 
     local ibSize = FONTSIZE_LARGE * canvasScale
 
-    gearPopupLeft = ImGui.GetCursorPosX(ctx)
+    undoRedoLeft = ImGui.GetCursorPosX(ctx)
 
     local hasUndo = tx.hasUndoSteps()
     local hasRedo = tx.hasRedoSteps()
@@ -1448,6 +1461,8 @@ local function windowFn()
   MakeGearPopup()
   MakeUndoRedo()
   MakeClearAll()
+  MakeFocusME()
+
   ---------------------------------------------------------------------------
   --------------------------------- FIND ROWS -------------------------------
 
@@ -1595,6 +1610,13 @@ local function windowFn()
     flags.isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
     flags.isParam3 = condOp.param3 and paramType ~= gdefs.PARAM_TYPE_MENU -- param3 exception -- make this nicer
     flags.isEventSelector = paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
+
+    if flags.isParam3 and condOp.param3.tableParamType and condOp.param3.tableParamType[index] then
+      paramType = condOp.param3.tableParamType[index]
+      if paramType ~= gdefs.PARAM_TYPE_MENU then
+        flags.isParam3 = false
+      end
+    end
 
     if (flags.isMetricOrMusical and index == 1) -- special case, sorry
       or (flags.isEveryN and index == 1)
@@ -2336,7 +2358,7 @@ local function windowFn()
     ImGui.PopStyleColor(ctx, 2)
   end
 
-  local function LineParam1Special(fun, row)
+  local function lineParam1Special(fun, row)
     local deactivated = false
 
     ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
@@ -2371,7 +2393,7 @@ local function windowFn()
     ImGui.PopStyleColor(ctx, 2)
   end
 
-  local function LineParam2Special(fun, row)
+  local function lineParam2Special(fun, row)
     local deactivated = false
 
     ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
@@ -2408,6 +2430,43 @@ local function windowFn()
         mod = 0
       end
       row.params[3].mod = mod
+    end
+
+    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
+      if completionKeyPress() then
+        ImGui.CloseCurrentPopup(ctx)
+      end
+    end
+
+    ImGui.PopStyleColor(ctx, 2)
+  end
+
+  -- TODO collapse some of this logic
+  -- TODO refactor, is 'fun' even used anywhere?
+  local function threshParam2Special(fun, row)
+    local deactivated = false
+
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
+    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
+
+    ImGui.AlignTextToFramePadding(ctx)
+
+    local _, _, _, target, operation = tx.actionTabsFromTarget(row)
+    local paramTypes = tx.getParamTypesForRow(row, target, operation)
+    local flags = {}
+
+    if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
+    for i = 2, 3 do
+      overrideEditorType(row, target, operation, paramTypes, i)
+      local paramType = paramTypes[i]
+      local editorType = row.params[i].editorType
+      flags.isFloat = (paramType == gdefs.PARAM_TYPE_FLOATEDITOR or editorType == gdefs.EDITOR_TYPE_PERCENT) and true or false
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, i == 1 and 'Lo:' or 'Hi:')
+      ImGui.SameLine(ctx)
+      ImGui.SetCursorPosX(ctx, currentFontWidth * 4)
+      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+      if doHandleTableParam(row, target, operation, paramType, editorType, i, flags, doActionUpdate) then deactivated = true end
     end
 
     if not ImGui.IsAnyItemActive(ctx) and not deactivated then
@@ -3056,7 +3115,7 @@ local function windowFn()
             and newMIDIEventParam1Special
           or currentActionOperation.param3
             and (currentActionOperation.notation == ':scaleoffset' and positionScaleOffsetParam1Special
-            or isLineOp and LineParam1Special)
+              or isLineOp and lineParam1Special)
           or nil,
           paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT)
 
@@ -3073,8 +3132,9 @@ local function windowFn()
         end,
         paramTypes[2] == gdefs.PARAM_TYPE_NEWMIDIEVENT
             and newMIDIEventParam2Special
-          or isLineOp
-            and LineParam2Special
+          or (currentActionOperation.param3
+            and (isLineOp and lineParam2Special
+              or currentActionOperation.notation == ':thresh' and threshParam2Special))
           or nil,
           isLineOp or paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT)
 

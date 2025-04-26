@@ -262,6 +262,12 @@ local function mirror(event, property, mirrorVal)
   return setValue(event, property, newval)
 end
 
+local function threshold(event, property, p1, p2, p3)
+  local oldval = Shared.getValue(event, property)
+  local newval = oldval < p1 and p2 or p3
+  return setValue(event, property, newval)
+end
+
 local function linearChangeOverSelection(event, property, projTime, p1, type, p2, mult, context)
   local firstTime = context.firstTime
   local lastTime = context.lastTime
@@ -430,5 +436,6 @@ ActionFuns.ccSetCurve = ccSetCurve
 ActionFuns.addDuration = addDuration
 ActionFuns.subtractDuration = subtractDuration
 ActionFuns.multiplyPosition = multiplyPosition
+ActionFuns.threshold = threshold
 
 return ActionFuns

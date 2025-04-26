@@ -1084,6 +1084,7 @@ context.CreateNewMIDIEvent = afuns.createNewMIDIEvent
 context.RandomValue = afuns.randomValue
 context.QuantizeTo = afuns.quantizeTo
 context.Mirror = afuns.mirror
+context.Threshold = afuns.threshold
 context.LinearChangeOverSelection = afuns.linearChangeOverSelection
 context.ClampValue = afuns.clampValue
 context.AddLength = afuns.addLength
@@ -3201,6 +3202,8 @@ TransformerLib.makeParam3 = function(row)
     p3.makeParam3PositionScaleOffset(row)
   elseif operation.notation == ':line' or operation.notation == ':relline' then
     p3.makeParam3Line(row)
+  elseif operation.notation == ':thresh' then
+    p3.makeParam3Thresh(row, target)
   end
 end
 TransformerLib.makeDefaultEventSelector = evseldefs.makeDefaultEventSelector

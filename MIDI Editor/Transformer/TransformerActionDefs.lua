@@ -65,6 +65,7 @@ local actionOperationLine = { notation = ':line', label = 'Ramp in Selection Ran
 local actionOperationRelLine = { notation = ':relline', label = 'Relative Ramp in Selection Range', text = 'OperateEvent1(event, {tgt}, OP_ADD, LinearChangeOverSelection(event, nil, event.projtime, {param1}, {param2}, {param3}, _context))', terms = 3, split = {{ inteditor = true }, { menu = true }, { inteditor = true }}, freeterm = true, fullrange = true, bipolar = true, param3 = p3.lineParam3Tab }
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true, nixnote = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
+local actionOperationThresh = { notation = ':thresh', label = 'Threshold', text = 'Threshold(event, {tgt}, {param1}, {param2}, {param3})', terms = 3, freeterm = true, param3 = p3.threshParam3Tab, inteditor = true, split = {{ default = 64 }, { default = 0 }, { default = 127 }} }
 
 local function positionMod(op)
   local newop = tg.tableCopy(op)
@@ -185,14 +186,14 @@ local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   { notation = ':getvalue2', label = 'Use Value 2', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetMainValue(event))', terms = 0 }, -- note that this is different for AT and PB
-  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   { notation = ':getvalue1', label = 'Use Value 1', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetSubtypeValue(event))', terms = 0 }, -- ?? note that this is different for AT and PB
-  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 local actionNewEventOperationEntries = {
@@ -215,7 +216,7 @@ local newMIDIEventPositionEntries = {
 local actionGenericOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
-  actionOperationMirror, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
 }
 
 ActionDefs.ActionRow = ActionRow

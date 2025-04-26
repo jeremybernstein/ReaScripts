@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.2
+-- @version 1.0.14-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add a "focus" icon at the top-right to focus the active MIDI editor (SWS required)
---   - add a "Threshold" action to force values above/below a threshold value to a fixed value
+--   - fix typo in Threshold pop-up
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.1'
+local versionStr = '1.0.14-beta.3'
 
 local r = reaper
 
@@ -2462,7 +2461,7 @@ local function windowFn()
       local editorType = row.params[i].editorType
       flags.isFloat = (paramType == gdefs.PARAM_TYPE_FLOATEDITOR or editorType == gdefs.EDITOR_TYPE_PERCENT) and true or false
       ImGui.AlignTextToFramePadding(ctx)
-      ImGui.Text(ctx, i == 1 and 'Lo:' or 'Hi:')
+      ImGui.Text(ctx, i == 2 and 'Lo:' or 'Hi:')
       ImGui.SameLine(ctx)
       ImGui.SetCursorPosX(ctx, currentFontWidth * 4)
       ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)

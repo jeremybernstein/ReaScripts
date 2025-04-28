@@ -111,6 +111,7 @@ clearFindPostProcessingInfo()
 
 local currentActionScope = adefs.actionScopeFromNotation()
 local currentActionScopeFlags = adefs.actionScopeFlagsFromNotation()
+local currentStripRepetitions = false
 
 local scriptIgnoreSelectionInArrangeView = false
 
@@ -2173,10 +2174,29 @@ local function preProcessSelection(take)
   end
 end
 
+local function handleRepetitions(prevEvents, event)
+  if currentStripRepetitions then
+    if prevEvents[event.chan] then
+      local pEv = prevEvents[event.chan][event.chanmsg]
+      if pEv
+        and event.msg2 == pEv.msg2
+        and event.msg3 == pEv.msg3
+      then
+        event.delete = true
+      end
+    end
+    prevEvents[event.chan] = prevEvents[event.chan] or {}
+    prevEvents[event.chan][event.chanmsg] = event
+  end
+end
+
 local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
   if doTx == true or doTx == nil then
     mu.MIDI_OpenWriteTransaction(take)
   end
+
+  local prevEvents = {}
+
   preProcessSelection(take)
   for _, event in ipairs(eventTab) do
     local timeAdjust = getTimeOffset()
@@ -2190,9 +2210,14 @@ local function insertEventsIntoTake(take, eventTab, actionFn, contextTab, doTx)
       event.msg3 = event.msg3 < 1 and 1 or event.msg3 -- do not turn off the note
       mu.MIDI_InsertNote(take, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.msg2, event.msg3, event.relvel)
     elseif getEventType(event) == gdefs.CC_TYPE then
-      local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
-      if rv and event.setcurve then
-        mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
+      handleRepetitions(prevEvents, event)
+      if event.delete then
+        -- drop it
+      else
+        local rv, newidx = mu.MIDI_InsertCC(take, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+        if rv and event.setcurve then
+          mu.MIDI_SetCCShape(take, newidx, event.setcurve, event.setcurveext)
+        end
       end
     elseif getEventType(event) == gdefs.SYXTEXT_TYPE then
       mu.MIDI_InsertTextSysexEvt(take, event.selected, event.muted, event.ppqpos, event.chanmsg == 0xF0 and event.chanmsg or event.msg2, event.textmsg)
@@ -2225,6 +2250,8 @@ local function transformEntryInTake(take, eventTab, actionFn, contextTab, replac
   local replaceTab = replace and {} or nil
   local timeAdjust = getTimeOffset()
 
+  local prevEvents = {}
+
   for _, event in ipairs(eventTab) do
     local eventType = getEventType(event)
     actionFn(event, getSubtypeValueName(event), getMainValueName(event), contextTab)
@@ -2255,6 +2282,10 @@ local function transformEntryInTake(take, eventTab, actionFn, contextTab, replac
       table.insert(eventData, event.ppqpos)
       if not eventData.startPpq or event.ppqpos < eventData.startPpq then eventData.startPpq = event.ppqpos end
       if not eventData.endPpq or event.ppqpos > eventData.endPpq then eventData.endPpq = event.ppqpos end
+    end
+
+    if eventType == gdefs.CC_TYPE then
+      handleRepetitions(prevEvents, event)
     end
   end
 
@@ -2318,7 +2349,9 @@ local function transformEntryInTake(take, eventTab, actionFn, contextTab, replac
         end
       end
     elseif eventType == gdefs.CC_TYPE then
-      if not event.orig_type or event.orig_type == gdefs.CC_TYPE then
+      if event.delete then
+        mu.MIDI_DeleteCC(take, event.idx)
+      elseif not event.orig_type or event.orig_type == gdefs.CC_TYPE then
         mu.MIDI_SetCC(take, event.idx, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
         if event.setcurve then
           mu.MIDI_SetCCShape(take, event.idx, event.setcurve, event.setcurveext)
@@ -2817,6 +2850,7 @@ local function getCurrentPresetState()
     notes = libPresetNotesBuffer,
     scriptIgnoreSelectionInArrangeView = false,
     notesInChord = tg.getNotesInChord(),
+    stripRepetitions = currentStripRepetitions
   }
   return presetTab
 end
@@ -2911,6 +2945,7 @@ local function loadPresetFromTable(presetTab)
   processActionMacro(presetTab.actionMacro)
   scriptIgnoreSelectionInArrangeView = presetTab.scriptIgnoreSelectionInArrangeView
   tg.setNotesInChord(presetTab.notesInChord)
+  currentStripRepetitions = presetTab.stripRepetitions
   return presetTab.notes
 end
 
@@ -3265,6 +3300,9 @@ TransformerLib.suspendUndo = suspendUndo
 TransformerLib.resumeUndo = resumeUndo
 
 TransformerLib.isANote = isANote
+
+TransformerLib.getWantsStripRepetitions = function() return currentStripRepetitions end
+TransformerLib.setWantsStripRepetitions = function(way) currentStripRepetitions = way and true or false end
 
 return TransformerLib
 

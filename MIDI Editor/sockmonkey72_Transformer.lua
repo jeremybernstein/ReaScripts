@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.3
+-- @version 1.0.14-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix typo in Threshold pop-up
+--   - add a "Strip Repetitions" Post-Action flag
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.3'
+local versionStr = '1.0.14-beta.4'
 
 local r = reaper
 
@@ -3195,7 +3195,11 @@ local function windowFn()
 
   if isSelectScope then ImGui.BeginDisabled(ctx) end
 
-  ImGui.Button(ctx, tx.actionScopeFlagsTable[tx.currentActionScopeFlags()].label, DEFAULT_ITEM_WIDTH * 2.5)
+  local scopeFlagsLabel = tx.actionScopeFlagsTable[tx.currentActionScopeFlags()].label
+  if tx.getWantsStripRepetitions() then
+    scopeFlagsLabel = scopeFlagsLabel .. ' [F]'
+  end
+  ImGui.Button(ctx, scopeFlagsLabel, DEFAULT_ITEM_WIDTH * 2.5)
   if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     ImGui.OpenPopup(ctx, 'actionScopeFlagsMenu')
   end
@@ -3208,10 +3212,19 @@ local function windowFn()
 
   if isSelectScope then ImGui.EndDisabled(ctx) end
 
-  createPopup(nil, 'actionScopeFlagsMenu', tx.actionScopeFlagsTable, tx.currentActionScopeFlags(), function(i)
+  createPopup(nil, 'actionScopeFlagsMenu', tx.actionScopeFlagsTable, tx.currentActionScopeFlags(),
+    function(i)
       tx.setCurrentActionScopeFlags(i)
       doUpdate()
-    end)
+    end,
+    function(fun, row)
+      local ret, v = ImGui.Checkbox(ctx, 'Strip CC Repetitions', tx.getWantsStripRepetitions())
+      if ret then
+        tx.setWantsStripRepetitions(v)
+        doUpdate()
+      end
+    end
+  )
 
   ImGui.PopStyleColor(ctx, 4)
 

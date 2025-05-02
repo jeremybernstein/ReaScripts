@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.07-beta.4
+-- @version 0.2.07-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - improve COMMIT_CANSKIP for multi-item usage
+--   - fix handling of item extents with truncated, looped items
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -950,62 +950,86 @@ local function MIDI_CommitWriteTransaction(take, refresh, dirty)
 
   if MIDIUtils.CORRECT_EXTENTS then
     local item = r.GetMediaItemTake_Item(take)
+
     local itemStartTime = r.GetMediaItemInfo_Value(item, 'D_POSITION')
-    local itemStartOffset = r.GetMediaItemTakeInfo_Value(take, 'D_STARTOFFS')
-    local itemStartOffsetQN = r.TimeMap2_timeToQN(0, itemStartOffset)
     local itemEndTime = itemStartTime + r.GetMediaItemInfo_Value(item, 'D_LENGTH')
+    local isLoopSource = r.GetMediaItemInfo_Value(item, 'B_LOOPSRC') and true or false
 
-    local itemStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemStartTime)
-    local itemEndPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemEndTime)
+    local takeStartOffset = r.GetMediaItemTakeInfo_Value(take, 'D_STARTOFFS')
+    local takePlayRate = r.GetMediaItemTakeInfo_Value(take, 'D_PLAYRATE')
 
-    local firstEventPPQ
-    local lastEventPPQ
+    local wantsProcessing = true
 
-    if item then
-      -- find the first and last _touched_ events
-      for _, event in ipairs(MIDIEvents) do
-        -- if event.ppqpos > itemStartPPQ then break end -- this list is unsorted, can't break early
-        if not event.delete and event.recalcMIDI then
-          if event.ppqpos < itemStartPPQ then
-            firstEventPPQ = event.ppqpos
-            break
-          end
+    if isLoopSource then
+      local mediaSource = r.GetMediaItemTake_Source(take)
+      if mediaSource then
+        local msLen, isQN = r.GetMediaSourceLength(mediaSource)
+        local scaledStartOffset = takeStartOffset / takePlayRate
+        local loopMediaStart = itemStartTime - scaledStartOffset
+        local loopMediaEnd
+        if isQN then
+          local loopMediaStartQN = r.TimeMap2_timeToQN(nil, loopMediaStart)
+          local loopMediaEndQN = loopMediaStartQN + (msLen / takePlayRate)
+          loopMediaEnd = r.TimeMap2_QNToTime(nil, loopMediaEndQN)
+        else
+          loopMediaEnd = loopMediaStart + (msLen / takePlayRate)
         end
-      end
-      for i = #MIDIEvents, 1, -1 do
-        local event = MIDIEvents[i]
-        -- if event.ppqpos < itemEndPPQ then break end -- this list is unsorted, can't break early
-        if not event.delete and event.recalcMIDI then
-          if event.ppqpos > itemEndPPQ then
-            lastEventPPQ = event.ppqpos
-            break
-          end
+        if loopMediaEnd < itemEndTime then
+          wantsProcessing = false
         end
       end
     end
+    if wantsProcessing then
+      local takeStartOffsetQN = r.TimeMap2_timeToQN(0, takeStartOffset)
 
-    if itemStartOffset ~= 0 then
-      firstEventPPQ = itemStartPPQ
-      -- lastEventPPQ = itemEndPPQ
-    end
+      local itemStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemStartTime)
+      local itemEndPPQ = r.MIDI_GetPPQPosFromProjTime(take, itemEndTime)
 
-    if firstEventPPQ or lastEventPPQ then
-      local newItemStartQN, newItemEndQN
-      if firstEventPPQ then
-        newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ)
+      local firstEventPPQ
+      local lastEventPPQ
+
+      if item then
+        -- find the first and last _touched_ events from the sorted array
+        for _, event in ipairs(MIDIEvents) do
+          if not event.delete and event.recalcMIDI and event.ppqpos >= itemStartPPQ then
+            if event.ppqpos < itemStartPPQ then
+              firstEventPPQ = event.ppqpos
+              break
+            end
+          end
+        end
+        for i = #MIDIEvents, 1, -1 do
+          local event = MIDIEvents[i]
+          if not event.delete and event.recalcMIDI and event.ppqpos < itemEndPPQ then
+            if event.ppqpos > itemEndPPQ then
+              lastEventPPQ = event.ppqpos
+              break
+            end
+          end
+        end
       end
-      if lastEventPPQ then
-        newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ)
-      end
 
-      if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end
-      if not newItemEndQN then newItemEndQN = r.TimeMap2_timeToQN(0, itemEndTime) end
-      -- resize to nearest QN
-      local floorStartTime = math.floor(newItemStartQN + 0.5)
-      correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime - itemStartOffsetQN)
-      r.MIDI_SetItemExtents(item, floorStartTime, math.ceil(newItemEndQN))
-      if itemStartOffset ~= 0 then
-        r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', itemStartOffset)
+      if firstEventPPQ or lastEventPPQ then
+        local newItemStartQN, newItemEndQN
+        if firstEventPPQ then
+          newItemStartQN = r.MIDI_GetProjQNFromPPQPos(take, firstEventPPQ)
+        end
+        if lastEventPPQ then
+          newItemEndQN = r.MIDI_GetProjQNFromPPQPos(take, lastEventPPQ)
+        end
+
+        if not newItemStartQN then newItemStartQN = r.TimeMap2_timeToQN(0, itemStartTime) end
+        if not newItemEndQN then newItemEndQN = r.TimeMap2_timeToQN(0, itemEndTime) end
+        -- resize to nearest QN
+        local floorStartTime = math.floor(newItemStartQN) -- + 0.5)
+        correct = -r.MIDI_GetPPQPosFromProjQN(take, floorStartTime - takeStartOffsetQN)
+        r.MIDI_SetItemExtents(item, floorStartTime, math.ceil(newItemEndQN))
+        if takeStartOffset ~= 0 then
+          r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', takeStartOffset)
+        end
+        if isLoopSource then -- reapply
+          r.SetMediaItemInfo_Value(item, 'B_LOOPSRC', 1)
+        end
       end
     end
   end

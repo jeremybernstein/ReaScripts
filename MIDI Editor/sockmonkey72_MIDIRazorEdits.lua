@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0-alpha.3
+-- @version 1.1.0-alpha.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - copy/paste for multiple areas now works/behaves predictably
+--   - new version of MIDIUtils to improve extents fixing of looped items
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

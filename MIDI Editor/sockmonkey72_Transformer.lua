@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.4
+-- @version 1.0.14-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add a "Strip Repetitions" Post-Action flag
+--   - new version of MIDIUtils to improve extents fixing of looped items
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.4'
+local versionStr = '1.0.14-beta.5'
 
 local r = reaper
 

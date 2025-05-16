@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0-alpha.4
+-- @version 1.1.0-alpha.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - new version of MIDIUtils to improve extents fixing of looped items
+--   - fix fullLane note area value offset
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

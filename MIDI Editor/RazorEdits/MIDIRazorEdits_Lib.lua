@@ -397,8 +397,8 @@ local function makeTimeValueExtentsForArea(area, noQuantize)
     leftmostTick, rightmostTick = quantizeTimeValueTimeExtent(leftmostTick, rightmostTick)
   end
 
-  local topValue = area.ccLane and meLanes[area.ccLane].topValue or meState.topPitch
-  local bottomValue = area.ccLane and meLanes[area.ccLane].bottomValue or meState.bottomPitch
+  local topValue = area.fullLane and meLanes[area.ccLane and area.ccLane or -1].range or meLanes[area.ccLane and area.ccLane or -1].topValue
+  local bottomValue = area.fullLane and 0 or meLanes[area.ccLane and area.ccLane or -1].bottomValue
   local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
 

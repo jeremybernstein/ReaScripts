@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0-alpha.5
+-- @version 1.1.0-alpha.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix fullLane note area value offset
+--   - respect channel filter in MIDI editor (open operate on visible events)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

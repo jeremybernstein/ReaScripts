@@ -133,6 +133,7 @@ local areaTickExtent
 
 local analyzeCheckTime = nil
 local editorCheckTime = nil
+local editorFilterChannel = nil
 
 ------------------------------------------------
 ------------------------------------------------
@@ -1553,16 +1554,18 @@ local function generateSourceInfo(area, op, force, overlap)
       then
         overlapTab = {}
         for _, event in ipairs(overlap) do
-          helper.addUnique(overlapTab, { type = mu.NOTE_TYPE,
-                                         selected = event.selected,
-                                         muted = event.muted,
-                                         ppqpos = event.ppqpos,
-                                         endppqpos = event.endppqpos,
-                                         chan = event.chan,
-                                         pitch = event.pitch,
-                                         vel = event.vel,
-                                         relvel = event.relvel
-                                       })
+          if not editorFilterChannel or event.chan == editorFilterChannel then
+            helper.addUnique(overlapTab, { type = mu.NOTE_TYPE,
+                                          selected = event.selected,
+                                          muted = event.muted,
+                                          ppqpos = event.ppqpos,
+                                          endppqpos = event.endppqpos,
+                                          chan = event.chan,
+                                          pitch = event.pitch,
+                                          vel = event.vel,
+                                          relvel = event.relvel
+                                        })
+          end
         end
       end
 
@@ -1572,14 +1575,16 @@ local function generateSourceInfo(area, op, force, overlap)
         local event = { type = mu.NOTE_TYPE }
         _, event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel = mu.MIDI_GetNote(activeTake, idx)
 
-        if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
-          and pitchInRange(event.pitch, bottomValue, topValue)
-        then
-          if overlapTab and helper.inUniqueTab(overlapTab, event) then
-            -- ignore
-          else
-            event.idx = idx
-            sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
+        if not editorFilterChannel or event.chan == editorFilterChannel then
+          if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
+            and pitchInRange(event.pitch, bottomValue, topValue)
+          then
+            if overlapTab and helper.inUniqueTab(overlapTab, event) then
+              -- ignore
+            else
+              event.idx = idx
+              sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
+            end
           end
         end
       end
@@ -1620,27 +1625,29 @@ local function generateSourceInfo(area, op, force, overlap)
           _, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3 = mu.MIDI_GetCC(activeTake, idx)
         end
 
-        event.chanmsg = event.chanmsg & 0xF0 -- to be safe
-        local onebyte = laneIsVel or event.chanmsg == 0xC0 or event.chanmsg == 0xD0
-        -- local pitchbend = chanmsg == 0xE0
-        local val = (event.chanmsg == 0xA0 or event.chanmsg == 0xB0) and event.msg3 or onebyte and event.msg2 or (event.msg3 << 7 | event.msg2)
+        if not editorFilterChannel or event.chan == editorFilterChannel then
+          event.chanmsg = event.chanmsg & 0xF0 -- to be safe
+          local onebyte = laneIsVel or event.chanmsg == 0xC0 or event.chanmsg == 0xD0
+          -- local pitchbend = chanmsg == 0xE0
+          local val = (event.chanmsg == 0xA0 or event.chanmsg == 0xB0) and event.msg3 or onebyte and event.msg2 or (event.msg3 << 7 | event.msg2)
 
-        if event.ppqpos >= leftmostTick - 1 and event.ppqpos <= rightmostTick + 1
-          and event.chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and event.msg2 == ccFilter))
-          and (not selNotes or selNotes[event.msg2]) -- handle PolyAT lane
-        then
-          local wants = true
-          if event.ppqpos <= leftmostTick or event.ppqpos >= rightmostTick then
-            sourceInfo.potentialControlPoints = sourceInfo.potentialControlPoints or {}
-            sourceInfo.potentialControlPoints[#sourceInfo.potentialControlPoints + 1] = event
-            if event.ppqpos < leftmostTick or event.ppqpos > rightmostTick then
-              wants = false
+          if event.ppqpos >= leftmostTick - 1 and event.ppqpos <= rightmostTick + 1
+            and event.chanmsg == ccChanmsg and (not ccFilter or (ccFilter >= 0 and event.msg2 == ccFilter))
+            and (not selNotes or selNotes[event.msg2]) -- handle PolyAT lane
+          then
+            local wants = true
+            if event.ppqpos <= leftmostTick or event.ppqpos >= rightmostTick then
+              sourceInfo.potentialControlPoints = sourceInfo.potentialControlPoints or {}
+              sourceInfo.potentialControlPoints[#sourceInfo.potentialControlPoints + 1] = event
+              if event.ppqpos < leftmostTick or event.ppqpos > rightmostTick then
+                wants = false
+              end
             end
-          end
-          if wants and val <= topValue and val >= bottomValue then
-            event.idx = idx
-            event.val = val
-            sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
+            if wants and val <= topValue and val >= bottomValue then
+              event.idx = idx
+              event.val = val
+              sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
+            end
           end
         end
       end
@@ -2123,6 +2130,13 @@ local function analyzeChunk()
     return false
   end
   activeChannel, meState.showNoteRows, meState.timeBase = activeTakeChunk:match('\nCFGEDIT %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) (%S+)')
+
+  local allChansWhenZero, filterChannel, filterEnabled = activeTakeChunk:match('\nEVTFILTER (%S+) %S+ %S+ %S+ %S+ (%S+) (%S+)')
+
+  allChansWhenZero = tonumber(allChansWhenZero)
+  filterChannel = tonumber(filterChannel)
+  filterEnabled = tonumber(filterEnabled)
+  editorFilterChannel = (allChansWhenZero ~= 0 and filterEnabled ~= 0) and filterChannel or nil
 
   -- _P('CFGEDIT', activeChannel, meState.timeBase)
 

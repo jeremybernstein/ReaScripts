@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0-alpha.6
+-- @version 1.1.0-alpha.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - respect channel filter in MIDI editor (open operate on visible events)
+--   - respect channel filter in MIDI editor (open operate on visible events, improved)
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

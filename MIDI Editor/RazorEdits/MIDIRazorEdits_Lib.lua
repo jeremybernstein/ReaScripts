@@ -113,6 +113,18 @@ local OP_DELETE_USER      = 12
 local OP_STRETCH          = 20 -- behaves a little differently
 local OP_STRETCH_DELETE   = 21 -- behaves a little differently
 
+local OP_SHIFTLEFT        = 30
+local OP_SHIFTRIGHT       = 31
+local OP_SHIFTLEFTGRID    = 32
+local OP_SHIFTRIGHTGRID   = 33
+local OP_SHIFTLEFTGRIDQ   = 34
+local OP_SHIFTRIGHTGRIDQ  = 35
+local OP_SHIFTEND         = 40
+
+local function isShiftOperation(op)
+  return op and op >= OP_SHIFTLEFT and op < OP_SHIFTEND
+end
+
 -- misc
 local muState
 local justLoaded = true
@@ -1942,6 +1954,7 @@ local function handleProcessAreas(singleArea, forceSourceInfo)
       clipboardEvents = {} -- otherwise let it persist
       clipboardInited = true
     end
+
     tInsertions = {}
     tDeletions = {}
     tDelQueries = {}
@@ -1963,27 +1976,65 @@ local function handleProcessAreas(singleArea, forceSourceInfo)
   end
 end
 
+local function processAreaShift(area, operation)
+  local shift = 0
+  if operation == OP_SHIFTLEFT then shift = -area.timeValue.ticks:size()
+  elseif operation == OP_SHIFTRIGHT then shift = area.timeValue.ticks:size()
+  elseif operation == OP_SHIFTLEFTGRID then shift = -(mu.MIDI_GetPPQ(glob.liceData.editorTake) * glob.currentGrid)
+  elseif operation == OP_SHIFTRIGHTGRID then shift = (mu.MIDI_GetPPQ(glob.liceData.editorTake) * glob.currentGrid)
+  elseif operation == OP_SHIFTLEFTGRIDQ then
+    local grid = mu.MIDI_GetPPQ(glob.liceData.editorTake) * glob.currentGrid
+    local temp = area.timeValue.ticks.min - grid
+    local som = r.MIDI_GetPPQPos_StartOfMeasure(glob.liceData.referenceTake, temp)
+    temp = temp - som -- 0-based position in measure
+    temp = som + (math.floor((temp / grid)) * grid)
+    shift = temp - (area.timeValue.ticks.min - grid)
+    if shift == 0 then shift = -grid end
+  elseif operation == OP_SHIFTRIGHTGRIDQ then
+    local grid = mu.MIDI_GetPPQ(glob.liceData.editorTake) * glob.currentGrid
+    local temp = area.timeValue.ticks.min + grid
+    local som = r.MIDI_GetPPQPos_StartOfMeasure(glob.liceData.referenceTake, temp)
+    temp = temp - som -- 0-based position in measure
+    temp = som + (math.floor((temp / grid) + 1) * grid)
+    shift = temp - (area.timeValue.ticks.min + grid)
+    if shift == 0 then shift = grid end
+  end
+  area.timeValue.ticks:shift(shift)
+  updateTimeValueTime(area)
+  updateAreaFromTimeValue(area)
+end
+
 local function processAreas(singleArea, forceSourceInfo)
   glob.liceData.referenceTake = glob.liceData.editorTake
   local doPaste = false
   local doCut = false
+  local doShift = false
 
   local operation = singleArea and singleArea.operation or #areas ~= 0 and areas[1].operation or wantsPaste and OP_PASTE or nil
   if operation == OP_PASTE then
     doPaste = true
   elseif operation == OP_CUT then
     doCut = true
+  elseif isShiftOperation(operation) then
+    doShift = true
   end
 
   if doPaste then
     handlePaste()
     wantsPaste = false
+  elseif doShift then
+
   else
     handleProcessAreas(singleArea, forceSourceInfo)
   end
 
   if doCut then
     clearAreas()
+  elseif doShift then
+    for i, area in ipairs(areas) do -- ideally only for a single area?
+      processAreaShift(area, operation)
+      area.operation = area.operation == OP_STRETCH and area.operation or nil -- TODO, why do we do that?
+    end
   else
     for i, area in ipairs(areas) do
       -- TODO, this should only happen after all takes have been processed, no?
@@ -2691,7 +2742,7 @@ local function processKeys()
 
     -- only hovered
     if keyMatches(vState, keyMappings.fullLane) then
-      if area.hovering then
+      if #areas == 1 or area.hovering then
         makeFullLane(area)
         createUndoStep('Modify Razor Edit Area')
         return true
@@ -2699,8 +2750,53 @@ local function processKeys()
       return false
     end
 
+    if keyMatches(vState, keyMappings.shiftleft) then -- shift left
+      if #areas == 1 or area.hovering then
+        area.operation = OP_SHIFTLEFT
+        return true
+      else
+        return false
+      end
+    elseif keyMatches(vState, keyMappings.shiftright) then -- shift right
+      if #areas == 1 or area.hovering then
+        area.operation = OP_SHIFTRIGHT
+        return true
+      else
+        return false
+      end
+    elseif keyMatches(vState, keyMappings.shiftleftgrid) then -- shift left
+      if #areas == 1 or area.hovering then
+        area.operation = OP_SHIFTLEFTGRID
+        return true
+      else
+        return false
+      end
+    elseif keyMatches(vState, keyMappings.shiftrightgrid) then -- shift right
+      if #areas == 1 or area.hovering then
+        area.operation = OP_SHIFTRIGHTGRID
+        return true
+      else
+        return false
+      end
+    elseif keyMatches(vState, keyMappings.shiftleftgridq) then -- shift left
+      if #areas == 1 or area.hovering then
+        area.operation = OP_SHIFTLEFTGRIDQ
+        return true
+      else
+        return false
+      end
+    elseif keyMatches(vState, keyMappings.shiftrightgridq) then -- shift right
+      if #areas == 1 or area.hovering then
+        area.operation = OP_SHIFTRIGHTGRIDQ
+        return true
+      else
+        return false
+      end
+    end
+
+
     if keyMatches(vState, keyMappings.ccSpan) then
-      if area.hovering and not area.ccLane then
+      if (#areas == 1 or area.hovering) and not area.ccLane then
         local toggledOn = toggleThisAreaToCCLanes(area)
         createUndoStep((toggledOn and 'Create' or 'Remove') .. ' Areas for CC Lanes')
         return true

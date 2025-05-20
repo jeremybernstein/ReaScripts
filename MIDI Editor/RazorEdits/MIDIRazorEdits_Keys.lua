@@ -332,6 +332,12 @@ local defaultKeyMappings = {
   cut                 = { name = 'Cut Area',                            baseKey = 'x', modifiers = 2 },
   copy                = { name = 'Copy Area',                           baseKey = 'c', modifiers = 2 },
   paste               = { name = 'Paste Area',                          baseKey = 'v', modifiers = 2, global = true },
+  shiftleft           = { name = 'Shift Area Left',                     baseKey = 'left' },
+  shiftright          = { name = 'Shift Area Right',                    baseKey = 'right' },
+  shiftleftgrid       = { name = 'Shift Area Left (Grid)',              baseKey = 'left', modifiers = 3 },
+  shiftrightgrid      = { name = 'Shift Area Right (Grid)',             baseKey = 'right', modifiers = 3 },
+  shiftleftgridq      = { name = 'Shift Area Left (Grid, Quantized)',   baseKey = 'left', modifiers = 2 },
+  shiftrightgridq     = { name = 'Shift Area Right (Grid, Quantized)',  baseKey = 'right', modifiers = 2 },
 }
 
 if helper.is_windows then

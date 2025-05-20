@@ -442,6 +442,16 @@ local function handleSavedMappings()
   wantsRightButton = prefsWantsRightButton
 end
 
+local function drawPageTabs()
+  local page = 0
+  if ImGui.BeginTabBar(ctx, 'Page') then
+    if ImGui.BeginTabItem(ctx, 'Key Mappings') then page = 0 ImGui.EndTabItem(ctx) end
+    if ImGui.BeginTabItem(ctx, 'Other Settings') then page = 1 ImGui.EndTabItem(ctx) end
+    ImGui.EndTabBar(ctx)
+  end
+  return page
+end
+
 local function drawKeyMappings()
   ImGui.Text(ctx, 'Key Mappings')
   ImGui.Separator(ctx)
@@ -716,6 +726,7 @@ local function onCrash(err)
   shutdown()
 end
 
+
 local function loop()
   ImGui.SetNextWindowBgAlpha(ctx, 1)
   local visible, open = ImGui.Begin(ctx, 'MIDI Razor Edits (Settings)', true, ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoDocking)
@@ -724,12 +735,18 @@ local function loop()
 
     setup()
 
+    local page = drawPageTabs()
+
+    if page == 0 then
+
     drawKeyMappings()
 
-    ImGui.Separator(ctx)
-    ImGui.Spacing(ctx)
-    ImGui.Separator(ctx)
-    ImGui.Spacing(ctx)
+    -- ImGui.Separator(ctx)
+    -- ImGui.Spacing(ctx)
+    -- ImGui.Separator(ctx)
+    -- ImGui.Spacing(ctx)
+
+    else
 
     drawModMappings()
 
@@ -737,7 +754,6 @@ local function loop()
     ImGui.Spacing(ctx)
     ImGui.Separator(ctx)
     ImGui.Spacing(ctx)
-
 
     drawMiscOptions()
 
@@ -747,6 +763,8 @@ local function loop()
     ImGui.Spacing(ctx)
 
     drawWidgetMappings()
+
+    end
 
     ImGui.Spacing(ctx)
     ImGui.Separator(ctx)

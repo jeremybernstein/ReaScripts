@@ -103,6 +103,7 @@ local actionPositionOperationEntries = {
   { notation = ':scaleoffset', label = 'Scale + Offset (rel.)', text = 'MultiplyPosition(event, {tgt}, {param1}, {param2}, \'{param3}\', _context)', terms = 3, split = {{}, { menu = true }, {}}, param3 = p3.positionScaleOffsetParam3Tab },
   { notation = ':toitemstart', label = 'Move to Item Start', text = 'MoveToItemPos(event, {tgt}, 0, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
   { notation = ':toitemend', label = 'Move to Item End', text = 'MoveToItemPos(event, {tgt}, 1, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
+  { notation = ':rampscale', label = 'Ramped Scale', text = 'ScaledRampOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, {param3}, _context)', terms = 3, split = {{ floateditor = true, default = 1., range = { 0., nil } }, { menu = true }, { floateditor = true, default = 1., range = { 0., nil } }}, literal = true, freeterm = true, param3 = p3.lineParam3Tab },
 }
 
 local actionPositionMultParam2Menu = {
@@ -123,6 +124,7 @@ local actionLengthOperationEntries = {
   { notation = ':tocursor', label = 'Move to Cursor', text = 'MoveLengthToCursor(event, {tgt})', terms = 0 },
   { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, TimeFormatToSeconds(\'{param2}\', event.projtime, _context, true))', terms = 2, split = {{ floateditor = true, default = 1. }, { timedur = true }}, range = {}, timearg = true },
   { notation = ':toitemend', label = 'Extend to Item End', text = 'MoveToItemPos(event, {tgt}, 2, \'{param1}\', _context)', terms = 1, timedur = true, timearg = true },
+  { notation = ':rampscale', label = 'Ramped Scale', text = 'ScaledRampOverSelection(event, {tgt}, event.projtime, {param1}, {param2}, {param3}, _context)', terms = 3, split = {{ floateditor = true, default = 1., range = { 0., nil } }, { menu = true }, { floateditor = true, default = 1., range = { 0., nil } }}, literal = true, freeterm = true, param3 = p3.lineParam3Tab },
 }
 
 local function channelMod(op)

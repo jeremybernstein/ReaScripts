@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.5
+-- @version 1.0.14-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - new version of MIDIUtils to improve extents fixing of looped items
+--   - add 'Ramped Scale' action for position and length to allow linear/exp/log/S-curve-based processing
+--   - new preference 'Focus MIDI Editor after Operation' to auto-focus the ME after application (requires SWS)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.5'
+local versionStr = '1.0.14-beta.6'
 
 local r = reaper
 
@@ -112,6 +113,7 @@ local scriptPrefix_Empty = '<no prefix>'
 local presetExt = '.tfmrPreset'
 local presetSubPath
 local restoreLastState = false
+local focusWhenDone = false
 
 local CANONICAL_FONTSIZE_LARGE = 13
 local FONTSIZE_LARGE = 13
@@ -555,6 +557,11 @@ local function handleExtState()
         end
       end
     end
+  end
+
+  if r.HasExtState(scriptID, 'focusWhenDone') then
+    state = r.GetExtState(scriptID, 'focusWhenDone')
+    focusWhenDone = tonumber(state) == 1 and true or false
   end
 end
 
@@ -1026,6 +1033,24 @@ local function windowFn()
         end
         -- ImGui.CloseCurrentPopup(ctx) -- feels weird if it closes, feels weird if it doesn't
       end
+
+      if canReveal then
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+
+        ImGui.Spacing(ctx)
+        rv, v = ImGui.Checkbox(ctx, 'Focus MIDI Editor after Operation', focusWhenDone)
+        if rv then
+          focusWhenDone = v
+          r.SetExtState(scriptID, 'focusWhenDone', v and '1' or '0', true)
+          if focusWhenDone then
+            doFindUpdate()
+          else
+            r.DeleteExtState(scriptID, 'focusWhenDone', true)
+          end
+        end
+      end
+
       ImGui.EndPopup(ctx)
     end
     ImGui.PopStyleColor(ctx)
@@ -1586,8 +1611,8 @@ local function windowFn()
         or condOp.percent or (condOp.split and condOp.split[index].percent) -- hack
       then
         ImGui.TextColored(ctx, 0xFFFFFF7F, '%')
-      elseif range and range[1] and range[2] then
-        ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. range[1] .. ' - ' .. range[2] .. ')')
+      else
+        ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. (range[1] or '...') .. ' - ' .. (range[2] or '...') .. ')')
       end
       ImGui.PopFont(ctx)
     end
@@ -3095,7 +3120,9 @@ local function windowFn()
         end)
 
       local isLineOp = currentActionOperation.param3
-        and (currentActionOperation.notation == ':line' or currentActionOperation.notation == ':relline')
+        and (currentActionOperation.notation == ':line'
+          or currentActionOperation.notation == ':relline'
+          or currentActionOperation.notation == ':rampscale')
 
       createPopup(currentRow, 'param1Menu', param1Entries, currentRow.params[1].menuEntry, function(i, isSpecial)
           if not isSpecial then
@@ -3163,6 +3190,9 @@ local function windowFn()
   ImGui.Button(ctx, 'Apply', DEFAULT_ITEM_WIDTH / 1.25)
   if ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
     tx.processAction(true)
+    if canReveal and focusWhenDone then
+      r.SN_FocusMIDIEditor()
+    end
   end
 
   ImGui.SameLine(ctx)

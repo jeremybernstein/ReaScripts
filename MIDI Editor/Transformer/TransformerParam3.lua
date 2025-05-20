@@ -213,13 +213,13 @@ local lineParam3Tab = {
     paramProc = param3LineParamProc,
 }
 
-local function makeParam3Line(row)
+local function makeParam3Line(row, isRampScale)
   row.params[1].menuEntry = 1 -- unused
   row.params[2].menuEntry = 1 -- this is the curve type menu
-  row.params[1].textEditorStr = '0'
+  row.params[1].textEditorStr = isRampScale and '1.' or '0'
   row.params[3] = tg.ParamInfo()
   for k, v in pairs(lineParam3Tab) do row.params[3][k] = v end
-  row.params[3].textEditorStr = '0'
+  row.params[3].textEditorStr = isRampScale and '1.' or '0'
   row.params[3].mod = 2. -- curve type mod, a param4
   row.params[3].modrange = { 0, nil }
 end

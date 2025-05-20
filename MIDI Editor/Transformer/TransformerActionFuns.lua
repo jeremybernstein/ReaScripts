@@ -268,7 +268,7 @@ local function threshold(event, property, p1, p2, p3)
   return setValue(event, property, newval)
 end
 
-local function linearChangeOverSelection(event, property, projTime, p1, type, p2, mult, context)
+local function getLerpVal(projTime, p1, type, p2, mult, context)
   local firstTime = context.firstTime
   local lastTime = context.lastTime
 
@@ -289,6 +289,14 @@ local function linearChangeOverSelection(event, property, projTime, p1, type, p2
       scalePos = ((mult - 1) * ((2 * linearPos) - 1)) / (2 * ((4 * mult) * math.abs(linearPos - 0.5) - mult - 1)) + 0.5
     end
     newval = ((p2 - p1) * scalePos) + p1
+    return newval
+  end
+  return nil
+end
+
+local function linearChangeOverSelection(event, property, projTime, p1, type, p2, mult, context)
+  local newval = getLerpVal(projTime, p1, type, p2, mult, context)
+  if newval then
     return setValue(event, property, newval)
   end
   return setValue(event, property, 0)
@@ -415,6 +423,18 @@ local function multiplyPosition(event, property, param, relative, offset, contex
   return scaledPosition
 end
 
+local function scaledRampOverSelection(event, property, projTime, p1, type, p2, mult, context)
+  local newval = getLerpVal(projTime, p1, type, p2, mult, context)
+  if newval then
+    if property == 'projtime' then
+      return multiplyPosition(event, property, newval, 1, nil, context)
+    else
+      return operateEvent1(event, property, adefs.OP_MULT, newval)
+    end
+  end
+  return event[property]
+end
+
 ActionFuns.setMusicalLength = setMusicalLength
 ActionFuns.quantizeMusicalPosition = quantizeMusicalPosition
 ActionFuns.quantizeMusicalLength = quantizeMusicalLength
@@ -428,6 +448,7 @@ ActionFuns.clampValue = clampValue
 ActionFuns.quantizeTo = quantizeTo
 ActionFuns.mirror = mirror
 ActionFuns.linearChangeOverSelection = linearChangeOverSelection
+ActionFuns.scaledRampOverSelection = scaledRampOverSelection
 ActionFuns.addLength = addLength
 ActionFuns.moveToCursor = moveToCursor
 ActionFuns.moveLengthToCursor = moveLengthToCursor

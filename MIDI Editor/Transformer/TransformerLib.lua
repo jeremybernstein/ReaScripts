@@ -1087,6 +1087,7 @@ context.QuantizeTo = afuns.quantizeTo
 context.Mirror = afuns.mirror
 context.Threshold = afuns.threshold
 context.LinearChangeOverSelection = afuns.linearChangeOverSelection
+context.ScaledRampOverSelection = afuns.scaledRampOverSelection
 context.ClampValue = afuns.clampValue
 context.AddLength = afuns.addLength
 context.MoveToCursor = afuns.moveToCursor
@@ -1728,7 +1729,10 @@ local function actionTabsFromTarget(row)
 
   local opnota = operation.notation
 
-  if opnota == ':line' or opnota == ':relline' then -- param3 operation
+  if opnota == ':line'
+    or opnota == ':relline'
+    or opnota == ':rampscale'
+  then -- param3 operation
     param1Tab = { }
     param2Tab = adefs.actionLineParam2Entries
   elseif notation == '$position' then
@@ -2989,6 +2993,7 @@ local function setRowParam(row, index, paramType, editorType, strVal, range, lit
   local isMetricOrMusical = (paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL)
   local isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
   local isBitField = editorType == gdefs.EDITOR_TYPE_BITFIELD
+  -- here is where range is ensured after text entry
   row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or tg.ensureNumString(strVal, range)
   if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
     row.params[index].percentVal = nil
@@ -3233,10 +3238,15 @@ TransformerLib.makeDefaultEveryN = evndefs.makeDefaultEveryN
 TransformerLib.makeDefaultNewMIDIEvent = nmedefs.makeDefaultNewMIDIEvent
 TransformerLib.makeParam3 = function(row)
   local _, _, _, target, operation = actionTabsFromTarget(row)
-  if target.notation == '$position' and operation.notation == ':scaleoffset' then
+  if target.notation == '$position'
+    and operation.notation == ':scaleoffset'
+  then
     p3.makeParam3PositionScaleOffset(row)
-  elseif operation.notation == ':line' or operation.notation == ':relline' then
-    p3.makeParam3Line(row)
+  elseif operation.notation == ':line'
+    or operation.notation == ':relline'
+    or operation.notation == ':rampscale'
+  then
+    p3.makeParam3Line(row, operation.notation == ':rampscale')
   elseif operation.notation == ':thresh' then
     p3.makeParam3Thresh(row, target)
   end

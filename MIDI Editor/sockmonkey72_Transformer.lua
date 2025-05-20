@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.6
+-- @version 1.0.14-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'Ramped Scale' action for position and length to allow linear/exp/log/S-curve-based processing
---   - new preference 'Focus MIDI Editor after Operation' to auto-focus the ME after application (requires SWS)
+--   - focus MIDI Editor pref also applies to cmd-enter trigger of 'Apply'
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.6'
+local versionStr = '1.0.14-beta.7'
 
 local r = reaper
 
@@ -817,6 +816,9 @@ local function handleKeys(handledEscape)
     elseif ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
       handledKey = true
       tx.processAction(true)
+      if canReveal and focusWhenDone then
+        r.SN_FocusMIDIEditor()
+      end
     end
   end
 

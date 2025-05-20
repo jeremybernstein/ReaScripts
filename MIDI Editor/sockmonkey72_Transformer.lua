@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.7
+-- @version 1.0.14-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - focus MIDI Editor pref also applies to cmd-enter trigger of 'Apply'
+--   - add 'floor' and 'ceil' variants for Round/Quantize operations (in musical params menu for quantize ops)
+--   - fix crasher/typo when setting triplet musical flag
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +20,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.7'
+local versionStr = '1.0.14-beta.8'
 
 local r = reaper
 
@@ -374,6 +375,7 @@ local function setupRowFormat(row, condOpTab)
     data.metricLastBarRestart = metricLastBarRestart
     tx.makeDefaultMetricGrid(row, data)
     if row.mg then row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[1].showswing) end
+    if row.mg then row.mg.showround = condOp.showround or (condOp.split and condOp.split[1].showround) end
   elseif isEveryN then
     tx.makeDefaultEveryN(row)
   elseif isNewMIDIEvent then
@@ -1695,6 +1697,9 @@ local function windowFn()
           elseif mgMods == gdefs.MG_GRID_DOTTED then label = label .. '.'
           elseif mgMods == gdefs.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
           end
+          if row.mg.roundmode == 'floor' then label = label .. ' (floor)'
+          elseif row.mg.roundmode == 'ceil' then label = label .. ' (ceil)'
+          end
         end
         ImGui.Button(ctx, label)
         if canOpen and ImGui.IsItemHovered(ctx) and ImGui.IsMouseClicked(ctx, 0) then
@@ -1802,25 +1807,26 @@ local function windowFn()
     local tripVal = not useGrid and mgMods == gdefs.MG_GRID_TRIPLET or false
     local swingVal = not useGrid and mgMods == gdefs.MG_GRID_SWING or false
     local showSwing = mg.showswing
+    local showRound = mg.showround
 
     if useGrid then ImGui.BeginDisabled(ctx) end
     local rv, sel = ImGui.Checkbox(ctx, 'Dotted', dotVal)
     if rv then
       newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_DOTTED or gdefs.MG_GRID_STRAIGHT)
-      fun(1, true)
+      doActionUpdate()
     end
 
     rv, sel = ImGui.Checkbox(ctx, 'Triplet', tripVal)
     if rv then
-      newMgMods = tx.setFindScopeFlagsetMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
-      fun(2, true)
+      newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
+      doActionUpdate()
     end
 
     if showSwing then
       rv, sel = ImGui.Checkbox(ctx, 'Swing', swingVal)
       if rv then
         newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_SWING or gdefs.MG_GRID_STRAIGHT)
-        fun(4, true)
+      doActionUpdate()
       end
 
       ImGui.SameLine(ctx)
@@ -1846,6 +1852,7 @@ local function windowFn()
           end
           mgReaSwing = newMgReaSwing
         end
+        doActionUpdate()
       end
       ImGui.SameLine(ctx)
       ImGui.Text(ctx, ']')
@@ -1858,6 +1865,22 @@ local function windowFn()
       end
     end
 
+    if showRound then
+      ImGui.Separator(ctx)
+      if ImGui.RadioButton(ctx, 'Round', not mg.roundmode or mg.roundmode == 'round') then
+        mg.roundmode = 'round'
+        doActionUpdate()
+      end
+      if ImGui.RadioButton(ctx, 'Round Down', mg.roundmode == 'floor') then
+        mg.roundmode = 'floor'
+        doActionUpdate()
+      end
+      if ImGui.RadioButton(ctx, 'Round Up', mg.roundmode == 'ceil') then
+        mg.roundmode = 'ceil'
+        doActionUpdate()
+      end
+    end
+
     if useGrid then ImGui.EndDisabled(ctx) end
 
     if addMetric then
@@ -1865,7 +1888,7 @@ local function windowFn()
       rv, sel = ImGui.Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
       if rv then
         mg.wantsBarRestart = sel
-        fun(3, true)
+        doActionUpdate()
       end
     end
 
@@ -1879,14 +1902,14 @@ local function windowFn()
       rv, tbuf = ImGui.InputDouble(ctx, 'Pre', mg.preSlopPercent, nil, nil, '%0.2f')
       if kbdEntryIsCompleted(rv) then
         mg.preSlopPercent = tbuf
-        fun(4, true)
+        doActionUpdate()
       end
       ImGui.SameLine(ctx)
       ImGui.SetNextItemWidth(ctx, scaled(50))
       rv, tbuf = ImGui.InputDouble(ctx, 'Post', mg.postSlopPercent, nil, nil, '%0.2f')
       if kbdEntryIsCompleted(rv) then
         mg.postSlopPercent = tbuf
-        fun(5, true)
+        doActionUpdate()
       end
     end
   end

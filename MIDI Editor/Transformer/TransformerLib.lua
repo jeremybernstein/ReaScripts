@@ -807,6 +807,7 @@ local function handleMacroParam(row, target, condOp, paramTab, paramStr, index)
         if paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL then
           row.mg = mgdefs.parseMetricGridNotation(paramStr:sub(pb))
           row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[index].showswing)
+          row.mg.showround = condOp.showround or (condOp.split and condOp.split[index].showround)
         end
         break
       end
@@ -1750,8 +1751,8 @@ local function actionTabsFromTarget(row)
     end
   elseif notation == '$length' then
     if opnota == ':quantmusical'
-    or opnota == ':roundlenmusical'
-    or opnota == ':roundendmusical'
+      or opnota == ':roundlenmusical'
+      or opnota == ':roundendmusical'
     then
       param1Tab = fdefs.findMusicalParam1Entries
     end

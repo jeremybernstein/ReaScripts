@@ -51,7 +51,8 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, oldppqpos)
 
   local ppqinmeasure = oldppqpos - som -- get the position from the start of the measure
-  local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
+  local roundval = (mgParams.roundmode == 'floor') and 0 or (mgParams.roundmode == 'ceil') and 0.9999 or 0.5
+  local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + roundval))
 
   local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
 
@@ -96,7 +97,8 @@ local function quantizeMusicalLength(event, take, PPQ, mgParams)
   local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
   local ppqlen = endppqpos - ppqpos
 
-  local newppqlen = (gridUnit * math.floor((ppqlen / gridUnit) + 0.5))
+  local roundval = (mgParams.roundmode == 'floor') and 0 or (mgParams.roundmode == 'ceil') and 0.9999 or 0.5
+  local newppqlen = (gridUnit * math.floor((ppqlen / gridUnit) + roundval))
   if newppqlen == 0 then newppqlen = gridUnit end
 
   if strength and strength ~= 100 then
@@ -130,7 +132,8 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
 
   local ppqinmeasure = endppqpos - som -- get the position from the start of the measure
 
-  local quant = (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
+  local roundval = (mgParams.roundmode == 'floor') and 0 or (mgParams.roundmode == 'ceil') and 0.9999 or 0.5
+  local quant = (gridUnit * math.floor((ppqinmeasure / gridUnit) + roundval))
   local newendppqpos = som + quant
   local newppqlen = newendppqpos - ppqpos
   if newppqlen < ppqlen * 0.5 then
@@ -249,10 +252,10 @@ local function clampValue(event, property, low, high)
   return setValue(event, property, newval)
 end
 
-local function quantizeTo(event, property, quant)
+local function quantizeTo(event, property, quant, floor)
   local oldval = Shared.getValue(event, property)
   if quant == 0 then return oldval end
-  local newval = quant * math.floor((oldval / quant) + 0.5)
+  local newval = quant * math.floor((oldval / quant) + (floor and 0 or 0.5))
   return setValue(event, property, newval)
 end
 

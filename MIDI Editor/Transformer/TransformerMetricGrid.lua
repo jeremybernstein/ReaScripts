@@ -32,7 +32,10 @@ local function generateMetricGridNotation(row)
   mgStr = mgStr .. (row.mg.wantsBarRestart and 'b' or '-')
   mgStr = mgStr .. string.format('|%0.2f|%0.2f', row.mg.preSlopPercent, row.mg.postSlopPercent)
   if mgMods == gdefs.MG_GRID_SWING then
-      mgStr = mgStr .. '|sw(' .. string.format('%0.2f', row.mg.swing) .. ')'
+    mgStr = mgStr .. '|sw(' .. string.format('%0.2f', row.mg.swing) .. ')'
+  end
+  if row.mg.roundmode and row.mg.roundmode ~= 'round' then
+    mgStr = mgStr .. '|rd(' .. row.mg.roundmode .. ')'
   end
   return mgStr
 end
@@ -51,20 +54,24 @@ end
 local function parseMetricGridNotation(str)
   local mg = {}
 
-  local fs, fe, mod, rst, pre, post, swing = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)|sw%((.-)%)$')
+  local fs, fe, mod, rst, pre, post, swing = string.find(str, '|([tdrm%-])([b%-])|([^|]+)|([^|]+)|sw%((.-)%)')
   if not (fs and fe) then
-    fs, fe, mod, rst, pre, post = string.find(str, '|([tdrm%-])([b-])|(.-)|(.-)$')
+    fs, fe, mod, rst, pre, post = string.find(str, '|([tdrm%-])([b%-])|([^|]+)|([^|]+).-$')
   end
   if fs and fe then
+    local _, _, opt = string.find(str, '|rd%((.-)%)')
+    local roundmode = opt == 'floor' and 'floor' or opt == 'ceil' and 'ceil' or 'round'
     mg.modifiers =
       mod == 'r' and (gdefs.MG_GRID_SWING | gdefs.MG_GRID_SWING_REAPER) -- reaper
       or mod == 'm' and gdefs.MG_GRID_SWING -- mpc
       or mod == 't' and gdefs.MG_GRID_TRIPLET
       or mod == 'd' and gdefs.MG_GRID_DOTTED
       or gdefs.MG_GRID_STRAIGHT
+
     mg.wantsBarRestart = rst == 'b' and true or false
     mg.preSlopPercent = tonumber(pre)
     mg.postSlopPercent = tonumber(post)
+    mg.roundmode = roundmode
 
     local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
     mg.swing = swing and tonumber(swing)

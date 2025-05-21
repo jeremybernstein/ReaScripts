@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.8
+-- @version 1.0.14-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add 'floor' and 'ceil' variants for Round/Quantize operations (in musical params menu for quantize ops)
---   - fix crasher/typo when setting triplet musical flag
+--   - fix Random generation so that it includes the 'max' parameter
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -20,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.8'
+local versionStr = '1.0.14-beta.9'
 
 local r = reaper
 

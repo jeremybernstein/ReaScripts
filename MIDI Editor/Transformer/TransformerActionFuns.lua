@@ -241,7 +241,8 @@ local function randomValue(event, property, min, max, single)
 
   local rnd = single and single or math.random()
 
-  newval = (rnd * (max - min)) + min
+  newval = (rnd * ((max - min) + 1)) + min
+  newval = newval < min and min or newval > max and max or newval
   if math.type(min) == 'integer' and math.type(max) == 'integer' then newval = math.floor(newval) end
   return setValue(event, property, newval)
 end

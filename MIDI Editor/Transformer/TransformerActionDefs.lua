@@ -137,11 +137,32 @@ local function channelMod(op)
   return newop
 end
 
+local function channelModRerange(tab, ranges)
+  local newTab = tg.tableCopy(channelMod(tab))
+  newTab.preEdit = function(val)
+    local numval = tonumber(val)
+    if numval then
+      return tostring(numval + 1)
+    end
+    return val
+  end
+  newTab.postEdit = function(val)
+    local numval = tonumber(val)
+    if numval then
+      return tostring(numval - 1)
+    end
+    return val
+  end
+  newTab.rangelabel = ranges or { '1 - 16', '1 - 16' }
+  return newTab
+end
+
 local actionChannelOperationEntries = {
   channelMod(actionOperationPlus), channelMod(actionOperationMinus),
   actionOperationFixed,
-  channelMod(actionOperationRandom), channelMod(actionOperationRelRandom), channelMod(actionOperationRelRandomSingle),
-  channelMod(actionOperationLine), channelMod(actionOperationRelLine)
+  channelModRerange(actionOperationRandom, nil),
+  channelMod(actionOperationRelRandom), channelMod(actionOperationRelRandomSingle),
+  channelModRerange(actionOperationLine, { '1 - 16', nil, '1 - 16' }), channelMod(actionOperationRelLine)
 }
 local actionTypeOperationEntries = {
   actionOperationFixed

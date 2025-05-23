@@ -1156,16 +1156,16 @@ local function doProcessParams(row, target, condOp, paramType, paramTab, index, 
     if override == gdefs.EDITOR_TYPE_BITFIELD then
       paramVal = row.params[index].textEditorStr
     elseif (override == gdefs.EDITOR_TYPE_PERCENT or override == gdefs.EDITOR_TYPE_PERCENT_BIPOLAR) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row.params[index].textEditorStr)):gsub("%.?0+$", "")
+      paramVal = string.format(percentFormat, percentVal and percentVal or tonumber(row.params[index].textEditorStr)):gsub('%.?0+$', '')
     elseif (override == gdefs.EDITOR_TYPE_PITCHBEND or override == gdefs.EDITOR_TYPE_PITCHBEND_BIPOLAR) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) + (1 << 13)) / ((1 << 14) - 1) * 100):gsub("%.?0+$", "")
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) + (1 << 13)) / ((1 << 14) - 1) * 100):gsub('%.?0+$', '')
     elseif ((override == gdefs.EDITOR_TYPE_14BIT or override == gdefs.EDITOR_TYPE_14BIT_BIPOLAR)) then
-      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 14) - 1)) * 100):gsub("%.?0+$", "")
+      paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 14) - 1)) * 100):gsub('%.?0+$', '')
     elseif ((override == gdefs.EDITOR_TYPE_7BIT
         or override == gdefs.EDITOR_TYPE_7BIT_NOZERO
         or override == gdefs.EDITOR_TYPE_7BIT_BIPOLAR))
       then
-        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 7) - 1)) * 100):gsub("%.?0+$", "")
+        paramVal = string.format(percentFormat, percentVal and percentVal or (tonumber(row.params[index].textEditorStr) / ((1 << 7) - 1)) * 100):gsub('%.?0+$', '')
     else
       mu.post('unknown override: ' .. override)
     end
@@ -2994,7 +2994,7 @@ local function setRowParam(row, index, paramType, editorType, strVal, range, lit
   local isMetricOrMusical = (paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL)
   local isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
   local isBitField = editorType == gdefs.EDITOR_TYPE_BITFIELD
-  -- here is where range is ensured after text entry
+  -- here is where range is enforced after text entry (in ensureNumString)
   row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or tg.ensureNumString(strVal, range)
   if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
     row.params[index].percentVal = nil

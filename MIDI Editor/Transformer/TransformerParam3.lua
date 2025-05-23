@@ -192,7 +192,14 @@ local function param3LineMenuLabel(row, target, condOp, newHasTable)
     end
   end
 
-  return row.params[1].textEditorStr .. (note1 and ' [' .. note1 .. ']' or '') .. ' / ' .. row.params[3].textEditorStr .. (note3 and ' [' .. note3 .. ']' or '')
+  local text1 = row.params[1].textEditorStr
+  local text3 = row.params[3].textEditorStr
+  if condOp.preEdit then
+    text1 = condOp.preEdit(text1)
+    text3 = condOp.preEdit(text3)
+  end
+
+  return text1 .. (note1 and ' [' .. note1 .. ']' or '') .. ' / ' .. text3 .. (note3 and ' [' .. note3 .. ']' or '')
 end
 
 local function param3LineFunArg(row, target, condOp, param3Term)

@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.9
+-- @version 1.0.14-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix Random generation so that it includes the 'max' parameter
+--   - channel actions rename range 0-15 -> 1-16 where appropriate (note that 'mathy' stuff like relative changes still uses 0-15, which seems correct (can't go below 1, right?))
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.9'
+local versionStr = '1.0.14-beta.10'
 
 local r = reaper
 
@@ -1567,14 +1567,21 @@ local function windowFn()
     end
 
     if isNote then ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75) end
+    local editVal = row.params[index].textEditorStr
+    if condOp.preEdit then
+      editVal = condOp.preEdit(editVal)
+    end
     local retval, buf = ImGui.InputText(ctx, '##' .. 'param' .. index .. 'Edit',
-      row.params[index].textEditorStr,
+      editVal,
       flags.isFloat and floatFlags or ImGui.InputTextFlags_CallbackCharFilter,
       flags.isFloat and nil or isNote and numbersOrNoteNameCallback or flags.isBitField and bitFieldCallback or numbersOnlyCallback)
 
     if kbdEntryIsCompleted(retval) then
       if isNote then
         buf = rewriteNoteName(buf)
+      end
+      if condOp.postEdit then
+        buf = condOp.postEdit(buf)
       end
       tx.setRowParam(row, index, paramType, editorType, buf, range, condOp.literal and true or false)
       procFn()

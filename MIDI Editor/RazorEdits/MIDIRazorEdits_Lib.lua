@@ -13,6 +13,8 @@
 local r = reaper
 local Lib = {}
 
+local RCW_VERSION = '1.0.0-alpha.2'
+
 local DEBUG_UNDO = false
 local sectionID, commandID
 local hasSWS = true
@@ -62,6 +64,25 @@ local lice = require 'MIDIRazorEdits_LICE'
 local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
 local helper = require 'MIDIRazorEdits_Helper'
+
+if helper.is_windows then
+  local needsupdate = false
+  if not r.APIExists('rcw_GetVersion') then
+    if r.APIExists('CreateChildWindowForHWND') then
+      needsupdate = true
+    else
+      r.ShowConsoleMsg('For best results, please install the \'childwindow\' extension\nvia ReaPack (also from sockmonkey72).\n')
+    end
+  else
+    local rcwVersion = r.rcw_GetVersion()
+    if rcwVersion ~= RCW_VERSION then
+      needsupdate = true
+    end
+  end
+  if needsupdate then
+    r.ShowConsoleMsg('Please update to the latest version of the \'childwindow\' extension.\nThe older version has been disabled for this run.\n')
+  end
+end
 
 local Area = classes.Area
 local Point = classes.Point

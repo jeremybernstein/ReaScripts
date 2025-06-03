@@ -100,19 +100,30 @@ local function prepMidiview(midiview)
 end
 
 local numBitmaps = 0 -- print this out for diagnostics if it wets your whistle
+local childHWND
 
 local function destroyBitmap(bitmap)
   if bitmap then
-    r.JS_LICE_DestroyBitmap(bitmap)
+    if childHWND then
+      r.rcw_DestroyBitmap(bitmap)
+    else
+      r.JS_LICE_DestroyBitmap(bitmap)
+    end
     numBitmaps = numBitmaps - 1
     return true
   end
   return false
 end
 
-local childHWND
+local function createBitmap(w, h, upsizing)
+  if childHWND then
+    return r.rcw_CreateBitmap(w, h)
+  else
+    return r.JS_LICE_CreateBitmap(true, w + (upsizing and w or 0), h + (upsizing and h or 0)) -- when upsizing, make it double-the size so that we don't have to resize so often
+  end
+end
 
-local function createBitmap(midiview, windRect)
+local function createMidiViewBitmap(midiview, windRect)
   local hwnd = childHWND and childHWND or midiview
   local integrated = not helper.is_windows or hwnd == childHWND
 
@@ -363,8 +374,8 @@ local function startIntercepts()
       r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
     end
   end
-  if helper.is_windows and r.APIExists('CreateChildWindowForHWND') then
-    childHWND = r.CreateChildWindowForHWND(glob.liceData.midiview, "*MRE")
+  if helper.is_windows and r.APIExists('rcw_CreateCompositingOverlayForHWND') then
+    childHWND = r.rcw_CreateCompositingOverlayForHWND(glob.liceData.midiview, "*MRE")
   end
   startAppIntercepts()
 end
@@ -380,10 +391,10 @@ local function endIntercepts()
       intercept.timestamp = 0
     end
     glob.setCursor(glob.normal_cursor)
-    if helper.is_windows and r.APIExists('DestroyChildWindow') and childHWND then
-      r.DestroyChildWindow(childHWND)
+    if helper.is_windows and r.APIExists('rcw_DestroyCompositingOverlay') and childHWND then
+      r.rcw_DestroyCompositingOverlay(childHWND)
       childHWND = nil
-    end
+    end  
   end
   glob.prevCursor = -1
 end
@@ -571,6 +582,8 @@ local function peekIntercepts(m_x, m_y)
   end
 end
 
+local composite
+
 local function createFrameBitmaps(midiview, windRect)
   local bitmaps = {}
 
@@ -585,26 +598,26 @@ local function createFrameBitmaps(midiview, windRect)
   if meLanes and next(meLanes) then
     local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
     local w, h = math.floor(windRect:width() + 0.5), math.floor( (bottomPixel - y1) + 0.5)
-    bitmaps.top = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1, true)
+    bitmaps.top = createBitmap(1, 1)
+    composite(hwnd, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
-    bitmaps.bottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, true)
+    bitmaps.bottom = createBitmap(1, 1)
+    composite(hwnd, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
     if meLanes[0] then
       local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
-      bitmaps.middletop = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, true)
+      bitmaps.middletop = createBitmap(1, 1)
+      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, true)
       numBitmaps = numBitmaps + 1
-      bitmaps.middlebottom = r.JS_LICE_CreateBitmap(true, 1, 1)
-      r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, true)
+      bitmaps.middlebottom = createBitmap(1, 1)
+      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, true)
       numBitmaps = numBitmaps + 1
     end
-    bitmaps.left = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, true)
+    bitmaps.left = createBitmap(1, 1)
+    composite(hwnd, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
-    bitmaps.right = r.JS_LICE_CreateBitmap(true, 1, 1)
-    r.JS_Composite(hwnd, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, true)
+    bitmaps.right = createBitmap(1, 1)
+    composite(hwnd, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, true)
     numBitmaps = numBitmaps + 1
 
     if not integrated then
@@ -632,7 +645,10 @@ local function initLice(editor)
   if not glob.meLanes then return end
   if glob.liceData and glob.liceData.editor == editor then
     local windChanged, windRect = prepMidiview(glob.liceData.midiview)
-    if windChanged or not next(glob.liceData.bitmaps) or recompositeInit then
+    if windChanged 
+      or not next(glob.liceData.bitmaps)
+      or recompositeInit 
+    then
       glob.liceData.windRect = windRect
       -- Create new bitmaps
       for _, bitmap in pairs(glob.liceData.bitmaps) do
@@ -641,7 +657,7 @@ local function initLice(editor)
       glob.liceData.bitmaps, glob.liceData.screenRect = createFrameBitmaps(glob.liceData.midiview, windRect)
       if glob.DEBUG_LANES or not MOAR_BITMAPS then
         if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
-        glob.liceData.bitmap = createBitmap(glob.liceData.midiview, windRect)
+        glob.liceData.bitmap = createMidiViewBitmap(glob.liceData.midiview, windRect)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
@@ -655,7 +671,7 @@ local function initLice(editor)
       local bitmaps, screenRect = createFrameBitmaps(midiview, windRect)
       glob.liceData = { editor = editor, midiview = midiview, bitmaps = bitmaps, windRect = windRect, screenRect = screenRect }
       if glob.DEBUG_LANES or not MOAR_BITMAPS then
-        glob.liceData.bitmap = createBitmap(midiview, windRect)
+        glob.liceData.bitmap = createMidiViewBitmap(midiview, windRect)
       end
       glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
@@ -694,7 +710,7 @@ local function shutdownLice()
   glob.setCursor(glob.normal_cursor)
 end
 
-local function convertColorFromNative(col)
+local function convertColorFromNative(col)  
   if helper.is_windows then
     col = (col & 0xFF000000)
         | (col & 0xFF) << 16
@@ -844,20 +860,39 @@ for i = 1, 10 do
   colors[#colors + 1] = (math.random(0, 0xFFFFFF)) + 0xBF000000
 end
 
+composite = function(hwnd, dstX, dstY, dstW, dstH, bitmap, srcX, srcY, srcW, srcH)
+  if childHWND then
+    r.rcw_Composite(hwnd, dstX, dstY, dstW, dstH, bitmap, srcX, srcY, srcW, srcH)
+  else
+    r.JS_Composite(hwnd, dstX, dstY, dstW, dstH, bitmap, srcX, srcY, srcW, srcH, true)
+  end
+end
+
 local function clearBitmap(bitmap, x1, y1, width, height)
-  r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
-  -- if helper.is_windows then
-  --   r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
-  -- else
-  --   r.JS_LICE_Clear(bitmap, 0x00000000)
-  -- end
+  if childHWND then
+    r.rcw_ClearBitmap(bitmap, x1, y1, width, height)
+  else
+    r.JS_LICE_FillRect(bitmap, x1, y1, width, height, 0, 1, 'MUL')
+  end
+end
+
+local function fillRect(bitmap, x1, y1, width, height, color, alpha, mode)
+  if childHWND then
+    r.rcw_DrawRectWithAlpha(bitmap, x1, y1, width, height, color, alpha, true)
+  else
+    r.JS_LICE_FillRect(bitmap, x1, y1, width, height, color, alpha, mode)
+  end
 end
 
 local function frameRect(bitmap, x1, y1, width, height, color, alpha, mode, antialias)
   local scale = pixelScale
 
   while scale > 0 do
-    r.JS_LICE_RoundRect(bitmap, x1, y1, width, height, 0, color, alpha, mode, antialias)
+    if childHWND then
+      r.rcw_DrawRectWithAlpha(bitmap, x1, y1, width, height, color, alpha, false)
+    else
+      r.JS_LICE_RoundRect(bitmap, x1, y1, width, height, 0, color, alpha, mode, antialias)
+    end
     x1 = x1 + 1
     y1 = y1 + 1
     width = width - 2
@@ -870,7 +905,11 @@ local function putPixel(bitmap, xx1, yy1, which, color, alpha, mode)
   local scale = pixelScale
 
   while scale > 0 do
-    r.JS_LICE_PutPixel(bitmap, xx1, yy1, color, alpha, mode)
+    if childHWND then
+      r.rcw_SetPixelWithAlpha(bitmap, xx1, yy1, color, alpha);
+    else
+      r.JS_LICE_PutPixel(bitmap, xx1, yy1, color, alpha, mode)
+    end
 
     xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or 0)
     yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or 0)
@@ -879,25 +918,54 @@ local function putPixel(bitmap, xx1, yy1, which, color, alpha, mode)
   end
 end
 
+local function simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
+  if childHWND then
+    r.rcw_DrawLineWithAlpha(bitmap, xx1, yy1, xx2, yy2, color, alpha, 1)
+  else
+    r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
+  end
+end
+
 local function thickLine(bitmap, xx1, yy1, xx2, yy2, which, color, alpha, mode, antialias)
   local scale = pixelScale
 
   while scale > 0 do
-    r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
-                  color, alpha, mode, antialias)
+    simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
     xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0  or (which == 6) and -1 or 0)
     yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and -1 or (which == 6) and 0  or 0)
     xx2 = xx2 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0  or (which == 6) and -1 or 0)
     yy2 = yy2 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and -1 or (which == 6) and 0  or 0)
-    r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
-                  color, alpha, mode, antialias)
+    simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
     xx1 = xx1 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0 or (which == 6) and 2 or 0)
     yy1 = yy1 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and 2 or (which == 6) and 0 or 0)
     xx2 = xx2 + ((which == 0) and 1 or (which == 2) and -1 or (which == 5) and 0 or (which == 6) and 2 or 0)
     yy2 = yy2 + ((which == 1) and 1 or (which == 3) and -1 or (which == 5) and 2 or (which == 6) and 0 or 0)
-    r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2,
-                  color, alpha, mode, antialias)
+    simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
     scale = scale - 1
+  end
+end
+
+local function fillCircle(bitmap, x, y, radius, color, alpha, mode, antialias)
+  if childHWND then
+    r.rcw_FillCircleWithAlpha(bitmap, x, y, radius, color, alpha)
+  else
+    r.JS_LICE_FillCircle(bitmap, x, y, radius, color, alpha, mode, antialias)
+  end
+end
+
+local function frameCircle(bitmap, x, y, radius, color, alpha, mode, antialias)
+  if childHWND then
+    r.rcw_DrawCircleWithAlpha(bitmap, x, y, radius, color, alpha)
+  else
+    r.JS_LICE_Circle(bitmap, x, y, radius, color, alpha, mode, antialias)
+  end
+end
+
+local function fillTriangle(bitmap, x1, y1, x2, y2, x3, y3, color, alpha, mode)
+  if childHWND then
+    r.rcw_FillTriangleWithAlpha(bitmap, x1, y1, x2, y2, x3, y3, color, alpha)
+  else
+    r.JS_LICE_FillTriangle(bitmap, x1, y1, x2, y2, x3, y3, color, alpha, mode)
   end
 end
 
@@ -952,26 +1020,34 @@ local function drawLice()
         end
 
         if not skip and area.bitmap and (area.modified or recomposite) then
-          local bmWidth, bmHeight = r.JS_LICE_GetWidth(area.bitmap), r.JS_LICE_GetHeight(area.bitmap)
+          local bmWidth, bmHeight 
+          if childHWND then
+            bmWidth, bmHeight = r.rcw_GetBitmapWidth(area.bitmap), r.rcw_GetBitmapHeight(area.bitmap)
+          else
+            bmWidth, bmHeight = r.JS_LICE_GetWidth(area.bitmap), r.JS_LICE_GetHeight(area.bitmap)
+          end
           if w > bmWidth or h > bmHeight then
             upsizing = true
           elseif w < bmWidth / 2 or h < bmHeight / 2 then
             downsizing = true
           end
-          if upsizing or downsizing or recomposite then
+          if recomposite then
+            composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h);
+          elseif upsizing or downsizing then
+            --_P('will destroy', upsizing, downsizing)
             if destroyBitmap(area.bitmap) then
               area.bitmap = nil
             end
           else
             clearBitmap(area.bitmap, 0, 0, bmWidth, bmHeight)
-            r.JS_Composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, true)
+            composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h)
           end
         end
         if not skip and not area.bitmap then
-          area.bitmap = r.JS_LICE_CreateBitmap(true, w + (upsizing and w or 0), h + (upsizing and h or 0)) -- when upsizing, make it double-the size so that we don't have to resize so often
+          area.bitmap = createBitmap(w, h, upsizing)
+          composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h)
           numBitmaps = numBitmaps + 1
           area.modified = true
-          r.JS_Composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h, true)
         end
 
         if not skip and area.modified or area.hovering or area.washovering then
@@ -986,8 +1062,10 @@ local function drawLice()
 
           local function maskTopBottom()
             if helper.is_windows then
-              r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0, 1, 'MUL') -- top
-              r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0, 1, 'MUL') -- bottom
+              clearBitmap(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V)) -- top
+              clearBitmap(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2) -- bottom
+              --r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0, 1, 'MUL') -- top
+              --r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0, 1, 'MUL') -- bottom
             else
               r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0x00FFFFFF, 1, 'COPY') -- top
               r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0x00FFFFFF, 1, 'COPY') -- bottom
@@ -996,9 +1074,8 @@ local function drawLice()
 
           -- LICE has neither line widths nor clipping rects. Meh.
           clearBitmap(area.bitmap, x1 - Lice.EDGE_SLOP, y1 - Lice.EDGE_SLOP, logWidth + (Lice.EDGE_SLOP * 2) + 1, logHeight + (Lice.EDGE_SLOP * 2) + 1)
-
-          r.JS_LICE_FillRect(area.bitmap, x1, y1,
-                             logWidth, logHeight - 1, reFillColor, not integrated and 0.3 or 1, mode)
+          fillRect(area.bitmap, x1, y1,
+                   logWidth, logHeight - 1, reFillColor, helper.is_windows and 0.3 or 1, mode)
           frameRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reBorderColor, alpha, mode, antialias)
           -- if area.onClipboard then
           --   frameRect(area.bitmap, x1 + 3, y1 + 3, logWidth - 6, logHeight - 7, reBorderContrastColor, alpha, mode, antialias)
@@ -1012,22 +1089,22 @@ local function drawLice()
               -- if not area.widgetExtents then area.widgetExtents = Extent.new(0.5, 0.5) end
               local widgetMin, widgetMax = visTop + (visHeight * area.widgetExtents.min),
                                            visTop + (visHeight * area.widgetExtents.max)
-              r.JS_LICE_Line(area.bitmap, x1, widgetMin, x2, widgetMax,
-                             reBorderColor, alpha, mode, antialias)
-              r.JS_LICE_Line(area.bitmap, x1, widgetMin - 1, x2, widgetMax - 1,
-                             reBorderColor, alpha, mode, antialias)
-              r.JS_LICE_Line(area.bitmap, x1, widgetMin + 1, x2, widgetMax + 1,
-                             reBorderColor, alpha, mode, antialias)
-              r.JS_LICE_FillCircle(area.bitmap, x1, widgetMin, Lice.EDGE_SLOP, reBorderColor, alpha, mode, antialias)
-              r.JS_LICE_FillCircle(area.bitmap, x2, widgetMax, Lice.EDGE_SLOP, reBorderColor, alpha, mode, antialias)
-              r.JS_LICE_Circle(area.bitmap, x1 + math.floor((viewRect:width() / 2) + 0.5), math.floor((widgetMin + ((widgetMax - widgetMin) / 2)) + 0.5), Lice.EDGE_SLOP, reBorderColor, alpha, mode, antialias)
+              simpleLine(area.bitmap, x1, widgetMin, x2, widgetMax,
+                         reBorderColor, alpha, mode, antialias)
+              simpleLine(area.bitmap, x1, widgetMin - 1, x2, widgetMax - 1,
+                         reBorderColor, alpha, mode, antialias)
+              simpleLine(area.bitmap, x1, widgetMin + 1, x2, widgetMax + 1,
+                         reBorderColor, alpha, mode, antialias)
+              fillCircle(area.bitmap, x1, widgetMin, Lice.EDGE_SLOP, reBorderColor, alpha, mode, antialias)
+              fillCircle(area.bitmap, x2, widgetMax, Lice.EDGE_SLOP, reBorderColor, alpha, mode, antialias)
+              frameCircle(area.bitmap, x1 + math.floor((viewRect:width() / 2) + 0.5), math.floor((widgetMin + ((widgetMax - widgetMin) / 2)) + 0.5), Lice.EDGE_SLOP, reBorderColor, alpha, mode, antialias)
               area.washovering = true
             else
               if area.hovering.area then
                 frameRect(area.bitmap, x1 + 2, y1 + 2,
-                                    logWidth - 4, logHeight - 5, reBorderColor, alpha, mode, antialias)
+                          logWidth - 4, logHeight - 5, reBorderColor, alpha, mode, antialias)
                 frameRect(area.bitmap, x1 + 1, y1 + 1,
-                                    logWidth - 2, logHeight - 3, reBorderColor, alpha, mode, antialias)
+                          logWidth - 2, logHeight - 3, reBorderColor, alpha, mode, antialias)
                 -- if ... is held, draw the widget for tilt-scaling
               elseif area.hovering.left then
                 thickLine(area.bitmap, x1, y1, x1, y2, 0, reBorderColor, alpha, mode, antialias)
@@ -1044,8 +1121,8 @@ local function drawLice()
                 local middleY = math.floor(y1 + Lice.EDGE_SLOP * 3 + 0.5)
                 local tqslop = math.floor(Lice.EDGE_SLOP * 0.75 + 0.5)
                 if true then -- add to target mode -> this might be in combination with one of the above, so different corner?
-                  r.JS_LICE_Circle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5), reBorderContrastColor, 1., mode, false) --antialias)
-                  r.JS_LICE_Circle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5) + 1, reBorderContrastColor, 1., mode, false) --antialias)
+                  frameCircle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5), reBorderContrastColor, 1., mode, false) --antialias)
+                  frameCircle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5) + 1, reBorderContrastColor, 1., mode, false) --antialias)
                   thickLine(area.bitmap, middleX - tqslop, middleY, middleX + tqslop, middleY, 5, reBorderContrastColor, 1., mode, antialias)
                   thickLine(area.bitmap, middleX, middleY - tqslop, middleX, middleY + tqslop, 6, reBorderContrastColor, 1., mode, antialias)
                 end
@@ -1057,26 +1134,26 @@ local function drawLice()
                 local middleY = math.floor(y1 + Lice.EDGE_SLOP * 3.5 + 0.5)
                 local my2 = math.floor(middleY - Lice.EDGE_SLOP / 1 + 0.5)
                 if glob.horizontalLock then -- horizontal lock scroll mode
-                  r.JS_LICE_FillTriangle(area.bitmap, middleX - (Lice.EDGE_SLOP * 2), my2,
-                                                      middleX - Lice.EDGE_SLOP, my2 - Lice.EDGE_SLOP,
-                                                      middleX - Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
-                                                      reBorderContrastColor, 1., mode)
-                  r.JS_LICE_FillTriangle(area.bitmap, mx2 + (Lice.EDGE_SLOP * 2), my2,
-                                                      mx2 + Lice.EDGE_SLOP, my2 - Lice.EDGE_SLOP,
-                                                      mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
-                                                      reBorderContrastColor, 1., mode)
+                  fillTriangle(area.bitmap, middleX - (Lice.EDGE_SLOP * 2), my2,
+                                            middleX - Lice.EDGE_SLOP, my2 - Lice.EDGE_SLOP,
+                                            middleX - Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                                            reBorderContrastColor, 1., mode)
+                  fillTriangle(area.bitmap, mx2 + (Lice.EDGE_SLOP * 2), my2,
+                                            mx2 + Lice.EDGE_SLOP, my2 - Lice.EDGE_SLOP,
+                                            mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                                            reBorderContrastColor, 1., mode)
                 elseif glob.verticalLock then -- vertical lock scroll mode
                   -- r.JS_LICE_FillRect(area.bitmap, middleX - Lice.EDGE_SLOP * 3, middleY - (Lice.EDGE_SLOP * 3),
                   --                                     Lice.EDGE_SLOP * 6, (Lice.EDGE_SLOP * 6),
                   --                                     ((reBorderColor & 0x00FFFFFF) | 0x88000000), helper.is_windows and 0x88/255 or 1, mode)
-                  r.JS_LICE_FillTriangle(area.bitmap, mx2, middleY - (Lice.EDGE_SLOP * 2),
-                                                      mx2 - Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
-                                                      mx2 + Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
-                                                      reBorderContrastColor, 1., mode)
-                  r.JS_LICE_FillTriangle(area.bitmap, mx2, my2 + (Lice.EDGE_SLOP * 2),
-                                                      mx2 - Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
-                                                      mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
-                                                      reBorderContrastColor, 1., mode)
+                  fillTriangle(area.bitmap, mx2, middleY - (Lice.EDGE_SLOP * 2),
+                               mx2 - Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
+                               mx2 + Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
+                               reBorderContrastColor, 1., mode)
+                  fillTriangle(area.bitmap, mx2, my2 + (Lice.EDGE_SLOP * 2),
+                               mx2 - Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                               mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
+                               reBorderContrastColor, 1., mode)
                 end
               end
 
@@ -1156,7 +1233,7 @@ end
 Lice.recalcConstants = recalcConstants
 Lice.initLice = initLice
 Lice.shutdownLice = shutdownLice
-Lice.createBitmap = createBitmap
+Lice.createBitmap = createMidiViewBitmap
 Lice.destroyBitmap = destroyBitmap
 Lice.attendKeyIntercepts = attendKeyIntercepts
 Lice.ignoreKeyIntercepts = ignoreKeyIntercepts

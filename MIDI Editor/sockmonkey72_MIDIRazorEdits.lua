@@ -1,10 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0-alpha.9
+-- @version 1.1.0-alpha.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
 --   - improvements to childwindow extension on Windows
+--   - clicking on empty space to delete all areas creates undo event
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

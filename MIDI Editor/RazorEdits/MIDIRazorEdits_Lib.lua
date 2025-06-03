@@ -3846,7 +3846,7 @@ local function processMouse()
       muState = nil
 
       if not preserveMod() then
-        clearAreas()
+        doClearAll()
         deferredClearAll = true
       end
 

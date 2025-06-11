@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14-beta.10
+-- @version 1.0.14
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - channel actions rename range 0-15 -> 1-16 where appropriate (note that 'mathy' stuff like relative changes still uses 0-15, which seems correct (can't go below 1, right?))
+--   - version bump (no changes from 1.0.14-beta.10)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*

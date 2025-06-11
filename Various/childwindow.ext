@@ -1,6 +1,16 @@
-@description childwindow (MIDI Razor Edits)
+@description childwindow
 @author sockmonkey72
-@version 1.0.0-alpha.2
+@version 1.0.0
+@about
+  # Layered child windows required for improved performance while running MIDI Razor Edits on Windows
+  The method used by MIDI Razor Edits to draw into the MIDI Editor (the same method
+  used by Julian Sader's scripts like MultiTool) has terrible performance problems
+  on Windows which do not arise on macOS or Linux. The "childwindow" extension provides
+  a composited, layered child window which floats above the MIDI Editor and performs
+  fast, flicker-free drawing for the MIDI Razor Edits script. That's all you need to know,
+  if you're on Windows and using MIDI Razor Edits, please install it.
+@changelog
+  - version bump (no change from 1.0.0-alpha.2)
 @provides
   [win64] childwindow/reaper_childwindow_x64.dll > reaper_childwindow_x64.dll
   [win32] childwindow/reaper_childwindow_w32.dll > reaper_childwindow_w32.dll

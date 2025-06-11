@@ -1,2 +1,5 @@
 .DS_Store
+.envrc
+.direnv
+.vscode
 

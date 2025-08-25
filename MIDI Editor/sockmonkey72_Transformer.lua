@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.0.14
+-- @version 1.0.15
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - version bump (no changes from 1.0.14-beta.10)
+--   - workaround for DearImgui combobox width bug (https://github.com/ocornut/imgui/issues/8203)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.14-beta.10'
+local versionStr = '1.0.15'
 
 local r = reaper
 
@@ -1287,13 +1287,14 @@ local function windowFn()
 
         local rv, selected
 
+        -- ImGui.SelectableFlags_SpanAllColumns works around a bug in DearImGui (https://github.com/ocornut/imgui/issues/8203)
         if source[i].sub then
           if ImGui.BeginMenu(ctx, selectText) then
             generatePresetMenu(source[i].sub, path .. '/' .. selectText, selectText, filter, onlyFolders)
             ImGui.EndMenu(ctx)
           end
         else
-          rv, selected = ImGui.Selectable(ctx, selectText, false)
+          rv, selected = ImGui.Selectable(ctx, selectText, false, ImGui.SelectableFlags_SpanAllColumns)
         end
 
         ImGui.SameLine(ctx)
@@ -1302,8 +1303,7 @@ local function windowFn()
         local _, itemTop = ImGui.GetItemRectMin(ctx)
         local _, itemBottom = ImGui.GetItemRectMax(ctx)
         local inVert = mousePos.y >= itemTop + framePaddingY and mousePos.y <= itemBottom - framePaddingY and mousePos.x >= windowRect.left and mousePos.x <= windowRect.right
-        local srv = ImGui.Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, ImGui.SelectableFlags_AllowOverlap)
-
+        local srv = ImGui.Selectable(ctx, '##popup' .. (lab and lab or '') .. i .. 'Selectable', inVert, ImGui.SelectableFlags_AllowOverlap | ImGui.SelectableFlags_SpanAllColumns)
         ImGui.EndGroup(ctx)
 
         if rv or srv then

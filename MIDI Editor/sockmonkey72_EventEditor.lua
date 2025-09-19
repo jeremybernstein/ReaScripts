@@ -1,5 +1,5 @@
 -- @description MIDI Event Editor
--- @version 1.8
+-- @version 1.9-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Event Editor
@@ -13,7 +13,7 @@
 --   When setting negative absolute values for pitch bend, use --VALUE (instead of -VALUE, which will use the
 --   '-' Math Operator)
 -- @changelog
---   - MIDIUtils update (looped items)
+--   - Fix project measure offset
 -- @provides
 --   EventEditor/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/MIDI/MIDIUtils.lua
 --   [main=midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_EventEditor.lua
@@ -348,6 +348,7 @@ local function windowFn()
   end
 
   local function BBTToPPQ(measures, beats, ticks, relativeppq, nosubtract)
+    local _, beatsOffset = r.get_config_var_string('projmeasoffs')
     local nilmeas = measures == nil
     if not measures then measures = 0 end
     if not beats then beats = 0 end
@@ -358,6 +359,7 @@ local function windowFn()
       beats = beats + relBeats
       ticks = ticks + relTicks
     end
+    measures = measures - (1 + beatsOffset)
     local bbttime
     if nilmeas then
       bbttime = r.TimeMap2_beatsToTime(0, beats) -- have to do it this way, passing nil as 3rd arg is equivalent to 0 and breaks things
@@ -370,10 +372,11 @@ local function windowFn()
   end
 
   function ppqToTime(ppqpos)
+    local _, beatsOffset = r.get_config_var_string('projmeasoffs')
     local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, ppqpos))
     local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
 
-    local measures = posMeasures
+    local measures = posMeasures + (1 + beatsOffset)
     local beats = math.floor(posBeats - posBeatsSOM)
     local beatsmax = math.floor(cml)
     local posBeats_PPQ = BBTToPPQ(nil, math.floor(posBeats))

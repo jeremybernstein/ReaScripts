@@ -1,18 +1,12 @@
 @description Peace_MOD
 @author sockmonkey72
-@version 1.7.5
-@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.5/Peace_MOD.ReaperThemeZip
+@version 1.7.6
+@provides Peace_MOD.ReaperThemeZip https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.6/Peace_MOD.ReaperThemeZip
 @about
   # Peace_MOD
 
   Fork of Peace by Ice Cold Milk
 @changelog
-  Changes since 1.7.4:
+  Changes since 1.7.5:
 
-  * color and font tweaks
-  * cleanup of highlight/armed graphics
-  * add up/down-rank graphics
-  * trackidx refinements for color/font
-  * fix trackidx colors for MCP label bottom layouts
-  * initial addition of transport timebase elements (pre-release)
-  * increase mcp trackidx width
+  * Fix TCP context menu positioning when the REAPER window is not left-aligned with the screen. Contributed by @PhelixK (thank you)!

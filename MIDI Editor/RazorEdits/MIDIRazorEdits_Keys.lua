@@ -338,6 +338,7 @@ local defaultKeyMappings = {
   shiftrightgrid      = { name = 'Shift Area Right (Grid)',             baseKey = 'right', modifiers = 3 },
   shiftleftgridq      = { name = 'Shift Area Left (Grid, Quantized)',   baseKey = 'left', modifiers = 2 },
   shiftrightgridq     = { name = 'Shift Area Right (Grid, Quantized)',  baseKey = 'right', modifiers = 2 },
+  slicerMode          = { name = 'Toggle Slicer Mode',                  baseKey = 'z', global = true },
 }
 
 if helper.is_windows then
@@ -358,6 +359,21 @@ Keys.MODTYPE_STRETCH = 8
 
 Keys.MODTYPE_CLICK_SETCURSOR = 9
 
+-- SLICER
+
+Keys.MODTYPE_SLICER_TRIM = 10
+Keys.MODTYPE_SLICER_END = 11
+Keys.MODTYPE_SLICER_VERTLOCK = 12
+
+-- SLICER
+
+--[[
+  1 = shift
+  2 = ctrl
+  4 = alt
+  8 = super
+--]]
+
 local defaultModMappings = {
   { name = 'Toggle Snap',               modKey = 1 },
 
@@ -372,6 +388,15 @@ local defaultModMappings = {
   { name = 'Stretch Area',              modKey = 4, cat = 'stretch' },
 
   { name = 'Set Cursor',                modKey = 2, cat = 'click' },
+
+-- SLICER
+
+  { name = 'Trim When Slicing',         modKey = 4, cat = 'slicer' },
+  { name = 'Slice Selects/Trims End',   modKey = 8, cat = 'slicer' },
+  { name = 'Slice Vertical Lock',       modKey = 2, cat = 'slicer' }, -- or use vertLockMode? mod is more practical here...
+
+-- SLICER
+
 }
 
 Keys.WIDGET_MODE_PUSHPULL = 1
@@ -391,5 +416,188 @@ Keys.defaultModMappings = defaultModMappings
 Keys.defaultWidgetMappings = defaultWidgetMappings
 Keys.vKeyLookup = vKeyLookup
 
+local keyMappings
+local modMappings
+local widgetMappings
+
+local userKeyMappings
+local userModMappings
+local userWidgetMappings
+
+local function buildNewKeyMap()
+  keyMappings = tableCopy(defaultKeyMappings)
+  if userKeyMappings then
+    for k, map in pairs(userKeyMappings) do
+      if keyMappings[k] then
+        keyMappings[k] = map -- pre-vetted
+      end
+    end
+  end
+  keyMappings.enterKey = { name = 'Enter Key', baseKey = 'enter', vKey = vKeys.VK_ENTER } -- always listen to enter
+
+  for k, map in pairs(keyMappings) do
+    map.vKey = map.vKey or vKeyLookup[map.baseKey]
+  end
+
+  modMappings = tableCopy(defaultModMappings)
+  if userModMappings then
+    for k, map in pairs(userModMappings) do
+      if modMappings[k] and map.modKey then
+        modMappings[k].modKey = map.modKey
+      end
+    end
+  end
+
+  widgetMappings = tableCopy(defaultWidgetMappings)
+  if userWidgetMappings then
+    for k, map in pairs(userWidgetMappings) do
+      if widgetMappings[k] and map.modKey then
+        widgetMappings[k].modKey = map.modKey
+      end
+    end
+  end
+
+  return keyMappings, modMappings, widgetMappings
+end
+
+local function loadKeyMappingState(stateTab)
+  if userKeyMappings then userKeyMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.baseKey then
+        local vKey = vKeyLookup[map.baseKey]
+        if vKey then
+          if not userKeyMappings then userKeyMappings = {} end
+          userKeyMappings[k] = { baseKey = map.baseKey, modifiers = map.modifiers, vKey = vKey } -- need to ensure that there are no duplicate key/modifiers pairs
+        end
+      end
+    end
+  end
+end
+
+local function loadModMappingState(stateTab)
+  if userModMappings then userModMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.modKey then
+        if not userModMappings then userModMappings = {} end
+        userModMappings[k] = { modKey = map.modKey }
+      end
+    end
+  end
+end
+
+local function loadWidgetMappingState(stateTab)
+  if userWidgetMappings then userWidgetMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.modKey then
+        if not userWidgetMappings then userWidgetMappings = {} end
+        userWidgetMappings[k] = { modKey = map.modKey }
+      end
+    end
+  end
+end
+
+Keys.buildNewKeyMap = buildNewKeyMap
+Keys.loadKeyMappingState = loadKeyMappingState
+Keys.loadModMappingState = loadModMappingState
+Keys.loadWidgetMappingState = loadWidgetMappingState
+
+local mod = {}
+
+local currentMods
+local hottestMods
+
+local widgetMods
+local forceSnap
+
+mod.setForceSnap = function(way)
+  forceSnap = way and true or false
+end
+
+mod.getForceSnap = function()
+  return forceSnap
+end
+
+mod.setMods = function(current, hottest)
+  if current then currentMods = current end
+  if hottest then hottestMods = hottest end
+end
+
+mod.setWidgetMods = function(widget)
+  if widget then widgetMods = widget end
+end
+
+mod.getMod = function(someMods, modif)
+  someMods = someMods or currentMods
+  if modif & 1 ~= 0 then return someMods:shift(), 'shift', 'shiftFlag'
+  elseif modif & 2 ~= 0 then return someMods:ctrl(), 'ctrl', 'ctrlFlag'
+  elseif modif & 4 ~= 0 then return someMods:alt(), 'alt', 'altFlag'
+  elseif modif & 8 ~= 0 then return someMods:super(), 'super', 'superFlag'
+  end
+  return false, nil, nil
+end
+
+mod.snapMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_SNAP].modKey)
+end
+
+mod.copyMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_MOVE_COPY].modKey)
+end
+
+mod.overlapMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_MOVE_OVERLAP].modKey)
+end
+_G.overlapMod = overlapMod
+
+mod.singleMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_MOVE_SINGLE].modKey)
+end
+
+mod.fullLaneMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_NEW_FULLLANE].modKey)
+end
+
+mod.preserveMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_NEW_PRESERVE].modKey)
+end
+
+mod.stretchMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_STRETCH].modKey)
+end
+
+mod.onlyAreaMod = function(someMods)
+  someMods = someMods or currentMods
+  return someMods:matchesFlags(modMappings[Keys.MODTYPE_MOVE_ONLYAREA].modKey)
+end
+
+mod.matchesWidgetMod = function(which)
+  which = math.max(1, math.min(4, which))
+  return widgetMods:matchesFlags(widgetMappings[which].modKey)
+end
+
+mod.setCursorMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_CLICK_SETCURSOR].modKey)
+end
+
+-- SLICER
+
+mod.slicerTrimMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_SLICER_TRIM].modKey)
+end
+
+mod.slicerEndMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_SLICER_END].modKey)
+end
+
+mod.slicerVertLockMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_SLICER_VERTLOCK].modKey)
+end
+
+-- SLICER
+
+Keys.mod = mod
 
 return Keys

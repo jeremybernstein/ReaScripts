@@ -123,6 +123,10 @@ function Point:clone()
   return Point.new(self.x, self.y)
 end
 
+function Point:equals(point)
+  return point and self.x == point.x and self.y == point.y
+end
+
 function Point:__tostring()
   return string.format('Point(x=%.2f, y=%.2f)',
                         self.x, self.y)
@@ -313,7 +317,7 @@ end
 local Area = {}
 Area.__index = Area
 
-function Area.newFromRect(tab, completionFn)
+function Area.newFromRect(tab, completionFn, cfArg)
   local self = setmetatable({}, Area)
 
   self.viewRect = tab.viewRect
@@ -326,13 +330,13 @@ function Area.newFromRect(tab, completionFn)
   self.onClipboard = tab.onClipbooard or false
 
   if completionFn then
-    completionFn(self)
+    completionFn(self, cfArg)
   end
 
   return self
 end
 
-function Area.new(tab, completionFn)
+function Area.new(tab, completionFn, cfArg)
   local self = setmetatable({}, Area)
 
   self.ccLane = tab.ccLane
@@ -343,7 +347,7 @@ function Area.new(tab, completionFn)
   self.onClipboard = tab.onClipbooard or false
 
   if completionFn then
-    completionFn(self)
+    completionFn(self, cfArg)
   end
 
   return self

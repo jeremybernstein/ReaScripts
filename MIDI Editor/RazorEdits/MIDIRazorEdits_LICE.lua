@@ -14,6 +14,7 @@ local classes = require 'MIDIRazorEdits_Classes'
 local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
 local helper = require 'MIDIRazorEdits_Helper'
+local slicer = require 'MIDIRazorEdits_Slicer'
 
 local Point = classes.Point
 local Rect = classes.Rect
@@ -163,43 +164,8 @@ local widgetMappings
 
 local keyCt = 0
 
-local userKeyMappings
-local userModMappings
-local userWidgetMappings
-
 local function buildNewKeyMap()
-  keyMappings = tableCopy(keys.defaultKeyMappings)
-  if userKeyMappings then
-    for k, map in pairs(userKeyMappings) do
-      if keyMappings[k] then
-        keyMappings[k] = map -- pre-vetted
-      end
-    end
-  end
-  keyMappings.enterKey = { name = 'Enter Key', baseKey = 'enter', vKey = keys.vKeys.VK_ENTER } -- always listen to enter
-
-  for k, map in pairs(keyMappings) do
-    map.vKey = map.vKey or keys.vKeyLookup[map.baseKey]
-  end
-
-  modMappings = tableCopy(keys.defaultModMappings)
-  if userModMappings then
-    for k, map in pairs(userModMappings) do
-      if modMappings[k] and map.modKey then
-        modMappings[k].modKey = map.modKey
-      end
-    end
-  end
-
-  widgetMappings = tableCopy(keys.defaultWidgetMappings)
-  if userWidgetMappings then
-    for k, map in pairs(userWidgetMappings) do
-      if widgetMappings[k] and map.modKey then
-        widgetMappings[k].modKey = map.modKey
-      end
-    end
-  end
-
+  keyMappings, modMappings, widgetMappings = keys.buildNewKeyMap()
   -- _T(keyMappings)
   -- _T(modMappings)
 end
@@ -234,45 +200,6 @@ local function shutdownLiceKeys(onlyGlobal)
   end
 end
 
-local function loadKeyMappingState(stateTab)
-  if userKeyMappings then userKeyMappings = nil end
-  if stateTab then
-    for k, map in pairs(stateTab) do
-      if map.baseKey then
-        local vKey = keys.vKeyLookup[map.baseKey]
-        if vKey then
-          if not userKeyMappings then userKeyMappings = {} end
-          userKeyMappings[k] = { baseKey = map.baseKey, modifiers = map.modifiers, vKey = vKey } -- need to ensure that there are no duplicate key/modifiers pairs
-        end
-      end
-    end
-  end
-end
-
-local function loadModMappingState(stateTab)
-  if userModMappings then userModMappings = nil end
-  if stateTab then
-    for k, map in pairs(stateTab) do
-      if map.modKey then
-        if not userModMappings then userModMappings = {} end
-        userModMappings[k] = { modKey = map.modKey }
-      end
-    end
-  end
-end
-
-local function loadWidgetMappingState(stateTab)
-  if userWidgetMappings then userWidgetMappings = nil end
-  if stateTab then
-    for k, map in pairs(stateTab) do
-      if map.modKey then
-        if not userWidgetMappings then userWidgetMappings = {} end
-        userWidgetMappings[k] = { modKey = map.modKey }
-      end
-    end
-  end
-end
-
 local lastClickTime = 0
 
 local attendKeyIntercepts
@@ -290,19 +217,19 @@ local function reloadSettings()
   if stateVal then
     stateTab = fromExtStateString(stateVal)
   end
-  loadKeyMappingState(stateTab)
+  keys.loadKeyMappingState(stateTab)
 
   stateVal = r.GetExtState(glob.scriptID, 'modMappings')
   if stateVal then
     stateTab = fromExtStateString(stateVal)
   end
-  loadModMappingState(stateTab)
+  keys.loadModMappingState(stateTab)
 
   stateVal = r.GetExtState(glob.scriptID, 'widgetMappings')
   if stateVal then
     stateTab = fromExtStateString(stateVal)
   end
-  loadWidgetMappingState(stateTab)
+  keys.loadWidgetMappingState(stateTab)
 
   keyMappings = nil
   modMappings = nil
@@ -394,7 +321,7 @@ local function endIntercepts()
     if helper.is_windows and r.APIExists('rcw_DestroyCompositingOverlay') and childHWND then
       r.rcw_DestroyCompositingOverlay(childHWND)
       childHWND = nil
-    end  
+    end
   end
   glob.prevCursor = -1
 end
@@ -597,7 +524,7 @@ local function createFrameBitmaps(midiview, windRect)
   local meLanes = glob.meLanes
   if meLanes and next(meLanes) then
     local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
-    local w, h = math.floor(windRect:width() + 0.5), math.floor( (bottomPixel - y1) + 0.5)
+    local w, h = math.floor(windRect:width() + 0.5), math.floor((bottomPixel - y1) + 0.5)
     bitmaps.top = createBitmap(1, 1)
     composite(hwnd, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
@@ -645,9 +572,9 @@ local function initLice(editor)
   if not glob.meLanes then return end
   if glob.liceData and glob.liceData.editor == editor then
     local windChanged, windRect = prepMidiview(glob.liceData.midiview)
-    if windChanged 
+    if windChanged
       or not next(glob.liceData.bitmaps)
-      or recompositeInit 
+      or recompositeInit
     then
       glob.liceData.windRect = windRect
       -- Create new bitmaps
@@ -710,7 +637,7 @@ local function shutdownLice()
   glob.setCursor(glob.normal_cursor)
 end
 
-local function convertColorFromNative(col)  
+local function convertColorFromNative(col)
   if helper.is_windows then
     col = (col & 0xFF000000)
         | (col & 0xFF) << 16
@@ -869,6 +796,7 @@ composite = function(hwnd, dstX, dstY, dstW, dstH, bitmap, srcX, srcY, srcW, src
 end
 
 local function clearBitmap(bitmap, x1, y1, width, height)
+  if not bitmap then return end
   if childHWND then
     r.rcw_ClearBitmap(bitmap, x1, y1, width, height)
   else
@@ -985,6 +913,56 @@ local function checkThemeFile()
   end
 end
 
+local function getBitmapSize(bitmap)
+  if not bitmap then return 0, 0 end
+  local bmWidth, bmHeight
+  if childHWND then
+    bmWidth, bmHeight = r.rcw_GetBitmapWidth(bitmap), r.rcw_GetBitmapHeight(bitmap)
+  else
+    bmWidth, bmHeight = r.JS_LICE_GetWidth(bitmap), r.JS_LICE_GetHeight(bitmap)
+  end
+  return bmWidth, bmHeight
+end
+
+local function drawSlicer(hwnd, mode, antialias)
+  local slicerPoints = slicer.getSlicerPoints()
+  local slicerBitmap = slicer.getSlicerBitmap()
+  if glob.inSlicerMode and slicerPoints then
+    local w = slicerPoints.stop and math.abs(slicerPoints.stop.x - slicerPoints.start.x) or 0
+    local h = slicerPoints.stop and math.abs(slicerPoints.stop.y - slicerPoints.start.y) or 0
+
+    if h > 0 then -- in vertlock, w might be legitmately 0
+      w = w + 6 -- add some space for the line
+      if slicerBitmap then
+        local bmWidth, bmHeight = getBitmapSize(slicerBitmap)
+        if bmWidth ~= w or bmHeight ~= h then
+          destroyBitmap(slicerBitmap)
+          slicerBitmap = nil
+          slicer.setSlicerBitmap(nil)
+        end
+      end
+
+      local drawRect = Rect.new(slicerPoints.start.x, slicerPoints.start.y, slicerPoints.stop.x, slicerPoints.stop.y)
+      local viewRect = drawRect:clone():conform()
+      if not slicerBitmap then
+        local x1V, y1V = rectToLiceCoords(viewRect)
+        slicerBitmap = createBitmap(w, h, true)
+        slicer.setSlicerBitmap(slicerBitmap)
+        composite(hwnd, x1V - 3, y1V + Lice.MIDI_RULER_H, w, h, slicerBitmap, 0, 0, w, h)
+      end
+
+      drawRect:offset(-viewRect.x1, -viewRect.y1)
+      thickLine(slicerBitmap, drawRect.x1 + 3, drawRect.y1, drawRect.x2 + 3, drawRect.y2, 6, reBorderColor, 1., mode, antialias)
+      -- viewRect:offset(-viewRect.x1, -viewRect.y1)
+      -- frameRect(slicerBitmap, viewRect.x1 + 3, viewRect.y1, w-6, h-1, reBorderContrastColor, 0.5, mode, antialias)
+    end
+  elseif slicerBitmap then
+    destroyBitmap(slicerBitmap)
+    slicerBitmap = nil
+    slicer.setSlicerBitmap(nil)
+  end
+end
+
 local function drawLice()
   local hwnd = childHWND and childHWND or glob.liceData.midiview
   local integrated = not helper.is_windows or hwnd == childHWND
@@ -999,11 +977,15 @@ local function drawLice()
   local mode = 'COPY,ALPHA' --helper.is_windows and 0 or 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
+
   if glob.liceData then
     for _, area in ipairs(glob.areas) do
-      if area.logicalRect then
+      if glob.inSlicerMode then
+        local bmWidth, bmHeight = getBitmapSize(area.bitmap)
+        clearBitmap(area.bitmap, 0, 0, bmWidth, bmHeight)
+      elseif area.logicalRect then
         local viewRect = (area.viewRect:clone()):conform()
-        local x1V, y1V, x2V, y2V = rectToLiceCoords(viewRect)
+        local x1V, y1V, _, y2V = rectToLiceCoords(viewRect)
         local w, h = math.floor(viewRect:width() + (Lice.EDGE_SLOP * 2) + 1 + 0.5), math.floor(viewRect:height() + (Lice.EDGE_SLOP * 2) + 1 + 0.5) -- need some y slop for the widget
         local skip = false
         local upsizing = false
@@ -1020,12 +1002,7 @@ local function drawLice()
         end
 
         if not skip and area.bitmap and (area.modified or recomposite) then
-          local bmWidth, bmHeight 
-          if childHWND then
-            bmWidth, bmHeight = r.rcw_GetBitmapWidth(area.bitmap), r.rcw_GetBitmapHeight(area.bitmap)
-          else
-            bmWidth, bmHeight = r.JS_LICE_GetWidth(area.bitmap), r.JS_LICE_GetHeight(area.bitmap)
-          end
+          local bmWidth, bmHeight = getBitmapSize(area.bitmap)
           if w > bmWidth or h > bmHeight then
             upsizing = true
           elseif w < bmWidth / 2 or h < bmHeight / 2 then
@@ -1064,8 +1041,6 @@ local function drawLice()
             if helper.is_windows then
               clearBitmap(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V)) -- top
               clearBitmap(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2) -- bottom
-              --r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0, 1, 'MUL') -- top
-              --r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0, 1, 'MUL') -- bottom
             else
               r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0x00FFFFFF, 1, 'COPY') -- top
               r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0x00FFFFFF, 1, 'COPY') -- bottom
@@ -1166,6 +1141,9 @@ local function drawLice()
         end
       end
     end
+
+    drawSlicer(hwnd, mode, antialias)
+
     if glob.DEBUG_LANES then
       clearBitmap(glob.liceData.bitmap, glob.liceData.windRect.x1, glob.liceData.windRect.y1,
                                    math.abs(glob.liceData.windRect.x2 - glob.liceData.windRect.x1), math.abs(glob.liceData.windRect.y2 - glob.liceData.windRect.y2))

@@ -1,18 +1,20 @@
 -- @description MIDI Razor Edits
--- @version 1.1.0
+-- @version 1.2.0-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - version bump (no changes from 1.1.0-alpha.10)
+--   - add slicer mode & dedicated launcher script
+--   - misc minor bugfixes & cleanup
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_SelectedNotes.lua
+--   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_Slicer.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_Settings.lua
 
--- copyright (c) 2025 Jeremy Bernstein
+-- copyright (c) 2026 Jeremy Bernstein
 -- with a big thanks to FeedTheCat for his assistance
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'RazorEdits/?.lua;' -- GET DIRECTORY FOR REQUIRE

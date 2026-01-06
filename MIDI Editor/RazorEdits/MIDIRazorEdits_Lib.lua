@@ -19,8 +19,6 @@ local DEBUG_UNDO = false
 local sectionID, commandID
 local hasSWS = true
 
-local STARTUP_SELECTED_NOTES = 1
-
 local startupOptions
 
 local PROFILING = false
@@ -41,15 +39,13 @@ if not r.APIExists('CF_SendActionShortcut') then
   hasSWS = false
 end
 
-local mu
 local DEBUG_MU = false
 if DEBUG_MU then
   package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
-  mu = require 'MIDIUtils'
 else
   package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '/?.lua;' -- GET DIRECTORY FOR REQUIRE
-  mu = require 'MIDIUtils'
 end
+local mu = require 'MIDIUtils'
 
 mu.ENFORCE_ARGS = false -- turn off for release
 mu.USE_XPCALL = false
@@ -63,7 +59,9 @@ local classes = require 'MIDIRazorEdits_Classes'
 local lice = require 'MIDIRazorEdits_LICE'
 local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
+local mod = keys.mod
 local helper = require 'MIDIRazorEdits_Helper'
+local slicer = require 'MIDIRazorEdits_Slicer'
 
 if helper.is_windows then
   local needsupdate = false
@@ -142,6 +140,8 @@ local OP_SHIFTLEFTGRIDQ   = 34
 local OP_SHIFTRIGHTGRIDQ  = 35
 local OP_SHIFTEND         = 40
 
+local OP_SLICE            = slicer.OP_SLICE -- 50
+
 local function isShiftOperation(op)
   return op and op >= OP_SHIFTLEFT and op < OP_SHIFTEND
 end
@@ -152,6 +152,8 @@ local justLoaded = true
 
 local hottestMods = MouseMods.new()
 local currentMods = MouseMods.new()
+keys.mod.setMods(currentMods, hottestMods)
+
 local widgetMods
 
 local lastPoint, lastPointQuantized, hasMoved
@@ -198,62 +200,6 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
-local function getMod(someMods, mod)
-  someMods = someMods or currentMods
-  if mod & 1 ~= 0 then return someMods:shift(), 'shift', 'shiftFlag'
-  elseif mod & 2 ~= 0 then return someMods:ctrl(), 'ctrl', 'ctrlFlag'
-  elseif mod & 4 ~= 0 then return someMods:alt(), 'alt', 'altFlag'
-  elseif mod & 8 ~= 0 then return someMods:super(), 'super', 'superFlag'
-  end
-  return false, nil, nil
-end
-
-local function snapMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_SNAP].modKey)
-end
-
-local function copyMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_MOVE_COPY].modKey)
-end
-
-local function overlapMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_MOVE_OVERLAP].modKey)
-end
-_G.overlapMod = overlapMod
-
-local function singleMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_MOVE_SINGLE].modKey)
-end
-
-local function fullLaneMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_NEW_FULLLANE].modKey)
-end
-
-local function preserveMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_NEW_PRESERVE].modKey)
-end
-
-local function stretchMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_STRETCH].modKey)
-end
-
-local function onlyAreaMod(someMods)
-  someMods = someMods or currentMods
-  return someMods:matchesFlags(lice.modMappings()[keys.MODTYPE_MOVE_ONLYAREA].modKey)
-end
-
-local function matchesWidgetMod(which)
-  which = math.max(1, math.min(4, which))
-  return widgetMods:matchesFlags(lice.widgetMappings()[which].modKey)
-end
-
-local function setCursorMod(someMods)
-  return getMod(someMods, lice.modMappings()[keys.MODTYPE_CLICK_SETCURSOR].modKey)
-end
-
-------------------------------------------------
-------------------------------------------------
-
 local function getWidgetProcessor(mode)
   local fun = (mode == keys.WIDGET_MODE_PUSHPULL) and helper.scaleValue
            or (mode == keys.WIDGET_MODE_OFFSET) and helper.offsetValue
@@ -266,7 +212,7 @@ local function callWidgetProcessingMode(val, outputMin, outputMax, offsetFactorS
   local found = false
   local newval
   for k, _ in ipairs(lice.widgetMappings()) do
-    if k ~= glob.widgetStretchMode and matchesWidgetMod(k) then
+    if k ~= glob.widgetStretchMode and mod.matchesWidgetMod(k) then
       local fun = getWidgetProcessor(k)
       if fun then
         newval = fun(val, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
@@ -328,9 +274,10 @@ local function calculateVisibleRangeWithMargin(scroll, zoom, marginSize, viewHei
 end
 
 local function getEditorAndSnapWish()
-  local wantsSnap = r.MIDIEditor_GetSetting_int(glob.liceData.editor, 'snap_enabled') == 1
-  if snapMod() then wantsSnap = not wantsSnap end
+  if mod.getForceSnap() then return true end
 
+  local wantsSnap = r.MIDIEditor_GetSetting_int(glob.liceData.editor, 'snap_enabled') == 1
+  if mod.snapMod() then wantsSnap = not wantsSnap end
   return wantsSnap
 end
 
@@ -376,11 +323,14 @@ end
 local function updateTimeValueRight(area, leftmost)
   if meState.timeBase == 'time' then
     leftmost = leftmost or area.timeValue.time.min
-    local rightmostTime = equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + (area.logicalRect:width() / meState.pixelsPerSecond))
+    local rightmostTime = meState.leftmostTime + ((area.logicalRect.x2 - glob.windowRect.x1) / meState.pixelsPerSecond)
+    -- local rightmostTime = equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + (area.logicalRect:width() / meState.pixelsPerSecond))
     return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, rightmostTime - getTimeOffset()), rightmostTime
   else
     leftmost = leftmost or area.timeValue.ticks.min
-    return equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + math.floor((area.logicalRect:width() / meState.pixelsPerTick) + 0.5))
+    return equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost
+        or (meState.leftmostTick + math.floor(((area.logicalRect.x2 - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5))
+    -- return equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + math.floor((area.logicalRect:width() / meState.pixelsPerTick) + 0.5))
   end
 end
 
@@ -695,10 +645,10 @@ local function processNotes(activeTake, area, operation)
   local idx = -1
   local movingArea = operation == OP_STRETCH
         and resizing == RS_MOVEAREA
-        and (not onlyAreaMod() or area.active)
-  local duplicatingArea = movingArea and copyMod()
+        and (not mod.onlyAreaMod() or area.active)
+  local duplicatingArea = movingArea and mod.copyMod()
   local stretchingArea = operation == OP_STRETCH
-        and stretchMod()
+        and mod.stretchMod()
         and area.active
         and resizing > RS_UNCLICKED and resizing < RS_MOVEAREA
   local deltaTicks, deltaPitch
@@ -725,7 +675,7 @@ local function processNotes(activeTake, area, operation)
     deltaPitch = math.floor(deltaPitch + 0.5)
   end
 
-  if operation == OP_STRETCH and area.unstretched and (not singleMod() or area.active) then
+  if operation == OP_STRETCH and area.unstretched and (not mod.singleMod() or area.active) then
     ratio = area.timeValue.ticks:size() / area.unstretchedTimeValue.ticks:size()
     usingUnstretched = true
     if ratio == 1 and resizing < RS_MOVEAREA then return end
@@ -749,11 +699,16 @@ local function processNotes(activeTake, area, operation)
 
   local skipiter = false
   local widgeting = false
+  local slicing = false
+
   if glob.widgetInfo and area == glob.widgetInfo.area then
     if glob.widgetInfo.sourceEvents[activeTake] then
       skipiter = true
     end
     widgeting = true
+  elseif slicer.getSlicerPoints() then
+    skipiter = true
+    slicing = true
   end
 
   local insert = false
@@ -801,7 +756,7 @@ local function processNotes(activeTake, area, operation)
         for _, extent in ipairs(deletionExtents) do
           -- _P(ii, 'output', extent)
           tmpArea.timeValue = extent
-          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE, overlapMod() and sourceEvents) -- target
+          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE, mod.overlapMod() and sourceEvents) -- target
         end
       end
       insert = true -- won't do anything anymore because we pre-process
@@ -843,14 +798,14 @@ local function processNotes(activeTake, area, operation)
 
       if ppqpos + GLOBAL_PREF_SLOP < rightmostTick and endppqpos - GLOBAL_PREF_SLOP >= leftmostTick then
         if ppqpos < leftmostTick  then
-          if not overlapMod() then
+          if not mod.overlapMod() then
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
             canOperate = false
           end
         end
         if endppqpos > rightmostTick then
-          if not overlapMod() then
+          if not mod.overlapMod() then
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
             canOperate = false
@@ -860,7 +815,7 @@ local function processNotes(activeTake, area, operation)
       return canOperate
     end
 
-    local overlapped = overlapMod()
+    local overlapped = mod.overlapMod()
 
     if endppqpos > leftmostTick and ppqpos < rightmostTick
       and pitchInRange(pitch, bottomPitch, topPitch)
@@ -929,10 +884,10 @@ local function processNotes(activeTake, area, operation)
         if isOverlapped or deleteOrig then
           helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
         end
-      elseif not singleMod() or ppqpos >= leftmostTick then
+      elseif not mod.singleMod() or ppqpos >= leftmostTick then
         if stretchingArea then
           if resizing ~= RS_MOVEAREA
-            and stretchMod()
+            and mod.stretchMod()
           then
             if ppqpos >= leftmostTick and endppqpos <= rightmostTick then
               if resizing == RS_LEFT then
@@ -1008,12 +963,12 @@ local function processNotes(activeTake, area, operation)
           helper.addUnique(tInsertions,
                           { type = mu.NOTE_TYPE,
                             selected = selected, muted = muted,
-                            ppqpos = (ppqpos + deltaTicks < areaLeftmostTick and not overlapMod()) and areaLeftmostTick or ppqpos + deltaTicks,
-                            endppqpos = (endppqpos + deltaTicks > areaRightmostTick and not overlapMod()) and areaRightmostTick or endppqpos + deltaTicks,
+                            ppqpos = (ppqpos + deltaTicks < areaLeftmostTick and not mod.overlapMod()) and areaLeftmostTick or ppqpos + deltaTicks,
+                            endppqpos = (endppqpos + deltaTicks > areaRightmostTick and not mod.overlapMod()) and areaRightmostTick or endppqpos + deltaTicks,
                             chan = chan, pitch = newpitch,
                             vel = vel, relvel = relvel }
                           )
-          if not glob.insertMode and overlapMod() then
+          if not glob.insertMode and mod.overlapMod() then
             helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
           end
         end
@@ -1079,6 +1034,10 @@ local function processNotes(activeTake, area, operation)
         touchedMIDI = true
       end
     end
+  elseif slicing then
+    if slicer.processNotes(activeTake, area, { mu = mu, sourceEvents = sourceEvents, tInsertions = tInsertions, tDeletions = tDeletions }) then
+      touchedMIDI = true
+    end
   end
 end
 
@@ -1143,10 +1102,10 @@ local function processCCs(activeTake, area, operation)
   local idx = -1
   local movingArea = operation == OP_STRETCH
         and resizing == RS_MOVEAREA
-        and (not onlyAreaMod() or area.active)
-  local duplicatingArea = movingArea and copyMod()
+        and (not mod.onlyAreaMod() or area.active)
+  local duplicatingArea = movingArea and mod.copyMod()
   local stretchingArea = operation == OP_STRETCH
-        and stretchMod()
+        and mod.stretchMod()
         and area.active
         and resizing > RS_UNCLICKED and resizing < RS_MOVEAREA
   local deltaTicks, deltaVal
@@ -1180,7 +1139,7 @@ local function processCCs(activeTake, area, operation)
     deltaVal = math.floor(deltaVal + 0.5)
   end
 
-  if operation == OP_STRETCH and area.unstretched and (not singleMod() or area.active) then
+  if operation == OP_STRETCH and area.unstretched and (not mod.singleMod() or area.active) then
     hratio = (area.timeValue.ticks:size()) / (area.unstretchedTimeValue.ticks:size())
     vratio = (area.timeValue.vals:size()) / (area.unstretchedTimeValue.vals:size())
     usingUnstretched = true
@@ -1285,6 +1244,7 @@ local function processCCs(activeTake, area, operation)
         local tmpArea = Area.new(area:serialize()) -- only used for event selection
         local cacheMods = currentMods
         currentMods = MouseMods.new() -- clear out for the operation
+        keys.mod.setMods(currentMods)
         tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
         if not glob.insertMode then
           processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- target
@@ -1292,6 +1252,7 @@ local function processCCs(activeTake, area, operation)
         tmpArea.timeValue = area.unstretchedTimeValue
         processCCsWithGeneration(activeTake, tmpArea, OP_DELETE) -- source
         currentMods = cacheMods
+        keys.mod.setMods(currentMods)
         insert = true
       end
     else
@@ -1550,7 +1511,7 @@ local function generateSourceInfo(area, op, force, overlap)
 
     if op == OP_STRETCH
       and area.unstretched
-      and (not singleMod()
+      and (not mod.singleMod()
         or area.active)
     then
       sourceInfo.usingUnstretched = true
@@ -1583,7 +1544,7 @@ local function generateSourceInfo(area, op, force, overlap)
     if isNote then
       local overlapTab
       if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
-        and overlapMod() and overlap
+        and mod.overlapMod() and overlap
       then
         overlapTab = {}
         for _, event in ipairs(overlap) do
@@ -1892,7 +1853,7 @@ local function handlePaste()
           -- might need to scale value based on mismatch between 14- and 7-bit?
           helper.addUnique(tInsertions, event)
         else
-          local overlapped = overlapMod()
+          local overlapped = mod.overlapMod()
           helper.addUnique(tInsertions,
                           { type = mu.NOTE_TYPE,
                             selected = event.selected, muted = event.muted,
@@ -2253,9 +2214,9 @@ local function analyzeChunk()
   meState.leftmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, meState.leftmostTick)
 
   if meState.timeBase == 'time' then
-    meState.rightmostTime = meState.leftmostTime + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) * meState.pixelsPerSecond)
+    meState.rightmostTime = meState.leftmostTime + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) / meState.pixelsPerSecond)
   else
-    local rightmostTick = meState.leftmostTick + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) * meState.pixelsPerTick)
+    local rightmostTick = meState.leftmostTick + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) / meState.pixelsPerTick)
     meState.rightmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, rightmostTick)
   end
 
@@ -2593,6 +2554,8 @@ local function restorePreferences()
     if stateVal then glob.wantsRightButton = stateVal == 1 and true or false end
   end
 
+  slicer.handleState(scriptID)
+
   lice.reloadSettings() -- key/mod mappings
 end
 
@@ -2632,11 +2595,13 @@ local function acquireKeyMods()
                   keyMods & 0x10 ~= 0, -- alt
                   keyMods & 0x04 ~= 0, -- cmd/ctrl (windows)
                   keyMods & 0x20 ~= 0) -- ctrl/'super' (windows)
+  keys.mod.setMods(nil, hottestMods)
 end
 
 local function swapCurrentMods()
   acquireKeyMods()
   currentMods = hottestMods:clone()
+  keys.mod.setMods(currentMods)
 end
 
 local function keyMatches(vkState, info, allowOverlap, someMods)
@@ -2650,7 +2615,7 @@ local function keyMatches(vkState, info, allowOverlap, someMods)
       if vkState:byte(keys.vKeyLookup['back']) ~= 0 then found = true end
     end
     if found then
-      local hasOverlapMod, overlapModName = overlapMod(someMods)
+      local hasOverlapMod, overlapModName = mod.overlapMod(someMods)
       return someMods:matchesFlags(info.modifiers, (allowOverlap and hasOverlapMod) and { [overlapModName] = true } or nil)
     end
   end
@@ -2712,8 +2677,8 @@ local function processKeys()
   -- fallback to old style, selective passthrough and that's it
   acquireKeyMods()
 
-  local hotSnap, _, snapFlagName = snapMod(hottestMods)
-  if hotSnap ~= snapMod() then
+  local hotSnap, _, snapFlagName = mod.snapMod(hottestMods)
+  if hotSnap ~= mod.snapMod() then
     if snapFlagName then
       currentMods[snapFlagName] = hottestMods[snapFlagName]
     end
@@ -2731,6 +2696,18 @@ local function processKeys()
   -- global key commands which need to be checked every loop
 
   local keyMappings = lice.keyMappings()
+
+  -- SLICER
+  if not glob.slicerQuitAfterProcess and keyMatches(vState, keyMappings.slicerMode) then
+    glob.inSlicerMode = not glob.inSlicerMode
+    return
+  end
+
+  if glob.inSlicerMode then
+    passUnconsumedKeys(vState) -- we might not want this
+    return
+  end
+  -- SLICER
 
   if keyMatches(vState, keyMappings.exitScript) then
     wantsQuit = true
@@ -2814,7 +2791,6 @@ local function processKeys()
         return false
       end
     end
-
 
     if keyMatches(vState, keyMappings.ccSpan) then
       if (#areas == 1 or area.hovering) and not area.ccLane then
@@ -3025,9 +3001,9 @@ local function mouseXToTick(mx)
   return currentTick
 end
 
-local function quantizeToGrid(mx, wantsTick)
+local function quantizeToGrid(mx, wantsTick, force)
   local wantsSnap = getEditorAndSnapWish()
-  if not wantsSnap then return mx, (wantsTick and mouseXToTick(mx)) end
+  if not force and not wantsSnap then return mx, (wantsTick and mouseXToTick(mx)) end
 
   local activeTake = glob.liceData.editorTake
   local currentTick = mouseXToTick(mx)
@@ -3070,7 +3046,7 @@ local function updateAreaForAllEvents(area)
 
   local laneIsVel = laneIsVelocity(area)
   local isNote = not area.ccLane or laneIsVel
-  local ccValLimited = fullLaneMod() and not laneIsVel
+  local ccValLimited = mod.fullLaneMod() and not laneIsVel
 
   for _, take in ipairs(glob.liceData.allTakes) do
     local activeTake, itemInfo = prepItemInfoForTake(take)
@@ -3390,6 +3366,7 @@ local function processWidget(mx, my, mouseState)
             muState = nil
           end
           widgetMods = hottestMods:clone()
+          keys.mod.setWidgetMods(widgetMods)
           area.widgetExtents = Extent.new(0.5, 0.5)
           glob.widgetInfo = { area = area, side = nil }
         end
@@ -3443,6 +3420,7 @@ local function processWidget(mx, my, mouseState)
       glob.widgetInfo = { area = area, side = nil }
       acquireKeyMods()
       widgetMods = hottestMods:clone()
+      keys.mod.setWidgetMods(widgetMods)
     end
     return true
   end
@@ -3572,6 +3550,32 @@ local function runOperation(op)
               or op == OP_CUT and 'Cut Razor Area'
               or op == OP_PASTE and 'Paste Razor Area'
               or 'Process Razor Area Contents')
+end
+
+local function processTempArea(serializedArea, op, arg)
+
+  local tmpArea = Area.newFromRect(serializedArea, makeTimeValueExtentsForArea, arg)
+
+  glob.liceData.referenceTake = glob.liceData.editorTake
+
+  for _, take in ipairs(glob.liceData.allTakes) do
+    local activeTake = prepItemInfoForTake(take)
+    tInsertions = {}
+    tDeletions = {}
+    tDelQueries = {}
+    handleOpenTransaction(activeTake)
+    processNotesWithGeneration(take, tmpArea, op)
+    processInsertions()
+    noRestore[activeTake] = true -- force
+    handleCommitTransaction(activeTake)
+  end
+
+  glob.liceData.itemInfo = nil
+  glob.liceData.editorTake = glob.liceData.referenceTake
+  glob.liceData.referenceTake = nil
+
+  noRestore = {}
+  muState = nil
 end
 
 local function processMouse()
@@ -3707,6 +3711,29 @@ local function processMouse()
     return
   end
 
+  -- SLICER
+  -- in Cubase, the trim tool auto-deletes the end (or the beginning if opt is held)
+  -- cmd forces a straight line to make everything the same
+  local sliced, undoText = slicer.processSlicer(mx, my, { down = isDown,
+                                                          clicked = isClicked,
+                                                          dragging = isDragging,
+                                                          released = isReleased,
+                                                          hovered = isHovered,
+                                                          hoveredOnly = isOnlyHovered,
+                                                          ccLane = ccLane,
+                                                          inop = inop,
+                                                          hottestMods = hottestMods }, processTempArea, quantizeToGrid)
+  if sliced then
+    if undoText then
+      createUndoStep(undoText)
+      if glob.slicerQuitAfterProcess then
+        wantsQuit = true
+      end
+    end
+    return
+  end
+  -- SLICER
+
   if processWidget(mx, my, { down = isDown,
                               clicked = isClicked,
                               dragging = isDragging,
@@ -3741,15 +3768,15 @@ local function processMouse()
           if equalIsh(area.logicalRect.x1, area.viewRect.x1) and nearValue(mx, area.viewRect.x1) then
             hovering.left = true
             addHover = true
-            glob.setCursor((stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_left_cursor
-                    or (stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
+            glob.setCursor((mod.stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_left_cursor
+                    or (mod.stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
                     or glob.resize_left_cursor)
             cursorSet = true
           elseif equalIsh(area.logicalRect.x2, area.viewRect.x2) and nearValue(mx, area.viewRect.x2) then
             hovering.right = true
             addHover = true
-            glob.setCursor((stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_right_cursor
-                    or (stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
+            glob.setCursor((mod.stretchMod(theseMods) and canStretchLR(area)) and glob.stretch_right_cursor
+                    or (mod.stretchMod(theseMods) and not canStretchLR(area)) and glob.forbidden_cursor
                     or glob.resize_right_cursor)
             cursorSet = true
           end
@@ -3758,15 +3785,15 @@ local function processMouse()
           if equalIsh(area.logicalRect.y1, area.viewRect.y1) and nearValue(my, area.viewRect.y1) then
             hovering.top = true
             addHover = true
-            glob.setCursor((stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
-                    or (stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
+            glob.setCursor((mod.stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
+                    or (mod.stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
                     or glob.resize_top_cursor) -- stretch_top?
             cursorSet = true
           elseif equalIsh(area.logicalRect.y2, area.viewRect.y2) and nearValue(my, area.viewRect.y2) then
             hovering.bottom = true
             addHover = true
-            glob.setCursor((stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
-                    or (stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
+            glob.setCursor((mod.stretchMod(theseMods) and area.ccLane) and glob.stretch_up_down
+                    or (mod.stretchMod(theseMods) and not area.ccLane) and glob.forbidden_cursor
                     or glob.resize_bottom_cursor) -- stretch_bottom?
             cursorSet = true
           end
@@ -3774,8 +3801,8 @@ local function processMouse()
         if not addHover and pointIsInRect(testPoint, area.viewRect, 0) then
           hovering.area = true
           addHover = true
-          glob.setCursor(laneIsVelocity(area) and (onlyAreaMod(theseMods) and glob.razor_move_cursor or glob.forbidden_cursor)
-            or copyMod(theseMods) and glob.razor_copy_cursor
+          glob.setCursor(laneIsVelocity(area) and (mod.onlyAreaMod(theseMods) and glob.razor_move_cursor or glob.forbidden_cursor)
+            or mod.copyMod(theseMods) and glob.razor_copy_cursor
             or glob.razor_move_cursor)
           cursorSet = true
         end
@@ -3800,12 +3827,12 @@ local function processMouse()
       if canResize and not isOnlyHovered then
         if isDown then resizing = rsz end
         area.active = rsz > RS_NEWAREA
-        area.unstretched = (not onlyAreaMod() or area.active) and area.logicalRect:clone() or nil
+        area.unstretched = (not mod.onlyAreaMod() or area.active) and area.logicalRect:clone() or nil
         area.unstretchedTimeValue = area.unstretched and area.timeValue:clone() or nil
-        area.operation = (not onlyAreaMod() or area.active) and OP_STRETCH or nil
+        area.operation = (not mod.onlyAreaMod() or area.active) and OP_STRETCH or nil
       else
         area.active = false
-        area.unstretched = (isDown and not onlyAreaMod()) and area.logicalRect:clone() or nil -- we need this for multi-area move/copy (only RS_MOVEAREA?)
+        area.unstretched = (isDown and not mod.onlyAreaMod()) and area.logicalRect:clone() or nil -- we need this for multi-area move/copy (only RS_MOVEAREA?)
         area.unstretchedTimeValue = area.unstretched and area.timeValue:clone() or nil
       end
       if area.operation then doProcess = true end
@@ -3845,7 +3872,7 @@ local function processMouse()
       wasDragged = false
       muState = nil
 
-      if not preserveMod() then
+      if not mod.preserveMod() then
         doClearAll()
         deferredClearAll = true
       end
@@ -3854,7 +3881,7 @@ local function processMouse()
         resizing = RS_UNCLICKED return -- media item lane is verboten
       end
 
-      local fullLane = (ccLane and not fullLaneMod()) or (not ccLane and fullLaneMod())
+      local fullLane = (ccLane and not mod.fullLaneMod()) or (not ccLane and mod.fullLaneMod())
 
       areas[#areas + 1] = Area.newFromRect({ viewRect = Rect.new(mx, my, mx, my),
                                       logicalRect = Rect.new(mx, my, mx, my),
@@ -3944,10 +3971,10 @@ local function processMouse()
           local dx, dy = 0, 0
           local single = true
           if resizing == RS_MOVEAREA
-            and (not singleMod() or laneIsVelocity(area))
+            and (not mod.singleMod() or laneIsVelocity(area))
           then
             if laneIsVelocity(area) then
-              if onlyAreaMod() then
+              if mod.onlyAreaMod() then
                 dx = mx - lastPointQuantized.x
                 dy = my - lastPointQuantized.y
               else
@@ -3972,11 +3999,11 @@ local function processMouse()
               dy = my - lastPointQuantized.y
             end
 
-            stretching = not (resizing == RS_MOVEAREA and onlyAreaMod()) -- all = just move area
+            stretching = not (resizing == RS_MOVEAREA and mod.onlyAreaMod()) -- all = just move area
             if not stretching then noProcessOnRelease = true end -- TODO hack
             found = true
 
-            if resizing ~= RS_MOVEAREA and stretchMod() then
+            if resizing ~= RS_MOVEAREA and mod.stretchMod() then
               if ((resizing == RS_LEFT or resizing == RS_RIGHT) and not canStretchLR(area)) then
                 dx = 0
                 stretching = false
@@ -4094,7 +4121,7 @@ local function processMouse()
       local earlyReturn = false
       if areas[#areas].logicalRect then
         if (areas[#areas].logicalRect:width() < 5 or areas[#areas].logicalRect:height() < 5) then
-          if deferredClearAll or setCursorMod() then
+          if deferredClearAll or mod.setCursorMod() then
             earlyReturn = true
           end
         end
@@ -4109,7 +4136,7 @@ local function processMouse()
 
       if earlyReturn then
         clearArea(#areas)
-        if setCursorMod() then
+        if mod.setCursorMod() then
           local _, currentTick = quantizeToGrid(mx, true)
           r.SetEditCurPos2(0, r.MIDI_GetProjTimeFromPPQPos(glob.liceData.editorTake, currentTick), false, false)
           createUndoStep('Move edit cursor') -- ... to b.b.u?
@@ -4150,7 +4177,7 @@ local function processMouse()
       if stretching and resizing ~= RS_NEWAREA then
         if #removals ~= 0 then undoText = 'Delete Razor Edit Area'
         elseif resizing ~= RS_MOVEAREA then undoText = 'Scale Razor Edit Area'
-        elseif not onlyAreaMod() then undoText = 'Move Razor Edit Area Contents'
+        elseif not mod.onlyAreaMod() then undoText = 'Move Razor Edit Area Contents'
         else undoText = 'Duplicate Razor Edit Area Contents'
         end
       else
@@ -4303,11 +4330,17 @@ local function loop()
     checkProjectExtState(justLoaded)
     justLoaded = false
 
-    if startupOptions and startupOptions & STARTUP_SELECTED_NOTES ~= 0 then
-      clearAreas()
-      createAreaForSelectedNotes()
-      swapAreas(areas)
-      startupOptions = nil
+    if startupOptions then
+      if startupOptions & glob.STARTUP_SELECTED_NOTES ~= 0 then
+        clearAreas()
+        createAreaForSelectedNotes()
+        swapAreas(areas)
+        startupOptions = nil
+      end
+      if startupOptions & glob.STARTUP_SLICER_MODE ~= 0 then
+        glob.inSlicerMode = true
+        glob.slicerQuitAfterProcess = true
+      end
     end
   end
 
@@ -4331,7 +4364,7 @@ local function loop()
   glob.wantsAnalyze = false
 
   processMouse()
-  lice.drawLice()
+  lice.drawLice(hottestMods)
 
   r.defer(function() xpcall(loop, onCrash) end)
 end

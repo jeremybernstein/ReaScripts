@@ -78,6 +78,8 @@ local prefsWidgetStretchMode
 local widgetStretchMode
 local prefsWantsControlPoints
 local wantsControlPoints
+local prefsSlicerDefaultTrim
+local slicerDefaultTrim
 local prefsWantsRightButton
 local wantsRightButton
 
@@ -436,6 +438,11 @@ local function handleSavedMappings()
   prefsWidgetStretchMode = math.max(prefsWidgetStretchMode or 1, 1)
   widgetStretchMode = prefsWidgetStretchMode
 
+  state = r.GetExtState(scriptID_Save, 'slicerDefaultTrim')
+  prefsSlicerDefaultTrim = state ~= '' and tonumber(state) or 0
+  if not prefsSlicerDefaultTrim then prefsSlicerDefaultTrim = 0 end
+  slicerDefaultTrim = prefsSlicerDefaultTrim
+
   state = r.GetExtState(scriptID_Save, 'wantsRightButton')
   prefsWantsRightButton = state ~= '' and tonumber(state) or 0
   if not prefsWantsRightButton then prefsWantsRightButton = 0 end
@@ -565,6 +572,7 @@ local wantsQuit = false
 
 local function hasChanges() -- could throttle this if it's a performance concern
   if wantsRightButton ~= prefsWantsRightButton then return true end
+  if slicerDefaultTrim ~= prefsSlicerDefaultTrim then return true end
   if wantsControlPoints ~= prefsWantsControlPoints then return true end
   if stretchMode ~= prefsStretchMode then return true end
   if widgetStretchMode ~= prefsWidgetStretchMode then return true end
@@ -634,6 +642,13 @@ local function drawButtons()
     end
     prefsWidgetStretchMode = widgetStretchMode
 
+    if slicerDefaultTrim ~= 0 then
+      r.SetExtState(scriptID_Save, 'slicerDefaultTrim', tostring(slicerDefaultTrim), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'slicerDefaultTrim', true)
+    end
+    prefsSlicerDefaultTrim = slicerDefaultTrim
+
     if wantsRightButton ~= 0 then
       r.SetExtState(scriptID_Save, 'wantsRightButton', tostring(wantsRightButton), true)
     else
@@ -659,6 +674,7 @@ local function drawButtons()
   ImGui.SetCursorPosX(ctx, contentMaxX - 200)
   if ImGui.Button(ctx, 'Revert to Defaults', 200) then
     wantsControlPoints = false
+    slicerDefaultTrim = false
     wantsRightButton = false
     stretchMode = 0
     widgetStretchMode = 1
@@ -702,6 +718,14 @@ local function drawMiscOptions()
   -- ImGui.SameLine(ctx)
   -- rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp##wsm', wsm, 3)
   -- widgetStretchMode = wsm
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Slicer Trims By Default (opt/alt to split only):')
+  local trim = slicerDefaultTrim
+  ImGui.SameLine(ctx)
+  -- ImGui.SetCursorPosX(ctx, saveX)
+  rv, trim = ImGui.Checkbox(ctx, '##slicerDefaultTrim', trim == 1 and true or false)
+  slicerDefaultTrim = trim and 1 or 0
 
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Use Right Mouse Button (experimental):')

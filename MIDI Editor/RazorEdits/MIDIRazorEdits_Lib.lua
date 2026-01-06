@@ -3578,15 +3578,38 @@ local function processTempArea(serializedArea, op, arg)
   muState = nil
 end
 
+local function processSlicer(mx, my, mouseState)
+  local rv = false
+  if glob.inSlicerMode then
+    local sliced, undoText = slicer.processSlicer(mx, my, mouseState, processTempArea, quantizeToGrid)
+    if sliced then
+      rv = true
+      if undoText then
+        createUndoStep(undoText)
+        if glob.slicerQuitAfterProcess then
+          wantsQuit = true
+        end
+        resetMouse()
+      end
+    end
+    return true, rv
+  end
+  return false, rv
+end
+
 local function processMouse()
 
   local rv, mx, my = ValidateMouse()
 
   if not rv then
-    for _, area in ipairs(areas) do
-      if area.operation then
-        runOperation(area.operation)
-        break
+    if processSlicer(mx, my, { released = true, hottestMods = hottestMods }) then
+      return
+    else
+      for _, area in ipairs(areas) do
+        if area.operation then
+          runOperation(area.operation)
+          break
+        end
       end
     end
     return
@@ -3706,33 +3729,23 @@ local function processMouse()
   if isDown and isClicked then lice.button.click = false lice.button.drag = true end
   if not isDown and isReleased then lice.button.drag = false lice.button.release = false end
 
+  -- SLICER
+  local _, sliced = processSlicer(mx, my, { down = isDown,
+                                            clicked = isClicked,
+                                            dragging = isDragging,
+                                            released = isReleased,
+                                            hovered = isHovered,
+                                            hoveredOnly = isOnlyHovered,
+                                            ccLane = ccLane,
+                                            inop = inop,
+                                            hottestMods = hottestMods })
+  if sliced then return end
+  -- SLICER
+
   if not isDown and not isHovered then
     resetMouse()
     return
   end
-
-  -- SLICER
-  -- in Cubase, the trim tool auto-deletes the end (or the beginning if opt is held)
-  -- cmd forces a straight line to make everything the same
-  local sliced, undoText = slicer.processSlicer(mx, my, { down = isDown,
-                                                          clicked = isClicked,
-                                                          dragging = isDragging,
-                                                          released = isReleased,
-                                                          hovered = isHovered,
-                                                          hoveredOnly = isOnlyHovered,
-                                                          ccLane = ccLane,
-                                                          inop = inop,
-                                                          hottestMods = hottestMods }, processTempArea, quantizeToGrid)
-  if sliced then
-    if undoText then
-      createUndoStep(undoText)
-      if glob.slicerQuitAfterProcess then
-        wantsQuit = true
-      end
-    end
-    return
-  end
-  -- SLICER
 
   if processWidget(mx, my, { down = isDown,
                               clicked = isClicked,
@@ -4232,6 +4245,10 @@ local function checkForSettingsUpdate()
 end
 
 local function shutdown()
+  -- if we add more stuff, we can add a registry for startup & shutdown funs
+  -- and maybe a selection of cleanup functions. anyway, this is fine as a stopgap
+  slicer.shutdown(lice.destroyBitmap)
+
   lice.shutdownLice()
   local editor = r.MIDIEditor_GetActive()
   if editor then

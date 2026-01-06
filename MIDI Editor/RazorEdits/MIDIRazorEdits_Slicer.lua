@@ -28,22 +28,22 @@ local slicerPointsUnquantized = nil
 local slicerBitmap = nil
 
 local function getSlicerPoints()
-	return slicerPoints
+  return slicerPoints
 end
 
 local function getSlicerBitmap()
-	return slicerBitmap
+  return slicerBitmap
 end
 
 local function setSlicerBitmap(bitmap)
-	slicerBitmap = bitmap
+  slicerBitmap = bitmap
 end
 
 local function handleState(scriptID)
   slicerDefaultTrim = false -- default
 
-	local stateVal
-	stateVal = r.GetExtState(scriptID, 'slicerDefaultTrim')
+  local stateVal
+  stateVal = r.GetExtState(scriptID, 'slicerDefaultTrim')
   if stateVal then
     stateVal = tonumber(stateVal)
     if stateVal then slicerDefaultTrim = stateVal == 1 and true or false end
@@ -119,29 +119,30 @@ local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
 
     -- maybe we want to draw/adjust this line, and then enter to process
     -- this is fine for proof of concept
-    glob.setCursor(glob.slicer_cursor)
+    if mx and my then
+      glob.setCursor(glob.slicer_cursor)
 
-    local meLanes = glob.meLanes
-    local meState = glob.meState
+      local meLanes = glob.meLanes
+      local meState = glob.meState
 
-    -- adjust my to snap to notes
-    my = my < meLanes[-1].topPixel and meLanes[-1].topPixel or my > meLanes[-1].bottomPixel and meLanes[-1].bottomPixel or my
-    my = math.floor((math.floor(((my - meLanes[-1].topPixel) / meState.pixelsPerPitch) + 0.5) * meState.pixelsPerPitch) + meLanes[-1].topPixel + 0.5)
+      -- adjust my to snap to notes
+      my = my < meLanes[-1].topPixel and meLanes[-1].topPixel or my > meLanes[-1].bottomPixel and meLanes[-1].bottomPixel or my
+      my = math.floor((math.floor(((my - meLanes[-1].topPixel) / meState.pixelsPerPitch) + 0.5) * meState.pixelsPerPitch) + meLanes[-1].topPixel + 0.5)
+      local vertLock = mod.slicerVertLockMod(mouseState.hottestMods)
 
-    local vertLock = mod.slicerVertLockMod(mouseState.hottestMods)
-
-    if mouseState.ccLane == nil then
-      if mouseState.clicked then
-        slicerPointsUnquantized = { start = Point.new(mx, my), stop = nil }
-        local q = quantizer(mx, false, true)
-        slicerPointsQuantized = { start = Point.new(q, my), stop = nil } -- always get this
-      elseif mouseState.dragging then
-				if slicerPoints and slicerPointsUnquantized and slicerPointsQuantized then -- eliminate warnings
-					if vertLock then mx = slicerPoints.start.x end
-					slicerPointsUnquantized.stop = Point.new(mx, my)
-					-- local q = quantizer(mx, false, true)
-					slicerPointsQuantized.stop = Point.new(mx, my)
-				end
+      if mouseState.ccLane == nil then
+        if mouseState.clicked then
+          slicerPointsUnquantized = { start = Point.new(mx, my), stop = nil }
+          local q = quantizer(mx, false, true)
+          slicerPointsQuantized = { start = Point.new(q, my), stop = nil } -- always get this
+        elseif mouseState.dragging then
+          if slicerPoints and slicerPointsUnquantized and slicerPointsQuantized then -- eliminate warnings
+            if vertLock then mx = slicerPoints.start.x end
+            slicerPointsUnquantized.stop = Point.new(mx, my)
+            -- local q = quantizer(mx, false, true)
+            slicerPointsQuantized.stop = Point.new(mx, my)
+          end
+        end
       end
     end
 
@@ -164,53 +165,54 @@ local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
 end
 
 local function processNotes(activeTake, area, processInfo)
-	local sourceEvents = processInfo.sourceEvents
-	local tInsertions = processInfo.tInsertions
-	local tDeletions = processInfo.tDeletions
-	local mu = processInfo.mu
-	local rv = false
+  local sourceEvents = processInfo.sourceEvents
+  local tInsertions = processInfo.tInsertions
+  local tDeletions = processInfo.tDeletions
+  local mu = processInfo.mu
+  local rv = false
 
-	local intersectionsPerRow = calculateSlicerIntersections(area)
-	if intersectionsPerRow then
-		local wantsTrim = mod.slicerTrimMod()
-		if slicerDefaultTrim then wantsTrim = not wantsTrim end -- reverse meaning
+  local intersectionsPerRow = calculateSlicerIntersections(area)
+  if intersectionsPerRow then
+    local wantsTrim = mod.slicerTrimMod()
+    if slicerDefaultTrim then wantsTrim = not wantsTrim end -- reverse meaning
 
-		local endMod = mod.slicerEndMod()
+    local endMod = mod.slicerEndMod()
 
-		if not wantsTrim then
-			mu.MIDI_SelectAll(activeTake, false) -- first unselect everything in the take (should do for non-matching takes, too?)
-		end
-		for _, event in ipairs(sourceEvents) do
-			local ppqIntersection = intersectionsPerRow[event.pitch - area.timeValue.vals.min]
-			if ppqIntersection and event.ppqpos <= ppqIntersection and event.endppqpos >= ppqIntersection then
-				helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = event.idx })
-				if (wantsTrim and endMod) or not wantsTrim then
-					helper.addUnique(tInsertions, { type = mu.NOTE_TYPE,
-																					selected = wantsTrim and event.selected or (not endMod and true or false),
-																					muted = event.muted,
-																					ppqpos = event.ppqpos,
-																					endppqpos = ppqIntersection,
-																					chan = event.chan,
-																					pitch = event.pitch,
-																					vel = event.vel,
-																					relvel = event.relvel })
-				end
-				if (wantsTrim and not endMod) or not wantsTrim then
-					helper.addUnique(tInsertions, { type = mu.NOTE_TYPE,
-																					selected = wantsTrim and event.selected or (endMod and true or false),
-																					muted = event.muted,
-																					ppqpos = ppqIntersection,
-																					endppqpos = event.endppqpos,
-																					chan = event.chan,
-																					pitch = event.pitch,
-																					vel = event.vel,
-																					relvel = event.relvel })
-				end
-				rv = true
-			end
-		end
-	end
-	return rv
+    if not wantsTrim then
+      mu.MIDI_SelectAll(activeTake, false) -- first unselect everything in the take (should do for non-matching takes, too?)
+    end
+    for _, event in ipairs(sourceEvents) do
+      local pitchToTest = glob.meState.noteTab and glob.meState.noteTabReverse[event.pitch] - 1 or event.pitch - area.timeValue.vals.min
+      local ppqIntersection = intersectionsPerRow[pitchToTest]
+      if ppqIntersection and event.ppqpos <= ppqIntersection and event.endppqpos >= ppqIntersection then
+        helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = event.idx })
+        if (wantsTrim and endMod) or not wantsTrim then
+          helper.addUnique(tInsertions, { type = mu.NOTE_TYPE,
+                                          selected = wantsTrim and event.selected or (not endMod and true or false),
+                                          muted = event.muted,
+                                          ppqpos = event.ppqpos,
+                                          endppqpos = ppqIntersection,
+                                          chan = event.chan,
+                                          pitch = event.pitch,
+                                          vel = event.vel,
+                                          relvel = event.relvel })
+        end
+        if (wantsTrim and not endMod) or not wantsTrim then
+          helper.addUnique(tInsertions, { type = mu.NOTE_TYPE,
+                                          selected = wantsTrim and event.selected or (endMod and true or false),
+                                          muted = event.muted,
+                                          ppqpos = ppqIntersection,
+                                          endppqpos = event.endppqpos,
+                                          chan = event.chan,
+                                          pitch = event.pitch,
+                                          vel = event.vel,
+                                          relvel = event.relvel })
+        end
+        rv = true
+      end
+    end
+  end
+  return rv
 end
 
 Slicer.handleState = handleState
@@ -221,5 +223,12 @@ Slicer.OP_SLICE = OP_SLICE
 Slicer.getSlicerPoints = getSlicerPoints
 Slicer.getSlicerBitmap = getSlicerBitmap
 Slicer.setSlicerBitmap = setSlicerBitmap
+
+Slicer.shutdown = function(destroyBitmap)
+  if slicerBitmap then
+    destroyBitmap(slicerBitmap)
+    slicerBitmap = nil
+  end
+end
 
 return Slicer

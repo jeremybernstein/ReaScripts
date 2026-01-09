@@ -224,6 +224,9 @@ local function operateEvent2(event, property, op, param1, param2)
   local newval = oldval
   if op == adefs.OP_SCALEOFF then
     newval = (oldval * param1) + param2
+  elseif op == adefs.OP_SCALEAROUND then
+    local dist = oldval - param2
+    newval = (dist * param1) + param2
   end
   return setValue(event, property, newval)
 end

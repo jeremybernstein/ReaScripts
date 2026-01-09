@@ -198,8 +198,11 @@ Shared.moveCursorInfo = function()
   return moveCursorInfo
 end
 
-local function isANote(target, condOp)
-  local isNote = target.notation == '$value1' and not condOp.nixnote
+local function isANote(target, condOp, paramType, index)
+  local isNote = target.notation == '$value1'
+    and paramType ~= gdefs.PARAM_TYPE_FLOATEDITOR
+    and not condOp.nixnote
+    and not (condOp.split and condOp.split[index] and condOp.split[index].nixnote)
   if isNote then
     local hasTable = getHasTable()
     isNote = hasTable._size == 1 and hasTable[0x90]
@@ -1116,6 +1119,7 @@ context.OP_MULT = adefs.OP_MULT
 context.OP_DIV = adefs.OP_DIV
 context.OP_FIXED = adefs.OP_FIXED
 context.OP_SCALEOFF = adefs.OP_SCALEOFF
+context.OP_SCALEAROUND = adefs.OP_SCALEAROUND
 
 local function doProcessParams(row, target, condOp, paramType, paramTab, index, notation, takectx)
   local addMetricGridNotation = false

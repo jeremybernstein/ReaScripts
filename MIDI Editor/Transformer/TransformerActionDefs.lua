@@ -50,6 +50,9 @@ local OP_MULT = 3
 local OP_DIV = 4
 local OP_FIXED = 5
 local OP_SCALEOFF = 6
+local OP_SCALEAROUND = 7
+
+-- nixnote means don't show note name hints when the src is a note
 
 local actionOperationPlus = { notation = '+', label = 'Add', text = 'OperateEvent1(event, {tgt}, OP_ADD, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true, nixnote = true }
 local actionOperationMinus = { notation = '-', label = 'Subtract', text = 'OperateEvent1(event, {tgt}, OP_SUB, {param1})', terms = 1, inteditor = true, fullrange = true, literal = true, nixnote = true }
@@ -67,6 +70,7 @@ local actionOperationRelLine = { notation = ':relline', label = 'Relative Ramp i
 local actionOperationScaleOff = { notation = ':scaleoffset', label = 'Scale + Offset', text = 'OperateEvent2(event, {tgt}, OP_SCALEOFF, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true, bipolar = true }}, freeterm = true, literal = true, nixnote = true }
 local actionOperationMirror = { notation = ':mirror', label = 'Mirror', text = 'Mirror(event, {tgt}, {param1})', terms = 1 }
 local actionOperationThresh = { notation = ':thresh', label = 'Threshold', text = 'Threshold(event, {tgt}, {param1}, {param2}, {param3})', terms = 3, freeterm = true, param3 = p3.threshParam3Tab, inteditor = true, split = {{ default = 64 }, { default = 0 }, { default = 127 }} }
+local actionOperationScaleAround = { notation = ':scalearound', label = 'Scale Around', text = 'OperateEvent2(event, {tgt}, OP_SCALEAROUND, {param1}, {param2})', terms = 2, split = {{ floateditor = true, norange = true }, { inteditor = true }}, freeterm = true, literal = true }
 
 local function positionMod(op)
   local newop = tg.tableCopy(op)
@@ -212,14 +216,14 @@ local actionSubtypeOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   { notation = ':getvalue2', label = 'Use Value 2', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetMainValue(event))', terms = 0 }, -- note that this is different for AT and PB
-  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff, actionOperationScaleAround
 }
 
 local actionVelocityOperationEntries = {
   actionOperationPlus, actionOperationMinus, actionOperationMult, actionOperationDivide,
   actionOperationRound, actionOperationFixed, actionOperationClamp, actionOperationRandom, actionOperationRelRandom, actionOperationRelRandomSingle,
   { notation = ':getvalue1', label = 'Use Value 1', text = 'OperateEvent1(event, {tgt}, OP_FIXED, GetSubtypeValue(event))', terms = 0 }, -- ?? note that this is different for AT and PB
-  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff
+  actionOperationMirror, actionOperationThresh, actionOperationLine, actionOperationRelLine, actionOperationScaleOff, actionOperationScaleAround
 }
 
 local actionNewEventOperationEntries = {
@@ -273,6 +277,7 @@ ActionDefs.OP_MULT = OP_MULT
 ActionDefs.OP_DIV = OP_DIV
 ActionDefs.OP_FIXED = OP_FIXED
 ActionDefs.OP_SCALEOFF = OP_SCALEOFF
+ActionDefs.OP_SCALEAROUND = OP_SCALEAROUND
 ActionDefs.NEWEVENT_POSITION_ATCURSOR = NEWEVENT_POSITION_ATCURSOR
 ActionDefs.NEWEVENT_POSITION_ITEMSTART = NEWEVENT_POSITION_ITEMSTART
 ActionDefs.NEWEVENT_POSITION_ITEMEND = NEWEVENT_POSITION_ITEMEND

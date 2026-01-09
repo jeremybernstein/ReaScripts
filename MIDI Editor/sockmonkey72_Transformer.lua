@@ -1,10 +1,14 @@
 -- @description MIDI Transformer
--- @version 1.0.15
+-- @version 1.0.16
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - workaround for DearImgui combobox width bug (https://github.com/ocornut/imgui/issues/8203)
+--   - add Scale Around operation (for values, not positions) -- performs a scaling of the
+--     distance from a provided value. Essentially, it will compress/expand from a center point.
+--     For example, ScaleAround(2, 0) would be equivalent to Multiply(2), while ScaleAround(0.5, 60)
+--     would halve the distance of events measured from value 60 -- so 64 -> 62 [60 + (4 * 0.5))
+--     and 40 -> 50 (60 + (-20 * 0.5)).
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -19,7 +23,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.15'
+local versionStr = '1.0.16'
 
 local r = reaper
 
@@ -1552,7 +1556,7 @@ local function windowFn()
   end
 
   local function doHandleTableParam(row, target, condOp, paramType, editorType, index, flags, procFn)
-    local isNote = tx.isANote(target, condOp)
+    local isNote = tx.isANote(target, condOp, paramType, index)
     local floatFlags = ImGui.InputTextFlags_CharsDecimal + ImGui.InputTextFlags_CharsNoBlank
 
     -- TODO: cleanup these attributes & combinations

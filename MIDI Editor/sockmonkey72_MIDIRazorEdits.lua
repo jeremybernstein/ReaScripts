@@ -1,12 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 1.2.0-beta.2
+-- @version 1.2.0
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - slicer: custom note row support
---   - slicer: fix a few edge cases with cursor/focus
---   - slicer: improve shutdown cleanup
+--   - Slicer mode is released
+--   - compatibility with childwindow 2.0.0
 -- @provides
 --   {RazorEdits}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua

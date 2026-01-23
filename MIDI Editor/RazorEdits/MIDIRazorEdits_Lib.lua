@@ -73,7 +73,7 @@ if helper.is_windows then
     end
   else
     local rcwVersion = r.rcw_GetVersion()
-    if rcwVersion ~= RCW_VERSION then
+    if rcwVersion ~= RCW_VERSION and rcwVersion ~= '2.0.0' then
       needsupdate = true
     end
   end

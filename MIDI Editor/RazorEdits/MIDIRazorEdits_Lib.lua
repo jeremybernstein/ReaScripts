@@ -13,7 +13,7 @@
 local r = reaper
 local Lib = {}
 
-local RCW_VERSION = '1.0.0-alpha.2'
+local RCW_VERSION = '2.0.0'
 
 local DEBUG_UNDO = false
 local sectionID, commandID
@@ -62,24 +62,27 @@ local keys = require 'MIDIRazorEdits_Keys'
 local mod = keys.mod
 local helper = require 'MIDIRazorEdits_Helper'
 local slicer = require 'MIDIRazorEdits_Slicer'
+local pitchbend = require 'MIDIRazorEdits_PitchBend'
 
-if helper.is_windows then
-  local needsupdate = false
-  if not r.APIExists('rcw_GetVersion') then
-    if r.APIExists('CreateChildWindowForHWND') then
-      needsupdate = true
-    else
+pitchbend.setMIDIUtils(mu)
+
+local needsupdate = false
+if not r.APIExists('rcw_GetVersion') then
+  if r.APIExists('CreateChildWindowForHWND') then
+    needsupdate = true
+  else
+    if helper.is_windows then
       r.ShowConsoleMsg('For best results, please install the \'childwindow\' extension\nvia ReaPack (also from sockmonkey72).\n')
     end
-  else
-    local rcwVersion = r.rcw_GetVersion()
-    if rcwVersion ~= RCW_VERSION and rcwVersion ~= '2.0.0' then
-      needsupdate = true
-    end
   end
-  if needsupdate then
-    r.ShowConsoleMsg('Please update to the latest version of the \'childwindow\' extension.\nThe older version has been disabled for this run.\n')
+else
+  local rcwVersion = r.rcw_GetVersion()
+  if rcwVersion ~= RCW_VERSION then
+    needsupdate = true
   end
+end
+if needsupdate then
+  r.ShowConsoleMsg('Please update to the latest version of the \'childwindow\' extension.\nThe older version has been disabled for this run.\n')
 end
 
 local Area = classes.Area
@@ -159,6 +162,7 @@ local widgetMods
 local lastPoint, lastPointQuantized, hasMoved
 local wasDragged = false
 local wantsQuit = false
+local didStartup = false  -- Track if we actually started (for shutdown cleanup)
 local wantsPaste = false
 local touchedMIDI = false
 local noRestore = {} -- if we didn't touch the MIDI or change it significantly, we can avoid a restore
@@ -513,7 +517,6 @@ local function updateTimeValueExtentsForArea(area, noCheck, force)
         updateAreaFromTimeValue(area)
       end
     end
-    area.modified = true
   end
 end
 
@@ -582,9 +585,15 @@ updateAreaFromTimeValue = function(area, noCheck)
         y2 = math.min(math.floor((topPixel + ((topValue - area.timeValue.vals.min + 1) * multi)) + 0.5), meLanes[area.ccLane or -1].bottomPixel)
       end
     end
+
+    local oldViewRect = area.viewRect and area.viewRect:clone() or nil
+
     area.logicalRect = Rect.new(x1, y1, x2, y2)
     area.viewRect = lice.viewIntersectionRect(area)
-    area.modified = true
+
+    if not area.viewRect:equals(oldViewRect) then
+      area.modified = true
+    end
   end
   return true
 end
@@ -1420,8 +1429,9 @@ local function processCCs(activeTake, area, operation)
 
       local newmsg2
       local newmsg3
-      newmsg2 = onebyte and clipInt(newval) or pitchbend and (newval & 0x7F) or event.msg2
-      newmsg3 = onebyte and event.msg3 or pitchbend and ((newval >> 7) & 0x7F) or clipInt(newval)
+      newval = clipInt(newval, 0, meLanes[area.ccLane].range)
+      newmsg2 = onebyte and newval or pitchbend and (newval & 0x7F) or event.msg2
+      newmsg3 = onebyte and event.msg3 or pitchbend and ((newval >> 7) & 0x7F) or newval
 
       if laneIsVel then
         newmsg3 = isRelVelocity and newmsg2 or nil
@@ -2163,6 +2173,7 @@ local function analyzeChunk()
     return false
   end
   activeChannel, meState.showNoteRows, meState.timeBase = activeTakeChunk:match('\nCFGEDIT %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) (%S+)')
+  meState.activeChannel = tonumber(activeChannel) or 0
 
   local multiChanFilter, filterChannel, filterEnabled = activeTakeChunk:match('\nEVTFILTER (%S+) %S+ %S+ %S+ %S+ (%S+) (%S+)')
 
@@ -2412,6 +2423,18 @@ local function createUndoStep(undoText, override)
 end
 
 glob.handleRightClick = function() -- a little smelly, but whatever works
+  -- PB mode: delegate to pitchbend module for point deletion
+  if glob.inPitchBendMode then
+    local handled, undoText = pitchbend.handleRightClick(hottestMods)
+    if handled then
+      if undoText then
+        r.Undo_OnStateChange2(0, undoText)
+      end
+      return true
+    end
+    return false  -- No hovered point, don't process normal right-click
+  end
+
   for idx, area in ipairs(areas) do
     if area.hovering then
       if glob.widgetInfo and glob.widgetInfo.area and glob.inWidgetMode and area == glob.widgetInfo.area then
@@ -2555,6 +2578,7 @@ local function restorePreferences()
   end
 
   slicer.handleState(scriptID)
+  pitchbend.handleState(scriptID)
 
   lice.reloadSettings() -- key/mod mappings
 end
@@ -2684,7 +2708,7 @@ local function processKeys()
     end
   end
 
-  local vState = r.JS_VKeys_GetState(10)
+  local vState = helper.VKeys_GetState(10)
   if vState == prevKeys then
     return
   end
@@ -2696,10 +2720,18 @@ local function processKeys()
   -- global key commands which need to be checked every loop
 
   local keyMappings = lice.keyMappings()
+  local pbKeyMappings = lice.pbKeyMappings()
 
-  -- SLICER
-  if not glob.slicerQuitAfterProcess and keyMatches(vState, keyMappings.slicerMode) then
+  -- global exit check - works in all modes
+  if keyMatches(vState, keyMappings.exitScript) then
+    wantsQuit = true
+    return
+  end
+
+  -- SLICER (skip if launched from dedicated PitchBend launcher)
+  if not glob.slicerQuitAfterProcess and not glob.pitchBendQuitOnToggle and keyMatches(vState, keyMappings.slicerMode) then
     glob.inSlicerMode = not glob.inSlicerMode
+    if glob.inSlicerMode then glob.inPitchBendMode = false end -- exclusive modes
     return
   end
 
@@ -2709,10 +2741,100 @@ local function processKeys()
   end
   -- SLICER
 
-  if keyMatches(vState, keyMappings.exitScript) then
-    wantsQuit = true
+  -- PITCH BEND (skip if launched from dedicated Slicer launcher)
+  if not glob.slicerQuitAfterProcess and keyMatches(vState, keyMappings.pitchBendMode) then
+    if glob.pitchBendQuitOnToggle then
+      wantsQuit = true
+      return
+    end
+    glob.inPitchBendMode = not glob.inPitchBendMode
+    if glob.inPitchBendMode then
+      glob.inSlicerMode = false -- exclusive modes
+      -- seed activeChannel from MIDI editor's active channel (if filtering)
+      local pbConfig = pitchbend.getConfig()
+      if not pbConfig.showAllNotes then
+        local meActiveChan = math.max(0, (glob.meState.activeChannel or 1) - 1)
+        pitchbend.setConfig('activeChannel', meActiveChan)
+      end
+    end
     return
-  elseif keyMatches(vState, keyMappings.insertMode) then
+  end
+
+  if glob.inPitchBendMode then
+    local activeTake = glob.liceData and glob.liceData.editorTake
+
+    if keyMatches(vState, keyMappings.deleteAreaContents) then
+      local undoText = pitchbend.deleteSelectedPoints(activeTake, mu)
+      if undoText then createUndoStep(undoText) end
+      return
+    end
+
+    -- not ctrl: don't block cmd-C
+    if keyMatches(vState, pbKeyMappings.pitchBendCurveType) and not hottestMods:ctrl() then
+      local undoText = pitchbend.showCurveMenu(activeTake, mu)
+      if undoText then createUndoStep(undoText) end
+      return
+    end
+
+    -- not ctrl: don't block cmd-Q
+    if keyMatches(vState, pbKeyMappings.pitchBendSnapSemi) and not hottestMods:ctrl() then
+      local undoText = pitchbend.snapSelectedToSemitone(activeTake, mu)
+      if undoText then createUndoStep(undoText) end
+      return
+    end
+
+    if keyMatches(vState, pbKeyMappings.pitchBendConfig) and not hottestMods:ctrl() then
+      helper.VKeys_ClearState()
+      pitchbend.openConfigDialog(glob.scriptID)
+      return
+    end
+
+    if keyMatches(vState, pbKeyMappings.pitchBendMicrotonal) and not hottestMods:ctrl() then
+      pitchbend.toggleMicrotonalLines()
+      return
+    end
+
+    if keyMatches(vState, pbKeyMappings.pitchBendChannel) and not hottestMods:ctrl() then
+      pitchbend.showChannelMenu()
+      return
+    end
+
+    -- cmd+Q: quit REAPER
+    if vState:byte(keys.vKeyLookup['q']) ~= 0 and hottestMods:ctrl() and not hottestMods:shift() and not hottestMods:alt() then
+      r.Main_OnCommand(40004, 0)
+      return
+    end
+
+    -- raw check: key in pbKeyMappings for interception only
+    if vState:byte(keys.vKeyLookup['a']) ~= 0 and hottestMods:ctrl() and not hottestMods:shift() and not hottestMods:alt() then
+      pitchbend.selectAll()
+      pitchbend.syncSelectionToMIDI(activeTake, mu)
+      createUndoStep('Select Pitch Bend')
+      return
+    end
+
+    -- cmd-C: unselect all first so only PB events are copied
+    if keyMatches(vState, pbKeyMappings.pitchBendCopy) then
+      mu.MIDI_OpenWriteTransaction(activeTake)
+      mu.MIDI_SelectAll(activeTake, false)
+      mu.MIDI_CommitWriteTransaction(activeTake, true, false)
+      pitchbend.syncSelectionToMIDI(activeTake, mu)
+      r.MIDIEditor_OnCommand(glob.liceData.editor, 40010)
+      return
+    end
+
+    if keyMatches(vState, pbKeyMappings.pitchBendPaste) then
+      r.MIDIEditor_OnCommand(glob.liceData.editor, 40011)
+      pitchbend.clearCache()  -- force refresh to show pasted events
+      return
+    end
+
+    passUnconsumedKeys(vState)
+    return
+  end
+  -- PITCH BEND
+
+  if keyMatches(vState, keyMappings.insertMode) then
     glob.insertMode = not glob.insertMode
     return
   elseif keyMatches(vState, keyMappings.horzLockMode) then
@@ -2973,10 +3095,14 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
   end
 
   if justdoit or noConflicts(newRectFull, dragAreaIndex) then
+    local oldViewRect = dragArea.viewRect and dragArea.viewRect:clone() or nil
     -- do this delta thing so that the unmanipulated logical coords aren't lost
     local applyX1, applyY1, applyX2, applyY2 = newRectFull.x1 - dragArea.viewRect.x1, newRectFull.y1 - dragArea.viewRect.y1, newRectFull.x2 - dragArea.viewRect.x2, newRectFull.y2 - dragArea.viewRect.y2
     dragArea.logicalRect = Rect.new(dragArea.logicalRect.x1 + applyX1, dragArea.logicalRect.y1 + applyY1, dragArea.logicalRect.x2 + applyX2, dragArea.logicalRect.y2 + applyY2)
     dragArea.viewRect = lice.viewIntersectionRect(dragArea)
+    if not dragArea.viewRect:equals(oldViewRect) then
+      dragArea.modified = true
+    end
     return true
   end
 
@@ -3597,12 +3723,32 @@ local function processSlicer(mx, my, mouseState)
   return false, rv
 end
 
+local function processPitchBendMode(mx, my, mouseState)
+  local rv = false
+  if glob.inPitchBendMode then
+    -- Config dialog has its own defer loop, don't block curve rendering
+    local activeTake = glob.liceData and glob.liceData.editorTake
+    local processed, undoText = pitchbend.processPitchBend(mx, my, mouseState, mu, activeTake)
+    if processed then
+      rv = true
+      if undoText then
+        createUndoStep(undoText)
+        resetMouse()
+      end
+    end
+    return true, rv
+  end
+  return false, rv
+end
+
 local function processMouse()
 
   local rv, mx, my = ValidateMouse()
 
   if not rv then
     if processSlicer(mx, my, { released = true, hottestMods = hottestMods }) then
+      return
+    elseif processPitchBendMode(mx, my, { released = true, hottestMods = hottestMods }) then
       return
     else
       for _, area in ipairs(areas) do
@@ -3615,7 +3761,7 @@ local function processMouse()
     return
   end
 
-  if not glob.editorIsForeground then return end
+  if not glob.editorIsForeground and not pitchbend.isConfigDialogOpen() then return end
 
   local isCC = false
   local ccLane
@@ -3666,6 +3812,11 @@ local function processMouse()
   end
 
   local isDoubleClicked = lice.button.dblclick and not lice.button.dblclickSeen
+
+  -- Skip double-click area creation when in slicer or pitch bend mode
+  if isDoubleClicked and (glob.inSlicerMode or glob.inPitchBendMode) then
+    isDoubleClicked = false
+  end
 
   if isDoubleClicked then
     local wantsWidgetToggle = nil
@@ -3741,6 +3892,27 @@ local function processMouse()
                                             hottestMods = hottestMods })
   if sliced then return end
   -- SLICER
+
+  -- PITCH BEND
+  local pbModeActive, pbProcessed = processPitchBendMode(mx, my, { down = isDown,
+                                                         clicked = isClicked,
+                                                         dragging = isDragging,
+                                                         released = isReleased,
+                                                         hovered = isHovered,
+                                                         hoveredOnly = isOnlyHovered,
+                                                         ccLane = ccLane,
+                                                         inop = inop,
+                                                         hottestMods = hottestMods,
+                                                         doubleClicked = lice.button.dblclick })
+  if pbModeActive then
+    -- Clear dblclick flags when in PB mode to prevent pass-through
+    if lice.button.dblclick then
+      lice.button.dblclick = false
+      lice.button.dblclickSeen = true
+    end
+    return
+  end
+  -- PITCH BEND
 
   if not isDown and not isHovered then
     resetMouse()
@@ -4245,9 +4417,12 @@ local function checkForSettingsUpdate()
 end
 
 local function shutdown()
+  if not didStartup then return end  -- Don't cleanup if we never actually started
+
   -- if we add more stuff, we can add a registry for startup & shutdown funs
   -- and maybe a selection of cleanup functions. anyway, this is fine as a stopgap
   slicer.shutdown(lice.destroyBitmap)
+  pitchbend.shutdown(lice.destroyBitmap)
 
   lice.shutdownLice()
   local editor = r.MIDIEditor_GetActive()
@@ -4319,7 +4494,7 @@ local function loop()
   glob.liceData.editorItem = r.GetMediaItemTake_Item(editorTake)
   glob.liceData.allTakes = getEditableTakes(currEditor)
 
-  glob.wantsAnalyze = glob.wantsAnalyze or glob.editorIsForeground
+  glob.wantsAnalyze = glob.wantsAnalyze or glob.editorIsForeground or pitchbend.isConfigDialogOpen()
   if not glob.wantsAnalyze then
     analyzeCheckTime = analyzeCheckTime or glob.currentTime -- check periodically
     if glob.currentTime > analyzeCheckTime + 0.2 then glob.wantsAnalyze = true end
@@ -4331,7 +4506,7 @@ local function loop()
   end
 
   if glob.wantsAnalyze then
-    analyzeCheckTime = (analyzeCheckTime and glob.editorIsForeground) and glob.currentTime or nil
+    analyzeCheckTime = (analyzeCheckTime and (glob.editorIsForeground or pitchbend.isConfigDialogOpen())) and glob.currentTime or nil
     analyzeChunk()
   end
 
@@ -4358,6 +4533,11 @@ local function loop()
         glob.inSlicerMode = true
         glob.slicerQuitAfterProcess = true
       end
+      if startupOptions & glob.STARTUP_PITCHBEND_MODE ~= 0 then
+        glob.inPitchBendMode = true
+        glob.pitchBendQuitOnToggle = true
+        -- activeChannel is restored from ProjExtState in handleState (or falls back to editor's channel)
+      end
     end
   end
 
@@ -4366,7 +4546,7 @@ local function loop()
   if focusWindow
     and (focusWindow == currEditor
       or focusWindow == glob.liceData.midiview -- don't call into JS_Window_IsChild unless necessary
-      or (helper.is_windows and focusWindow == lice.childHWND())
+      or focusWindow == lice.childHWND()
       or r.JS_Window_IsChild(currEditor, focusWindow))
   then
     lice.attendKeyIntercepts(#areas == 0)
@@ -4381,7 +4561,7 @@ local function loop()
   glob.wantsAnalyze = false
 
   processMouse()
-  lice.drawLice(hottestMods)
+  lice.drawLice()
 
   r.defer(function() xpcall(loop, onCrash) end)
 end
@@ -4394,6 +4574,9 @@ local function setStartupOptions(opt)
 end
 
 local function startup(secID, cmdID)
+  if wantsQuit then return end  -- Already detected multiple instance
+
+  didStartup = true
   sectionID, commandID = secID, cmdID
 
   local _, _, _, _, _, _, _, contextstr = reaper.get_action_context()
@@ -4414,6 +4597,8 @@ local function startup(secID, cmdID)
   r.set_action_options(1)
   r.SetToggleCommandState(sectionID, commandID, 1)
   r.RefreshToolbar2(sectionID, commandID)
+
+  helper.VKeys_ClearState()  -- clear stuck keys from previous session
 
   justLoaded = true
   restorePreferences()
@@ -4451,6 +4636,6 @@ else
   r.SetExtState(scriptID, 'MRERunning', 'true', false)
 end
 
-prevKeys = r.JS_VKeys_GetState(10)
+prevKeys = helper.VKeys_GetState(10)
 
 return Lib

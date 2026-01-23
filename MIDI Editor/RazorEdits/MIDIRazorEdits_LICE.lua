@@ -15,6 +15,7 @@ local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
 local helper = require 'MIDIRazorEdits_Helper'
 local slicer = require 'MIDIRazorEdits_Slicer'
+local pitchbend = require 'MIDIRazorEdits_PitchBend'
 
 local Point = classes.Point
 local Rect = classes.Rect
@@ -101,9 +102,13 @@ local function prepMidiview(midiview)
 end
 
 local numBitmaps = 0 -- print this out for diagnostics if it wets your whistle
+local wantsChildHWND = r.APIExists('rcw_BeginFrame') -- if this exists, we can assume that all APIs currently in use are available
 local childHWND
+local composite
+local createBitmap
+local destroyBitmap
 
-local function destroyBitmap(bitmap)
+destroyBitmap = function(bitmap)
   if bitmap then
     if childHWND then
       r.rcw_DestroyBitmap(bitmap)
@@ -116,7 +121,7 @@ local function destroyBitmap(bitmap)
   return false
 end
 
-local function createBitmap(w, h, upsizing)
+createBitmap = function(w, h, upsizing)
   if childHWND then
     return r.rcw_CreateBitmap(w, h)
   else
@@ -126,12 +131,12 @@ end
 
 local function createMidiViewBitmap(midiview, windRect)
   local hwnd = childHWND and childHWND or midiview
-  local integrated = not helper.is_windows or hwnd == childHWND
+  local integrated = hwnd == childHWND
 
   local w, h = math.floor(windRect:width() + 0.5), math.floor(windRect:height() + 0.5)
-  local bitmap = r.JS_LICE_CreateBitmap(true, w, h)
+  local bitmap = createBitmap(w, h)
   numBitmaps = numBitmaps + 1
-  r.JS_Composite(hwnd, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h, true)
+  composite(hwnd, 0, Lice.MIDI_RULER_H, w, h, bitmap, 0, 0, w, h)
   if not integrated then
     -- should only need to do this once for the view
     r.JS_Composite_Delay(midiview, Lice.compositeDelayMin, Lice.compositeDelayMax, Lice.compositeDelayBitmaps)
@@ -159,13 +164,14 @@ local appIntercepts = {
 }
 
 local keyMappings
+local pbKeyMappings
 local modMappings
 local widgetMappings
 
 local keyCt = 0
 
 local function buildNewKeyMap()
-  keyMappings, modMappings, widgetMappings = keys.buildNewKeyMap()
+  keyMappings, pbKeyMappings, modMappings, widgetMappings = keys.buildNewKeyMap()
   -- _T(keyMappings)
   -- _T(modMappings)
 end
@@ -182,7 +188,12 @@ local function initLiceKeys(onlyGlobal)
   if glob.liceData and keyCt == 0 then
     for _, map in pairs(keyMappings) do
       if map.vKey and (not onlyGlobal or map.global) then
-        r.JS_VKeys_Intercept(map.vKey, 1)
+        helper.VKeys_Intercept(map.vKey, 1)
+      end
+    end
+    for _, map in pairs(pbKeyMappings) do
+      if map.vKey then
+        helper.VKeys_Intercept(map.vKey, 1)
       end
     end
     keyCt = keyCt + 1
@@ -193,7 +204,12 @@ local function shutdownLiceKeys(onlyGlobal)
   if glob.liceData and keyCt > 0 then
     for _, map in pairs(keyMappings) do
       if map.vKey and (not onlyGlobal or map.global) then
-        r.JS_VKeys_Intercept(map.vKey, -1)
+        helper.VKeys_Intercept(map.vKey, -1)
+      end
+    end
+    for _, map in pairs(pbKeyMappings) do
+      if map.vKey then
+        helper.VKeys_Intercept(map.vKey, -1)
       end
     end
     keyCt = keyCt - 1
@@ -219,6 +235,12 @@ local function reloadSettings()
   end
   keys.loadKeyMappingState(stateTab)
 
+  stateVal = r.GetExtState(glob.scriptID, 'pbKeyMappings')
+  if stateVal then
+    stateTab = fromExtStateString(stateVal)
+  end
+  keys.loadPbKeyMappingState(stateTab)
+
   stateVal = r.GetExtState(glob.scriptID, 'modMappings')
   if stateVal then
     stateTab = fromExtStateString(stateVal)
@@ -232,6 +254,7 @@ local function reloadSettings()
   keys.loadWidgetMappingState(stateTab)
 
   keyMappings = nil
+  pbKeyMappings = nil
   modMappings = nil
   widgetMappings = nil
 
@@ -301,7 +324,7 @@ local function startIntercepts()
       r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
     end
   end
-  if helper.is_windows and r.APIExists('rcw_CreateCompositingOverlayForHWND') then
+  if wantsChildHWND then
     childHWND = r.rcw_CreateCompositingOverlayForHWND(glob.liceData.midiview, "*MRE")
   end
   startAppIntercepts()
@@ -318,7 +341,7 @@ local function endIntercepts()
       intercept.timestamp = 0
     end
     glob.setCursor(glob.normal_cursor)
-    if helper.is_windows and r.APIExists('rcw_DestroyCompositingOverlay') and childHWND then
+    if childHWND then
       r.rcw_DestroyCompositingOverlay(childHWND)
       childHWND = nil
     end
@@ -378,6 +401,8 @@ local function peekAppIntercepts(force)
         glob.editorIsForeground = (wpl ~= 0)
         if not glob.editorIsForeground then
           glob.setCursor(glob.normal_cursor)
+          resetButtons()  -- clear stale button state on focus loss
+          helper.VKeys_ClearState()  -- clear stale key state on focus loss
         end
       end
     end
@@ -483,7 +508,7 @@ local function peekIntercepts(m_x, m_y)
             handleButtonDown(m_x, m_y, 0, hovering)
           end
         end
-        if helper.is_windows then
+        if not helper.is_macos then
           -- on windows, we don't get focus back when clicking
           -- into the midiview for some reason I cannot explain.
           r.JS_Window_SetFocus(glob.liceData.midiview)
@@ -509,13 +534,11 @@ local function peekIntercepts(m_x, m_y)
   end
 end
 
-local composite
-
 local function createFrameBitmaps(midiview, windRect)
   local bitmaps = {}
 
   local hwnd = childHWND and childHWND or midiview
-  local integrated = not helper.is_windows or hwnd == childHWND
+  local integrated = hwnd == childHWND
 
   local x1, y1 = pointConvertNative(windRect.x1, windRect.y1, windRect)
   local x2, y2 = pointConvertNative(windRect.x2, windRect.y2, windRect)
@@ -529,22 +552,22 @@ local function createFrameBitmaps(midiview, windRect)
     composite(hwnd, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
     bitmaps.bottom = createBitmap(1, 1)
-    composite(hwnd, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1, true)
+    composite(hwnd, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
     if meLanes[0] then
       local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
       bitmaps.middletop = createBitmap(1, 1)
-      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1, true)
+      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1)
       numBitmaps = numBitmaps + 1
       bitmaps.middlebottom = createBitmap(1, 1)
-      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1, true)
+      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1)
       numBitmaps = numBitmaps + 1
     end
     bitmaps.left = createBitmap(1, 1)
-    composite(hwnd, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1, true)
+    composite(hwnd, 0, Lice.MIDI_RULER_H, pixelScale, h, bitmaps.left, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
     bitmaps.right = createBitmap(1, 1)
-    composite(hwnd, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1, true)
+    composite(hwnd, w - Lice.MIDI_SCROLLBAR_R - (pixelScale - 1), Lice.MIDI_RULER_H, pixelScale, h, bitmaps.right, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
 
     if not integrated then
@@ -559,6 +582,7 @@ end
 
 local recompositeInit
 local recompositeDraw
+local shutdownLice
 
 local function viewIntersectionRect(area)
   local idx = area.ccLane and area.ccLane or -1
@@ -570,6 +594,16 @@ end
 
 local function initLice(editor)
   if not glob.meLanes then return end
+  -- Detect HWND change (e.g., dock/undock) and clean up old resources
+  if glob.liceData
+    and ((glob.liceData.editor and glob.liceData.editor ~= editor) -- editor actually remains the same across a dock/undock
+      or (glob.liceData.parent and glob.liceData.parent ~= r.JS_Window_GetParent(editor))) -- need to check the parent
+  then
+    shutdownLice() -- this is defined below
+    glob.needsRecomposite = true
+    glob.editorIsForeground = true  -- Ensure we keep processing after HWND change
+    glob.wantsAnalyze = true
+  end
   if glob.liceData and glob.liceData.editor == editor then
     local windChanged, windRect = prepMidiview(glob.liceData.midiview)
     if windChanged
@@ -582,7 +616,7 @@ local function initLice(editor)
         if bitmap then destroyBitmap(bitmap) end
       end
       glob.liceData.bitmaps, glob.liceData.screenRect = createFrameBitmaps(glob.liceData.midiview, windRect)
-      if glob.DEBUG_LANES or not MOAR_BITMAPS then
+      if glob.DEBUG_LANES then
         if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
         glob.liceData.bitmap = createMidiViewBitmap(glob.liceData.midiview, windRect)
       end
@@ -595,22 +629,25 @@ local function initLice(editor)
     local midiview = r.JS_Window_FindChildByID(editor, 1001)
     if midiview then
       local _, windRect = prepMidiview(midiview)
-      local bitmaps, screenRect = createFrameBitmaps(midiview, windRect)
-      glob.liceData = { editor = editor, midiview = midiview, bitmaps = bitmaps, windRect = windRect, screenRect = screenRect }
-      if glob.DEBUG_LANES or not MOAR_BITMAPS then
-        glob.liceData.bitmap = createMidiViewBitmap(midiview, windRect)
-      end
-      glob.windowRect = glob.liceData.screenRect:clone()
-      recompositeDraw = true
-      glob.wantsAnalyze = true
+      glob.liceData = { editor = editor, midiview = midiview, bitmaps = {}, windRect = windRect, screenRect = nil, parent = r.JS_Window_GetParent(editor) }
+      glob.editorIsForeground = true
       peekAppIntercepts(true)
       startIntercepts()
+      local bitmaps, screenRect = createFrameBitmaps(midiview, windRect)
+      glob.liceData.bitmaps = bitmaps
+      glob.liceData.screenRect = screenRect
+      glob.windowRect = screenRect:clone()
+      recompositeDraw = true
+      glob.wantsAnalyze = true
+      if glob.DEBUG_LANES then
+        glob.liceData.bitmap = createMidiViewBitmap(midiview, windRect)
+      end
     end
   end
   recompositeInit = false
 end
 
-local function shutdownLice()
+shutdownLice = function()
   for _, area in ipairs(glob.areas) do
     if destroyBitmap(area.bitmap) then
       area.bitmap = nil
@@ -626,7 +663,7 @@ local function shutdownLice()
       glob.liceData.bitmaps = nil
     end
     end
-    if glob.DEBUG_LANES or not MOAR_BITMAPS then
+    if glob.liceData.bitmap then
       if destroyBitmap(glob.liceData.bitmap) then
         glob.liceData.bitmap = nil
       end
@@ -778,6 +815,12 @@ local function rectToLiceCoords(rect)
          math.floor((rect.y2 - glob.liceData.screenRect.y1) + 0.5)  -- - MIDI_RULER_H
 end
 
+-- Fast point conversion without object creation
+local function pointToLiceCoords(x, y)
+  local sr = glob.liceData.screenRect
+  return math.floor((x - sr.x1) + 0.5), math.floor((y - sr.y1) + 0.5)
+end
+
 local function getAlpha(color)
   return helper.is_windows and (((color & 0xFF000000) >> 24) / 0xFF) or 1
 end
@@ -788,6 +831,7 @@ for i = 1, 10 do
 end
 
 composite = function(hwnd, dstX, dstY, dstW, dstH, bitmap, srcX, srcY, srcW, srcH)
+  if not bitmap then return end
   if childHWND then
     r.rcw_Composite(hwnd, dstX, dstY, dstW, dstH, bitmap, srcX, srcY, srcW, srcH)
   else
@@ -846,9 +890,9 @@ local function putPixel(bitmap, xx1, yy1, which, color, alpha, mode)
   end
 end
 
-local function simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
+local function simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias, thickness)
   if childHWND then
-    r.rcw_DrawLineWithAlpha(bitmap, xx1, yy1, xx2, yy2, color, alpha, 1)
+    r.rcw_DrawLineWithAlpha(bitmap, xx1, yy1, xx2, yy2, color, alpha, thickness or 2)
   else
     r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
   end
@@ -963,9 +1007,294 @@ local function drawSlicer(hwnd, mode, antialias)
   end
 end
 
+local pbBitmap = nil
+
+local function drawPitchBend(hwnd, mode, antialias)
+  if not glob.inPitchBendMode then
+    if pbBitmap then
+      destroyBitmap(pbBitmap)
+      pbBitmap = nil
+    end
+    return
+  end
+
+  local pbPoints = pitchbend.getPBPoints()
+  local config = pitchbend.getConfig()
+  local meLanes = glob.meLanes
+  local meState = glob.meState
+
+  if not meLanes[-1] or not (meState.pixelsPerTick or meState.pixelsPerSecond or meState.pixelsPerPitch) then return end
+  if not glob.liceData then return end
+
+  -- Calculate bitmap dimensions (note area only)
+  local noteAreaWidth = math.floor(glob.liceData.windRect:width() - Lice.MIDI_SCROLLBAR_R + 0.5)
+  local noteAreaHeight = math.floor(meLanes[-1].bottomPixel - glob.liceData.screenRect.y1 + 0.5)
+
+  -- Create bitmap if needed, composite only on creation or size change
+  local bmWidth, bmHeight = getBitmapSize(pbBitmap)
+  if not pbBitmap or bmWidth ~= noteAreaWidth or bmHeight ~= noteAreaHeight then
+    if pbBitmap then
+      destroyBitmap(pbBitmap)
+    end
+    pbBitmap = createBitmap(noteAreaWidth, noteAreaHeight)
+    composite(hwnd, 0, Lice.MIDI_RULER_H, noteAreaWidth, noteAreaHeight, pbBitmap, 0, 0, noteAreaWidth, noteAreaHeight)
+  else
+    clearBitmap(pbBitmap, 0, 0, noteAreaWidth, noteAreaHeight)
+  end
+
+  -- Colors for pitch bend visualization (using MRE theme colors)
+  local pbLineColor = reBorderContrastColor      -- Contrasting color for curves (visible on all backgrounds)
+  local pbPointColor = reBorderColor             -- Main MRE color for unselected points
+  local pbSelectedColor = reFillContrastColor    -- Contrasting color for selected points
+  local pbHoveredColor = 0xFFFFFF00              -- Yellow for hovered
+
+  -- Clip boundaries (bitmap coords, 0-based)
+  local clipBottom = noteAreaHeight
+  local clipRight = noteAreaWidth
+
+  -- Cache function lookups
+  local mmax, mmin, mfloor, mabs = math.max, math.min, math.floor, math.abs
+
+  -- Liang-Barsky line clipping algorithm
+  -- Returns clipped x1,y1,x2,y2 or nil if line is completely outside
+  local function clipLine(x1, y1, x2, y2)
+    local t0, t1 = 0, 1
+    local dx, dy = x2 - x1, y2 - y1
+
+    -- Clip against each edge using parametric form
+    local function clipEdge(p, q)
+      if p == 0 then
+        return q >= 0  -- parallel to edge, check if inside
+      end
+      local t = q / p
+      if p < 0 then  -- entering
+        if t > t1 then return false end
+        if t > t0 then t0 = t end
+      else  -- leaving
+        if t < t0 then return false end
+        if t < t1 then t1 = t end
+      end
+      return true
+    end
+
+    -- Clip against all 4 edges
+    if not clipEdge(-dx, x1) then return nil end      -- left (x >= 0)
+    if not clipEdge(dx, clipRight - x1) then return nil end   -- right (x <= clipRight)
+    if not clipEdge(-dy, y1) then return nil end      -- top (y >= 0)
+    if not clipEdge(dy, clipBottom - y1) then return nil end  -- bottom (y <= clipBottom)
+
+    -- Calculate clipped endpoints
+    return x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy
+  end
+
+  local activeChannel = nil
+  if not config.showAllNotes then
+    activeChannel = config.activeChannel
+  end
+
+  if config.showMicrotonalLines and config.tuningScale then
+    local snapLineColor = 0xFF39FF14
+    local drawnPitches = {}
+    for chan, points in pairs(pbPoints) do
+      if config.showAllNotes or chan == activeChannel then
+        for _, pt in ipairs(points) do
+          if pt.associatedNotes and #pt.associatedNotes > 0 then
+            local refPitch = pt.associatedNotes[1].pitch
+            if not drawnPitches[refPitch] then
+              drawnPitches[refPitch] = true
+              local snapLines = pitchbend.getScaleSnapLines(refPitch)
+              if snapLines then
+                for _, line in ipairs(snapLines) do
+                  local _, y = pointToLiceCoords(0, line.screenY)
+                  if y >= 0 and y < clipBottom then
+                    simpleLine(pbBitmap, 0, y, clipRight, y, snapLineColor, 0.8, 'COPY', false, 1)
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- Draw PB curves for each channel
+  for chan, points in pairs(pbPoints) do
+    -- filter by active channel if showAllNotes is false
+    if config.showAllNotes or chan == activeChannel then
+    local npts = #points
+    if npts > 0 then
+      -- Draw connecting lines between points
+      for i = 1, npts do
+        local pt1 = points[i]
+        local pt2 = points[i + 1]
+
+        if pt2 and pt1.screenX and pt1.screenY and pt2.screenX and pt2.screenY then
+          -- check for note boundary: skip curve if associated notes differ
+          local pt1Note = pt1.associatedNotes and pt1.associatedNotes[1]
+          local pt2Note = pt2.associatedNotes and pt2.associatedNotes[1]
+          local noteBoundary = pt1Note and pt2Note and pt1Note ~= pt2Note
+
+          if not noteBoundary then
+            local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
+            local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
+
+            -- REAPER shapes: 0=square, 1=linear, 2=slow, 3=fast start, 4=fast end, 5=bezier
+            local shape = pt1.shape or 0
+            local beztension = pt1.beztension or 0
+
+            if childHWND then
+              -- Use native curve drawing with built-in clipping
+              r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1, x2, y2, shape, beztension, 0, 0, 0, clipRight, clipBottom, pbLineColor, 0.8, 2)
+            else
+              -- Fallback: simple line drawing
+              if shape == 0 then
+                -- Square/Step: horizontal then vertical (clip each segment separately)
+                local hx1, hy1, hx2, hy2 = clipLine(x1, y1, x2, y1)  -- horizontal segment
+                if hx1 then
+                  simpleLine(pbBitmap, hx1, hy1, hx2, hy2, pbLineColor, 0.8, mode, antialias)
+                end
+                local vx1, vy1, vx2, vy2 = clipLine(x2, y1, x2, y2)  -- vertical segment
+                if vx1 then
+                  simpleLine(pbBitmap, vx1, vy1, vx2, vy2, pbLineColor, 0.8, mode, antialias)
+                end
+              else
+                -- All other shapes: linear with proper clipping (curves not supported in fallback)
+                local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2)
+                if cx1 then
+                  simpleLine(pbBitmap, cx1, cy1, cx2, cy2, pbLineColor, 0.8, mode, antialias)
+                end
+              end
+            end
+          else
+            -- note boundary: draw dashed vertical line to show discontinuity
+            local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
+            local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
+            local boundaryX = x2  -- boundary at new note's first PB point
+            local yTop, yBottom = mmin(y1, y2), mmax(y1, y2)
+            local dashLen, gapLen = 4, 3
+
+            if childHWND then
+              r.rcw_DrawDashedLineWithAlpha(pbBitmap, boundaryX, yTop, boundaryX, yBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
+            else
+              -- Fallback: manual dashed vertical line
+              local y = yTop
+              while y < yBottom do
+                local y2dash = mmin(y + dashLen, yBottom)
+                simpleLine(pbBitmap, boundaryX, y, boundaryX, y2dash, pbLineColor, 0.8, mode, false)
+                y = y + dashLen + gapLen
+              end
+            end
+          end
+        end
+      end
+
+      -- Draw points (as rectangles for performance)
+      for i = 1, npts do
+        local pt = points[i]
+        if pt.screenX and pt.screenY then
+          local x, y = pointToLiceCoords(pt.screenX, pt.screenY)
+
+          -- Only draw points within visible area (horizontal + vertical)
+          if x >= -5 and x <= clipRight + 5 and y >= 0 and y <= clipBottom then
+            local pointColor = pbPointColor
+            local sz = 4
+            if pt.selected then
+              pointColor = pbSelectedColor
+              sz = 5
+            elseif pt.hovered then
+              pointColor = pbHoveredColor
+              sz = 5
+            end
+
+            fillRect(pbBitmap, x - sz, y - sz, sz * 2, sz * 2, pointColor, 1.0, mode)
+          end
+        end
+      end
+    end
+    end  -- channel filter
+  end
+
+  -- Draw marquee selection rectangle if active
+  local dragState = pitchbend.getDragState()
+  if dragState and dragState.isMarquee and dragState.currentMx then
+    local x1, y1 = pointToLiceCoords(dragState.startMx, dragState.startMy)
+    local x2, y2 = pointToLiceCoords(dragState.currentMx, dragState.currentMy)
+
+    -- Normalize rect
+    local rx1, ry1 = mmin(x1, x2), mmin(y1, y2)
+    local rx2, ry2 = mmax(x1, x2), mmax(y1, y2)
+    local rw, rh = rx2 - rx1, ry2 - ry1
+
+    if rw > 0 and rh > 0 then
+      local marqueeColor = reBorderColor  -- Use MRE theme color
+      -- Draw outline rectangle
+      simpleLine(pbBitmap, rx1, ry1, rx2, ry1, marqueeColor, 0.8, mode, false)  -- top
+      simpleLine(pbBitmap, rx2, ry1, rx2, ry2, marqueeColor, 0.8, mode, false)  -- right
+      simpleLine(pbBitmap, rx2, ry2, rx1, ry2, marqueeColor, 0.8, mode, false)  -- bottom
+      simpleLine(pbBitmap, rx1, ry2, rx1, ry1, marqueeColor, 0.8, mode, false)  -- left
+    end
+  end
+
+  -- Draw center line for compress/expand mode
+  local centerState = pitchbend.getCenterLineState()
+  if centerState and (centerState.active or centerState.locked) then
+    local _, cy = pointToLiceCoords(0, centerState.screenY)
+    -- Only draw if within bitmap bounds
+    if cy >= 0 and cy < noteAreaHeight then
+      local centerColor = reBorderColor  -- Use main MRE border color (darker)
+      local dashLen = 6
+      local gapLen = 4
+      -- Use native dashed line if available (childHWND mode)
+      if childHWND then
+        r.rcw_DrawDashedLineWithAlpha(pbBitmap, 0, cy, noteAreaWidth, cy, centerColor, 1.0, 1, dashLen, gapLen)
+      else
+        -- Fallback: manual dashed line
+        local x = 0
+        while x < noteAreaWidth do
+          local x2 = mmin(x + dashLen, noteAreaWidth)
+          simpleLine(pbBitmap, x, cy, x2, cy, centerColor, 1.0, mode, false)
+          x = x + dashLen + gapLen
+        end
+      end
+    end
+  end
+
+  -- Draw path for draw mode (visual feedback while drawing)
+  local drawStateData = pitchbend.getDrawState()
+  if drawStateData and drawStateData.path and #drawStateData.path > 0 then
+    local drawColor = reFillContrastColor  -- Use contrasting color for draw preview
+    local path = drawStateData.path
+
+    -- Draw connecting lines between path points
+    for i = 1, #path - 1 do
+      local pt1 = path[i]
+      local pt2 = path[i + 1]
+      local _, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
+      local _, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
+      local x1 = pt1.screenX - glob.liceData.screenRect.x1
+      local x2 = pt2.screenX - glob.liceData.screenRect.x1
+
+      -- Clip and draw
+      local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2)
+      if cx1 then
+        simpleLine(pbBitmap, cx1, cy1, cx2, cy2, drawColor, 0.9, mode, antialias)
+      end
+    end
+
+    -- Draw points at each path position
+    for _, pt in ipairs(path) do
+      local _, y = pointToLiceCoords(pt.screenX, pt.screenY)
+      local x = pt.screenX - glob.liceData.screenRect.x1
+      if x >= 0 and x < noteAreaWidth and y >= 0 and y < noteAreaHeight then
+        fillRect(pbBitmap, x - 3, y - 3, 6, 6, drawColor, 1.0, mode)
+      end
+    end
+  end
+end
+
 local function drawLice()
   local hwnd = childHWND and childHWND or glob.liceData.midiview
-  local integrated = not helper.is_windows or hwnd == childHWND
 
   checkThemeFile()
   local recomposite = glob.needsRecomposite or recompositeDraw
@@ -974,13 +1303,15 @@ local function drawLice()
   recompositeDraw = false
 
   local antialias = true
-  local mode = 'COPY,ALPHA' --helper.is_windows and 0 or 'COPY,ALPHA'
+  local mode = 'COPY,ALPHA'
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
 
+  r.rcw_BeginFrame(hwnd)
+
   if glob.liceData then
     for _, area in ipairs(glob.areas) do
-      if glob.inSlicerMode then
+      if glob.inSlicerMode or glob.inPitchBendMode then
         local bmWidth, bmHeight = getBitmapSize(area.bitmap)
         clearBitmap(area.bitmap, 0, 0, bmWidth, bmHeight)
       elseif area.logicalRect then
@@ -1020,6 +1351,7 @@ local function drawLice()
             composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h)
           end
         end
+
         if not skip and not area.bitmap then
           area.bitmap = createBitmap(w, h, upsizing)
           composite(hwnd, x1V - Lice.EDGE_SLOP, y1V + Lice.MIDI_RULER_H - Lice.EDGE_SLOP, w, h, area.bitmap, 0, 0, w, h)
@@ -1027,9 +1359,30 @@ local function drawLice()
           area.modified = true
         end
 
-        if not skip and area.modified or area.hovering or area.washovering then
+        if area.hovering or area.washovering then
+          if area.washovering then
+            area.modified = true
+            area.washovering = false
+          else
+            if not area.hovering.last or
+              area.hovering.last.left ~= area.hovering.left or
+              area.hovering.last.top ~= area.hovering.top or
+              area.hovering.last.right ~= area.hovering.right or
+              area.hovering.last.bottom ~= area.hovering.bottom
+            then
+              area.modified = true
+              area.hovering.last = {
+                left = area.hovering.left,
+                top = area.hovering.top,
+                right = area.hovering.right,
+                bottom = area.hovering.bottom
+              }
+            end
+          end
+        end
+
+        if not skip and area.modified then
           area.modified = false
-          area.washovering = false -- ensure that it gets cleared
 
           local logicalRect = (area.logicalRect:clone()):conform()
           local x1L, y1L, x2L, y2L = rectToLiceCoords(logicalRect)
@@ -1038,19 +1391,13 @@ local function drawLice()
           local x1, y1, x2, y2 = (x1L - x1V) + Lice.EDGE_SLOP, (y1L - y1V) + Lice.EDGE_SLOP, (x2L - x1V) + Lice.EDGE_SLOP, (y2L - y1V) + Lice.EDGE_SLOP - 1
 
           local function maskTopBottom()
-            if helper.is_windows then
-              clearBitmap(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V)) -- top
-              clearBitmap(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2) -- bottom
-            else
-              r.JS_LICE_FillRect(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V), 0x00FFFFFF, 1, 'COPY') -- top
-              r.JS_LICE_FillRect(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2, 0x00FFFFFF, 1, 'COPY') -- bottom
-            end
+            clearBitmap(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V)) -- top
+            clearBitmap(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2) -- bottom
           end
 
           -- LICE has neither line widths nor clipping rects. Meh.
           clearBitmap(area.bitmap, x1 - Lice.EDGE_SLOP, y1 - Lice.EDGE_SLOP, logWidth + (Lice.EDGE_SLOP * 2) + 1, logHeight + (Lice.EDGE_SLOP * 2) + 1)
-          fillRect(area.bitmap, x1, y1,
-                   logWidth, logHeight - 1, reFillColor, helper.is_windows and 0.3 or 1, mode)
+          fillRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reFillColor, childHWND and 0.3 or 1, mode);
           frameRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reBorderColor, alpha, mode, antialias)
           -- if area.onClipboard then
           --   frameRect(area.bitmap, x1 + 3, y1 + 3, logWidth - 6, logHeight - 7, reBorderContrastColor, alpha, mode, antialias)
@@ -1143,6 +1490,7 @@ local function drawLice()
     end
 
     drawSlicer(hwnd, mode, antialias)
+    drawPitchBend(hwnd, mode, antialias)
 
     if glob.DEBUG_LANES then
       clearBitmap(glob.liceData.bitmap, glob.liceData.windRect.x1, glob.liceData.windRect.y1,
@@ -1150,13 +1498,13 @@ local function drawLice()
       for i = #meLanes, -1, -1 do
         local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(glob.windowRect.x1, meLanes[i].topPixel, glob.windowRect.x2 - Lice.MIDI_SCROLLBAR_R + 1, meLanes[i].bottomPixel))
         local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
-        r.JS_LICE_FillRect(glob.liceData.bitmap, x1, y1,
+        fillRect(glob.liceData.bitmap, x1, y1,
                            width, height, colors[i + 2], alpha, mode)
       end
       for _, dz in ipairs(glob.deadZones) do
         local x1, y1, x2, y2 = rectToLiceCoords(dz)
         local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
-        r.JS_LICE_FillRect(glob.liceData.bitmap, x1, y1,
+        fillRect(glob.liceData.bitmap, x1, y1,
                            width, height, 0xEFFFFFFF, alpha, mode)
       end
     else
@@ -1206,6 +1554,8 @@ local function drawLice()
       end
     end
   end
+
+  r.rcw_EndFrame(hwnd)
 end
 
 Lice.recalcConstants = recalcConstants
@@ -1224,6 +1574,7 @@ Lice.peekIntercepts = peekIntercepts
 Lice.peekAppIntercepts = peekAppIntercepts
 
 Lice.keyMappings = function() return keyMappings end
+Lice.pbKeyMappings = function() return pbKeyMappings end
 Lice.modMappings = function() return modMappings end
 Lice.widgetMappings = function() return widgetMappings end
 Lice.keyIsMapped = keyIsMapped

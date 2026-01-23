@@ -734,6 +734,36 @@ end
 
 ----------------------------------------------------
 
+-- VKeys wrappers: prefer rcw_VKeys_* (childwindow), fallback to JS_VKeys_*
+-- JS_VKeys_* always present if JS_ReaScriptAPI installed (checked at Lib load)
+local has_rcw_Intercept = r.APIExists('rcw_VKeys_Intercept')
+local has_rcw_GetState = r.APIExists('rcw_VKeys_GetState')
+local has_rcw_ClearState = r.APIExists('rcw_VKeys_ClearState')
+
+local function VKeys_Intercept(key, intercept)
+  if has_rcw_Intercept then
+    return r.rcw_VKeys_Intercept(key, intercept)
+  else
+    return r.JS_VKeys_Intercept(key, intercept)
+  end
+end
+
+local function VKeys_GetState(cutoff)
+  if has_rcw_GetState then
+    return r.rcw_VKeys_GetState(cutoff)
+  else
+    return r.JS_VKeys_GetState(cutoff)
+  end
+end
+
+local function VKeys_ClearState()
+  if has_rcw_ClearState then
+    r.rcw_VKeys_ClearState()
+  end
+end
+
+----------------------------------------------------
+
 Helper.deserialize = deserialize
 Helper.serialize = serialize
 
@@ -764,5 +794,21 @@ Helper.compExpValueMiddle = compExpValueMiddle
 Helper.compExpValueTopBottom = compExpValueTopBottom
 
 Helper.GLOBAL_PREF_SLOP = GLOBAL_PREF_SLOP
+
+Helper.VKeys_Intercept = VKeys_Intercept
+Helper.VKeys_GetState = VKeys_GetState
+Helper.VKeys_ClearState = VKeys_ClearState
+
+-- convert screen Y from GetMousePosition() to native coords matching glob.windowRect
+-- macOS screen Y is flipped (origin at bottom), this converts to match lane.topPixel etc
+local function screenYToNative(y, windowRect)
+  if is_macos and windowRect then
+    local _, wy1, _, wy2 = r.JS_Window_GetViewportFromRect(windowRect.x1, windowRect.y1, windowRect.x2, windowRect.y2, false)
+    local screenHeight = math.abs(wy2 - wy1)
+    return screenHeight - y
+  end
+  return y
+end
+Helper.screenYToNative = screenYToNative
 
 return Helper

@@ -9,6 +9,7 @@ local r = reaper
 
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'RazorEdits/?.lua;' -- GET DIRECTORY FOR REQUIRE
 local keys = require 'MIDIRazorEdits_Keys'
+local helper = require 'MIDIRazorEdits_Helper'
 if not keys then
   r.ShowConsoleMsg("MIDI Razor Edits (Settings) cannot find necessary files, please reinstall\n")
 end
@@ -28,10 +29,10 @@ end
 local scriptID = 'sockmonkey72_MRE_Settings'
 local scriptID_Save = 'sockmonkey72_MIDIRazorEdits'
 
-local os = r.GetOS()
-local is_windows = os:match('Win')
-local is_macos = os:match('OS')
-local is_linux = os:match('Other')
+local osName = r.GetOS()
+local is_windows = osName:match('Win')
+local is_macos = osName:match('OS')
+local is_linux = osName:match('Other')
 
 local ctrlName = is_macos and 'cmd' or 'ctrl'
 local shiftName = 'shift'
@@ -66,10 +67,12 @@ local prevKeys
 local overlapTestFailed = false
 
 local keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
+local pbKeyMappings = tableCopySimpleKeys(keys.defaultPbKeyMappings)
 local modMappings = tableCopySimpleKeys(keys.defaultModMappings)
 local widgetMappings = tableCopySimpleKeys(keys.defaultWidgetMappings)
 
 local lastKeyState
+local lastPbKeyState
 local lastModState
 local lastWidgetState
 local prefsStretchMode
@@ -82,20 +85,35 @@ local prefsSlicerDefaultTrim
 local slicerDefaultTrim
 local prefsWantsRightButton
 local wantsRightButton
+local prefsPbMaxBendUp
+local pbMaxBendUp
+local prefsPbMaxBendDown
+local pbMaxBendDown
+local prefsPbSnapToSemitone
+local pbSnapToSemitone
+local prefsPbShowAllNotes
+local pbShowAllNotes
+local prefsPbSclDirectory
+local pbSclDirectory
+local prefsPbDefaultTuning
+local pbDefaultTuning
+local pbSclFiles = {}  -- cached list of .scl files
 
 local function releaseKeys()
   if intercepting then
-    r.JS_VKeys_Intercept(-1, -1)
+    helper.VKeys_Intercept(-1, -1)
     intercepting = false
   end
 end
 
 local function interceptKeys()
   if not intercepting then
-    r.JS_VKeys_Intercept(-1, 1)
+    helper.VKeys_Intercept(-1, 1)
     intercepting = true
   end
 end
+
+local currentPbRow  -- forward declaration for PB key mappings
 
 local function setup()
   overlapTestFailed = false
@@ -103,11 +121,12 @@ local function setup()
   if not ImGui.IsWindowFocused(ctx) then
     releaseKeys()
     currentRow = nil
+    currentPbRow = nil
     return
   end
 
   if intercepting then
-    local vKeys = r.JS_VKeys_GetState(10)
+    local vKeys = helper.VKeys_GetState(10)
     local found
 
     if vKeys == prevKeys then return end
@@ -167,12 +186,17 @@ local function setup()
     if found then
       for k, v in pairs(keys.vKeyLookup) do
         if found == v then
-          keyMappings[currentRow].baseKey = k
+          if currentRow then
+            keyMappings[currentRow].baseKey = k
+            local jsMouse = r.JS_Mouse_GetState(0x3C)
+            local mouseState = 0 | (jsMouse & 0x08 ~= 0 and 1 or 0) | (jsMouse & 0x04 ~= 0 and 2 or 0) | (jsMouse & 0x10 ~= 0 and 4 or 0) | (jsMouse & 0x20 ~= 0 and 8 or 0)
+            keyMappings[currentRow].modifiers = mouseState
+            currentRow = nil
+          elseif currentPbRow then
+            pbKeyMappings[currentPbRow].baseKey = k
+            currentPbRow = nil
+          end
           releaseKeys()
-          local jsMouse = r.JS_Mouse_GetState(0x3C)
-          local mouseState = 0 | (jsMouse & 0x08 ~= 0 and 1 or 0) | (jsMouse & 0x04 ~= 0 and 2 or 0) | (jsMouse & 0x10 ~= 0 and 4 or 0) | (jsMouse & 0x20 ~= 0 and 8 or 0)
-          keyMappings[currentRow].modifiers = mouseState
-          currentRow = nil
           break
         end
       end
@@ -245,6 +269,7 @@ local function makeKeyRowTable(id, source, isDupe)
     if intercepting then
       interceptKeys()
       currentRow = id
+      currentPbRow = nil  -- clear PB row selection
     else
       releaseKeys()
       currentRow = nil
@@ -357,6 +382,23 @@ local function prepKeysForSaving()
   return output
 end
 
+local function prepPbKeysForSaving()
+  local output = {}
+  local defaults = keys.defaultPbKeyMappings
+  for k, v in pairs(pbKeyMappings) do
+    if not defaults[k]
+      or defaults[k].baseKey == v.baseKey
+        and ((v.modifiers == 0 and not defaults[k].modifiers)
+          or (v.modifiers == defaults[k].modifiers))
+    then
+      -- nada
+    else
+      output[k] = { baseKey = v.baseKey, modifiers = v.modifiers }
+    end
+  end
+  return output
+end
+
 local function prepModsForSaving()
   local output = {}
   local defaults = keys.defaultModMappings
@@ -392,6 +434,20 @@ local function handleSavedMappings()
         if keyMappings[k] and v.baseKey and keys.vKeyLookup[v.baseKey] then
           keyMappings[k].baseKey = v.baseKey
           keyMappings[k].modifiers = v.modifiers
+        end
+      end
+    end
+  end
+
+  state = r.GetExtState(scriptID_Save, 'pbKeyMappings')
+  lastPbKeyState = state ~= '' and state or nil
+  if state then
+    state = fromExtStateString(state)
+    if state then
+      for k, v in pairs(state) do
+        if pbKeyMappings[k] and v.baseKey and keys.vKeyLookup[v.baseKey] then
+          pbKeyMappings[k].baseKey = v.baseKey
+          pbKeyMappings[k].modifiers = v.modifiers
         end
       end
     end
@@ -447,6 +503,35 @@ local function handleSavedMappings()
   prefsWantsRightButton = state ~= '' and tonumber(state) or 0
   if not prefsWantsRightButton then prefsWantsRightButton = 0 end
   wantsRightButton = prefsWantsRightButton
+
+  -- Pitch Bend settings
+  state = r.GetExtState(scriptID_Save, 'pbMaxBendUp')
+  prefsPbMaxBendUp = state ~= '' and tonumber(state) or 48
+  if not prefsPbMaxBendUp then prefsPbMaxBendUp = 48 end
+  pbMaxBendUp = prefsPbMaxBendUp
+
+  state = r.GetExtState(scriptID_Save, 'pbMaxBendDown')
+  prefsPbMaxBendDown = state ~= '' and tonumber(state) or 48
+  if not prefsPbMaxBendDown then prefsPbMaxBendDown = 48 end
+  pbMaxBendDown = prefsPbMaxBendDown
+
+  state = r.GetExtState(scriptID_Save, 'pbSnapToSemitone')
+  prefsPbSnapToSemitone = state ~= '' and tonumber(state) or 0
+  if not prefsPbSnapToSemitone then prefsPbSnapToSemitone = 0 end
+  pbSnapToSemitone = prefsPbSnapToSemitone
+
+  state = r.GetExtState(scriptID_Save, 'pbShowAllNotes')
+  prefsPbShowAllNotes = state ~= '' and tonumber(state) or 1
+  if not prefsPbShowAllNotes then prefsPbShowAllNotes = 1 end
+  pbShowAllNotes = prefsPbShowAllNotes
+
+  state = r.GetExtState(scriptID_Save, 'pbSclDirectory')
+  prefsPbSclDirectory = state ~= '' and state or '~/Documents/scl'
+  pbSclDirectory = prefsPbSclDirectory
+
+  state = r.GetExtState(scriptID_Save, 'pbDefaultTuning')
+  prefsPbDefaultTuning = state ~= '' and state or ''
+  pbDefaultTuning = prefsPbDefaultTuning
 end
 
 local function drawPageTabs()
@@ -454,6 +539,7 @@ local function drawPageTabs()
   if ImGui.BeginTabBar(ctx, 'Page') then
     if ImGui.BeginTabItem(ctx, 'Key Mappings') then page = 0 ImGui.EndTabItem(ctx) end
     if ImGui.BeginTabItem(ctx, 'Other Settings') then page = 1 ImGui.EndTabItem(ctx) end
+    if ImGui.BeginTabItem(ctx, 'Even More Settings') then page = 2 ImGui.EndTabItem(ctx) end
     ImGui.EndTabBar(ctx)
   end
   return page
@@ -576,7 +662,14 @@ local function hasChanges() -- could throttle this if it's a performance concern
   if wantsControlPoints ~= prefsWantsControlPoints then return true end
   if stretchMode ~= prefsStretchMode then return true end
   if widgetStretchMode ~= prefsWidgetStretchMode then return true end
+  if pbMaxBendUp ~= prefsPbMaxBendUp then return true end
+  if pbMaxBendDown ~= prefsPbMaxBendDown then return true end
+  if pbSnapToSemitone ~= prefsPbSnapToSemitone then return true end
+  if pbShowAllNotes ~= prefsPbShowAllNotes then return true end
+  if pbSclDirectory ~= prefsPbSclDirectory then return true end
+  if pbDefaultTuning ~= prefsPbDefaultTuning then return true end
   if lastKeyState ~= toExtStateString(prepKeysForSaving()) then return true end
+  if lastPbKeyState ~= toExtStateString(prepPbKeysForSaving()) then return true end
   if lastModState ~= toExtStateString(prepModsForSaving()) then return true end
   if lastWidgetState ~= toExtStateString(prepWidgetsForSaving()) then return true end
   return false
@@ -597,6 +690,16 @@ local function drawButtons()
     else
       r.DeleteExtState(scriptID_Save, 'keyMappings', true)
       lastKeyState = nil
+    end
+
+    -- PB KEY mappings
+    extStateStr = toExtStateString(prepPbKeysForSaving())
+    if extStateStr then
+      r.SetExtState(scriptID_Save, 'pbKeyMappings', extStateStr, true)
+      lastPbKeyState = extStateStr
+    else
+      r.DeleteExtState(scriptID_Save, 'pbKeyMappings', true)
+      lastPbKeyState = nil
     end
 
     -- MOD mappings
@@ -656,6 +759,49 @@ local function drawButtons()
     end
     prefsWantsRightButton = wantsRightButton
 
+    -- Pitch Bend settings
+    if pbMaxBendUp ~= 48 then
+      r.SetExtState(scriptID_Save, 'pbMaxBendUp', tostring(pbMaxBendUp), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbMaxBendUp', true)
+    end
+    prefsPbMaxBendUp = pbMaxBendUp
+
+    if pbMaxBendDown ~= 48 then
+      r.SetExtState(scriptID_Save, 'pbMaxBendDown', tostring(pbMaxBendDown), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbMaxBendDown', true)
+    end
+    prefsPbMaxBendDown = pbMaxBendDown
+
+    if pbSnapToSemitone ~= 0 then
+      r.SetExtState(scriptID_Save, 'pbSnapToSemitone', tostring(pbSnapToSemitone), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbSnapToSemitone', true)
+    end
+    prefsPbSnapToSemitone = pbSnapToSemitone
+
+    if pbShowAllNotes ~= 1 then
+      r.SetExtState(scriptID_Save, 'pbShowAllNotes', tostring(pbShowAllNotes), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbShowAllNotes', true)
+    end
+    prefsPbShowAllNotes = pbShowAllNotes
+
+    if pbSclDirectory ~= '~/Documents/scl' then
+      r.SetExtState(scriptID_Save, 'pbSclDirectory', pbSclDirectory, true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbSclDirectory', true)
+    end
+    prefsPbSclDirectory = pbSclDirectory
+
+    if pbDefaultTuning ~= '' then
+      r.SetExtState(scriptID_Save, 'pbDefaultTuning', pbDefaultTuning, true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbDefaultTuning', true)
+    end
+    prefsPbDefaultTuning = pbDefaultTuning
+
     -- NOTIFY
     r.SetExtState(scriptID_Save, 'settingsUpdated', 'ping', false)
   end
@@ -678,9 +824,205 @@ local function drawButtons()
     wantsRightButton = false
     stretchMode = 0
     widgetStretchMode = 1
+    pbMaxBendUp = 48
+    pbMaxBendDown = 48
+    pbSnapToSemitone = 0
+    pbShowAllNotes = 1
+    pbSclDirectory = '~/Documents/scl'
+    pbDefaultTuning = ''
     keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
+    pbKeyMappings = tableCopySimpleKeys(keys.defaultPbKeyMappings)
     modMappings = tableCopySimpleKeys(keys.defaultModMappings)
     widgetMappings = tableCopySimpleKeys(keys.defaultWidgetMappings)
+  end
+end
+
+-- scan pbSclDirectory for .scl files
+local function scanSclFiles()
+  pbSclFiles = {}
+  if not pbSclDirectory or pbSclDirectory == '' then return end
+
+  local dir = pbSclDirectory
+  -- expand ~ to home directory
+  if dir:sub(1, 1) == '~' then
+    local home = os.getenv('HOME') or os.getenv('USERPROFILE') or ''
+    dir = home .. dir:sub(2)
+  end
+
+  local idx = 0
+  while true do
+    local file = r.EnumerateFiles(dir, idx)
+    if not file then break end
+    if file:lower():match('%.scl$') then
+      table.insert(pbSclFiles, file)
+    end
+    idx = idx + 1
+  end
+  table.sort(pbSclFiles)
+end
+
+local function makePbKeyRowTable(id, source, isDupe)
+  if not source.modifiers then source.modifiers = 0 end
+
+  local rv
+
+  ImGui.TableNextRow(ctx)
+
+  if isDupe then
+    local col = ImGui.GetColor(ctx, ImGui.Col_TableRowBg)
+    ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, col + 0xBB0000BB)
+  end
+  if id == currentPbRow then
+    local col = ImGui.GetColor(ctx, ImGui.Col_TableRowBg)
+    ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, col + 0x00BBBBBB)
+  end
+
+  ImGui.TableNextColumn(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, source.name)
+
+  ImGui.TableNextColumn(ctx)
+  rv = ImGui.Button(ctx, (intercepting and currentPbRow == id) and ('Waiting...##pb_' .. id) or (source.baseKey .. '##pb_' .. id), 100)
+  if rv then
+    intercepting = (not intercepting or id ~= currentPbRow) and true or false
+    if intercepting then
+      interceptKeys()
+      currentPbRow = id
+      currentRow = nil  -- clear main row selection
+    else
+      releaseKeys()
+      currentPbRow = nil
+    end
+  end
+end
+
+local function drawPbKeyMappings()
+  ImGui.Text(ctx, 'Pitch Bend Mode Key Mappings')
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+  if ImGui.BeginTable(ctx, '##pbKeyMappings', 2, ImGui.TableFlags_RowBg, 400) then
+    ImGui.TableSetupColumn(ctx, 'Description', ImGui.TableColumnFlags_WidthStretch, 250)
+    ImGui.TableSetupColumn(ctx, 'Key', ImGui.TableColumnFlags_WidthFixed, 100)
+
+    ImGui.TableHeadersRow(ctx)
+
+    for k, v in spairs(pbKeyMappings, function(t, a, b) return t[a].name < t[b].name end) do
+      local function isDuped()
+        for kk, map in pairs(pbKeyMappings) do
+          if kk ~= k then
+            if map.baseKey == v.baseKey then return true end
+          end
+        end
+        return false
+      end
+      makePbKeyRowTable(k, v, isDuped())
+    end
+    ImGui.EndTable(ctx)
+  end
+end
+
+local function drawPitchBendOptions()
+  ImGui.Text(ctx, 'Pitch Bend Mode Settings')
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  local rv
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Max Pitch Bend Up (semitones):')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  ImGui.SetNextItemWidth(ctx, 100)
+  rv, pbMaxBendUp = ImGui.InputInt(ctx, '##pbMaxBendUp', pbMaxBendUp, 1, 12)
+  if pbMaxBendUp < 1 then pbMaxBendUp = 1 end
+  if pbMaxBendUp > 96 then pbMaxBendUp = 96 end
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Max Pitch Bend Down (semitones):')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  ImGui.SetNextItemWidth(ctx, 100)
+  rv, pbMaxBendDown = ImGui.InputInt(ctx, '##pbMaxBendDown', pbMaxBendDown, 1, 12)
+  if pbMaxBendDown < 1 then pbMaxBendDown = 1 end
+  if pbMaxBendDown > 96 then pbMaxBendDown = 96 end
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Snap to Semitone by Default:')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  local snap = pbSnapToSemitone == 1
+  rv, snap = ImGui.Checkbox(ctx, '##pbSnapToSemitone', snap)
+  pbSnapToSemitone = snap and 1 or 0
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Display Filter:')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  rv, pbShowAllNotes = ImGui.RadioButtonEx(ctx, 'All Notes##pbFilter', pbShowAllNotes, 1)
+  ImGui.SameLine(ctx)
+  rv, pbShowAllNotes = ImGui.RadioButtonEx(ctx, 'Active Channel##pbFilter', pbShowAllNotes, 0)
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Scale (.scl) Directory:')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  ImGui.SetNextItemWidth(ctx, 250)
+  local dirChanged
+  dirChanged, pbSclDirectory = ImGui.InputText(ctx, '##pbSclDirectory', pbSclDirectory)
+  if dirChanged then scanSclFiles() end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, 'Browse...##pbSclBrowse') then
+    local ok, path = r.JS_Dialog_BrowseForFolder('Select .scl directory', pbSclDirectory)
+    if ok == 1 and path then
+      pbSclDirectory = path
+      scanSclFiles()
+    end
+  end
+
+  -- default tuning combo
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Default Tuning:')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  ImGui.SetNextItemWidth(ctx, 250)
+  if ImGui.BeginCombo(ctx, '##pbDefaultTuning', pbDefaultTuning == '' and 'Equal Temperament (12-TET)' or pbDefaultTuning) then
+    if ImGui.Selectable(ctx, 'Equal Temperament (12-TET)', pbDefaultTuning == '') then
+      pbDefaultTuning = ''
+    end
+    local fileCount = #pbSclFiles
+    if fileCount <= 50 then
+      for _, file in ipairs(pbSclFiles) do
+        if ImGui.Selectable(ctx, file, pbDefaultTuning == file) then
+          pbDefaultTuning = file
+        end
+      end
+    else
+      -- group by first character (0-9, A, B, C...)
+      local groups = {}
+      for _, f in ipairs(pbSclFiles) do
+        local firstChar = f:sub(1, 1):upper()
+        if firstChar:match('%d') then firstChar = '0-9' end
+        if not groups[firstChar] then groups[firstChar] = {} end
+        table.insert(groups[firstChar], f)
+      end
+      -- sort group keys
+      local sortedKeys = {}
+      for k in pairs(groups) do table.insert(sortedKeys, k) end
+      table.sort(sortedKeys)
+      -- build submenus
+      for _, key in ipairs(sortedKeys) do
+        local groupFiles = groups[key]
+        if ImGui.BeginMenu(ctx, key .. ' (' .. #groupFiles .. ')') then
+          for _, file in ipairs(groupFiles) do
+            if ImGui.Selectable(ctx, file, pbDefaultTuning == file) then
+              pbDefaultTuning = file
+            end
+          end
+          ImGui.EndMenu(ctx)
+        end
+      end
+    end
+    ImGui.EndCombo(ctx)
   end
 end
 
@@ -720,20 +1062,26 @@ local function drawMiscOptions()
   -- widgetStretchMode = wsm
 
   ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Slicer Trims By Default (opt/alt to split only):')
-  local trim = slicerDefaultTrim
-  ImGui.SameLine(ctx)
-  -- ImGui.SetCursorPosX(ctx, saveX)
-  rv, trim = ImGui.Checkbox(ctx, '##slicerDefaultTrim', trim == 1 and true or false)
-  slicerDefaultTrim = trim and 1 or 0
-
-  ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Use Right Mouse Button (experimental):')
   local rb = wantsRightButton
   ImGui.SameLine(ctx)
   -- ImGui.SetCursorPosX(ctx, saveX)
   rv, rb = ImGui.Checkbox(ctx, '##wantsRightButton', rb == 1 and true or false)
   wantsRightButton = rb and 1 or 0
+end
+
+local function drawSlicerOptions()
+  ImGui.Text(ctx, 'Slicer Mode Settings')
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Slicer Trims By Default (opt/alt to split only):')
+  local trim = slicerDefaultTrim
+  ImGui.SameLine(ctx)
+  local rv
+  rv, trim = ImGui.Checkbox(ctx, '##slicerDefaultTrim', trim == 1 and true or false)
+  slicerDefaultTrim = trim and 1 or 0
 end
 
 local inWindow = false
@@ -765,12 +1113,7 @@ local function loop()
 
     drawKeyMappings()
 
-    -- ImGui.Separator(ctx)
-    -- ImGui.Spacing(ctx)
-    -- ImGui.Separator(ctx)
-    -- ImGui.Spacing(ctx)
-
-    else
+    elseif page == 1 then
 
     drawModMappings()
 
@@ -788,6 +1131,24 @@ local function loop()
 
     drawWidgetMappings()
 
+    else  -- page == 2
+
+    drawSlicerOptions()
+
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    drawPitchBendOptions()
+
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    drawPbKeyMappings()
+
     end
 
     ImGui.Spacing(ctx)
@@ -799,6 +1160,12 @@ local function loop()
     if ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Left) then
       releaseKeys()
       currentRow = nil
+      currentPbRow = nil
+    end
+
+    -- esc to quit (only if not intercepting keys)
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) and not intercepting then
+      wantsQuit = true
     end
 
     ImGui.End(ctx)
@@ -811,5 +1178,6 @@ local function loop()
 end
 
 handleSavedMappings()
+scanSclFiles()
 reaper.defer(function() xpcall(loop, onCrash) end)
 r.atexit(shutdown)

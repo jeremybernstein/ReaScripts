@@ -5,6 +5,8 @@ MIDI Razor Edits adds the ability to:
 - Select, copy, and manipulate MIDI notes and CC data with the precision of Razor Edits.
 - Use workflows similar to REAPER’s native Razor Edits but designed specifically for MIDI editing.
 - Stretch, scale, invert, duplicate, copy your MIDI data quickly and conveniently.
+- Trim/split MIDI notes across a diagonal (Slicer mode).
+- Create and edit pitchbend events directly on the piano roll (Pitchbend mode).
 
 **<u>Basic usage</u>**
 
@@ -14,8 +16,10 @@ Of course, there's more to it. You can cmd/ctrl-click-drag to create multiple ar
 
 **<u>Performance Tips</u>**
 
-* On Windows, MRE can be flickery and laggy. This is not my fault per se, it's a limitation of the kind of drawing required by the script, and REAPER's handling of such. There's a secret performance settings dialog available if you press ctrl-alt-F10, where you can try to adjust the compositing settings. If you find something which works particularly well, please tell me about it.
-* On Mac, I recommend enabling Move throttling in the Advanced UI/system tweaks preference dialog (in the General tab), which will smooth out performance (particularly if you have external, high-DPI input devices and/or multiple displays).
+* On Windows, without the *reaper_childwindow* extension (install via ReaPack from my repository), MRE can be flickery and laggy. So install it! 
+  * As of v1.5. the *childwindow* extension is **available and more or less required** for all supported platforms in order to squeeze the best performance and experience out of the script. The extension manages the invisible overlay which is created over the MIDI Editor as a drawing surface, as well as providing fast drawing utilities and a few other helpers.
+
+* On Mac, I recommend *enabling mouse Move throttling* in the Advanced UI/system tweaks preference dialog (in the General tab), which will smooth out performance, expecially on low-refresh-rate external displays.
 
 **<u>Key Mapping / Operations</u>**
 
@@ -73,3 +77,25 @@ Enter **Widget Mode** by double-clicking on an area or by using the **Toggle Wid
   Note that **Widget Mode** provides additional value stretching modes.
 
 * **Use Right Mouse Button** (experimental): 
+
+
+**<u>Slicer Mode</u>** (introduced in v1.2)
+
+This fairly simple mode permits splitting or trimming notes along a diagonal line drawn by the user. The default hotkey to enter **Slicer mode** is `z`, or you can launch the Slicer as a dedicated tool by assigning a key command to the launcher script in the Actions window. When you launch the script as a dedicated tool, it will auto-quit after slicing.
+
+ In **Slicer mode** (there's a custom cursor to indicate it):
+
+- draw a line (the "slice line" if you will) to define a split point on the notes intersecting that line. By default, the notes will be split and the left side will be selected after the operation.
+- **shift** will toggle grid-snapping. Note, however, that grid-snapping is always off by default and shift enables it, which is more appropriate for this tool. When enabled, grid quantization only applies to the first and last points of the slice line, not to points in the middle (negotiable, but this made the most sense to me)
+- **option/alt** will toggle "trim" behavior (a la Cubase), so instead of splitting, the left side (by default) will be deleted. *There is a checkbox for the default behavior for split vs trim in the Settings script.*
+- **cmd/ctrl** will enable vertical lock (the splits will be at exactly the same time for all notes)
+- **super (ctrl/windows/super)** will switch sides (the right side of the slice line will be selected/trimmed)
+
+**<u>Pitchbend Mode</u>** (introduced in v1.5)
+
+The excessively complex mode permits editing of pitchbend events as note-associated curves, directly in the piano roll. The default hotkey to enter **Pitchbend mode** is `p`, or you can launch Pitchbend mode as a dedicated tool by assigning a key command to the launcher script in the Actions window. 
+
+> [!IMPORTANT]
+>
+> Please see *PitchBendMode_README.md* for comprehensive documentation about this mode.
+

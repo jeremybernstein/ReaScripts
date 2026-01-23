@@ -86,6 +86,8 @@ Global.DEBUG_LANES = false
 --]]
 
 -- is this a problem, multiple initialization?
+local scriptPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
+
 Global.normal_cursor = r.JS_Mouse_LoadCursor(helper.is_windows and 32512 or 0)
 Global.razor_cursor1 = r.JS_Mouse_LoadCursor(599)
 Global.resize_left_cursor = r.JS_Mouse_LoadCursor(417)
@@ -101,7 +103,14 @@ Global.stretch_left_cursor = r.JS_Mouse_LoadCursor(430)
 Global.stretch_right_cursor = r.JS_Mouse_LoadCursor(431)
 Global.stretch_up_down = r.JS_Mouse_LoadCursor(429)
 Global.forbidden_cursor = r.JS_Mouse_LoadCursor(32648)
-Global.slicer_cursor = r.JS_Mouse_LoadCursorFromFile(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'slicer.cur') -- r.JS_Mouse_LoadCursor(433) -- 185? 433?
+Global.slicer_cursor = r.JS_Mouse_LoadCursorFromFile(scriptPath .. 'slicer.cur')
+Global.bend_cursor = r.JS_Mouse_LoadCursorFromFile(scriptPath .. 'bend.cur') -- r.JS_Mouse_LoadCursor(185) --r.JS_Mouse_LoadCursor(32515)  -- IDC_CROSS
+Global.draw_cursor = r.JS_Mouse_LoadCursor(185)
+Global.hand_cursor = r.JS_Mouse_LoadCursor(32649)       -- IDC_HAND
+Global.move_cursor = r.JS_Mouse_LoadCursor(32646)       -- IDC_SIZEALL
+Global.bezier_cursor = r.JS_Mouse_LoadCursor(462)       -- bezier tension edit
+-- Global.curve_select_cursor = r.JS_Mouse_LoadCursor(105) -- fade-in curve (curve type selection)
+Global.curve_select_cursor = r.JS_Mouse_LoadCursorFromFile(scriptPath .. 'curve.cur')
 
 Global.prevCursor = Global.normal_cursor
 
@@ -139,6 +148,9 @@ Global.inWidgetMode = false
 Global.inSlicerMode = false
 Global.slicerQuitAfterProcess = false
 
+Global.inPitchBendMode = false
+Global.pitchBendQuitOnToggle = false
+
 Global.insertMode = false
 Global.horizontalLock = false
 Global.verticalLock = false
@@ -153,6 +165,7 @@ Global.GLOBAL_PREF_SLOP = helper.GLOBAL_PREF_SLOP
 
 Global.STARTUP_SELECTED_NOTES = 1
 Global.STARTUP_SLICER_MODE = 2
+Global.STARTUP_PITCHBEND_MODE = 4
 
 
 

@@ -74,16 +74,16 @@ local function calculateSlicerIntersections(area)
     return intersections
   end
 
-  -- For each row, find where the line crosses it
+  -- find where the line crosses each row
   for row = 0, rows - 1 do
-    -- Calculate the y-coordinate for this row
+    -- calculate the y-coordinate for this row
     local row_y = area.timeValue.vals.min + (row / (rows - 1)) * (area.timeValue.vals.max - area.timeValue.vals.min)
 
-    -- Solve for x: x = x1 + (row_y - y1) * (dx / dy)
+    -- solve for x: x = x1 + (row_y - y1) * (dx / dy)
     local t = (row_y - y1) / dy
     local intersection_x = x1 + t * dx
 
-    -- Clamp to bounding box if needed
+    -- clamp to bounding box if needed
     intersection_x = math.max(area.timeValue.ticks.min, math.min(area.timeValue.ticks.max, intersection_x))
 
     intersections[row] = intersection_x
@@ -112,13 +112,6 @@ end
 local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
   if glob.inSlicerMode then
     local undoText = nil
-    -- only straight line or freeform?
-    -- beat-quantized or linear?
-    -- my instinct is that pure linear straight-line is 99% of the usage
-    -- but that other modes will be requested (because they always are...)
-
-    -- maybe we want to draw/adjust this line, and then enter to process
-    -- this is fine for proof of concept
     if mx and my then
       glob.setCursor(glob.slicer_cursor)
 
@@ -139,7 +132,6 @@ local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
           if slicerPoints and slicerPointsUnquantized and slicerPointsQuantized then -- eliminate warnings
             if vertLock then mx = slicerPoints.start.x end
             slicerPointsUnquantized.stop = Point.new(mx, my)
-            -- local q = quantizer(mx, false, true)
             slicerPointsQuantized.stop = Point.new(mx, my)
           end
         end
@@ -149,7 +141,6 @@ local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
     local quantized = mod.snapMod(mouseState.hottestMods) -- false -- mod.slicerVertLockMod(mouseState.hottestMods)
     slicerPoints = quantized and slicerPointsQuantized or slicerPointsUnquantized
 
-    -- or should release only work if we're over the note lane, otherwise cancel?
     if mouseState.released then
       -- finish line and perform slice
       handleSlicer(areaProcessor, quantized)

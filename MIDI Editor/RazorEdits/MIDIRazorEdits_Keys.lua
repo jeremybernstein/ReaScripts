@@ -339,6 +339,19 @@ local defaultKeyMappings = {
   shiftleftgridq      = { name = 'Shift Area Left (Grid, Quantized)',   baseKey = 'left', modifiers = 2 },
   shiftrightgridq     = { name = 'Shift Area Right (Grid, Quantized)',  baseKey = 'right', modifiers = 2 },
   slicerMode          = { name = 'Toggle Slicer Mode',                  baseKey = 'z', global = true },
+  pitchBendMode       = { name = 'Toggle Pitch Bend Mode',              baseKey = 'p', global = true },
+}
+
+-- PB mode keys (separate table, no conflict checking with main keys)
+local defaultPbKeyMappings = {
+  pitchBendCurveType  = { name = 'Set Curve Type',                      baseKey = 'c' },
+  pitchBendSnapSemi   = { name = 'Snap Selected to Semitone',           baseKey = 'q' },
+  pitchBendConfig     = { name = 'Project Bend Config',                 baseKey = 'b' },
+  pitchBendMicrotonal = { name = 'Toggle Microtonal Lines',             baseKey = 'm' },
+  pitchBendChannel    = { name = 'Select Active Channel',               baseKey = 'h' },
+  pitchBendSelectAll  = { name = 'Select All Points',                   baseKey = 'a' },
+  pitchBendCopy       = { name = 'Copy Points',                         baseKey = 'c', modifiers = 2 },
+  pitchBendPaste      = { name = 'Paste Points',                        baseKey = 'v', modifiers = 2 },
 }
 
 if helper.is_windows then
@@ -366,6 +379,14 @@ Keys.MODTYPE_SLICER_END = 11
 Keys.MODTYPE_SLICER_VERTLOCK = 12
 
 -- SLICER
+
+-- PITCH BEND
+
+Keys.MODTYPE_PB_DRAW = 13
+Keys.MODTYPE_PB_COMPEXP = 14
+Keys.MODTYPE_PB_SNAP_PITCH = 15
+
+-- PITCH BEND
 
 --[[
   1 = shift
@@ -397,6 +418,14 @@ local defaultModMappings = {
 
 -- SLICER
 
+-- PITCH BEND
+
+  { name = 'Draw Mode',                 modKey = 2, cat = 'pb' },
+  { name = 'Compress/Expand',           modKey = 8, cat = 'pb' },
+  { name = 'Snap to Pitch',             modKey = 4, cat = 'pb' },
+
+-- PITCH BEND
+
 }
 
 Keys.WIDGET_MODE_PUSHPULL = 1
@@ -412,15 +441,18 @@ local defaultWidgetMappings = {
 }
 
 Keys.defaultKeyMappings = defaultKeyMappings
+Keys.defaultPbKeyMappings = defaultPbKeyMappings
 Keys.defaultModMappings = defaultModMappings
 Keys.defaultWidgetMappings = defaultWidgetMappings
 Keys.vKeyLookup = vKeyLookup
 
 local keyMappings
+local pbKeyMappings
 local modMappings
 local widgetMappings
 
 local userKeyMappings
+local userPbKeyMappings
 local userModMappings
 local userWidgetMappings
 
@@ -436,6 +468,19 @@ local function buildNewKeyMap()
   keyMappings.enterKey = { name = 'Enter Key', baseKey = 'enter', vKey = vKeys.VK_ENTER } -- always listen to enter
 
   for k, map in pairs(keyMappings) do
+    map.vKey = map.vKey or vKeyLookup[map.baseKey]
+  end
+
+  pbKeyMappings = tableCopy(defaultPbKeyMappings)
+  if userPbKeyMappings then
+    for k, map in pairs(userPbKeyMappings) do
+      if pbKeyMappings[k] then
+        pbKeyMappings[k] = map
+      end
+    end
+  end
+
+  for k, map in pairs(pbKeyMappings) do
     map.vKey = map.vKey or vKeyLookup[map.baseKey]
   end
 
@@ -457,7 +502,7 @@ local function buildNewKeyMap()
     end
   end
 
-  return keyMappings, modMappings, widgetMappings
+  return keyMappings, pbKeyMappings, modMappings, widgetMappings
 end
 
 local function loadKeyMappingState(stateTab)
@@ -469,6 +514,21 @@ local function loadKeyMappingState(stateTab)
         if vKey then
           if not userKeyMappings then userKeyMappings = {} end
           userKeyMappings[k] = { baseKey = map.baseKey, modifiers = map.modifiers, vKey = vKey } -- need to ensure that there are no duplicate key/modifiers pairs
+        end
+      end
+    end
+  end
+end
+
+local function loadPbKeyMappingState(stateTab)
+  if userPbKeyMappings then userPbKeyMappings = nil end
+  if stateTab then
+    for k, map in pairs(stateTab) do
+      if map.baseKey then
+        local vKey = vKeyLookup[map.baseKey]
+        if vKey then
+          if not userPbKeyMappings then userPbKeyMappings = {} end
+          userPbKeyMappings[k] = { baseKey = map.baseKey, modifiers = map.modifiers, vKey = vKey }
         end
       end
     end
@@ -501,6 +561,7 @@ end
 
 Keys.buildNewKeyMap = buildNewKeyMap
 Keys.loadKeyMappingState = loadKeyMappingState
+Keys.loadPbKeyMappingState = loadPbKeyMappingState
 Keys.loadModMappingState = loadModMappingState
 Keys.loadWidgetMappingState = loadWidgetMappingState
 
@@ -597,6 +658,39 @@ mod.slicerVertLockMod = function(someMods)
 end
 
 -- SLICER
+
+-- PITCH BEND - base modifier checks
+mod.shiftMod = function(someMods)
+  return someMods and someMods:shift()
+end
+
+mod.optMod = function(someMods)
+  return someMods and someMods:alt()
+end
+
+mod.cmdMod = function(someMods)
+  return someMods and someMods:ctrl()
+end
+
+mod.ctrlMod = function(someMods)
+  return someMods and someMods:super()  -- Actual Ctrl key on macOS
+end
+
+-- PITCH BEND
+mod.pbDrawMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_PB_DRAW].modKey)
+end
+
+mod.pbCompExpMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_PB_COMPEXP].modKey)
+end
+
+mod.pbSnapToPitchMod = function(someMods)
+  return mod.getMod(someMods, modMappings[Keys.MODTYPE_PB_SNAP_PITCH].modKey)
+end
+
+mod.pbSnapToGridMod = mod.shiftMod   -- uses global snap modifier
+mod.pbSmoothDrawMod = mod.shiftMod   -- uses global snap modifier
 
 Keys.mod = mod
 

@@ -1,6 +1,6 @@
 @description childwindow
 @author sockmonkey72
-@version 2.0.0-beta.2
+@version 2.0.0-beta.3
 @about
   # Layered child windows required for improved performance while running MIDI Razor Edits on all platforms
   The method used by MIDI Razor Edits to draw into the MIDI Editor (the same method
@@ -16,3 +16,8 @@
 @provides
   [win64] childwindow/Windows/reaper_childwindow_x64.dll > reaper_childwindow_x64.dll
   [win32] childwindow/Windows/reaper_childwindow_w32.dll > reaper_childwindow_w32.dll
+  [darwin64] childwindow/macOS/reaper_childwindow.dylib > reaper_childwindow.dylib
+  [darwin-arm64] childwindow/macOS/reaper_childwindow.dylib > reaper_childwindow.dylib
+  [linux32] childwindow/Linux/reaper_childwindow-i686.so > reaper_childwindow-i686.so
+  [linux64] childwindow/Linux/reaper_childwindow-x86_64.so > reaper_childwindow-x86_64.so
+  [linux-aarch64] childwindow/Linux/reaper_childwindow-aarch64.so > reaper_childwindow-aarch64.so

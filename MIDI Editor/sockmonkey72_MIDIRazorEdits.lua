@@ -1,5 +1,5 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.3
+-- @version 1.5.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
@@ -9,6 +9,7 @@
 --   - preparation for updates to childwindow to support better menu
 -- @provides
 --   {RazorEdits}/*
+--   {RazorEdits}/{lib}/{lua-scala}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_PitchBend.lua

@@ -327,6 +327,41 @@ local function ppqToScreenX(ppqpos, take)
   end
 end
 
+-- calculate PPQ position from screen X (inverse of ppqToScreenX)
+local function screenXToPpq(screenX, take)
+  local meState = glob.meState
+  if not take then return nil end
+
+  if meState.timeBase == 'time' then
+    -- time-based mode: convert screen X to time, then to PPQ
+    if not meState.pixelsPerSecond or not meState.leftmostTime then return nil end
+    local projTime = meState.leftmostTime + ((screenX - glob.windowRect.x1) / meState.pixelsPerSecond)
+    return r.MIDI_GetPPQPosFromProjTime(take, projTime - getTimeOffset())
+  else
+    -- tick-based mode
+    if not meState.pixelsPerTick then return nil end
+    return meState.leftmostTick + ((screenX - glob.windowRect.x1) / meState.pixelsPerTick)
+  end
+end
+
+-- get pixels per PPQ unit for delta calculations (approximate in time mode)
+local function getPixelsPerPpq(take)
+  local meState = glob.meState
+  if meState.timeBase == 'time' then
+    -- time mode: approximate using PPQ (tempo-dependent)
+    if not meState.pixelsPerSecond or not take then return nil end
+    local ppq = mu.MIDI_GetPPQ(take) or 960
+    -- at 120 BPM: 1 beat = 0.5 sec, so pixelsPerPpq = pixelsPerSecond * 0.5 / ppq
+    -- get actual tempo at current position for better accuracy
+    local cursorTime = r.GetCursorPosition()
+    local tempo = r.TimeMap_GetDividedBpmAtTime(cursorTime) or 120
+    local secsPerBeat = 60 / tempo
+    return meState.pixelsPerSecond * secsPerBeat / ppq
+  else
+    return meState.pixelsPerTick
+  end
+end
+
 local function getActiveChannelFilter()
   if config.showAllNotes then return nil end
   return config.activeChannel
@@ -1159,7 +1194,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           local activeChan = meState.activeChannel and meState.activeChannel > 0 and (meState.activeChannel - 1) or 0
 
           -- calculate initial point (snap based on current shift state)
-          local ppqpos = meState.leftmostTick + ((mx - glob.windowRect.x1) / meState.pixelsPerTick)
+          local ppqpos = screenXToPpq(mx, activeTake)
+          if not ppqpos then return end
 
           -- grid snap for X (unless shift held for smooth mode)
           if not shiftHeld and activeTake and glob.currentGrid then
@@ -1292,8 +1328,9 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         local deltaPpq = 0
         local deltaSemitones = 0
 
-        if meState.pixelsPerTick and meState.pixelsPerTick > 0 then
-          deltaPpq = dx / meState.pixelsPerTick
+        local pxPerPpq = getPixelsPerPpq(activeTake)
+        if pxPerPpq and pxPerPpq > 0 then
+          deltaPpq = dx / pxPerPpq
         end
         if meState.pixelsPerPitch and meState.pixelsPerPitch > 0 then
           deltaSemitones = -dy / meState.pixelsPerPitch
@@ -1343,7 +1380,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local smooth = smoothToggle
 
       -- calculate current position
-      local ppqpos = meState.leftmostTick + ((mx - glob.windowRect.x1) / meState.pixelsPerTick)
+      local ppqpos = screenXToPpq(mx, activeTake)
+      if not ppqpos then return end
 
       -- grid snap for X (unless smooth mode)
       if not smooth and activeTake and glob.currentGrid then
@@ -1392,6 +1430,19 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
       -- only add if value changed (dedup consecutive same values)
       if shouldAdd and pbValue ~= drawState.lastPbValue then
+        -- insert anchor point if we've been coasting at the same value
+        -- this preserves curve shape when making a sudden change
+        local lastPt = drawState.path[#drawState.path]
+        if lastPt and drawState.lastPpq and lastPt.ppq < drawState.lastPpq then
+          -- gap exists: insert anchor at coast position with old value
+          local anchorScreenX = ppqToScreenX(drawState.lastPpq, activeTake) or lastPt.screenX
+          table.insert(drawState.path, {
+            ppq = drawState.lastPpq,
+            pbValue = drawState.lastPbValue,
+            screenX = anchorScreenX,
+            screenY = lastPt.screenY,
+          })
+        end
         table.insert(drawState.path, {
           ppq = ppqpos,
           pbValue = pbValue,
@@ -1574,8 +1625,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local meState = glob.meState
       local meLanes = glob.meLanes
 
-      if meState.pixelsPerTick and meLanes[-1] then
-        local ppqpos = meState.leftmostTick + ((mx - glob.windowRect.x1) / meState.pixelsPerTick)
+      local ppqpos = screenXToPpq(mx, activeTake)
+      if ppqpos and meLanes[-1] then
 
         -- grid snap handling (modifier toggles, respects editor snap setting)
         local gridSnapToggle = mod.pbSnapToGridMod and mod.pbSnapToGridMod(mouseState.hottestMods)
@@ -1744,8 +1795,7 @@ local function showCurveMenu(take, midiUtils)
   local curveNames = { 'Square', 'Linear', 'Slow start/end', 'Fast start', 'Fast end', 'Bezier' }
   local menuStr = table.concat(curveNames, '|')
 
-  gfx.x, gfx.y = r.GetMousePosition()
-  local choice = gfx.showmenu(menuStr)
+  local choice = helper.showMenu(menuStr)
 
   helper.VKeys_ClearState()
 
@@ -2191,7 +2241,7 @@ local function configDialogLoop()
     end
 
     local menuStr = table.concat(menuItems, "|")
-    local choice = gfx.showmenu(menuStr)
+    local choice = helper.showMenu(menuStr)
 
     if choice == 1 then
       -- none (12-TET) - set to empty string to explicitly override
@@ -2310,7 +2360,8 @@ local function handleRightClick(mods)
     -- use screen coords for both X and Y (screenYToPitch uses lane.topPixel which is screen-relative)
     local mx, my = r.GetMousePosition()
     my = helper.screenYToNative(my, glob.windowRect)
-    local ppqpos = meState.leftmostTick + ((mx - glob.windowRect.x1) / meState.pixelsPerTick)
+    local ppqpos = screenXToPpq(mx, take)
+    if not ppqpos then return false end
     local mousePitch = screenYToPitch(my)
     local ppq = mu.MIDI_GetPPQ(take) or 960
     local gridLookahead = glob.currentGrid and (ppq * glob.currentGrid * 2) or 0
@@ -2410,8 +2461,7 @@ local function showChannelMenu()
   end
   local menuStr = table.concat(menuItems, '|')
 
-  gfx.x, gfx.y = r.GetMousePosition()
-  local choice = gfx.showmenu(menuStr)
+  local choice = helper.showMenu(menuStr)
 
   helper.VKeys_ClearState()
 

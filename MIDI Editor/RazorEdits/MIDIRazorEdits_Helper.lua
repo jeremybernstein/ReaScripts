@@ -811,4 +811,27 @@ local function screenYToNative(y, windowRect)
 end
 Helper.screenYToNative = screenYToNative
 
+-- show popup menu, preferring rcw_ShowMenu if available (better behavior with child windows)
+-- menuStr: same format as gfx.showmenu
+-- x, y: screen coordinates (optional, defaults to mouse position)
+local hasRcwShowMenu = r.APIExists('rcw_ShowMenu')
+local function showMenu(menuStr, x, y)
+  if not x or not y then
+    x, y = r.GetMousePosition()
+  end
+  if hasRcwShowMenu then
+    -- convert Y to Cocoa coords on macOS (origin at bottom)
+    if is_macos then
+      local _, wy1, _, wy2 = r.JS_Window_GetViewportFromRect(x, y, x, y, false)
+      local screenHeight = math.abs(wy2 - wy1)
+      y = screenHeight - y
+    end
+    return r.rcw_ShowMenu(menuStr, x, y)
+  else
+    gfx.x, gfx.y = x, y
+    return gfx.showmenu(menuStr)
+  end
+end
+Helper.showMenu = showMenu
+
 return Helper

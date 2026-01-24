@@ -1,16 +1,14 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.2
+-- @version 1.5.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - add PitchBend module (see included documentation)
---   - fix esc to quit if launched in Slicer mode
---   - update to childwindow 2.0.0 extension (now available/required for all platforms)
---     needs to be installed separately via ReaPack
+--   - fix Project Time mode
+--   - when drawing curves, add control point before change if necessary
+--   - preparation for updates to childwindow to support better menu
 -- @provides
 --   {RazorEdits}/*
---   {RazorEdits}/{lib}/{lua-scala}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_PitchBend.lua

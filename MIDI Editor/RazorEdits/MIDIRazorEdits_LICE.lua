@@ -437,7 +437,8 @@ local function peekIntercepts(m_x, m_y)
   local DOUBLE_CLICK_DELAY = 0.2 -- 200ms, adjust based on system double-click time
   local hovering
 
-  local pt = Point.new(m_x + glob.liceData.screenRect.x1, m_y + glob.liceData.screenRect.y1 - Lice.MIDI_RULER_H )
+  -- mouse coords are relative to midiview, area coords are relative to content (below ruler)
+  local pt = Point.new(m_x, m_y - Lice.MIDI_RULER_H)
   for _, area in ipairs(glob.areas) do
     if area.viewRect:containsPoint(pt) then
       hovering = area
@@ -546,21 +547,22 @@ local function createFrameBitmaps(midiview, windRect)
   if MOAR_BITMAPS then
   local meLanes = glob.meLanes
   if meLanes and next(meLanes) then
+    -- lane positions are now relative to bitmap origin (0,0)
     local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
-    local w, h = math.floor(windRect:width() + 0.5), math.floor((bottomPixel - y1) + 0.5)
+    local w, h = math.floor(windRect:width() + 0.5), math.floor(bottomPixel + 0.5)
     bitmaps.top = createBitmap(1, 1)
     composite(hwnd, 0, Lice.MIDI_RULER_H, w, pixelScale, bitmaps.top, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
     bitmaps.bottom = createBitmap(1, 1)
-    composite(hwnd, 0, Lice.MIDI_RULER_H + (bottomPixel - y1) - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1)
+    composite(hwnd, 0, Lice.MIDI_RULER_H + bottomPixel - pixelScale + 1, w, pixelScale, bitmaps.bottom, 0, 0, 1, 1)
     numBitmaps = numBitmaps + 1
     if meLanes[0] then
       local middleHeight = meLanes[0].topPixel - meLanes[-1].bottomPixel
       bitmaps.middletop = createBitmap(1, 1)
-      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[-1].bottomPixel - y1) - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1)
+      composite(hwnd, 0, Lice.MIDI_RULER_H + meLanes[-1].bottomPixel - (pixelScale - 1) + (pixelScale - 1), w, 1, bitmaps.middletop, 0, 0, 1, 1)
       numBitmaps = numBitmaps + 1
       bitmaps.middlebottom = createBitmap(1, 1)
-      composite(hwnd, 0, Lice.MIDI_RULER_H + (meLanes[0].topPixel - y1) - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1)
+      composite(hwnd, 0, Lice.MIDI_RULER_H + meLanes[0].topPixel - (pixelScale - 1), w, 1, bitmaps.middlebottom, 0, 0, 1, 1)
       numBitmaps = numBitmaps + 1
     end
     bitmaps.left = createBitmap(1, 1)
@@ -586,9 +588,10 @@ local shutdownLice
 
 local function viewIntersectionRect(area)
   local idx = area.ccLane and area.ccLane or -1
-  return Rect.new(math.max(area.logicalRect.x1, glob.windowRect.x1),
+  local sr = glob.liceData.screenRect
+  return Rect.new(math.max(area.logicalRect.x1, 0),
                   math.max(area.logicalRect.y1, glob.meLanes[idx].topPixel),
-                  math.min(area.logicalRect.x2, glob.windowRect.x2),
+                  math.min(area.logicalRect.x2, sr:width()),
                   math.min(area.logicalRect.y2, glob.meLanes[idx].bottomPixel))
 end
 
@@ -620,7 +623,6 @@ local function initLice(editor)
         if glob.liceData.bitmap then destroyBitmap(glob.liceData.bitmap) end
         glob.liceData.bitmap = createMidiViewBitmap(glob.liceData.midiview, windRect)
       end
-      glob.windowRect = glob.liceData.screenRect:clone()
       recompositeDraw = true
       glob.wantsAnalyze = true
       peekAppIntercepts(true)
@@ -636,7 +638,6 @@ local function initLice(editor)
       local bitmaps, screenRect = createFrameBitmaps(midiview, windRect)
       glob.liceData.bitmaps = bitmaps
       glob.liceData.screenRect = screenRect
-      glob.windowRect = screenRect:clone()
       recompositeDraw = true
       glob.wantsAnalyze = true
       if glob.DEBUG_LANES then
@@ -807,18 +808,17 @@ end
 
 rebuildColors()
 
+-- coords are now stored relative to bitmap origin, just round
 local function rectToLiceCoords(rect)
-  -- macos
-  return math.floor((rect.x1 - glob.liceData.screenRect.x1) + 0.5),
-         math.floor((rect.y1 - glob.liceData.screenRect.y1) + 0.5), -- - MIDI_RULER_H,
-         math.floor((rect.x2 - glob.liceData.screenRect.x1) + 0.5),
-         math.floor((rect.y2 - glob.liceData.screenRect.y1) + 0.5)  -- - MIDI_RULER_H
+  return math.floor(rect.x1 + 0.5),
+         math.floor(rect.y1 + 0.5),
+         math.floor(rect.x2 + 0.5),
+         math.floor(rect.y2 + 0.5)
 end
 
--- Fast point conversion without object creation
+-- coords are now stored relative to bitmap origin, just round
 local function pointToLiceCoords(x, y)
-  local sr = glob.liceData.screenRect
-  return math.floor((x - sr.x1) + 0.5), math.floor((y - sr.y1) + 0.5)
+  return math.floor(x + 0.5), math.floor(y + 0.5)
 end
 
 local function getAlpha(color)
@@ -1026,9 +1026,9 @@ local function drawPitchBend(hwnd, mode, antialias)
   if not meLanes[-1] or not (meState.pixelsPerTick or meState.pixelsPerSecond or meState.pixelsPerPitch) then return end
   if not glob.liceData then return end
 
-  -- Calculate bitmap dimensions (note area only)
+  -- Calculate bitmap dimensions (note area only, lane positions are relative)
   local noteAreaWidth = math.floor(glob.liceData.windRect:width() - Lice.MIDI_SCROLLBAR_R + 0.5)
-  local noteAreaHeight = math.floor(meLanes[-1].bottomPixel - glob.liceData.screenRect.y1 + 0.5)
+  local noteAreaHeight = math.floor(meLanes[-1].bottomPixel + 0.5)
 
   -- Create bitmap if needed, composite only on creation or size change
   local bmWidth, bmHeight = getBitmapSize(pbBitmap)
@@ -1266,14 +1266,12 @@ local function drawPitchBend(hwnd, mode, antialias)
     local drawColor = reFillContrastColor  -- Use contrasting color for draw preview
     local path = drawStateData.path
 
-    -- Draw connecting lines between path points
+    -- Draw connecting lines between path points (coords are relative)
     for i = 1, #path - 1 do
       local pt1 = path[i]
       local pt2 = path[i + 1]
-      local _, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
-      local _, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
-      local x1 = pt1.screenX - glob.liceData.screenRect.x1
-      local x2 = pt2.screenX - glob.liceData.screenRect.x1
+      local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
+      local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
 
       -- Clip and draw
       local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2)
@@ -1282,10 +1280,9 @@ local function drawPitchBend(hwnd, mode, antialias)
       end
     end
 
-    -- Draw points at each path position
+    -- Draw points at each path position (coords are relative)
     for _, pt in ipairs(path) do
-      local _, y = pointToLiceCoords(pt.screenX, pt.screenY)
-      local x = pt.screenX - glob.liceData.screenRect.x1
+      local x, y = pointToLiceCoords(pt.screenX, pt.screenY)
       if x >= 0 and x < noteAreaWidth and y >= 0 and y < noteAreaHeight then
         fillRect(pbBitmap, x - 3, y - 3, 6, 6, drawColor, 1.0, mode)
       end
@@ -1493,15 +1490,18 @@ local function drawLice()
     drawPitchBend(hwnd, mode, antialias)
 
     if glob.DEBUG_LANES then
-      clearBitmap(glob.liceData.bitmap, glob.liceData.windRect.x1, glob.liceData.windRect.y1,
-                                   math.abs(glob.liceData.windRect.x2 - glob.liceData.windRect.x1), math.abs(glob.liceData.windRect.y2 - glob.liceData.windRect.y2))
+      local sr = glob.liceData.screenRect
+      clearBitmap(glob.liceData.bitmap, 0, 0,
+                                   math.floor(sr:width() + 0.5), math.floor(sr:height() + 0.5))
       for i = #meLanes, -1, -1 do
-        local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(glob.windowRect.x1, meLanes[i].topPixel, glob.windowRect.x2 - Lice.MIDI_SCROLLBAR_R + 1, meLanes[i].bottomPixel))
+        -- lane positions are already relative, use directly
+        local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(0, meLanes[i].topPixel, sr:width() - Lice.MIDI_SCROLLBAR_R + 1, meLanes[i].bottomPixel))
         local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
         fillRect(glob.liceData.bitmap, x1, y1,
                            width, height, colors[i + 2], alpha, mode)
       end
       for _, dz in ipairs(glob.deadZones) do
+        -- deadZones are already relative
         local x1, y1, x2, y2 = rectToLiceCoords(dz)
         local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
         fillRect(glob.liceData.bitmap, x1, y1,
@@ -1512,7 +1512,9 @@ local function drawLice()
         if MOAR_BITMAPS then
         local bitmaps = glob.liceData.bitmaps
         if bitmaps then
-          local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(glob.windowRect.x1, glob.windowRect.y1, glob.windowRect.x2 - Lice.MIDI_SCROLLBAR_R, glob.windowRect.y2 - 1))
+          -- coords are relative, rectToLiceCoords just rounds
+          local sr = glob.liceData.screenRect
+          local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(0, 0, sr:width() - Lice.MIDI_SCROLLBAR_R, sr:height() - 1))
           local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
             if bitmaps.top then
               clearBitmap(bitmaps.top, 0, 0, 1, 1)
@@ -1540,12 +1542,15 @@ local function drawLice()
             end
         end
         else
-        local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(glob.windowRect.x1, glob.windowRect.y1, glob.windowRect.x2 - Lice.MIDI_SCROLLBAR_R, meLanes[0] and (meLanes[-1].bottomPixel - 1) or (glob.windowRect.y2 - 1)))
+        -- coords are relative
+        local sr = glob.liceData.screenRect
+        local x1, y1, x2, y2 = rectToLiceCoords(Rect.new(0, 0, sr:width() - Lice.MIDI_SCROLLBAR_R, meLanes[0] and (meLanes[-1].bottomPixel - 1) or (sr:height() - 1)))
         local width, height = math.abs(x2 - x1), math.abs(y2 - y1)
         clearBitmap(glob.liceData.bitmap, x1, y1 - Lice.MIDI_SEPARATOR, width, height + (2 * Lice.MIDI_SEPARATOR))
         frameRect(glob.liceData.bitmap, x1, y1, width, height, reBorderColor, alpha, mode, antialias)
         if meLanes[0] then
-          y1 = meLanes[0].topPixel - glob.liceData.screenRect.y1
+          -- lane positions are relative, use directly
+          y1 = meLanes[0].topPixel
           height = math.abs(meLanes[#meLanes].bottomPixel - meLanes[0].topPixel)
           clearBitmap(glob.liceData.bitmap, x1, y1 - Lice.MIDI_SEPARATOR, width, height + (2 * Lice.MIDI_SEPARATOR))
           frameRect(glob.liceData.bitmap, x1, y1, width, height, reBorderColor, alpha, mode, antialias)

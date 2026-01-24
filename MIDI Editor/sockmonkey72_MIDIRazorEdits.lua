@@ -1,12 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.4
+-- @version 1.5.0-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix Project Time mode
---   - when drawing curves, add control point before change if necessary
---   - preparation for updates to childwindow to support better menu
+--   - review/refactor of absolute vs relative coordinate usage (improves performance and improves rendering, particularly on Windows)
+--   - minor fix for point hover logic
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

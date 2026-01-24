@@ -316,31 +316,31 @@ local function getTimeOffset()
 end
 
 local function updateTimeValueLeft(area)
+  -- area coords are now relative (0-based)
   if meState.timeBase == 'time' then
-    local leftmostTime = meState.leftmostTime + ((area.logicalRect.x1 - glob.windowRect.x1) / meState.pixelsPerSecond)
+    local leftmostTime = meState.leftmostTime + (area.logicalRect.x1 / meState.pixelsPerSecond)
     return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, leftmostTime - getTimeOffset()), leftmostTime
   else
-    return meState.leftmostTick + math.floor(((area.logicalRect.x1 - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5)
+    return meState.leftmostTick + math.floor((area.logicalRect.x1 / meState.pixelsPerTick) + 0.5)
   end
 end
 
 local function updateTimeValueRight(area, leftmost)
+  -- area coords are now relative (0-based)
   if meState.timeBase == 'time' then
     leftmost = leftmost or area.timeValue.time.min
-    local rightmostTime = meState.leftmostTime + ((area.logicalRect.x2 - glob.windowRect.x1) / meState.pixelsPerSecond)
-    -- local rightmostTime = equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + (area.logicalRect:width() / meState.pixelsPerSecond))
+    local rightmostTime = meState.leftmostTime + (area.logicalRect.x2 / meState.pixelsPerSecond)
     return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, rightmostTime - getTimeOffset()), rightmostTime
   else
     leftmost = leftmost or area.timeValue.ticks.min
     return equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost
-        or (meState.leftmostTick + math.floor(((area.logicalRect.x2 - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5))
-    -- return equalIsh(area.logicalRect.x2, area.logicalRect.x1) and leftmost or (leftmost + math.floor((area.logicalRect:width() / meState.pixelsPerTick) + 0.5))
+        or (meState.leftmostTick + math.floor((area.logicalRect.x2 / meState.pixelsPerTick) + 0.5))
   end
 end
 
 local function updateTimeValueTop(area)
   local topValue = area.ccLane and meLanes[area.ccLane].topValue or meState.topPitch
-  local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
+  local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or 0  -- relative (0-based)
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
 
   if area.ccLane or not meState.noteTab then
@@ -348,7 +348,7 @@ local function updateTimeValueTop(area)
   else
     -- in noteTab mode, topValue is 127 (or less if scrolled)
     local numRows = #meState.noteTab - (127 - meState.topPitch)
-    local idx = numRows - math.floor(((area.logicalRect.y1 - glob.windowRect.y1) / divisor) + 0.5)
+    local idx = numRows - math.floor((area.logicalRect.y1 / divisor) + 0.5)  -- y1 is relative
     return math.min(math.max(idx, 1), #meState.noteTab)
   end
 end
@@ -361,7 +361,7 @@ local function updateTimeValueBottom(area)
   else
     -- in noteTab mode, topValue is 127 (or less if scrolled)
     local numRows = #meState.noteTab - (127 - meState.topPitch)
-    local idx = numRows - math.floor(((area.logicalRect.y2 - glob.windowRect.y1) / divisor) + 0.5) + 1
+    local idx = numRows - math.floor((area.logicalRect.y2 / divisor) + 0.5) + 1  -- y2 is relative
     return math.min(math.max(idx, 1), #meState.noteTab)
   end
 end
@@ -387,7 +387,7 @@ local function makeTimeValueExtentsForArea(area, noQuantize)
 
   local topValue = area.fullLane and meLanes[area.ccLane and area.ccLane or -1].range or meLanes[area.ccLane and area.ccLane or -1].topValue
   local bottomValue = area.fullLane and 0 or meLanes[area.ccLane and area.ccLane or -1].bottomValue
-  local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
+  local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or 0  -- relative (0-based)
   local divisor = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
 
   local valMin, valMax
@@ -403,7 +403,7 @@ local function makeTimeValueExtentsForArea(area, noQuantize)
     else
       local idx = numRows - math.floor(((area.logicalRect.y1 - topPixel) / divisor) + 0.5)
       valMax = math.min(math.max(idx, 1), #meState.noteTab)
-      idx = numRows - math.floor(((area.logicalRect.y2 - glob.windowRect.y1) / divisor) + 0.5) + 1
+      idx = numRows - math.floor((area.logicalRect.y2 / divisor) + 0.5) + 1  -- y2 is relative
       valMin = math.min(math.max(idx, 1), #meState.noteTab)
     end
   end
@@ -549,16 +549,17 @@ updateAreaFromTimeValue = function(area, noCheck)
   if not noCheck then adjustFullLane(area) end
 
   if area.timeValue then
+    -- area coords are relative (0-based)
     local x1, y1, x2, y2
     if meState.timeBase == 'time' then
       if not area.timeValue.time then
         updateTimeValueTime(area)
       end
-      x1 = math.floor((glob.windowRect.x1 + ((area.timeValue.time.min - meState.leftmostTime) * meState.pixelsPerSecond)) + 0.5)
-      x2 = math.floor((glob.windowRect.x1 + ((area.timeValue.time.max - meState.leftmostTime) * meState.pixelsPerSecond)) + 0.5)
+      x1 = math.floor(((area.timeValue.time.min - meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
+      x2 = math.floor(((area.timeValue.time.max - meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
     else
-      x1 = math.floor((glob.windowRect.x1 + ((area.timeValue.ticks.min - meState.leftmostTick) * meState.pixelsPerTick)) + 0.5)
-      x2 = math.floor((glob.windowRect.x1 + ((area.timeValue.ticks.max - meState.leftmostTick) * meState.pixelsPerTick)) + 0.5)
+      x1 = math.floor(((area.timeValue.ticks.min - meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
+      x2 = math.floor(((area.timeValue.ticks.max - meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
     end
     if area.fullLane then
       -- TODO noterow
@@ -566,19 +567,19 @@ updateAreaFromTimeValue = function(area, noCheck)
         y1 = math.floor((meLanes[area.ccLane].topPixel - ((meLanes[area.ccLane].range - meLanes[area.ccLane].topValue) * meLanes[area.ccLane].pixelsPerValue)) + 0.5) -- hack RANGE
         y2 = math.floor((meLanes[area.ccLane].bottomPixel + ((meLanes[area.ccLane].bottomValue) * meLanes[area.ccLane].pixelsPerValue)) + 0.5)
       else
-        y1 = math.floor(glob.windowRect.y1 - ((meLanes[-1].range - meState.topPitch) * meState.pixelsPerPitch) + 0.5)
+        y1 = math.floor(0 - ((meLanes[-1].range - meState.topPitch) * meState.pixelsPerPitch) + 0.5)  -- relative (0-based)
         y2 = math.floor((meLanes[-1].bottomPixel + (meState.bottomPitch * meState.pixelsPerPitch)) + 0.5)
       end
     else
       if meState.noteTab then
-        local topPixel = glob.windowRect.y1
+        local topPixel = 0  -- relative (0-based)
         local multi = meState.pixelsPerPitch
         -- in noteTab mode, topValue is 127 (or less if scrolled)
         local numRows = #meState.noteTab - (127 - meState.topPitch)
         y1 = math.floor(topPixel + ((numRows - area.timeValue.vals.max) * multi) + 0.5)
         y2 = math.min(math.floor((topPixel + ((numRows - (area.timeValue.vals.min - 1)) * multi)) + 0.5), meLanes[-1].bottomPixel)
       else
-        local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or glob.windowRect.y1
+        local topPixel = area.ccLane and meLanes[area.ccLane].topPixel or 0  -- relative (0-based)
         local topValue = area.ccLane and meLanes[area.ccLane].topValue or meState.topPitch
         local multi = area.ccLane and meLanes[area.ccLane].pixelsPerValue or meState.pixelsPerPitch
         y1 = math.floor((topPixel + ((topValue - area.timeValue.vals.max) * multi)) + 0.5)
@@ -2126,7 +2127,7 @@ local function analyzeChunk()
 
   local activeTakeChunk
   local activeChannel
-  local windY = glob.windowRect.y1
+  local windY = 0 -- relative to content area (below ruler)
   local rv, midivuConfig = r.get_config_var_string('midivu')
   local midivu = tonumber(midivuConfig)
   local showMargin = midivu and (midivu & 0x80) == 0
@@ -2224,10 +2225,11 @@ local function analyzeChunk()
   end
   meState.leftmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, meState.leftmostTick)
 
+  local screenWidth = glob.liceData.screenRect:width()
   if meState.timeBase == 'time' then
-    meState.rightmostTime = meState.leftmostTime + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) / meState.pixelsPerSecond)
+    meState.rightmostTime = meState.leftmostTime + ((screenWidth - lice.MIDI_SCROLLBAR_R) / meState.pixelsPerSecond)
   else
-    local rightmostTick = meState.leftmostTick + ((glob.windowRect:width() - lice.MIDI_SCROLLBAR_R) / meState.pixelsPerTick)
+    local rightmostTick = meState.leftmostTick + ((screenWidth - lice.MIDI_SCROLLBAR_R) / meState.pixelsPerTick)
     meState.rightmostTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, rightmostTick)
   end
 
@@ -2267,7 +2269,8 @@ local function analyzeChunk()
     meLanes[laneID] = { VELLANE = vellaneStr, type = laneType, range = helper.ccTypeToRange(laneType), height = ME_Height, inlineHeight = inlineHeight, scroll = scroll, zoom = zoom }
   end
 
-  local laneBottomPixel = glob.windowRect.y1 + (glob.windowRect:height() - lice.MIDI_SCROLLBAR_B) -- magic numbers which work
+  local sr = glob.liceData.screenRect
+  local laneBottomPixel = sr:height() - lice.MIDI_SCROLLBAR_B -- relative to content area (0-based)
   for i = #meLanes, 0, -1 do
     local margin = 0
     meLanes[i].bottomPixel = laneBottomPixel -- - (1 * winscale)
@@ -2304,8 +2307,9 @@ local function analyzeChunk()
       glob.needsRecomposite = true
     end
 
-    table.insert(glob.deadZones, Rect.new(glob.windowRect.x1, meLanes[i].bottomPixel + bottomMargin, glob.windowRect.x1 + lice.MIDI_HANDLE_L, meLanes[i + 1] and meLanes[i + 1].topPixel - meLanes[i + 1].topMargin or glob.windowRect.y2))
-    table.insert(glob.deadZones, Rect.new(glob.windowRect.x2 - (lice.MIDI_SCROLLBAR_R + lice.MIDI_HANDLE_R), meLanes[i].bottomPixel + bottomMargin, glob.windowRect.x2 - lice.MIDI_SCROLLBAR_R, meLanes[i + 1] and meLanes[i + 1].topPixel - meLanes[i + 1].topMargin or glob.windowRect.y2))
+    -- deadZones use relative coords (0-based)
+    table.insert(glob.deadZones, Rect.new(0, meLanes[i].bottomPixel + bottomMargin, lice.MIDI_HANDLE_L, meLanes[i + 1] and meLanes[i + 1].topPixel - meLanes[i + 1].topMargin or sr:height()))
+    table.insert(glob.deadZones, Rect.new(sr:width() - (lice.MIDI_SCROLLBAR_R + lice.MIDI_HANDLE_R), meLanes[i].bottomPixel + bottomMargin, sr:width() - lice.MIDI_SCROLLBAR_R, meLanes[i + 1] and meLanes[i + 1].topPixel - meLanes[i + 1].topMargin or sr:height()))
 
     laneBottomPixel = laneBottomPixel - meLanes[i].height
   end
@@ -2328,15 +2332,15 @@ local function analyzeChunk()
   -- _P('meLanes', -1, meLanes[-1].bottomPixel, meLanes[-1].topPixel, meLanes[-1].bottomValue, meLanes[-1].topValue, meLanes[-1].height, meLanes[-1].pixelsPerValue)
 
   if meLanes[0] then
-    table.insert(glob.deadZones, Rect.new(glob.windowRect.x1, meLanes[-1].bottomPixel, glob.windowRect.x1 + lice.MIDI_HANDLE_L, meLanes[0].topPixel - meLanes[0].topMargin)) -- piano roll -> first lane
-    table.insert(glob.deadZones, Rect.new(glob.windowRect.x2 - (lice.MIDI_SCROLLBAR_R + lice.MIDI_HANDLE_R), meLanes[-1].bottomPixel, glob.windowRect.x2 - lice.MIDI_SCROLLBAR_R, meLanes[0].topPixel - meLanes[0].topMargin)) -- piano roll -> first lane
+    table.insert(glob.deadZones, Rect.new(0, meLanes[-1].bottomPixel, lice.MIDI_HANDLE_L, meLanes[0].topPixel - meLanes[0].topMargin)) -- piano roll -> first lane
+    table.insert(glob.deadZones, Rect.new(sr:width() - (lice.MIDI_SCROLLBAR_R + lice.MIDI_HANDLE_R), meLanes[-1].bottomPixel, sr:width() - lice.MIDI_SCROLLBAR_R, meLanes[0].topPixel - meLanes[0].topMargin)) -- piano roll -> first lane
   end
-  table.insert(glob.deadZones, Rect.new(glob.windowRect.x2 - lice.MIDI_SCROLLBAR_R, glob.windowRect.y1, glob.windowRect.x2, glob.windowRect.y2))
+  table.insert(glob.deadZones, Rect.new(sr:width() - lice.MIDI_SCROLLBAR_R, 0, sr:width(), sr:height()))
 
   if meLanes[0] then
-    table.insert(glob.deadZones, Rect.new(glob.windowRect.x1, meLanes[#meLanes].bottomPixel + meLanes[#meLanes].bottomMargin, glob.windowRect.x2, glob.windowRect.y2))
+    table.insert(glob.deadZones, Rect.new(0, meLanes[#meLanes].bottomPixel + meLanes[#meLanes].bottomMargin, sr:width(), sr:height()))
   else
-    table.insert(glob.deadZones, Rect.new(glob.windowRect.x1, meLanes[-1].bottomPixel, glob.windowRect.x2, glob.windowRect.y2))
+    table.insert(glob.deadZones, Rect.new(0, meLanes[-1].bottomPixel, sr:width(), sr:height()))
   end
 
   glob.meLanes = meLanes
@@ -3110,6 +3114,7 @@ local function attemptDragRectPartial(dragAreaIndex, dx, dy, justdoit)
 end
 
 local function mouseXToTick(mx)
+  -- mx is now relative (0-based)
   local activeTake = glob.liceData.editorTake
 
   local itemStartTime = r.GetMediaItemInfo_Value(glob.liceData.editorItem, 'D_POSITION')
@@ -3118,10 +3123,10 @@ local function mouseXToTick(mx)
   local currentTick
 
   if meState.timeBase == 'time' then
-    local currentTime = meState.leftmostTime + ((mx - glob.windowRect.x1) / meState.pixelsPerSecond)
+    local currentTime = meState.leftmostTime + (mx / meState.pixelsPerSecond)
     currentTick = r.MIDI_GetPPQPosFromProjTime(activeTake, currentTime - getTimeOffset())
   else
-    currentTick = meState.leftmostTick + math.floor(((mx - glob.windowRect.x1) / meState.pixelsPerTick) + 0.5)
+    currentTick = meState.leftmostTick + math.floor((mx / meState.pixelsPerTick) + 0.5)
   end
   if currentTick < itemStartTick then currentTick = itemStartTick end
   return currentTick
@@ -3139,11 +3144,12 @@ local function quantizeToGrid(mx, wantsTick, force)
   local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
   local quantizedTick = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
 
+  -- return relative coords (0-based)
   if meState.timeBase == 'time' then
     local quantizedTime = r.MIDI_GetProjTimeFromPPQPos(activeTake, quantizedTick)
-    mx = glob.windowRect.x1 + math.floor(((quantizedTime - meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
+    mx = math.floor(((quantizedTime - meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
   else
-    mx = glob.windowRect.x1 + math.floor(((quantizedTick - meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
+    mx = math.floor(((quantizedTick - meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
   end
   return mx, (wantsTick and quantizedTick)
 end
@@ -3565,7 +3571,8 @@ end
 
 local function isDeadZone(mx, my)
   if my < lice.MIDI_RULER_H then return true end
-  local pt = Point.new(mx + glob.liceData.screenRect.x1, my + glob.liceData.screenRect.y1 - lice.MIDI_RULER_H)
+  -- mouse coords and deadZones are now relative (0-based)
+  local pt = Point.new(mx, my - lice.MIDI_RULER_H)
   for _, dz in ipairs(glob.deadZones) do
     if resizing == RS_UNCLICKED and pointIsInRect(pt, dz) then
       return true
@@ -3767,8 +3774,9 @@ local function processMouse()
   local ccLane
   local isActive
 
-  mx = mx + glob.liceData.screenRect.x1
-  my = my + glob.liceData.screenRect.y1 - lice.MIDI_RULER_H -- correct for the RULER
+  -- mouse coords are now relative (no screen offset added)
+  -- only adjust for ruler offset
+  my = my - lice.MIDI_RULER_H -- correct for the RULER
 
   local valid = false
   if clickedLane then
@@ -4122,7 +4130,7 @@ local function processMouse()
             area.viewRect.y1 = meLanes[area.ccLane].topPixel
             area.viewRect.y2 = meLanes[area.ccLane].bottomPixel
           else
-            area.logicalRect.y1 = glob.windowRect.y1 - ((meLanes[-1].range - meState.topPitch) * meState.pixelsPerPitch)
+            area.logicalRect.y1 = 0 - ((meLanes[-1].range - meState.topPitch) * meState.pixelsPerPitch)  -- relative (0-based)
             area.logicalRect.y2 = meLanes[-1].bottomPixel + (meState.bottomPitch * meState.pixelsPerPitch)
             area.viewRect.y1 = meLanes[-1].topPixel
             area.viewRect.y2 = meLanes[-1].bottomPixel
@@ -4232,10 +4240,11 @@ local function processMouse()
                 local itemStartTick = r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, itemStartTime)
                 local itemStartX
 
+                -- itemStartX is relative (0-based)
                 if meState.timeBase == 'time' then
-                  itemStartX = glob.windowRect.x1 + math.floor(((itemStartTime - glob.meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
+                  itemStartX = math.floor(((itemStartTime - glob.meState.leftmostTime) * meState.pixelsPerSecond) + 0.5)
                 else
-                  itemStartX = glob.windowRect.x1 + math.floor(((itemStartTick - glob.meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
+                  itemStartX = math.floor(((itemStartTick - glob.meState.leftmostTick) * meState.pixelsPerTick) + 0.5)
                 end
 
                 for i, testArea in ipairs(areas) do
@@ -4312,7 +4321,8 @@ local function processMouse()
         end
 
         if meState.noteTab then
-          local bottomPixel =  glob.windowRect.y1 + math.floor(((#meState.noteTab - (127 - meState.topPitch)) * meState.pixelsPerPitch) + 0.5)
+          -- bottomPixel is relative (0-based)
+          local bottomPixel = math.floor(((#meState.noteTab - (127 - meState.topPitch)) * meState.pixelsPerPitch) + 0.5)
           if areas[#areas].logicalRect.y1 > bottomPixel then
             earlyReturn = true
           end

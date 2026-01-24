@@ -107,7 +107,6 @@ local cache = {
     pixelsPerPitch = nil,
     laneTopPixel = nil,
     laneTopValue = nil,
-    windowX1 = nil,
   },
 }
 
@@ -128,7 +127,6 @@ local function viewStateChanged()
       or vs.pixelsPerPitch ~= meState.pixelsPerPitch
       or vs.laneTopPixel ~= lane.topPixel
       or vs.laneTopValue ~= lane.topValue
-      or (glob.windowRect and vs.windowX1 ~= glob.windowRect.x1)
 end
 
 -- update view state cache after screen coords updated
@@ -147,9 +145,6 @@ local function updateViewStateCache()
   if lane then
     vs.laneTopPixel = lane.topPixel
     vs.laneTopValue = lane.topValue
-  end
-  if glob.windowRect then
-    vs.windowX1 = glob.windowRect.x1
   end
 end
 
@@ -309,38 +304,38 @@ local function getTimeOffset()
   -- return 0
 end
 
--- calculate screen X position for a PPQ position
+-- calculate screen X position for a PPQ position (returns relative, 0-based)
 local function ppqToScreenX(ppqpos, take)
   local meState = glob.meState
   if not take then return nil end
 
   if meState.timeBase == 'time' then
-    -- time-based mode: convert PPQ to project time, then to screen X
+    -- time-based mode: convert PPQ to project time, then to relative X
     if not meState.pixelsPerSecond or not meState.leftmostTime then return nil end
     local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos)
     local adjustedTime = projTime + getTimeOffset()
-    return glob.windowRect.x1 + ((adjustedTime - meState.leftmostTime) * meState.pixelsPerSecond)
+    return (adjustedTime - meState.leftmostTime) * meState.pixelsPerSecond
   else
     -- tick-based mode
     if not meState.pixelsPerTick then return nil end
-    return glob.windowRect.x1 + ((ppqpos - meState.leftmostTick) * meState.pixelsPerTick)
+    return (ppqpos - meState.leftmostTick) * meState.pixelsPerTick
   end
 end
 
--- calculate PPQ position from screen X (inverse of ppqToScreenX)
+-- calculate PPQ position from screen X (accepts relative, 0-based)
 local function screenXToPpq(screenX, take)
   local meState = glob.meState
   if not take then return nil end
 
   if meState.timeBase == 'time' then
-    -- time-based mode: convert screen X to time, then to PPQ
+    -- time-based mode: convert relative X to time, then to PPQ
     if not meState.pixelsPerSecond or not meState.leftmostTime then return nil end
-    local projTime = meState.leftmostTime + ((screenX - glob.windowRect.x1) / meState.pixelsPerSecond)
+    local projTime = meState.leftmostTime + (screenX / meState.pixelsPerSecond)
     return r.MIDI_GetPPQPosFromProjTime(take, projTime - getTimeOffset())
   else
     -- tick-based mode
     if not meState.pixelsPerTick then return nil end
-    return meState.leftmostTick + ((screenX - glob.windowRect.x1) / meState.pixelsPerTick)
+    return meState.leftmostTick + (screenX / meState.pixelsPerTick)
   end
 end
 
@@ -839,7 +834,7 @@ local function getVisiblePPQRange(take)
   local meState = glob.meState
   local margin = 960  -- ~1 beat margin for curve endpoints
   local leftPPQ = meState.leftmostTick - margin
-  local viewWidth = glob.windowRect:width()  -- margin compensates for scrollbar
+  local viewWidth = glob.liceData.screenRect:width()  -- screen width
   local rightPPQ
   if meState.timeBase == 'time' then
     local rightTime = meState.leftmostTime + (viewWidth / meState.pixelsPerSecond)
@@ -940,17 +935,18 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     local optHeld = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
     if not dragState then
       local hit = hitTestPoint(mx, my)
+      -- clear all hovered flags first
+      for chan, points in pairs(pbPoints) do
+        for _, pt in ipairs(points) do
+          pt.hovered = false
+        end
+      end
       if hit then
         hoveredPoint = hit
         hit.point.hovered = true
         hoveredCurve = nil
       else
         hoveredPoint = nil
-        for chan, points in pairs(pbPoints) do
-          for _, pt in ipairs(points) do
-            pt.hovered = false
-          end
-        end
         -- check for curve hover when not over a point (only for bezier curves)
         -- only show bezier tool if: curve's point is selected, OR nothing is selected
         if optHeld then
@@ -994,13 +990,13 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local reaperInForeground = fgWnd == mainWnd or r.JS_Window_IsChild(mainWnd, fgWnd)
       if reaperInForeground then
         -- show active channel indicator centered over ruler
-        local windowRect = glob.windowRect
+        -- TODO: screenRect has native-converted Y on macOS, should use proper screen coords
         local screenRect = glob.liceData and glob.liceData.screenRect
-        if windowRect and screenRect then
+        if screenRect then
           local activeChan = getActiveChannelFilter()
           if activeChan then
-            local centerX = math.floor((windowRect.x1 + windowRect.x2) / 2)
-            local rulerY = math.floor(screenRect.y1) + (not helper.is_macos and -60 or -10) -- middle of ruler above legend, not sure why the y-coord is so different
+            local centerX = math.floor((screenRect.x1 + screenRect.x2) / 2)
+            local rulerY = math.floor(screenRect.y1) + (not helper.is_macos and -60 or -10)
             r.TrackCtl_SetToolTip(string.format("Ch %d (h=menu)", activeChan + 1), centerX, rulerY, true)
           end
         end
@@ -2356,10 +2352,14 @@ local function handleRightClick(mods)
   if mods and mods:ctrl() then
     local meState = glob.meState
     if not meState then return false end
+    local sr = glob.liceData and glob.liceData.screenRect
+    if not sr then return false end
 
-    -- use screen coords for both X and Y (screenYToPitch uses lane.topPixel which is screen-relative)
+    -- convert screen-absolute mouse coords to relative (0-based)
     local mx, my = r.GetMousePosition()
-    my = helper.screenYToNative(my, glob.windowRect)
+    my = helper.screenYToNative(my, sr)
+    mx = mx - sr.x1
+    my = my - sr.y1
     local ppqpos = screenXToPpq(mx, take)
     if not ppqpos then return false end
     local mousePitch = screenYToPitch(my)

@@ -799,7 +799,7 @@ Helper.VKeys_Intercept = VKeys_Intercept
 Helper.VKeys_GetState = VKeys_GetState
 Helper.VKeys_ClearState = VKeys_ClearState
 
--- convert screen Y from GetMousePosition() to native coords matching glob.windowRect
+-- convert screen Y from GetMousePosition() to native coords matching screenRect
 -- macOS screen Y is flipped (origin at bottom), this converts to match lane.topPixel etc
 local function screenYToNative(y, windowRect)
   if is_macos and windowRect then

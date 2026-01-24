@@ -138,7 +138,6 @@ Global.wantsRightButton = false
 
 Global.areas = {}
 Global.liceData = nil
-Global.windowRect = nil
 Global.deadZones = {}
 
 Global.widgetInfo = nil

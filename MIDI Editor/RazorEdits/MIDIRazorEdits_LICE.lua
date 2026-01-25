@@ -1304,7 +1304,9 @@ local function drawLice()
   local alpha = getAlpha(reBorderColor)
   local meLanes = glob.meLanes
 
-  r.rcw_BeginFrame(hwnd)
+  if wantsChildHWND then
+    r.rcw_BeginFrame(hwnd)
+  end
 
   if glob.liceData then
     for _, area in ipairs(glob.areas) do
@@ -1560,7 +1562,9 @@ local function drawLice()
     end
   end
 
-  r.rcw_EndFrame(hwnd)
+  if wantsChildHWND then
+    r.rcw_EndFrame(hwnd)
+  end
 end
 
 Lice.recalcConstants = recalcConstants

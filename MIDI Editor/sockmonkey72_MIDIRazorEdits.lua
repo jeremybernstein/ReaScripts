@@ -1,11 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.5
+-- @version 1.5.0-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - review/refactor of absolute vs relative coordinate usage (improves performance and improves rendering, particularly on Windows)
---   - minor fix for point hover logic
+--   - fix childwindow detection and warnings on non-Windows
+--   - add guards to childwindow-only function calls so the script doesn't crash when it's not present
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

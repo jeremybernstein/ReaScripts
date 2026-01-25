@@ -71,9 +71,7 @@ if not r.APIExists('rcw_GetVersion') then
   if r.APIExists('CreateChildWindowForHWND') then
     needsupdate = true
   else
-    if helper.is_windows then
-      r.ShowConsoleMsg('For best results, please install the \'childwindow\' extension\nvia ReaPack (also from sockmonkey72).\n')
-    end
+    r.ShowConsoleMsg('For best results, please install the \'childwindow\' extension\nvia ReaPack (also from sockmonkey72).\n')
   end
 else
   local rcwVersion = r.rcw_GetVersion()

@@ -58,6 +58,11 @@ local config = {
   tuningFile = nil,     -- nil = 12-TET
   tuningScale = nil,
   showMicrotonalLines = false,
+  -- colors (nil = use theme, value = user override)
+  lineColor = nil,
+  pointColor = nil,
+  selectedColor = nil,
+  hoveredColor = nil,
 }
 
 -- system defaults (from ExtState, set via Settings.lua)
@@ -65,6 +70,11 @@ local systemDefaults = {
   maxBendUp = 48,
   maxBendDown = 48,
   tuningFile = nil,
+  -- color overrides (nil = use theme color)
+  lineColor = nil,            -- curve line color (0xAARRGGBB)
+  pointColor = nil,           -- unselected point color
+  selectedColor = nil,        -- selected point color
+  hoveredColor = nil,         -- hovered point color
 }
 
 -- project overrides (from ProjExtState, set via in-script dialog)
@@ -460,6 +470,12 @@ applyEffectiveConfig = function()
 
   config.tuningFile = tuningFile
   config.tuningScale = loadTuningFromFile(tuningFile)
+
+  -- colors (system defaults only, no project overrides)
+  config.lineColor = systemDefaults.lineColor
+  config.pointColor = systemDefaults.pointColor
+  config.selectedColor = systemDefaults.selectedColor
+  config.hoveredColor = systemDefaults.hoveredColor
 end
 
 -- handle ExtState preferences (system defaults)
@@ -511,6 +527,19 @@ local function handleState(scriptID)
   else
     systemDefaults.tuningFile = nil
   end
+
+  -- color overrides (nil = use theme)
+  stateVal = r.GetExtState(scriptID, 'pbLineColor')
+  systemDefaults.lineColor = (stateVal and stateVal ~= '') and tonumber(stateVal) or nil
+
+  stateVal = r.GetExtState(scriptID, 'pbPointColor')
+  systemDefaults.pointColor = (stateVal and stateVal ~= '') and tonumber(stateVal) or nil
+
+  stateVal = r.GetExtState(scriptID, 'pbSelectedColor')
+  systemDefaults.selectedColor = (stateVal and stateVal ~= '') and tonumber(stateVal) or nil
+
+  stateVal = r.GetExtState(scriptID, 'pbHoveredColor')
+  systemDefaults.hoveredColor = (stateVal and stateVal ~= '') and tonumber(stateVal) or nil
 
   -- load project overrides and apply effective config
   loadProjectState(scriptID)
@@ -928,6 +957,48 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     if viewStateChanged() then
       updateViewStateCache()
     end
+  end
+
+  -- handle mouse released outside bounds (mx/my nil but released true)
+  -- this prevents stuck drag state when mouse leaves the editor area
+  if not mx or not my then
+    if mouseState.released then
+      local outOfBoundsUndo = nil
+      if dragState then
+        -- for marquee, complete the selection with current bounds
+        if dragState.isMarquee and dragState.currentMx then
+          local x1, y1 = math.min(dragState.startMx, dragState.currentMx), math.min(dragState.startMy, dragState.currentMy)
+          local x2, y2 = math.max(dragState.startMx, dragState.currentMx), math.max(dragState.startMy, dragState.currentMy)
+
+          local marqueeSelected = false
+          for chan, points in pairs(pbPoints) do
+            for _, pt in ipairs(points) do
+              if pt.screenX and pt.screenY then
+                if pt.screenX >= x1 and pt.screenX <= x2 and pt.screenY >= y1 and pt.screenY <= y2 then
+                  pt.selected = true
+                  marqueeSelected = true
+                end
+              end
+            end
+          end
+
+          if marqueeSelected and activeTake then
+            syncSelectionToMIDI(activeTake, mu)
+            outOfBoundsUndo = 'Select Pitch Bend'
+          end
+        end
+        -- cancel other drag types without committing
+        dragState = nil
+      end
+      if drawState then
+        -- cancel draw without committing
+        drawState = nil
+      end
+      centerLineState.active = false
+      centerLineState.locked = false
+      return true, outOfBoundsUndo
+    end
+    return true  -- still in PB mode, just nothing to process
   end
 
   if mx and my then
@@ -2506,6 +2577,9 @@ PitchBend.handleRightClick = handleRightClick
 PitchBend.toggleMicrotonalLines = toggleMicrotonalLines
 PitchBend.getActiveChannel = getActiveChannel
 PitchBend.showChannelMenu = showChannelMenu
+PitchBend.restoreCursor = function()
+  glob.setCursor(glob.bend_cursor)
+end
 
 -- export utility functions for external use
 PitchBend.pbToSemitones = pbToSemitones

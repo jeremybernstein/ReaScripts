@@ -349,9 +349,9 @@ local defaultPbKeyMappings = {
   pitchBendConfig     = { name = 'Project Bend Config',                 baseKey = 'b' },
   pitchBendMicrotonal = { name = 'Toggle Microtonal Lines',             baseKey = 'm' },
   pitchBendChannel    = { name = 'Select Active Channel',               baseKey = 'h' },
-  pitchBendSelectAll  = { name = 'Select All Points',                   baseKey = 'a' },
-  pitchBendCopy       = { name = 'Copy Points',                         baseKey = 'c', modifiers = 2 },
-  pitchBendPaste      = { name = 'Paste Points',                        baseKey = 'v', modifiers = 2 },
+  pitchBendSelectAll  = { name = 'Select All Points',                   baseKey = 'a', hidden = true },
+  pitchBendCopy       = { name = 'Copy Points',                         baseKey = 'c', modifiers = 2, hidden = true },
+  pitchBendPaste      = { name = 'Paste Points',                        baseKey = 'v', modifiers = 2, hidden = true },
 }
 
 if helper.is_windows then

@@ -142,12 +142,16 @@ local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
     slicerPoints = quantized and slicerPointsQuantized or slicerPointsUnquantized
 
     if mouseState.released then
-      -- finish line and perform slice
-      handleSlicer(areaProcessor, quantized)
+      -- finish line and perform slice (only if we had a valid slice in progress)
+      if slicerPoints and slicerPoints.start and slicerPoints.stop
+        and not slicerPoints.start:equals(slicerPoints.stop)
+      then
+        handleSlicer(areaProcessor, quantized)
+        undoText = 'Slice Notes'
+      end
       slicerPoints = nil
       slicerPointsUnquantized = nil
       slicerPointsQuantized = nil
-      undoText = 'Slice Notes'
     end
 
     return true, undoText
@@ -220,6 +224,10 @@ Slicer.shutdown = function(destroyBitmap)
     destroyBitmap(slicerBitmap)
     slicerBitmap = nil
   end
+end
+
+Slicer.restoreCursor = function()
+  glob.setCursor(glob.slicer_cursor)
 end
 
 return Slicer

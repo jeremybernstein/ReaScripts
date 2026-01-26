@@ -2572,6 +2572,13 @@ local function restorePreferences()
     if stateVal then glob.wantsControlPoints = stateVal == 1 and true or false end
   end
 
+  glob.wantsFullLaneDefault = false -- default
+  stateVal = r.GetExtState(scriptID, 'wantsFullLaneDefault')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.wantsFullLaneDefault = stateVal == 1 and true or false end
+  end
+
   glob.wantsRightButton = false -- default
   stateVal = r.GetExtState(scriptID, 'wantsRightButton')
   if stateVal then
@@ -2738,6 +2745,17 @@ local function processKeys()
   end
 
   if glob.inSlicerMode then
+    -- allow switching to PitchBend mode from Slicer mode (but not from dedicated slicer script)
+    if not glob.slicerQuitAfterProcess and keyMatches(vState, keyMappings.pitchBendMode) then
+      glob.inPitchBendMode = true
+      glob.inSlicerMode = false
+      local pbConfig = pitchbend.getConfig()
+      if not pbConfig.showAllNotes then
+        local meActiveChan = math.max(0, (glob.meState.activeChannel or 1) - 1)
+        pitchbend.setConfig('activeChannel', meActiveChan)
+      end
+      return
+    end
     passUnconsumedKeys(vState) -- we might not want this
     return
   end
@@ -4072,7 +4090,10 @@ local function processMouse()
         resizing = RS_UNCLICKED return -- media item lane is verboten
       end
 
-      local fullLane = (ccLane and not mod.fullLaneMod()) or (not ccLane and mod.fullLaneMod())
+      -- CC lanes: default full lane, modifier disables
+      -- Note lane: default depends on wantsFullLaneDefault setting, modifier toggles
+      local fullLane = (ccLane and not mod.fullLaneMod())
+                    or (not ccLane and (glob.wantsFullLaneDefault ~= mod.fullLaneMod()))
 
       areas[#areas + 1] = Area.newFromRect({ viewRect = Rect.new(mx, my, mx, my),
                                       logicalRect = Rect.new(mx, my, mx, my),

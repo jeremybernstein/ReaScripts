@@ -83,6 +83,8 @@ local prefsWantsControlPoints
 local wantsControlPoints
 local prefsSlicerDefaultTrim
 local slicerDefaultTrim
+local prefsWantsFullLaneDefault
+local wantsFullLaneDefault
 local prefsWantsRightButton
 local wantsRightButton
 local prefsPbMaxBendUp
@@ -98,6 +100,15 @@ local pbSclDirectory
 local prefsPbDefaultTuning
 local pbDefaultTuning
 local pbSclFiles = {}  -- cached list of .scl files
+-- color overrides (nil = use theme)
+local prefsPbLineColor
+local pbLineColor
+local prefsPbPointColor
+local pbPointColor
+local prefsPbSelectedColor
+local pbSelectedColor
+local prefsPbHoveredColor
+local pbHoveredColor
 
 local function releaseKeys()
   if intercepting then
@@ -499,6 +510,11 @@ local function handleSavedMappings()
   if not prefsSlicerDefaultTrim then prefsSlicerDefaultTrim = 0 end
   slicerDefaultTrim = prefsSlicerDefaultTrim
 
+  state = r.GetExtState(scriptID_Save, 'wantsFullLaneDefault')
+  prefsWantsFullLaneDefault = state ~= '' and tonumber(state) or 0
+  if not prefsWantsFullLaneDefault then prefsWantsFullLaneDefault = 0 end
+  wantsFullLaneDefault = prefsWantsFullLaneDefault
+
   state = r.GetExtState(scriptID_Save, 'wantsRightButton')
   prefsWantsRightButton = state ~= '' and tonumber(state) or 0
   if not prefsWantsRightButton then prefsWantsRightButton = 0 end
@@ -532,6 +548,23 @@ local function handleSavedMappings()
   state = r.GetExtState(scriptID_Save, 'pbDefaultTuning')
   prefsPbDefaultTuning = state ~= '' and state or ''
   pbDefaultTuning = prefsPbDefaultTuning
+
+  -- color overrides (nil = use theme)
+  state = r.GetExtState(scriptID_Save, 'pbLineColor')
+  prefsPbLineColor = state ~= '' and tonumber(state) or nil
+  pbLineColor = prefsPbLineColor
+
+  state = r.GetExtState(scriptID_Save, 'pbPointColor')
+  prefsPbPointColor = state ~= '' and tonumber(state) or nil
+  pbPointColor = prefsPbPointColor
+
+  state = r.GetExtState(scriptID_Save, 'pbSelectedColor')
+  prefsPbSelectedColor = state ~= '' and tonumber(state) or nil
+  pbSelectedColor = prefsPbSelectedColor
+
+  state = r.GetExtState(scriptID_Save, 'pbHoveredColor')
+  prefsPbHoveredColor = state ~= '' and tonumber(state) or nil
+  pbHoveredColor = prefsPbHoveredColor
 end
 
 local function drawPageTabs()
@@ -657,6 +690,7 @@ end
 local wantsQuit = false
 
 local function hasChanges() -- could throttle this if it's a performance concern
+  if wantsFullLaneDefault ~= prefsWantsFullLaneDefault then return true end
   if wantsRightButton ~= prefsWantsRightButton then return true end
   if slicerDefaultTrim ~= prefsSlicerDefaultTrim then return true end
   if wantsControlPoints ~= prefsWantsControlPoints then return true end
@@ -668,6 +702,10 @@ local function hasChanges() -- could throttle this if it's a performance concern
   if pbShowAllNotes ~= prefsPbShowAllNotes then return true end
   if pbSclDirectory ~= prefsPbSclDirectory then return true end
   if pbDefaultTuning ~= prefsPbDefaultTuning then return true end
+  if pbLineColor ~= prefsPbLineColor then return true end
+  if pbPointColor ~= prefsPbPointColor then return true end
+  if pbSelectedColor ~= prefsPbSelectedColor then return true end
+  if pbHoveredColor ~= prefsPbHoveredColor then return true end
   if lastKeyState ~= toExtStateString(prepKeysForSaving()) then return true end
   if lastPbKeyState ~= toExtStateString(prepPbKeysForSaving()) then return true end
   if lastModState ~= toExtStateString(prepModsForSaving()) then return true end
@@ -752,6 +790,13 @@ local function drawButtons()
     end
     prefsSlicerDefaultTrim = slicerDefaultTrim
 
+    if wantsFullLaneDefault ~= 0 then
+      r.SetExtState(scriptID_Save, 'wantsFullLaneDefault', tostring(wantsFullLaneDefault), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'wantsFullLaneDefault', true)
+    end
+    prefsWantsFullLaneDefault = wantsFullLaneDefault
+
     if wantsRightButton ~= 0 then
       r.SetExtState(scriptID_Save, 'wantsRightButton', tostring(wantsRightButton), true)
     else
@@ -802,6 +847,35 @@ local function drawButtons()
     end
     prefsPbDefaultTuning = pbDefaultTuning
 
+    -- color overrides
+    if pbLineColor then
+      r.SetExtState(scriptID_Save, 'pbLineColor', tostring(pbLineColor), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbLineColor', true)
+    end
+    prefsPbLineColor = pbLineColor
+
+    if pbPointColor then
+      r.SetExtState(scriptID_Save, 'pbPointColor', tostring(pbPointColor), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbPointColor', true)
+    end
+    prefsPbPointColor = pbPointColor
+
+    if pbSelectedColor then
+      r.SetExtState(scriptID_Save, 'pbSelectedColor', tostring(pbSelectedColor), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbSelectedColor', true)
+    end
+    prefsPbSelectedColor = pbSelectedColor
+
+    if pbHoveredColor then
+      r.SetExtState(scriptID_Save, 'pbHoveredColor', tostring(pbHoveredColor), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbHoveredColor', true)
+    end
+    prefsPbHoveredColor = pbHoveredColor
+
     -- NOTIFY
     r.SetExtState(scriptID_Save, 'settingsUpdated', 'ping', false)
   end
@@ -821,6 +895,7 @@ local function drawButtons()
   if ImGui.Button(ctx, 'Revert to Defaults', 200) then
     wantsControlPoints = false
     slicerDefaultTrim = false
+    wantsFullLaneDefault = false
     wantsRightButton = false
     stretchMode = 0
     widgetStretchMode = 1
@@ -830,6 +905,10 @@ local function drawButtons()
     pbShowAllNotes = 1
     pbSclDirectory = '~/Documents/scl'
     pbDefaultTuning = ''
+    pbLineColor = nil
+    pbPointColor = nil
+    pbSelectedColor = nil
+    pbHoveredColor = nil
     keyMappings = tableCopySimpleKeys(keys.defaultKeyMappings)
     pbKeyMappings = tableCopySimpleKeys(keys.defaultPbKeyMappings)
     modMappings = tableCopySimpleKeys(keys.defaultModMappings)
@@ -907,15 +986,17 @@ local function drawPbKeyMappings()
     ImGui.TableHeadersRow(ctx)
 
     for k, v in spairs(pbKeyMappings, function(t, a, b) return t[a].name < t[b].name end) do
-      local function isDuped()
-        for kk, map in pairs(pbKeyMappings) do
-          if kk ~= k then
-            if map.baseKey == v.baseKey then return true end
+      if not v.hidden then
+        local function isDuped()
+          for kk, map in pairs(pbKeyMappings) do
+            if kk ~= k and not map.hidden then
+              if map.baseKey == v.baseKey then return true end
+            end
           end
+          return false
         end
-        return false
+        makePbKeyRowTable(k, v, isDuped())
       end
-      makePbKeyRowTable(k, v, isDuped())
     end
     ImGui.EndTable(ctx)
   end
@@ -1024,6 +1105,98 @@ local function drawPitchBendOptions()
     end
     ImGui.EndCombo(ctx)
   end
+
+  -- Color overrides
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+  ImGui.Text(ctx, 'Color Overrides (uncheck to use theme):')
+  ImGui.Spacing(ctx)
+
+  -- convert ARGB (storage/LICE) to RGBA (ReaImGui)
+  local function argbToRgba(argb)
+    if not argb then return nil end
+    local a = (argb >> 24) & 0xFF
+    local r = (argb >> 16) & 0xFF
+    local g = (argb >> 8) & 0xFF
+    local b = argb & 0xFF
+    return (r << 24) | (g << 16) | (b << 8) | a
+  end
+
+  -- convert RGBA (ReaImGui) to ARGB (storage/LICE)
+  local function rgbaToArgb(rgba)
+    if not rgba then return nil end
+    local r = (rgba >> 24) & 0xFF
+    local g = (rgba >> 16) & 0xFF
+    local b = (rgba >> 8) & 0xFF
+    local a = rgba & 0xFF
+    return (a << 24) | (r << 16) | (g << 8) | b
+  end
+
+  local rv, col, enabled
+  local colorX = 32  -- fixed X position for color squares
+
+  -- Line color (default orange)
+  ImGui.AlignTextToFramePadding(ctx)
+  enabled = pbLineColor ~= nil
+  rv, enabled = ImGui.Checkbox(ctx, '##lineColorEnabled', enabled)
+  if rv then
+    if enabled then pbLineColor = 0xFFFF8800 else pbLineColor = nil end
+  end
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, colorX)
+  if not enabled then ImGui.BeginDisabled(ctx) end
+  col = argbToRgba(pbLineColor) or 0xFF8800FF  -- orange in RGBA (default)
+  rv, col = ImGui.ColorEdit4(ctx, 'Curve Line##lineColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
+  if rv and enabled then pbLineColor = rgbaToArgb(col) end
+  if not enabled then ImGui.EndDisabled(ctx) end
+
+  -- Point color (unselected, default blue)
+  ImGui.AlignTextToFramePadding(ctx)
+  enabled = pbPointColor ~= nil
+  rv, enabled = ImGui.Checkbox(ctx, '##pointColorEnabled', enabled)
+  if rv then
+    if enabled then pbPointColor = 0xFF0088FF else pbPointColor = nil end
+  end
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, colorX)
+  if not enabled then ImGui.BeginDisabled(ctx) end
+  col = argbToRgba(pbPointColor) or 0x0088FFFF  -- blue in RGBA (default)
+  rv, col = ImGui.ColorEdit4(ctx, 'Point (unselected)##pointColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
+  if rv and enabled then pbPointColor = rgbaToArgb(col) end
+  if not enabled then ImGui.EndDisabled(ctx) end
+
+  -- Selected color (default red)
+  ImGui.AlignTextToFramePadding(ctx)
+  enabled = pbSelectedColor ~= nil
+  rv, enabled = ImGui.Checkbox(ctx, '##selectedColorEnabled', enabled)
+  if rv then
+    if enabled then pbSelectedColor = 0xFFFF0000 else pbSelectedColor = nil end
+  end
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, colorX)
+  if not enabled then ImGui.BeginDisabled(ctx) end
+  col = argbToRgba(pbSelectedColor) or 0xFF0000FF  -- red in RGBA (default)
+  rv, col = ImGui.ColorEdit4(ctx, 'Point (selected)##selectedColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
+  if rv and enabled then pbSelectedColor = rgbaToArgb(col) end
+  if not enabled then ImGui.EndDisabled(ctx) end
+
+  -- Hovered color (default yellow)
+  ImGui.AlignTextToFramePadding(ctx)
+  enabled = pbHoveredColor ~= nil
+  rv, enabled = ImGui.Checkbox(ctx, '##hoveredColorEnabled', enabled)
+  if rv then
+    if enabled then pbHoveredColor = 0xFFFFFF00 else pbHoveredColor = nil end
+  end
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, colorX)
+  if not enabled then ImGui.BeginDisabled(ctx) end
+  col = argbToRgba(pbHoveredColor) or 0xFFFF00FF  -- yellow in RGBA (default)
+  rv, col = ImGui.ColorEdit4(ctx, 'Point (hovered)##hoveredColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
+  if rv and enabled then pbHoveredColor = rgbaToArgb(col) end
+  if not enabled then ImGui.EndDisabled(ctx) end
+
+  ImGui.Spacing(ctx)
 end
 
 local function drawMiscOptions()
@@ -1060,6 +1233,13 @@ local function drawMiscOptions()
   -- ImGui.SameLine(ctx)
   -- rv, wsm = ImGui.RadioButtonEx(ctx, 'Comp/Exp##wsm', wsm, 3)
   -- widgetStretchMode = wsm
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Full-Lane Note Selection By Default:')
+  local fl = wantsFullLaneDefault
+  ImGui.SameLine(ctx)
+  rv, fl = ImGui.Checkbox(ctx, '##wantsFullLaneDefault', fl == 1 and true or false)
+  wantsFullLaneDefault = fl and 1 or 0
 
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Use Right Mouse Button (experimental):')

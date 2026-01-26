@@ -398,11 +398,18 @@ local function peekAppIntercepts(force)
       intercept.timestamp = time
 
       if msg == appInterceptActiveMessageName then
+        local wasForeground = glob.editorIsForeground
         glob.editorIsForeground = (wpl ~= 0)
         if not glob.editorIsForeground then
           glob.setCursor(glob.normal_cursor)
           resetButtons()  -- clear stale button state on focus loss
           helper.VKeys_ClearState()  -- clear stale key state on focus loss
+        elseif not wasForeground then
+          if glob.inSlicerMode then
+            slicer.restoreCursor()
+          elseif glob.inPitchBendMode then
+            pitchbend.restoreCursor()
+          end
         end
       end
     end
@@ -1042,11 +1049,12 @@ local function drawPitchBend(hwnd, mode, antialias)
     clearBitmap(pbBitmap, 0, 0, noteAreaWidth, noteAreaHeight)
   end
 
-  -- Colors for pitch bend visualization (using MRE theme colors)
-  local pbLineColor = reBorderContrastColor      -- Contrasting color for curves (visible on all backgrounds)
-  local pbPointColor = reBorderColor             -- Main MRE color for unselected points
-  local pbSelectedColor = reFillContrastColor    -- Contrasting color for selected points
-  local pbHoveredColor = 0xFFFFFF00              -- Yellow for hovered
+  -- Colors for pitch bend visualization (user override or MRE theme colors)
+  -- User colors are stored as ARGB, need conversion on Windows (swap R/B)
+  local pbLineColor = config.lineColor and convertColorFromNative(config.lineColor) or reBorderContrastColor
+  local pbPointColor = config.pointColor and convertColorFromNative(config.pointColor) or reBorderColor
+  local pbSelectedColor = config.selectedColor and convertColorFromNative(config.selectedColor) or reFillContrastColor
+  local pbHoveredColor = config.hoveredColor and convertColorFromNative(config.hoveredColor) or 0xFFFFFF00
 
   -- Clip boundaries (bitmap coords, 0-based)
   local clipBottom = noteAreaHeight

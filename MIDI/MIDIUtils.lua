@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.07-beta.5
+-- @version 0.2.07-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix handling of item extents with truncated, looped items
+--   - fix note-off management when extents are trimmed
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -843,6 +843,15 @@ end
 -----------------------------------------------------------------------------
 ------------------------------ OVERLAP CORRECT ------------------------------
 
+-- helper to delete a note and its corresponding note-off
+local function markNoteForDeletion(event)
+  event.delete = true
+  -- also delete the note-off to avoid orphaned note-offs
+  if event.noteOffIdx and MIDIEvents[event.noteOffIdx] then
+    MIDIEvents[event.noteOffIdx].delete = true
+  end
+end
+
 local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelection)
   local modified = false
   if testEvent.chan == selectedEvent.chan
@@ -855,8 +864,8 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
       local testSel = testEvent:IsSelected()
       local selSel = selectedEvent:IsSelected()
 
-      if (testSel ~= selSel and testSel) or selectedEvent.delete then selectedEvent.delete = true
-      else testEvent.delete = true
+      if (testSel ~= selSel and testSel) or selectedEvent.delete then markNoteForDeletion(selectedEvent)
+      else markNoteForDeletion(testEvent)
       end
       return true
     elseif testEvent.endppqpos >= selectedEvent.ppqpos and testEvent.endppqpos <= selectedEvent.endppqpos then
@@ -872,7 +881,7 @@ local function CorrectOverlapForEvent(take, testEvent, selectedEvent, favorSelec
     end
 
     if testEvent.endppqpos - testEvent.ppqpos < 1 then
-      testEvent.delete = true
+      markNoteForDeletion(testEvent)
     end
   end
   return modified

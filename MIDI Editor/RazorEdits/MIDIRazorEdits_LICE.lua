@@ -405,6 +405,9 @@ local function peekAppIntercepts(force)
           resetButtons()  -- clear stale button state on focus loss
           helper.VKeys_ClearState()  -- clear stale key state on focus loss
         elseif not wasForeground then
+          -- returning from background - force full state refresh
+          glob.wantsAnalyze = true
+          glob.needsRecomposite = true
           if glob.inSlicerMode then
             slicer.restoreCursor()
           elseif glob.inPitchBendMode then
@@ -462,6 +465,19 @@ local function peekIntercepts(m_x, m_y)
 
     if ret and time ~= intercept.timestamp then
       intercept.timestamp = time
+
+      -- if receiving mouse messages but editorIsForeground is false, we must have
+      -- returned from background without WM_ACTIVATE firing (macOS issue)
+      if not glob.editorIsForeground then
+        glob.editorIsForeground = true
+        glob.wantsAnalyze = true  -- force full state refresh
+        glob.needsRecomposite = true
+        if glob.inSlicerMode then
+          slicer.restoreCursor()
+        elseif glob.inPitchBendMode then
+          pitchbend.restoreCursor()
+        end
+      end
 
       -- if msg == 'WM_MOUSEWHEEL' then -- TODO: can use this to improve sync on scroll
       --   glob._P('mousewheel', wpl, wph, lpl, lph)
@@ -1397,6 +1413,10 @@ local function drawLice()
 
           local x1, y1, x2, y2 = (x1L - x1V) + Lice.EDGE_SLOP, (y1L - y1V) + Lice.EDGE_SLOP, (x2L - x1V) + Lice.EDGE_SLOP, (y2L - y1V) + Lice.EDGE_SLOP - 1
 
+          -- view-based coordinates for decorations (visible in full-lane mode)
+          local viewWidth, viewHeight = math.floor(viewRect:width() + 0.5), math.floor(viewRect:height() + 0.5)
+          local x1View, y1View, x2View, y2View = Lice.EDGE_SLOP, Lice.EDGE_SLOP, viewWidth + Lice.EDGE_SLOP, viewHeight + Lice.EDGE_SLOP - 1
+
           local function maskTopBottom()
             clearBitmap(area.bitmap, x1, y1, logWidth + 1, math.abs(y1L - y1V)) -- top
             clearBitmap(area.bitmap, x1, y2 - math.abs(y2L - y2V) + 1, logWidth + 1, y2) -- bottom
@@ -1415,7 +1435,7 @@ local function drawLice()
             local visHeight = math.abs(visBottom - visTop)
             if glob.inWidgetMode and ((glob.widgetInfo and area == glob.widgetInfo.area)) then -- or (not widgetInfo and area.ccLane)) then -- tilt only in cc lanes
               maskTopBottom()
-              -- if not area.widgetExtents then area.widgetExtents = Extent.new(0.5, 0.5) end
+              if not area.widgetExtents then area.widgetExtents = Extent.new(0.5, 0.5) end
               local widgetMin, widgetMax = visTop + (visHeight * area.widgetExtents.min),
                                            visTop + (visHeight * area.widgetExtents.max)
               simpleLine(area.bitmap, x1, widgetMin, x2, widgetMax,
@@ -1446,8 +1466,9 @@ local function drawLice()
               end
 
               if glob.insertMode then
-                local middleX = x2 - math.floor(Lice.EDGE_SLOP * 3.5 + 0.5)
-                local middleY = math.floor(y1 + Lice.EDGE_SLOP * 3 + 0.5)
+                -- use view-based coordinates so decoration is visible in full-lane mode
+                local middleX = x2View - math.floor(Lice.EDGE_SLOP * 3.5 + 0.5)
+                local middleY = math.floor(y1View + Lice.EDGE_SLOP * 3 + 0.5)
                 local tqslop = math.floor(Lice.EDGE_SLOP * 0.75 + 0.5)
                 if true then -- add to target mode -> this might be in combination with one of the above, so different corner?
                   frameCircle(area.bitmap, middleX, middleY, math.floor(Lice.EDGE_SLOP * 1.5), reBorderContrastColor, 1., mode, false) --antialias)
@@ -1458,9 +1479,10 @@ local function drawLice()
               end
 
               if glob.horizontalLock or glob.verticalLock then
-                local middleX = x1 + Lice.EDGE_SLOP * 4
+                -- use view-based coordinates so decoration is visible in full-lane mode
+                local middleX = x1View + Lice.EDGE_SLOP * 4
                 local mx2 = math.floor(middleX - Lice.EDGE_SLOP / 1 + 0.5)
-                local middleY = math.floor(y1 + Lice.EDGE_SLOP * 3.5 + 0.5)
+                local middleY = math.floor(y1View + Lice.EDGE_SLOP * 3.5 + 0.5)
                 local my2 = math.floor(middleY - Lice.EDGE_SLOP / 1 + 0.5)
                 if glob.horizontalLock then -- horizontal lock scroll mode
                   fillTriangle(area.bitmap, middleX - (Lice.EDGE_SLOP * 2), my2,

@@ -1,17 +1,17 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.7
+-- @version 1.5.0-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - add color pickers for pitchbend curve/point colors
---   - fix behavior when selection goes out of bounds in pitchbend mode
---   - some fixes for switching modes between main, slicer, pitchbend (and preventing same when dedicated scripts in use)
---   - minor cursor/focus fixups
---   - now using custom menu function where appropriate to work around gfx.showmenu multiple monitor limitations
+--   - use semver for childwindow version checking (https://github.com/kikito/semver.lua)
+--   - fix a ton of annoying bugs when copying areas (thanks BirdBird!)
+--   - fix a few obnoxious bugs when using invert, duplicate and retrograde operations (thanks BirdBird!)
+--   - minor fixes and improvements
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*
+--   {RazorEdits}/{lib}/{semver}/*
 --   RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits.lua
 --   [main=main,midi_editor] sockmonkey72_MIDIRazorEdits_PitchBend.lua

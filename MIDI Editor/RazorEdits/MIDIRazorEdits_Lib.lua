@@ -13,7 +13,7 @@
 local r = reaper
 local Lib = {}
 
-local RCW_VERSION = '2.0.0'
+local RCW_MIN_VERSION = '2.0.0'
 
 local DEBUG_UNDO = false
 local sectionID, commandID
@@ -63,6 +63,7 @@ local mod = keys.mod
 local helper = require 'MIDIRazorEdits_Helper'
 local slicer = require 'MIDIRazorEdits_Slicer'
 local pitchbend = require 'MIDIRazorEdits_PitchBend'
+local semver = require 'lib.semver.semver'
 
 pitchbend.setMIDIUtils(mu)
 
@@ -74,8 +75,8 @@ if not r.APIExists('rcw_GetVersion') then
     r.ShowConsoleMsg('For best results, please install the \'childwindow\' extension\nvia ReaPack (also from sockmonkey72).\n')
   end
 else
-  local rcwVersion = r.rcw_GetVersion()
-  if rcwVersion ~= RCW_VERSION then
+  local rcwVersion = semver(r.rcw_GetVersion())
+  if rcwVersion < semver(RCW_MIN_VERSION) then
     needsupdate = true
   end
 end
@@ -648,13 +649,34 @@ local function pitchInRange(pitch, bottomPitch, topPitch)
 end
 _G.pitchInRange = pitchInRange -- find a better place for this
 
+local DEBUG_COPY = false  -- DEBUG flag for copy mode
+local DEBUG_DUPLICATE = false  -- DEBUG flag for duplicate mode
+local DEBUG_INVERT = false  -- DEBUG flag for invert mode
+
 local function processNotes(activeTake, area, operation)
+  if DEBUG_INVERT and operation == OP_INVERT then
+    _P('=== processNotes: OP_INVERT ===')
+    _P('  area ticks:', area.timeValue.ticks.min, '-', area.timeValue.ticks.max)
+    _P('  area pitch:', area.timeValue.vals.min, '-', area.timeValue.vals.max)
+  end
+
   local ratio = 1.
   local idx = -1
   local movingArea = operation == OP_STRETCH
         and resizing == RS_MOVEAREA
         and (not mod.onlyAreaMod() or area.active)
   local duplicatingArea = movingArea and mod.copyMod()
+
+  -- DEBUG copy mode
+  if DEBUG_COPY and duplicatingArea then
+    _P('=== COPY MODE ===')
+    _P('src area (unstretched): ticks', area.unstretchedTimeValue.ticks.min, '-', area.unstretchedTimeValue.ticks.max,
+       'pitch', area.unstretchedTimeValue.vals.min, '-', area.unstretchedTimeValue.vals.max)
+    _P('dst area (timeValue): ticks', area.timeValue.ticks.min, '-', area.timeValue.ticks.max,
+       'pitch', area.timeValue.vals.min, '-', area.timeValue.vals.max)
+    _P('insertMode:', glob.insertMode)
+  end
+
   local stretchingArea = operation == OP_STRETCH
         and mod.stretchMod()
         and area.active
@@ -675,6 +697,14 @@ local function processNotes(activeTake, area, operation)
   local sourceEvents = sourceInfo.sourceEvents
   local usingUnstretched = sourceInfo.usingUnstretched
 
+  -- DEBUG sourceEvents
+  if DEBUG_COPY and duplicatingArea then
+    _P('sourceEvents count:', #sourceEvents)
+    for i, ev in ipairs(sourceEvents) do
+      _P('  src note', i, ': idx', ev.idx, 'ppq', ev.ppqpos, '-', ev.endppqpos, 'pitch', ev.pitch)
+    end
+  end
+
   if movingArea then
     deltaTicks = area.timeValue.ticks.min - area.unstretchedTimeValue.ticks.min
     deltaPitch = -(area.timeValue.vals.min - area.unstretchedTimeValue.vals.min)
@@ -684,7 +714,9 @@ local function processNotes(activeTake, area, operation)
   end
 
   if operation == OP_STRETCH and area.unstretched and (not mod.singleMod() or area.active) then
-    ratio = area.timeValue.ticks:size() / area.unstretchedTimeValue.ticks:size()
+    local denom = area.unstretchedTimeValue.ticks:size()
+    if denom == 0 then return end
+    ratio = area.timeValue.ticks:size() / denom
     usingUnstretched = true
     if ratio == 1 and resizing < RS_MOVEAREA then return end
   end
@@ -749,22 +781,59 @@ local function processNotes(activeTake, area, operation)
   elseif operation == OP_DUPLICATE then
     local tmpArea = Area.new(area:serialize()) -- OP_DELETE_TRIM will use this area for the deletion itself (in addition to event selection)
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
+    if DEBUG_DUPLICATE then
+      _P('--- OP_DUPLICATE: calling OP_DELETE_TRIM ---')
+      _P('  original area ticks:', area.timeValue.ticks.min, '-', area.timeValue.ticks.max)
+      _P('  shifted tmpArea ticks:', tmpArea.timeValue.ticks.min, '-', tmpArea.timeValue.ticks.max)
+      _P('  areaTickExtent:', areaTickExtent.min, '-', areaTickExtent.max, 'size:', areaTickExtent:size())
+    end
     processNotesWithGeneration(activeTake, tmpArea, OP_DELETE_TRIM)
   elseif movingArea then
      if deltaTicks ~= 0 or deltaPitch ~= 0 then
-      -- extra work to avoid deleting the target area, if it intersects with the source area
-      local deletionExtents = not duplicatingArea -- this calculation in the non-offset extents
-        and helper.getExtentUnion(area.timeValue, area.unstretchedTimeValue) -- since the offset will be applied
-        or helper.getNonIntersectingAreas(area.timeValue, area.unstretchedTimeValue) -- when performing the delete
+      -- for move: delete union of source+dest (notes move from source to dest)
+      -- for copy: skip area-based deletion, segment dest notes around copy positions below
+      local deletionExtents = not duplicatingArea
+        and helper.getExtentUnion(area.timeValue, area.unstretchedTimeValue)
+        or {}  -- for copy: handled after sourceEvents loop
+
+      -- DEBUG deletion extents
+      if DEBUG_COPY then
+        _P('--- DELETION EXTENT LOGIC ---')
+        _P('movingArea:', movingArea, 'duplicatingArea:', duplicatingArea)
+        _P('glob.insertMode:', glob.insertMode)
+        _P('deletionExtents count:', #deletionExtents)
+        for i, ext in ipairs(deletionExtents) do
+          _P('  extent', i, ': ticks', ext.ticks.min, '-', ext.ticks.max, 'vals', ext.vals.min, '-', ext.vals.max)
+        end
+      end
+
       local tmpArea = Area.new(area:serialize()) -- only used for event selection
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = nil, nil
-      -- _P('src1', area.timeValue)
-      -- _P('src2', area.unstretchedTimeValue)
       if not glob.insertMode then
+        if DEBUG_COPY then
+          _P('NOT insertMode - processing deletions')
+        end
+        -- create temporary areas from deletion extents for segment calculation
+        -- this ensures getNoteSegments uses the correct extents (merged or separate)
+        -- instead of glob.areas which always has both source+dest merged
+        glob.deletionAreas = {}
         for _, extent in ipairs(deletionExtents) do
-          -- _P(ii, 'output', extent)
+          local delArea = Area.new(area:serialize())
+          delArea.timeValue = extent
+          delArea.unstretched, delArea.unstretchedTimeValue = nil, nil
+          table.insert(glob.deletionAreas, delArea)
+        end
+        for _, extent in ipairs(deletionExtents) do
           tmpArea.timeValue = extent
-          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE, mod.overlapMod() and sourceEvents) -- target
+          if DEBUG_COPY then
+            _P('  calling processNotesWithGeneration OP_DELETE for extent ticks', extent.ticks.min, '-', extent.ticks.max)
+          end
+          processNotesWithGeneration(activeTake, tmpArea, OP_DELETE, mod.overlapMod() and sourceEvents)
+        end
+        glob.deletionAreas = nil
+      else
+        if DEBUG_COPY then
+          _P('insertMode ON - SKIPPING deletions')
         end
       end
       insert = true -- won't do anything anymore because we pre-process
@@ -795,6 +864,14 @@ local function processNotes(activeTake, area, operation)
   end
 
   if not skipiter then
+
+  if DEBUG_INVERT and operation == OP_INVERT then
+    _P('sourceEvents count:', #sourceEvents)
+    for i, ev in ipairs(sourceEvents) do
+      _P('  source', i, ': idx', ev.idx, 'ppq', ev.ppqpos, '-', ev.endppqpos, 'pitch', ev.pitch)
+    end
+  end
+
   for sidx, event in ipairs(sourceEvents) do
     local selected, muted, ppqpos, endppqpos, chan, pitch, vel, relvel = event.selected, event.muted, event.ppqpos, event.endppqpos, event.chan, event.pitch, event.vel, event.relvel
     local newppqpos, newendppqpos, newpitch
@@ -807,6 +884,12 @@ local function processNotes(activeTake, area, operation)
       if ppqpos + GLOBAL_PREF_SLOP < rightmostTick and endppqpos - GLOBAL_PREF_SLOP >= leftmostTick then
         if ppqpos < leftmostTick  then
           if not mod.overlapMod() then
+            if DEBUG_DUPLICATE and operation == OP_DELETE_TRIM then
+              _P('    trimOverlappingNotes: creating LEFT segment', ppqpos, '-', leftmostTick, 'pitch', pitch)
+            end
+            if DEBUG_INVERT and operation == OP_INVERT then
+              _P('    trimOverlappingNotes: creating LEFT segment', ppqpos, '-', leftmostTick, 'pitch', pitch)
+            end
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos, endppqpos = leftmostTick, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
             canOperate = false
@@ -814,6 +897,12 @@ local function processNotes(activeTake, area, operation)
         end
         if endppqpos > rightmostTick then
           if not mod.overlapMod() then
+            if DEBUG_DUPLICATE and operation == OP_DELETE_TRIM then
+              _P('    trimOverlappingNotes: creating RIGHT segment', rightmostTick, '-', endppqpos, 'pitch', pitch)
+            end
+            if DEBUG_INVERT and operation == OP_INVERT then
+              _P('    trimOverlappingNotes: creating RIGHT segment', rightmostTick, '-', endppqpos, 'pitch', pitch)
+            end
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = rightmostTick, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
             canOperate = false
@@ -825,6 +914,13 @@ local function processNotes(activeTake, area, operation)
 
     local overlapped = mod.overlapMod()
 
+    if DEBUG_DUPLICATE and operation == OP_DELETE_TRIM then
+      local inRange = endppqpos > leftmostTick and ppqpos < rightmostTick and pitchInRange(pitch, bottomPitch, topPitch)
+      _P('  note idx', idx, ': ppq', ppqpos, '-', endppqpos, 'pitch', pitch)
+      _P('    leftmostTick:', leftmostTick, 'rightmostTick:', rightmostTick)
+      _P('    endppqpos > leftmostTick:', endppqpos > leftmostTick, 'ppqpos < rightmostTick:', ppqpos < rightmostTick)
+      _P('    inRange:', inRange)
+    end
     if endppqpos > leftmostTick and ppqpos < rightmostTick
       and pitchInRange(pitch, bottomPitch, topPitch)
     then
@@ -832,14 +928,24 @@ local function processNotes(activeTake, area, operation)
         mu.MIDI_SetNote(activeTake, idx, not (operation == OP_UNSELECT) and true or false, nil, nil, nil, nil, nil)
         touchedMIDI = true
       elseif operation == OP_INVERT then
+        if DEBUG_INVERT then
+          _P('--- OP_INVERT: note idx', idx, '---')
+          _P('  original: ppq', ppqpos, '-', endppqpos, 'pitch', pitch)
+          _P('  area bounds: leftTick', leftmostTick, 'rightTick', rightmostTick)
+          _P('  area pitch: min', area.timeValue.vals.min, 'max', area.timeValue.vals.max)
+          _P('  overlapped:', overlapped)
+        end
         trimOverlappingNotes()
         newppqpos = (overlapped or ppqpos >= leftmostTick) and ppqpos or leftmostTick
-        newendppqpos = (overlapped or endppqpos <= rightmostTick) and endppqpos or rightmostTick + 1
+        newendppqpos = (overlapped or endppqpos <= rightmostTick) and endppqpos or rightmostTick
         if meState.noteTab then
           local newidx = area.timeValue.vals.max - (meState.noteTabReverse[pitch] - area.timeValue.vals.min)
           newpitch = meState.noteTab[newidx]
         else
           newpitch = area.timeValue.vals.max - (pitch - area.timeValue.vals.min)
+        end
+        if DEBUG_INVERT then
+          _P('  -> new: ppq', newppqpos, '-', newendppqpos, 'pitch', newpitch)
         end
       elseif operation == OP_RETROGRADE then
         trimOverlappingNotes()
@@ -861,22 +967,38 @@ local function processNotes(activeTake, area, operation)
       elseif operation == OP_RETROGRADE_VALS then
         trimOverlappingNotes()
         newppqpos = (overlapped or ppqpos >= leftmostTick) and ppqpos or leftmostTick
-        newendppqpos = (overlapped or endppqpos <= rightmostTick) and endppqpos or rightmostTick + 1
+        newendppqpos = (overlapped or endppqpos <= rightmostTick) and endppqpos or rightmostTick
         newpitch = sourceEvents[#sourceEvents - (sidx - 1)].pitch
       elseif operation == OP_DUPLICATE then
         helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = (ppqpos >= leftmostTick and ppqpos or leftmostTick) + areaTickExtent:size(),
-                          endppqpos = (endppqpos <= rightmostTick and endppqpos or rightmostTick + 1) + areaTickExtent:size(), chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                          endppqpos = (endppqpos <= rightmostTick and endppqpos or rightmostTick) + areaTickExtent:size(), chan = chan, pitch = pitch, vel = vel, relvel = relvel })
       elseif operation == OP_DELETE_USER or operation == OP_DELETE or operation == OP_STRETCH_DELETE or operation == OP_DELETE_TRIM then
         local deleteOrig = true
         local isOverlapped = operation == OP_DELETE_USER and overlapped
 
         if operation == OP_DELETE_TRIM then
           deleteOrig = trimOverlappingNotes() -- this screws up most operations, but is necessary for OP_DUPLICATE
+          if DEBUG_DUPLICATE then
+            _P('    after trimOverlappingNotes: deleteOrig =', deleteOrig)
+          end
         end
 
         -- don't unnecessarily repeat this calculation if we've already done it
-        if not isOverlapped and helper.addUnique(tDelQueries, { ppqpos = ppqpos, endppqpos = endppqpos, pitch = pitch, op = operation }) then
-          local segments = helper.getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, operation == OP_DELETE_TRIM and area or nil)
+        -- for OP_DELETE during move/copy, use glob.deletionAreas (the actual deletion extents)
+        -- instead of glob.areas which always has both source+dest that get merged incorrectly
+        -- skip getNoteSegments for OP_DELETE_TRIM since trimOverlappingNotes already handles it
+        if operation ~= OP_DELETE_TRIM and not isOverlapped and helper.addUnique(tDelQueries, { ppqpos = ppqpos, endppqpos = endppqpos, pitch = pitch, op = operation }) then
+          local areasForSegments = (operation == OP_DELETE and glob.deletionAreas) or areas
+          local onlyArea = nil -- was: operation == OP_DELETE_TRIM and area or nil
+          local segments = helper.getNoteSegments(areasForSegments, itemInfo, ppqpos, endppqpos, pitch, onlyArea)
+          if DEBUG_DUPLICATE and operation == OP_DELETE_TRIM then
+            _P('    getNoteSegments returned:', segments and #segments or 'nil', 'segments')
+            if segments then
+              for si, seg in ipairs(segments) do
+                _P('      segment', si, ':', seg[1], '-', seg[2])
+              end
+            end
+          end
           if segments then
             for _, seg in ipairs(segments) do
               local newEvent = mu.tableCopy(event)
@@ -890,6 +1012,9 @@ local function processNotes(activeTake, area, operation)
           end
         end
         if isOverlapped or deleteOrig then
+          if DEBUG_DUPLICATE and operation == OP_DELETE_TRIM then
+            _P('    DELETING note idx', idx)
+          end
           helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
         end
       elseif not mod.singleMod() or ppqpos >= leftmostTick then
@@ -939,19 +1064,147 @@ local function processNotes(activeTake, area, operation)
         end
 
         if movingArea or duplicatingArea then
-          local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil)
-          if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
-            for _, seg in ipairs(segments) do
-              helper.addUnique(tInsertions,
-                              { type = mu.NOTE_TYPE,
-                                selected = selected, muted = muted,
-                                ppqpos = seg[1],
-                                endppqpos = seg[2],
-                                chan = chan, pitch = newpitch or pitch,
-                                vel = vel, relvel = relvel }
-                              )
+          -- for move (not copy), preserve note segments outside the source area
+          if movingArea and not duplicatingArea then
+            local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil)
+            if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
+              for _, seg in ipairs(segments) do
+                helper.addUnique(tInsertions,
+                                { type = mu.NOTE_TYPE,
+                                  selected = selected, muted = muted,
+                                  ppqpos = seg[1],
+                                  endppqpos = seg[2],
+                                  chan = chan, pitch = newpitch or pitch,
+                                  vel = vel, relvel = relvel }
+                                )
+              end
+              event.segments = segments
             end
-            event.segments = segments
+          end
+          -- for copy: check if copied note position overlaps original note position
+          -- only segment/delete original if there's actual overlap (same pitch conflict)
+          if duplicatingArea then
+            -- compute actual copy position (with area clipping)
+            local copyPpqpos = (ppqpos + deltaTicks < areaLeftmostTick and not overlapped) and areaLeftmostTick or ppqpos + deltaTicks
+            local copyEndppqpos = (endppqpos + deltaTicks > areaRightmostTick and not overlapped) and areaRightmostTick or endppqpos + deltaTicks
+            -- check if copy overlaps original (would create same-pitch overlap)
+            -- use <= and >= because endppqpos is inclusive
+            -- also check deltaPitch == 0, otherwise copy is at different pitch (no collision)
+            local copyOverlapsOriginal = deltaPitch == 0 and copyPpqpos <= endppqpos and copyEndppqpos >= ppqpos
+
+            if DEBUG_COPY then
+              _P('--- SOURCE NOTE COPY OVERLAP CHECK ---')
+              _P('  source note idx', idx, ': ppq', ppqpos, '-', endppqpos, 'pitch', pitch)
+              _P('  copy position: ppq', copyPpqpos, '-', copyEndppqpos)
+              _P('  copyOverlapsOriginal:', copyOverlapsOriginal)
+            end
+
+            if copyOverlapsOriginal then
+              if DEBUG_COPY then
+                _P('  -> OVERLAP DETECTED, insertMode:', glob.insertMode)
+              end
+              -- only create segments to preserve source note portions when in insertMode
+              if glob.insertMode then
+                if ppqpos < copyPpqpos then
+                  local segEnd = copyPpqpos - 1
+                  local len = segEnd - ppqpos + 1
+                  if len >= GLOBAL_PREF_SLOP then
+                    if DEBUG_COPY then
+                      _P('    inserting left segment: ppq', ppqpos, '-', segEnd)
+                    end
+                    helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted,
+                      ppqpos = ppqpos, endppqpos = segEnd, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                  end
+                end
+                if endppqpos > copyEndppqpos then
+                  local segStart = copyEndppqpos + 1
+                  local len = endppqpos - segStart + 1
+                  if len >= GLOBAL_PREF_SLOP then
+                    if DEBUG_COPY then
+                      _P('    inserting right segment: ppq', segStart, '-', endppqpos)
+                    end
+                    helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted,
+                      ppqpos = segStart, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                  end
+                end
+              else
+                -- NOT insertMode - create segments around DEST AREA bounds
+                -- (portions of original outside dest area should remain visible)
+                if DEBUG_COPY then
+                  _P('    NOT insertMode - creating segments around dest area bounds')
+                end
+                if ppqpos < areaLeftmostTick then
+                  local segEnd = areaLeftmostTick - 1
+                  local len = segEnd - ppqpos + 1
+                  if len >= GLOBAL_PREF_SLOP then
+                    if DEBUG_COPY then
+                      _P('    inserting left segment: ppq', ppqpos, '-', segEnd)
+                    end
+                    helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted,
+                      ppqpos = ppqpos, endppqpos = segEnd, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                  end
+                end
+                if endppqpos > areaRightmostTick then
+                  local segStart = areaRightmostTick + 1
+                  local len = endppqpos - segStart + 1
+                  if len >= GLOBAL_PREF_SLOP then
+                    if DEBUG_COPY then
+                      _P('    inserting right segment: ppq', segStart, '-', endppqpos)
+                    end
+                    helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted,
+                      ppqpos = segStart, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                  end
+                end
+              end
+              if DEBUG_COPY then
+                _P('    DELETING original source note idx', idx)
+              end
+              helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+            elseif not glob.insertMode then
+              -- copy doesn't overlap original, but source note may still be in dest area
+              -- in non-insertMode, segment source notes around dest area bounds
+              -- use timeValue pitch range (dest area), not sourceInfo pitch range
+              local destBottomPitch = math.floor(timeValue.vals.min + 0.5)
+              local destTopPitch = math.floor(timeValue.vals.max + 0.5)
+              local inDestArea = endppqpos > areaLeftmostTick and ppqpos < areaRightmostTick
+                and pitchInRange(pitch, destBottomPitch, destTopPitch)
+              if DEBUG_COPY then
+                _P('  checking if source note in dest area:')
+                _P('    ppqpos', ppqpos, 'endppqpos', endppqpos, 'pitch', pitch)
+                _P('    areaLeftmostTick', areaLeftmostTick, 'areaRightmostTick', areaRightmostTick)
+                _P('    destBottomPitch', destBottomPitch, 'destTopPitch', destTopPitch)
+                _P('    inDestArea:', inDestArea)
+              end
+              if inDestArea then
+                if DEBUG_COPY then
+                  _P('  -> SOURCE NOTE IN DEST AREA, deleting and segmenting')
+                end
+                -- create segments for portions outside dest area
+                if ppqpos < areaLeftmostTick then
+                  local segEnd = areaLeftmostTick - 1
+                  local len = segEnd - ppqpos + 1
+                  if len >= GLOBAL_PREF_SLOP then
+                    if DEBUG_COPY then
+                      _P('    inserting left segment: ppq', ppqpos, '-', segEnd)
+                    end
+                    helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted,
+                      ppqpos = ppqpos, endppqpos = segEnd, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                  end
+                end
+                if endppqpos > areaRightmostTick then
+                  local segStart = areaRightmostTick + 1
+                  local len = endppqpos - segStart + 1
+                  if len >= GLOBAL_PREF_SLOP then
+                    if DEBUG_COPY then
+                      _P('    inserting right segment: ppq', segStart, '-', endppqpos)
+                    end
+                    helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted,
+                      ppqpos = segStart, endppqpos = endppqpos, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+                  end
+                end
+                helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+              end
+            end
           end
           if meState.noteTab then
             local pitchidx = meState.noteTabReverse[pitch]
@@ -968,15 +1221,27 @@ local function processNotes(activeTake, area, operation)
           else
             newpitch = pitch - deltaPitch
           end
+          local copyPpqpos = (ppqpos + deltaTicks < areaLeftmostTick and not mod.overlapMod()) and areaLeftmostTick or ppqpos + deltaTicks
+          local copyEndppqpos = (endppqpos + deltaTicks > areaRightmostTick and not mod.overlapMod()) and areaRightmostTick or endppqpos + deltaTicks
+
+          if DEBUG_COPY then
+            _P('--- ADDING COPIED NOTE ---')
+            _P('  from source idx', idx, 'pitch', pitch, 'ppq', ppqpos, '-', endppqpos)
+            _P('  to dest pitch', newpitch, 'ppq', copyPpqpos, '-', copyEndppqpos)
+          end
+
           helper.addUnique(tInsertions,
                           { type = mu.NOTE_TYPE,
                             selected = selected, muted = muted,
-                            ppqpos = (ppqpos + deltaTicks < areaLeftmostTick and not mod.overlapMod()) and areaLeftmostTick or ppqpos + deltaTicks,
-                            endppqpos = (endppqpos + deltaTicks > areaRightmostTick and not mod.overlapMod()) and areaRightmostTick or endppqpos + deltaTicks,
+                            ppqpos = copyPpqpos,
+                            endppqpos = copyEndppqpos,
                             chan = chan, pitch = newpitch,
                             vel = vel, relvel = relvel }
                           )
           if not glob.insertMode and mod.overlapMod() then
+            if DEBUG_COPY then
+              _P('  overlapMod + !insertMode -> DELETING source note idx', idx)
+            end
             helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
           end
         end
@@ -1014,11 +1279,17 @@ local function processNotes(activeTake, area, operation)
                                   vel = vel, relvel = relvel }
                                 )
               else
+                if DEBUG_INVERT and operation == OP_INVERT then
+                  _P('  -> MIDI_SetNote idx', idx, ': ppq', newppqpos, '-', newendppqpos, 'pitch', newpitch)
+                end
                 mu.MIDI_SetNote(activeTake, idx, selected, nil, newppqpos, newendppqpos, nil, newpitch)
                 touchedMIDI = true
               end
             else
               -- TODO: I don't think this is reachable anymore
+              if DEBUG_INVERT and operation == OP_INVERT then
+                _P('  -> MIDI_DeleteNote idx', idx, '(note too short)')
+              end
               mu.MIDI_DeleteNote(activeTake, idx)
               touchedMIDI = true
             end
@@ -1027,6 +1298,162 @@ local function processNotes(activeTake, area, operation)
       end
     end
   end
+  end
+
+  if DEBUG_INVERT and operation == OP_INVERT then
+    _P('=== INVERT SUMMARY ===')
+    _P('  tInsertions count:', #tInsertions)
+    for i, ins in ipairs(tInsertions) do
+      if ins.type == mu.NOTE_TYPE then
+        _P('    insert', i, ': ppq', ins.ppqpos, '-', ins.endppqpos, 'pitch', ins.pitch)
+      end
+    end
+    _P('  tDeletions count:', #tDeletions)
+    for i, del in ipairs(tDeletions) do
+      _P('    delete', i, ': idx', del.idx)
+    end
+    _P('=== END INVERT ===')
+  end
+
+  -- for copy: segment dest notes (not in sourceEvents) around the copy positions
+  if duplicatingArea then
+    -- DEBUG
+    if DEBUG_COPY then
+      _P('--- DEST AREA PROCESSING ---')
+      _P('insertMode:', glob.insertMode)
+      _P('areaLeftmostTick:', areaLeftmostTick, 'areaRightmostTick:', areaRightmostTick)
+      _P('bottomPitch:', bottomPitch, 'topPitch:', topPitch)
+    end
+
+    -- build set of sourceEvents indices to exclude
+    local sourceIdxSet = {}
+    for _, ev in ipairs(sourceEvents) do
+      if ev.idx then sourceIdxSet[ev.idx] = true end
+    end
+    -- collect copy positions from tInsertions (notes added during sourceEvents loop)
+    local copyPositions = {}
+    for _, ins in ipairs(tInsertions) do
+      if ins.type == mu.NOTE_TYPE and ins.ppqpos and ins.endppqpos then
+        table.insert(copyPositions, ins)
+      end
+    end
+
+    -- DEBUG
+    if DEBUG_COPY then
+      _P('copyPositions count:', #copyPositions)
+      for i, cp in ipairs(copyPositions) do
+        _P('  copy', i, ': ppq', cp.ppqpos, '-', cp.endppqpos, 'pitch', cp.pitch)
+      end
+    end
+
+    -- enumerate all notes at dest and segment those that overlap copies
+    local idx = -1
+    while true do
+      idx = mu.MIDI_EnumNotes(activeTake, idx)
+      if not idx or idx == -1 then break end
+      if not sourceIdxSet[idx] then  -- skip sourceEvents notes (already handled)
+        local _, sel, muted, ppqpos, endppqpos, chan, pitch, vel, relvel = mu.MIDI_GetNote(activeTake, idx)
+        -- check if this note overlaps dest area (timeValue)
+        local destLeft = math.floor(areaLeftmostTick + 0.5)
+        local destRight = math.floor(areaRightmostTick + 0.5)
+        -- use dest area pitch range, not source area pitch range
+        local destBottomPitch = math.floor(timeValue.vals.min + 0.5)
+        local destTopPitch = math.floor(timeValue.vals.max + 0.5)
+
+        -- DEBUG: show all notes being considered
+        if DEBUG_COPY then
+          local inDest = endppqpos > destLeft and ppqpos < destRight and pitchInRange(pitch, destBottomPitch, destTopPitch)
+          _P('  note idx', idx, ': ppq', ppqpos, '-', endppqpos, 'pitch', pitch, 'inDestArea:', inDest, 'isSourceNote:', sourceIdxSet[idx] or false)
+        end
+
+        if endppqpos > destLeft and ppqpos < destRight
+          and pitchInRange(pitch, destBottomPitch, destTopPitch)
+        then
+          -- find all copies that overlap this note (same pitch)
+          local overlappingCopies = {}
+          for _, cp in ipairs(copyPositions) do
+            if cp.pitch == pitch and cp.ppqpos <= endppqpos and cp.endppqpos >= ppqpos then
+              table.insert(overlappingCopies, cp)
+            end
+          end
+          -- DEBUG
+          if DEBUG_COPY then
+            _P('    -> in dest area, overlappingCopies:', #overlappingCopies)
+          end
+
+          -- insertMode: only process notes that overlap with copies (segment around copies)
+          -- non-insertMode: process all notes in dest area (segment around dest bounds)
+          if glob.insertMode then
+            if #overlappingCopies > 0 then
+              -- insertMode: segment around copy positions
+              local segments = {}
+              table.sort(overlappingCopies, function(a, b) return a.ppqpos < b.ppqpos end)
+              local segStart = ppqpos
+              for _, cp in ipairs(overlappingCopies) do
+                if segStart < cp.ppqpos then
+                  local segEnd = cp.ppqpos - 1
+                  if segEnd - segStart + 1 >= GLOBAL_PREF_SLOP then
+                    table.insert(segments, {segStart, segEnd})
+                  end
+                end
+                segStart = math.max(segStart, cp.endppqpos + 1)
+              end
+              -- final segment after last copy
+              if segStart <= endppqpos then
+                local segEnd = endppqpos
+                if segEnd - segStart + 1 >= GLOBAL_PREF_SLOP then
+                  table.insert(segments, {segStart, segEnd})
+                end
+              end
+              if DEBUG_COPY then
+                _P('    -> insertMode: SEGMENTING around copy positions')
+                _P('    -> creating', #segments, 'segments, DELETING original')
+                for si, seg in ipairs(segments) do
+                  _P('       segment', si, ':', seg[1], '-', seg[2])
+                end
+              end
+              for _, seg in ipairs(segments) do
+                helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = sel, muted = muted,
+                  ppqpos = seg[1], endppqpos = seg[2], chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+              end
+              helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+            else
+              -- insertMode but no overlapping copies - skip this note entirely
+              if DEBUG_COPY then
+                _P('    -> insertMode: no overlapping copies, SKIPPING note')
+              end
+            end
+          else
+            -- non-insertMode: segment around dest area bounds only
+            local segments = {}
+            if ppqpos < destLeft then
+              local segEnd = destLeft - 1
+              if segEnd - ppqpos + 1 >= GLOBAL_PREF_SLOP then
+                table.insert(segments, {ppqpos, segEnd})
+              end
+            end
+            if endppqpos > destRight then
+              local segStart = destRight + 1
+              if endppqpos - segStart + 1 >= GLOBAL_PREF_SLOP then
+                table.insert(segments, {segStart, endppqpos})
+              end
+            end
+            if DEBUG_COPY then
+              _P('    -> non-insertMode: SEGMENTING around dest area bounds')
+              _P('    -> creating', #segments, 'segments, DELETING original')
+              for si, seg in ipairs(segments) do
+                _P('       segment', si, ':', seg[1], '-', seg[2])
+              end
+            end
+            for _, seg in ipairs(segments) do
+              helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = sel, muted = muted,
+                ppqpos = seg[1], endppqpos = seg[2], chan = chan, pitch = pitch, vel = vel, relvel = relvel })
+            end
+            helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+          end
+        end
+      end
+    end
   end
 
   -- outside of the enumeration
@@ -1046,6 +1473,22 @@ local function processNotes(activeTake, area, operation)
     if slicer.processNotes(activeTake, area, { mu = mu, sourceEvents = sourceEvents, tInsertions = tInsertions, tDeletions = tDeletions }) then
       touchedMIDI = true
     end
+  end
+
+  -- DEBUG: summary of final insertions and deletions
+  if DEBUG_COPY and duplicatingArea then
+    _P('=== FINAL COPY SUMMARY ===')
+    _P('tDeletions count:', #tDeletions)
+    for i, del in ipairs(tDeletions) do
+      _P('  delete', i, ': idx', del.idx)
+    end
+    _P('tInsertions count:', #tInsertions)
+    for i, ins in ipairs(tInsertions) do
+      if ins.type == mu.NOTE_TYPE then
+        _P('  insert', i, ': ppq', ins.ppqpos, '-', ins.endppqpos, 'pitch', ins.pitch)
+      end
+    end
+    _P('=== END COPY ===')
   end
 end
 
@@ -1476,6 +1919,21 @@ end
 
 local function processInsertions()
   local activeTake = glob.liceData.editorTake
+  if DEBUG_DUPLICATE or DEBUG_INVERT then
+    _P('--- processInsertions ---')
+    _P('  tInsertions count:', #tInsertions)
+    for i, event in ipairs(tInsertions) do
+      if event.type == mu.NOTE_TYPE then
+        _P('    insertion', i, ': NOTE ppq', event.ppqpos, '-', event.endppqpos, 'pitch', event.pitch)
+      else
+        _P('    insertion', i, ': CC ppq', event.ppqpos)
+      end
+    end
+    _P('  tDeletions count:', #tDeletions)
+    for i, event in ipairs(tDeletions) do
+      _P('    deletion', i, ': type', event.type, 'idx', event.idx)
+    end
+  end
   for _, event in ipairs(tInsertions) do
     if event.type == mu.NOTE_TYPE then
       if event.ppqpos and event.endppqpos and event.ppqpos < event.endppqpos and event.endppqpos - event.ppqpos > GLOBAL_PREF_SLOP then
@@ -1552,10 +2010,13 @@ local function generateSourceInfo(area, op, force, overlap)
     local idx = -1
     if isNote then
       local overlapTab
+      local excludeByIdx  -- for copy: exclude sourceEvents by idx (positions differ between source/dest)
+      -- use exclusion list when provided (for copy: excludes sourceEvents from dest deletion)
       if not (op == OP_STRETCH or op == OP_STRETCH_DELETE or op == OP_DELETE_TRIM)
-        and mod.overlapMod() and overlap
+        and overlap
       then
         overlapTab = {}
+        excludeByIdx = {}
         for _, event in ipairs(overlap) do
           if not editorFilterChannels or (editorFilterChannels & (1 << event.chan) ~= 0) then
             helper.addUnique(overlapTab, { type = mu.NOTE_TYPE,
@@ -1568,6 +2029,7 @@ local function generateSourceInfo(area, op, force, overlap)
                                           vel = event.vel,
                                           relvel = event.relvel
                                         })
+            if event.idx then excludeByIdx[event.idx] = true end
           end
         end
       end
@@ -1582,7 +2044,8 @@ local function generateSourceInfo(area, op, force, overlap)
           if event.endppqpos > leftmostTick and event.ppqpos < rightmostTick
             and pitchInRange(event.pitch, bottomValue, topValue)
           then
-            if overlapTab and helper.inUniqueTab(overlapTab, event) then
+            -- exclude by idx (for copy) or by hash (for overlapMod)
+            if (excludeByIdx and excludeByIdx[idx]) or (overlapTab and helper.inUniqueTab(overlapTab, event)) then
               -- ignore
             else
               event.idx = idx
@@ -2508,6 +2971,7 @@ local function checkProjectExtState(noWidget)
             glob.widgetInfo = glob.widgetInfo or {}
             glob.widgetInfo.area = area
             glob.inWidgetMode = true
+            if not area.widgetExtents then area.widgetExtents = Extent.new(0.5, 0.5) end
           end
         end
         if hovering and area.timeValue and area.timeValue:compare(hovering.timeValue) then
@@ -2737,6 +3201,12 @@ local function processKeys()
     return
   end
 
+  -- cmd+Q: quit REAPER (global, all modes)
+  if vState:byte(keys.vKeyLookup['q']) ~= 0 and hottestMods:ctrl() and not hottestMods:shift() and not hottestMods:alt() then
+    r.Main_OnCommand(40004, 0)
+    return
+  end
+
   -- SLICER (skip if launched from dedicated PitchBend launcher)
   if not glob.slicerQuitAfterProcess and not glob.pitchBendQuitOnToggle and keyMatches(vState, keyMappings.slicerMode) then
     glob.inSlicerMode = not glob.inSlicerMode
@@ -2816,12 +3286,6 @@ local function processKeys()
 
     if keyMatches(vState, pbKeyMappings.pitchBendChannel) and not hottestMods:ctrl() then
       pitchbend.showChannelMenu()
-      return
-    end
-
-    -- cmd+Q: quit REAPER
-    if vState:byte(keys.vKeyLookup['q']) ~= 0 and hottestMods:ctrl() and not hottestMods:shift() and not hottestMods:alt() then
-      r.Main_OnCommand(40004, 0)
       return
     end
 

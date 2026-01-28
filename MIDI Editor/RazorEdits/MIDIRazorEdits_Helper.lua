@@ -455,23 +455,27 @@ local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyAr
   local valid_segments = {}
 
   if merged_areas[1].left > ppqpos then
-    local length = merged_areas[1].left - ppqpos
+    local seg_end = merged_areas[1].left - 1
+    local length = seg_end - ppqpos + 1
     if length >= GLOBAL_PREF_SLOP then
-      table.insert(valid_segments, {ppqpos, merged_areas[1].left})
+      table.insert(valid_segments, {ppqpos, seg_end})
     end
   end
 
   for i = 1, #merged_areas - 1 do
-    local length = merged_areas[i + 1].left - merged_areas[i].right
+    local seg_start = merged_areas[i].right + 1
+    local seg_end = merged_areas[i + 1].left - 1
+    local length = seg_end - seg_start + 1
     if length >= GLOBAL_PREF_SLOP then
-      table.insert(valid_segments, {merged_areas[i].right, merged_areas[i + 1].left})
+      table.insert(valid_segments, {seg_start, seg_end})
     end
   end
 
   if merged_areas[#merged_areas].right < endppqpos then
-    local length = endppqpos - merged_areas[#merged_areas].right
+    local seg_start = merged_areas[#merged_areas].right + 1
+    local length = endppqpos - seg_start + 1
     if length >= GLOBAL_PREF_SLOP then
-      table.insert(valid_segments, {merged_areas[#merged_areas].right, endppqpos})
+      table.insert(valid_segments, {seg_start, endppqpos})
     end
   end
 

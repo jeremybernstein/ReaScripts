@@ -1661,7 +1661,7 @@ local function loop()
       local relPath = removePrefix(presetSubPath, presetPath .. '/')
       folderIndicator = relPath .. '/'
     end
-    local comboLabel = currentPresetName ~= '' and (folderIndicator .. currentPresetName) or (folderIndicator ~= '' and folderIndicator or '(none)')
+    local comboLabel = currentPresetName ~= '' and (folderIndicator .. currentPresetName) or '(none)'
     if currentPresetName ~= '' and isModified() then
       comboLabel = comboLabel .. ' *'
     end
@@ -1915,7 +1915,7 @@ local function loop()
         grooveDisplay = grooveFilePath:match('([^/\\]+)$') or grooveFilePath
       end
 
-      ImGui.PushItemWidth(ctx, 280)
+      ImGui.PushItemWidth(ctx, 275)
       if ImGui.BeginCombo(ctx, '##grooveCombo', grooveDisplay) then
 
         -- === RGT SUBMENU ===
@@ -2032,7 +2032,7 @@ local function loop()
       end
       ImGui.PopItemWidth(ctx)
 
-      ImGui.SameLine(ctx, 0, 20)
+      ImGui.SameLine(ctx, 0, 19)
       ImGui.Text(ctx, 'Vel Str:')
       ImGui.SameLine(ctx)
       ImGui.PushItemWidth(ctx, 120)
@@ -2049,7 +2049,7 @@ local function loop()
       ImGui.AlignTextToFramePadding(ctx)
       ImGui.Text(ctx, 'Tolerance:')
       ImGui.SameLine(ctx, labelWidthMain)
-      local tolSliderW = 115
+      local tolSliderW = 125
       ImGui.PushItemWidth(ctx, tolSliderW)
       rv, grooveToleranceMin = ImGui.SliderDouble(ctx, '##grooveTolMin', grooveToleranceMin, 0.0, 100.0, '%.0f%%')
       if rv then
@@ -2062,8 +2062,10 @@ local function loop()
       end
       ImGui.PopItemWidth(ctx)
       ImGui.SameLine(ctx)
+      ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) - 1)
       ImGui.Text(ctx, 'to')
       ImGui.SameLine(ctx)
+      ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) - 1)
       ImGui.PushItemWidth(ctx, tolSliderW)
       rv, grooveToleranceMax = ImGui.SliderDouble(ctx, '##grooveTolMax', grooveToleranceMax, 0.0, 100.0, '%.0f%%')
       if rv then
@@ -2087,9 +2089,9 @@ local function loop()
 
         -- threshold row: value + mode
         ImGui.AlignTextToFramePadding(ctx)
-        ImGui.Text(ctx, 'Threshold:')
+        ImGui.Text(ctx, 'Coalesce:')
         ImGui.SameLine(ctx, labelWidthMain)
-        ImGui.PushItemWidth(ctx, 80)
+        ImGui.PushItemWidth(ctx, 66)
         local newThreshold
         rv, newThreshold = ImGui.InputDouble(ctx, '##midiThreshold', midiThreshold, 0, 0, '%.1f')
         if rv then
@@ -2101,7 +2103,7 @@ local function loop()
         ImGui.PopItemWidth(ctx)
 
         ImGui.SameLine(ctx)
-        ImGui.PushItemWidth(ctx, 80)
+        ImGui.PushItemWidth(ctx, 65)
         local thresholdModeItems = 'ticks\0ms\0%beat\0'
         rv, newIdx = ImGui.Combo(ctx, '##midiThreshMode', midiThresholdMode, thresholdModeItems)
         if rv then
@@ -2112,9 +2114,12 @@ local function loop()
         end
         ImGui.PopItemWidth(ctx)
 
+        ImGui.SameLine(ctx, 0, 10)
+        ImGui.AlignTextToFramePadding(ctx)
+        ImGui.Text(ctx, 'preferring')
         -- coalesce mode
-        ImGui.SameLine(ctx, 0, 15)
-        ImGui.PushItemWidth(ctx, 80)
+        ImGui.SameLine(ctx)
+        ImGui.PushItemWidth(ctx, 66)
         local coalesceModeItems = 'first\0loudest\0'
         rv, newIdx = ImGui.Combo(ctx, '##midiCoalesce', midiCoalesceMode, coalesceModeItems)
         if rv then

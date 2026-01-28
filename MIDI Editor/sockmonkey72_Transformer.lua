@@ -1,11 +1,12 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.1
+-- @version 1.1.0-beta.2
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add a new Quantize interface (drop-in replacement for REAPER's Quantize dialog)
---   - some minor infrastructural changes to support quantization operations
+--   - fix janky preset name display
+--   - adjust some UI sizes
+--   - complete SMFParser implementation
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*

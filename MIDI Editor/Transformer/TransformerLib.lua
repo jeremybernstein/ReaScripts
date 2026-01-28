@@ -128,6 +128,15 @@ Shared.gridInfo = function()
   return gridInfo
 end
 
+-- range filter grid override (set by Quantize dialog preset)
+local rangeFilterGridOverride = nil
+Shared.setRangeFilterGrid = function(grid)
+  rangeFilterGridOverride = grid
+end
+Shared.getRangeFilterGrid = function()
+  return rangeFilterGridOverride
+end
+
 local function getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
   local gridUnit
   local mgMods = mgdefs.getMetricGridModifiers(mgParams)
@@ -1057,6 +1066,7 @@ context.SelectChordNote = ffuns.selectChordNote
 context.OnMetricGrid = ffuns.onMetricGrid
 context.OnGrid = ffuns.onGrid
 context.InBarRange = ffuns.inBarRange
+context.InGridRange = ffuns.inGridRange
 context.InRazorArea = ffuns.inRazorArea
 context.IsNearEvent = ffuns.isNearEvent
 context.InScale = ffuns.inScale
@@ -2539,7 +2549,9 @@ local function processActionForTake(take)
       local mgParams = tg.tableCopy(row.mg)
       mgParams.param1 = paramNums[1]
       mgParams.param2 = paramTerms[2]
-      actionTerm = string.gsub(actionTerm, '{musicalparams}', tg.serialize(mgParams))
+      local serialized = tg.serialize(mgParams)
+      -- use function replacement to avoid % escape issues in serialized data
+      actionTerm = string.gsub(actionTerm, '{musicalparams}', function() return serialized end)
     end
 
     local isNewMIDIEvent = paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT and true or false
@@ -2578,7 +2590,7 @@ local function itemInTable(it, t)
   return false
 end
 
-local function processAction(execute, fromScript)
+local function processAction(execute, fromScript, skipUndo)
   mediaItemCount = nil
   mediaItemIndex = nil
 
@@ -2665,7 +2677,9 @@ local function processAction(execute, fromScript)
     return
   end
 
-  r.Undo_BeginBlock2(0)
+  if not skipUndo then
+    r.Undo_BeginBlock2(0)
+  end
   r.PreventUIRefresh(1)
 
   for _, v in ipairs(takes) do
@@ -2824,7 +2838,9 @@ local function processAction(execute, fromScript)
   end
 
   r.PreventUIRefresh(-1)
-  r.Undo_EndBlock2(0, 'Transformer: ' .. adefs.actionScopeTable[currentActionScope].label, -1)
+  if not skipUndo then
+    r.Undo_EndBlock2(0, 'Transformer: ' .. adefs.actionScopeTable[currentActionScope].label, -1)
+  end
 end
 
 local function setPresetNotesBuffer(buf)
@@ -2928,6 +2944,9 @@ local function createUndoStep(state)
 end
 
 local function loadPresetFromTable(presetTab)
+  -- set range filter grid override if present (from Quantize dialog)
+  Shared.setRangeFilterGrid(presetTab.rangeFilterGrid)
+
   currentFindScopeFlags = fdefs.FIND_SCOPE_FLAG_NONE -- do this first (FindScopeFromNotation() may populate it)
   currentFindScope = fdefs.findScopeFromNotation(presetTab.findScope)
   local fsFlags = presetTab.findScopeFlags -- not pretty

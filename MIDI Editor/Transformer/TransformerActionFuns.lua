@@ -35,8 +35,282 @@ local function setMusicalLength(event, take, PPQ, mgParams)
   return newprojlen
 end
 
+-- calculate distance% from oldppqpos to nearest grid point (with swing)
+-- must be called BEFORE quantization/strength application
+local function calculateDistancePercent(oldppqpos, som, gridUnit, ppqinmeasure, mgParams, useGridSwing)
+  -- find nearest grid point (always round-to-nearest for distance calc)
+  local nearestGrid = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
+
+  -- apply swing to nearestGrid (same logic as quantize functions)
+  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
+  if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
+    local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
+    local half = gridUnit * 0.5
+    local localpos = ppqinmeasure % (gridUnit * 2)
+    if localpos >= gridUnit - half and localpos < gridUnit + half then
+      nearestGrid = nearestGrid + (gridUnit * 0.5 * scale)
+    end
+  elseif mgMods == gdefs.MG_GRID_SWING then
+    local localpos = ppqinmeasure % (gridUnit * 2)
+    if localpos >= gridUnit then
+      local scale = ((mgParams.swing - 50) * 2) * 0.01
+      nearestGrid = nearestGrid + (gridUnit * scale)
+    end
+  end
+
+  local distance = math.abs(oldppqpos - nearestGrid)
+  local distancePercent = (distance / gridUnit) * 100
+  return math.min(100, distancePercent)  -- cap at 100%
+end
+
+-- apply distance scaling (inverted range):
+-- note at distance D enters range when rangeMin = (rangeMax - D)
+-- at entry point: 0% strength, interpolating to 100% as rangeMin approaches 0
+local function applyDistanceScaling(strength, distancePercent, rangeMin, rangeMax)
+  local threshold = rangeMax - distancePercent
+  if threshold <= 0 then
+    return strength  -- at or beyond rangeMax: full strength
+  end
+  if rangeMin >= threshold then
+    return 0  -- outside range: no movement
+  end
+  -- inside range: interpolate from 0 (at threshold) to 100% (at rangeMin=0)
+  return strength * (threshold - rangeMin) / threshold
+end
+
+-- find nearest groove point and return info about it
+-- returns: nearestBeat, nearestAmplitude, distance, requiresEarly, requiresLate
+local function findNearestGroovePoint(posInBeats, grooveData)
+  if not grooveData or not grooveData.positions or #grooveData.positions == 0 then
+    return posInBeats, 1.0, 0, false, false
+  end
+
+  local nBeats = grooveData.nBeats
+  -- wrap position to groove cycle
+  local cyclePos = posInBeats % nBeats
+  -- how many complete cycles before this position
+  local cycleNum = math.floor(posInBeats / nBeats)
+  local cycleStart = cycleNum * nBeats
+
+  local nearestBeat = posInBeats
+  local nearestAmp = 1.0
+  local minDist = math.huge
+
+  -- check positions in current cycle and adjacent cycles for boundary cases
+  for _, cycleOffset in ipairs({-1, 0, 1}) do
+    local baseBeat = (cycleNum + cycleOffset) * nBeats
+    for _, gp in ipairs(grooveData.positions) do
+      -- gp.beat is already within 0..nBeats range
+      local gpBeat = baseBeat + gp.beat
+      local dist = math.abs(posInBeats - gpBeat)
+      if dist < minDist then
+        minDist = dist
+        nearestBeat = gpBeat
+        nearestAmp = gp.amplitude or 1.0
+      end
+    end
+  end
+
+  local requiresEarly = nearestBeat < posInBeats
+  local requiresLate = nearestBeat > posInBeats
+
+  return nearestBeat, nearestAmp, minDist, requiresEarly, requiresLate
+end
+
+local DEBUG_GROOVE = false  -- set to true to trace groove quantization
+
+-- groove quantization for position
+local function quantizeGroovePosition(event, take, PPQ, mgParams)
+  if not take then return event.projtime end
+
+  local groove = mgParams.groove
+  if not groove or not groove.data then return event.projtime end
+
+  local strength = tonumber(mgParams.param2) or 100
+
+  local timeAdjust = Shared.getTimeOffset()
+  local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+
+  -- get reference point: start of measure 1 (project bar 1)
+  -- this ensures groove cycles align with musical bars
+  local refppq = r.MIDI_GetPPQPos_StartOfMeasure(take, 0)
+
+  -- convert to beats (QN) from reference point
+  local posInBeatsAbs = (oldppqpos - refppq) / PPQ
+
+  -- find nearest groove point (handles cycling internally)
+  local nearestBeat, nearestAmp, distance, requiresEarly, requiresLate = findNearestGroovePoint(posInBeatsAbs, groove.data)
+
+  -- calculate new position (absolute from reference)
+  local newppqpos = refppq + (nearestBeat * PPQ)
+  local ppqDrift = newppqpos - oldppqpos
+
+  if DEBUG_GROOVE then
+    local pitch = event.msg2 or 0
+    local chan = event.chan or 0
+    r.ShowConsoleMsg(string.format('note ch%d p%d: oldPPQ=%.2f posBeats=%.8f -> grooveBeat=%.8f dist=%.8f ppqDrift=%.2f\n',
+      chan, pitch, oldppqpos, posInBeatsAbs, nearestBeat, distance, ppqDrift))
+  end
+
+  -- direction filtering: skip if nearest requires wrong direction
+  local direction = groove.direction or 0  -- 0=both, 1=early only, 2=late only
+  if direction == 1 and requiresLate then
+    if DEBUG_GROOVE then r.ShowConsoleMsg('  SKIPPED: direction=early only, but nearest is later\n') end
+    return event.projtime
+  end
+  if direction == 2 and requiresEarly then
+    if DEBUG_GROOVE then r.ShowConsoleMsg('  SKIPPED: direction=late only, but nearest is earlier\n') end
+    return event.projtime
+  end
+
+  -- tolerance filtering: skip if distance% outside range
+  local gridUnit = groove.data.nBeats / #groove.data.positions  -- approximate grid unit
+  local distancePercent = (distance / gridUnit) * 100
+  distancePercent = math.max(0, math.min(100, distancePercent))  -- clamp to 0-100
+
+  if DEBUG_GROOVE then
+    r.ShowConsoleMsg(string.format('  distPct=%.2f%%, tolMin=%.1f, tolMax=%.1f\n', distancePercent, groove.toleranceMin, groove.toleranceMax))
+  end
+
+  if distancePercent < groove.toleranceMin or distancePercent > groove.toleranceMax then
+    if DEBUG_GROOVE then r.ShowConsoleMsg('  SKIPPED: outside tolerance\n') end
+    return event.projtime  -- outside tolerance range, skip
+  end
+
+  -- skip sub-tick movements (floating point noise)
+  if math.abs(ppqDrift) < 0.5 then
+    if DEBUG_GROOVE then r.ShowConsoleMsg('  SKIPPED: sub-tick drift\n') end
+    return event.projtime
+  end
+
+  -- apply strength
+  if strength and strength ~= 100 then
+    local dist = newppqpos - oldppqpos
+    newppqpos = oldppqpos + (dist * strength / 100)
+  end
+
+  -- apply velocity if velStrength > 0 and groove has amplitude
+  if groove.velStrength and groove.velStrength > 0 and Shared.getEventType(event) == gdefs.NOTE_TYPE then
+    local velBlend = groove.velStrength / 100
+    -- amplitude is typically 0-1 in groove files, scale to 0-127
+    local grooveVel = math.floor(nearestAmp * 127 + 0.5)
+    local newVel = math.floor(event.msg3 + (grooveVel - event.msg3) * velBlend + 0.5)
+    newVel = math.max(1, math.min(127, newVel))
+    event.msg3 = newVel
+  end
+
+  local newprojpos = r.MIDI_GetProjTimeFromPPQPos(take, newppqpos) + timeAdjust
+  event.projtime = newprojpos
+  return newprojpos
+end
+
+-- groove quantization for note end position
+local function quantizeGrooveEndPos(event, take, PPQ, mgParams)
+  if not take then return event.projlen end
+
+  local groove = mgParams.groove
+  if not groove or not groove.data then return event.projlen end
+
+  local strength = tonumber(mgParams.param2) or 100
+
+  local timeAdjust = Shared.getTimeOffset()
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+  local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
+  local ppqlen = endppqpos - ppqpos
+
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, endppqpos)
+  local endInMeasureQN = (endppqpos - som) / PPQ
+
+  -- find nearest groove point for end position
+  local nearestBeat, nearestAmp, distance, requiresEarly, requiresLate = findNearestGroovePoint(endInMeasureQN, groove.data)
+
+  -- direction filtering for length: shrink=early, grow=late
+  local direction = groove.direction or 0
+  if direction == 1 and requiresLate then return event.projlen end  -- early only
+  if direction == 2 and requiresEarly then return event.projlen end  -- late only
+
+  -- tolerance filtering
+  local gridUnit = groove.data.nBeats / #groove.data.positions
+  local distancePercent = (distance / gridUnit) * 100
+  distancePercent = math.min(100, distancePercent)
+  if distancePercent < groove.toleranceMin or distancePercent > groove.toleranceMax then
+    return event.projlen
+  end
+
+  -- calculate new end position
+  local newendppqpos = som + (nearestBeat * PPQ)
+  local newppqlen = newendppqpos - ppqpos
+
+  -- ensure minimum length
+  if newppqlen < ppqlen * 0.5 then
+    local gridUnit = groove.data.nBeats / #groove.data.positions
+    newendppqpos = newendppqpos + (gridUnit * PPQ)
+    newppqlen = newendppqpos - ppqpos
+  end
+
+  -- apply strength
+  if strength and strength ~= 100 then
+    local dist = newppqlen - ppqlen
+    newppqlen = ppqlen + (dist * strength / 100)
+  end
+
+  local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
+  event.projlen = newprojlen
+  return newprojlen
+end
+
+-- groove quantization for note length (snaps duration to groove interval)
+local function quantizeGrooveLength(event, take, PPQ, mgParams)
+  if not take then return event.projlen end
+
+  local groove = mgParams.groove
+  if not groove or not groove.data then return event.projlen end
+
+  local strength = tonumber(mgParams.param2) or 100
+
+  local timeAdjust = Shared.getTimeOffset()
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+  local endppqpos = r.MIDI_GetPPQPosFromProjTime(take, (event.projtime + event.projlen) - timeAdjust)
+  local ppqlen = endppqpos - ppqpos
+
+  -- calculate average grid unit from groove data
+  local gridUnit = (groove.data.nBeats / #groove.data.positions) * PPQ
+
+  -- quantize length to grid unit
+  local roundval = 0.5
+  local newppqlen = gridUnit * math.floor((ppqlen / gridUnit) + roundval)
+  if newppqlen == 0 then newppqlen = gridUnit end
+
+  -- direction constraints
+  local direction = groove.direction or 0
+  if direction == 1 and newppqlen > ppqlen then return event.projlen end  -- early only = shrink only
+  if direction == 2 and newppqlen < ppqlen then return event.projlen end  -- late only = grow only
+
+  -- tolerance filtering
+  local distancePercent = (math.abs(ppqlen - newppqlen) / gridUnit) * 100
+  distancePercent = math.min(100, distancePercent)
+  if distancePercent < groove.toleranceMin or distancePercent > groove.toleranceMax then
+    return event.projlen
+  end
+
+  -- apply strength
+  if strength and strength ~= 100 then
+    local dist = newppqlen - ppqlen
+    newppqlen = ppqlen + (dist * strength / 100)
+  end
+
+  local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
+  event.projlen = newprojlen
+  return newprojlen
+end
+
 local function quantizeMusicalPosition(event, take, PPQ, mgParams)
   if not take then return event.projtime end
+
+  -- check for groove mode
+  if mgParams.isGroove then
+    return quantizeGroovePosition(event, take, PPQ, mgParams)
+  end
 
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
@@ -71,10 +345,31 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
     end
   end
 
-  if strength and strength ~= 100 then
-    local distance = newppqpos - oldppqpos
-    local scaledDistance = distance * (strength / 100)
-    newppqpos = oldppqpos + scaledDistance
+  -- direction constraints
+  local dirFlags = mgParams.directionFlags or 0xF
+  if newppqpos < oldppqpos then
+    if (dirFlags & gdefs.DIR_LEFT) == 0 then newppqpos = oldppqpos end
+  elseif newppqpos > oldppqpos then
+    if (dirFlags & gdefs.DIR_RIGHT) == 0 then newppqpos = oldppqpos end
+  end
+
+  local hasDistanceScaling = mgParams.distanceRangeMin and mgParams.distanceRangeMax
+  if strength and (strength ~= 100 or hasDistanceScaling) then
+    local effectiveStrength = strength
+    -- calculate distance% from original position to nearest grid BEFORE strength application
+    if hasDistanceScaling then
+      local distancePercent = calculateDistancePercent(oldppqpos, som, gridUnit, ppqinmeasure, mgParams, useGridSwing)
+      effectiveStrength = applyDistanceScaling(strength, distancePercent, mgParams.distanceRangeMin, mgParams.distanceRangeMax)
+    end
+
+    if effectiveStrength ~= 0 and effectiveStrength ~= 100 then
+      local distance = newppqpos - oldppqpos
+      local scaledDistance = distance * (effectiveStrength / 100)
+      newppqpos = oldppqpos + scaledDistance
+    elseif effectiveStrength == 0 then
+      newppqpos = oldppqpos  -- 0% effective strength = no movement
+    end
+    -- effectiveStrength == 100 falls through: use newppqpos as-is (full quantize)
   end
   local newprojpos = r.MIDI_GetProjTimeFromPPQPos(take, newppqpos) + timeAdjust
 
@@ -84,6 +379,11 @@ end
 
 local function quantizeMusicalLength(event, take, PPQ, mgParams)
   if not take then return event.projlen end
+
+  -- check for groove mode
+  if mgParams.isGroove then
+    return quantizeGrooveLength(event, take, PPQ, mgParams)
+  end
 
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
@@ -101,10 +401,32 @@ local function quantizeMusicalLength(event, take, PPQ, mgParams)
   local newppqlen = (gridUnit * math.floor((ppqlen / gridUnit) + roundval))
   if newppqlen == 0 then newppqlen = gridUnit end
 
-  if strength and strength ~= 100 then
-    local distance = newppqlen - ppqlen
-    local scaledDistance = distance * (strength / 100)
-    newppqlen = ppqlen + scaledDistance
+  -- direction constraints
+  local dirFlags = mgParams.directionFlags or 0xF
+  if newppqlen < ppqlen then
+    if (dirFlags & gdefs.DIR_SHRINK) == 0 then newppqlen = ppqlen end
+  elseif newppqlen > ppqlen then
+    if (dirFlags & gdefs.DIR_GROW) == 0 then newppqlen = ppqlen end
+  end
+
+  local hasDistanceScaling = mgParams.distanceRangeMin and mgParams.distanceRangeMax
+  if strength and (strength ~= 100 or hasDistanceScaling) then
+    local effectiveStrength = strength
+    -- calculate distance% based on how far length is from grid alignment
+    if hasDistanceScaling then
+      local distancePercent = (math.abs(ppqlen - newppqlen) / gridUnit) * 100
+      distancePercent = math.min(100, distancePercent)
+      effectiveStrength = applyDistanceScaling(strength, distancePercent, mgParams.distanceRangeMin, mgParams.distanceRangeMax)
+    end
+
+    if effectiveStrength ~= 0 and effectiveStrength ~= 100 then
+      local distance = newppqlen - ppqlen
+      local scaledDistance = distance * (effectiveStrength / 100)
+      newppqlen = ppqlen + scaledDistance
+    elseif effectiveStrength == 0 then
+      newppqlen = ppqlen
+    end
+    -- effectiveStrength == 100 falls through: use newppqlen as-is (full quantize)
   end
   local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
 
@@ -114,6 +436,11 @@ end
 
 local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
   if not take then return event.projlen end
+
+  -- check for groove mode
+  if mgParams.isGroove then
+    return quantizeGrooveEndPos(event, take, PPQ, mgParams)
+  end
 
   local subdiv = mgParams.param1
   local strength = tonumber(mgParams.param2)
@@ -160,10 +487,31 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
     end
   end
 
-  if strength and strength ~= 100 then
-    local distance = newppqlen - ppqlen
-    local scaledDistance = distance * (strength / 100)
-    newppqlen = ppqlen + scaledDistance
+  -- direction constraints (shrink = end earlier, grow = end later)
+  local dirFlags = mgParams.directionFlags or 0xF
+  if newppqlen < ppqlen then
+    if (dirFlags & gdefs.DIR_SHRINK) == 0 then newppqlen = ppqlen end
+  elseif newppqlen > ppqlen then
+    if (dirFlags & gdefs.DIR_GROW) == 0 then newppqlen = ppqlen end
+  end
+
+  local hasDistanceScaling = mgParams.distanceRangeMin and mgParams.distanceRangeMax
+  if strength and (strength ~= 100 or hasDistanceScaling) then
+    local effectiveStrength = strength
+    -- calculate distance% from original end position to nearest grid BEFORE strength application
+    if hasDistanceScaling then
+      local distancePercent = calculateDistancePercent(endppqpos, som, gridUnit, ppqinmeasure, mgParams, useGridSwing)
+      effectiveStrength = applyDistanceScaling(strength, distancePercent, mgParams.distanceRangeMin, mgParams.distanceRangeMax)
+    end
+
+    if effectiveStrength ~= 0 and effectiveStrength ~= 100 then
+      local distance = newppqlen - ppqlen
+      local scaledDistance = distance * (effectiveStrength / 100)
+      newppqlen = ppqlen + scaledDistance
+    elseif effectiveStrength == 0 then
+      newppqlen = ppqlen
+    end
+    -- effectiveStrength == 100 falls through: use newppqlen as-is (full quantize)
   end
   local newprojlen = (r.MIDI_GetProjTimeFromPPQPos(take, ppqpos + newppqlen) + timeAdjust) - event.projtime
 
@@ -446,6 +794,9 @@ ActionFuns.setMusicalLength = setMusicalLength
 ActionFuns.quantizeMusicalPosition = quantizeMusicalPosition
 ActionFuns.quantizeMusicalLength = quantizeMusicalLength
 ActionFuns.quantizeMusicalEndPos = quantizeMusicalEndPos
+ActionFuns.quantizeGroovePosition = quantizeGroovePosition
+ActionFuns.quantizeGrooveLength = quantizeGrooveLength
+ActionFuns.quantizeGrooveEndPos = quantizeGrooveEndPos
 ActionFuns.setValue = setValue
 ActionFuns.operateEvent1 = operateEvent1
 ActionFuns.operateEvent2 = operateEvent2

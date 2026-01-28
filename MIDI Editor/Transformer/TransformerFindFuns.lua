@@ -415,6 +415,54 @@ local function inBarRange(take, PPQ, event, rangeStart, rangeEnd)
   return barpos >= (rangeStart / 100) and barpos < (rangeEnd / 100)
 end
 
+local function inGridRange(take, PPQ, event, rangeMin, rangeMax)
+  if not take then return false end
+
+  -- check for grid override from Quantize dialog
+  local gridUnit, swing
+  local override = Shared.getRangeFilterGrid()
+  if override then
+    -- use grid from Quantize dialog
+    if override.subdiv >= 0 then
+      gridUnit = PPQ * (override.subdiv * 4)
+    else
+      -- subdiv < 0 means "use MIDI editor grid"
+      gridUnit = Shared.gridInfo().currentGrid * PPQ
+    end
+    swing = override.swing
+  else
+    -- fallback to MIDI editor grid
+    gridUnit = Shared.gridInfo().currentGrid * PPQ
+    swing = Shared.gridInfo().currentSwing
+  end
+
+  if gridUnit == 0 then return rangeMin <= 0 end
+
+  local timeAdjust = Shared.getTimeOffset()
+  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
+  local ppqinmeasure = ppqpos - som
+
+  -- find nearest grid point
+  local nearestGrid = gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5)
+
+  -- apply swing adjustment if enabled
+  if swing and swing ~= 0 then
+    local subMeas = math.floor((gridUnit * 2) + 0.5)
+    local localpos = ppqinmeasure % subMeas
+    -- if on an odd grid point, adjust for swing
+    if localpos >= gridUnit - (gridUnit * 0.5) and localpos < gridUnit + (gridUnit * 0.5) then
+      nearestGrid = nearestGrid + (swing * gridUnit * 0.5)
+    end
+  end
+
+  -- calculate distance as percentage of grid unit
+  local distance = math.abs(ppqinmeasure - nearestGrid)
+  local distancePercent = (distance / gridUnit) * 100
+
+  return distancePercent >= rangeMin and distancePercent <= rangeMax
+end
+
 local function inTakeRange(take, event, rangeStart, rangeEnd)
   if not take then return false end
 
@@ -525,6 +573,7 @@ FindFuns.onMetronome = onMetronome
 FindFuns.inScale = inScale
 FindFuns.onGrid = onGrid
 FindFuns.inBarRange = inBarRange
+FindFuns.inGridRange = inGridRange
 FindFuns.inRazorArea = inRazorArea
 FindFuns.ccHasCurve = ccHasCurve
 FindFuns.inTakeRange = inTakeRange

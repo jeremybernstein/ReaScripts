@@ -96,4 +96,9 @@ GeneralDefs.MG_GRID_TRIPLET = 2
 GeneralDefs.MG_GRID_SWING = 3
 GeneralDefs.MG_GRID_SWING_REAPER = 0x8
 
+GeneralDefs.DIR_LEFT = 0x1
+GeneralDefs.DIR_RIGHT = 0x2
+GeneralDefs.DIR_SHRINK = 0x4
+GeneralDefs.DIR_GROW = 0x8
+
 return GeneralDefs

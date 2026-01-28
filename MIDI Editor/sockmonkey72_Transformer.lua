@@ -1,20 +1,19 @@
 -- @description MIDI Transformer
--- @version 1.0.16
+-- @version 1.1.0-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - add Scale Around operation (for values, not positions) -- performs a scaling of the
---     distance from a provided value. Essentially, it will compress/expand from a center point.
---     For example, ScaleAround(2, 0) would be equivalent to Multiply(2), while ScaleAround(0.5, 60)
---     would halve the distance of events measured from value 60 -- so 64 -> 62 [60 + (4 * 0.5))
---     and 40 -> 50 (60 + (-20 * 0.5)).
+--   - add a new Quantize interface (drop-in replacement for REAPER's Quantize dialog)
+--   - some minor infrastructural changes to support quantization operations
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
+--   {Transformer}/{lib}/{SMFParser}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   Transformer Presets/Factory Presets/**/*.tfmrPreset > ../$path
 --   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_Transformer.lua
+--   [main=main,midi_editor,midi_eventlisteditor,midi_inlineeditor] sockmonkey72_TransformerQuantize.lua
 
 -----------------------------------------------------------------------------
 
@@ -23,7 +22,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.0.16'
+local versionStr = '1.1.0-beta.1'
 
 local r = reaper
 
@@ -114,6 +113,7 @@ presetPath = presetPath:gsub('(.*[/\\]).*[/\\]', '%1Transformer Presets')
 local scriptPrefix = 'Xform_'
 local scriptPrefix_Empty = '<no prefix>'
 local presetExt = '.tfmrPreset'
+local quantPresetExt = '.quantPreset'
 local presetSubPath
 local restoreLastState = false
 local focusWhenDone = false
@@ -1368,6 +1368,9 @@ local function windowFn()
       while fname do
         if fname:match('%' .. presetExt .. '$') then
           local entry = { label = fname:gsub('%' .. presetExt .. '$', '') }
+          table.insert(fnames, entry)
+        elseif fname:match('%' .. quantPresetExt .. '$') then
+          local entry = { label = fname:gsub('%' .. quantPresetExt .. '$', '') }
           table.insert(fnames, entry)
         end
         idx = idx + 1

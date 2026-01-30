@@ -8,6 +8,7 @@
 local r = reaper
 local scriptID = 'sockmonkey72_TransformerQuantize'
 local DEBUG = false  -- set true to output generated scripts to console
+local CACHE_DEBUG = false  -- set true to output cache reconciliation debug (passed to ops.init)
 
 -- require MIDI editor
 local function requireMIDIEditor()
@@ -42,6 +43,13 @@ local tg = require 'TransformerGlobal'
 local mu = require 'MIDIUtils'
 local mgdefs = require 'TransformerMetricGrid'
 local SMFParser = require 'lib.SMFParser.SMFParser' -- only partially impmeneted for this case
+local ops = require 'TransformerQuantizeOps'
+
+-- initialize ops module with dependencies
+ops.init(r, mu, CACHE_DEBUG)
+
+-- early wrapper for markControlChanged (called throughout UI code)
+local function markControlChanged() return ops.markControlChanged() end
 
 -- action context for toggle state / single instance
 local _, _, sectionID, commandID = r.get_action_context()
@@ -61,18 +69,17 @@ local targetIndex = 0  -- 0=Position only, 1=Position + note end, 2=Position + n
 local targetItems = 'Position only\0Position + note end\0Position + note length\0Note end only\0Note length only\0'
 local strength = 100  -- 0-100
 local fixOverlaps = false
-local bypass = false
+local previewActive = false  -- true when preview is showing (replaces inverted 'bypass')
+local previewLatched = false  -- true when opt-clicked to stay on
+local previewButtonDown = false  -- true while mouse is held on preview button
+local previewShiftDown = false  -- true while shift is held for momentary preview
 local statusMessage = ''  -- feedback shown in status line
 local isExecuting = false  -- prevent double-click during execution
 
--- live preview state
-local originalMIDICache = {}  -- table[take] = binary MIDI string
-local lastControlChangeTime = nil
-local previewPending = false
-local applyButtonEnabled = true
-local DEBOUNCE_INTERVAL = 0.033  -- 33ms in seconds
-local lastTakeHash = nil  -- for selection change detection
-local markControlChanged  -- forward declaration (defined later)
+-- live preview state (managed by ops module)
+-- access via ops.getState() for: originalMIDICache, reconciliationBaseline, pristinePostQuantize,
+-- preRestoreSnapshot, lastMIDIContentHash, catastrophicTakes, pauseLiveMode, showConflictDialog,
+-- previewPending, lastControlChangeTime, lastTakeHash, isApplying, lastOriginalHash, lastPreviewApplied
 
 -- grid parameters
 local gridMode = 0  -- 0=Use Grid, 1=Manual, 2=Groove
@@ -136,7 +143,6 @@ local function removePrefix(str, prefix)
 end
 local currentPresetName = ''
 local loadedPresetState = nil  -- snapshot for modified detection
-local presetList = {}  -- enumerated preset names
 local presetListDirty = true  -- refresh flag
 local presetSubPath = nil  -- current folder (nil = root)
 local presetTree = {}  -- recursive folder/preset structure
@@ -233,9 +239,7 @@ local function initializeQuantizeState()
   if r.HasExtState(scriptID, 'fixOverlaps') then
     fixOverlaps = r.GetExtState(scriptID, 'fixOverlaps') == 'true'
   end
-  if r.HasExtState(scriptID, 'bypass') then
-    bypass = r.GetExtState(scriptID, 'bypass') == 'true'
-  end
+  -- preview state not persisted (always starts off)
   if r.HasExtState(scriptID, 'gridMode') then
     local val = tonumber(r.GetExtState(scriptID, 'gridMode'))
     if val then gridMode = val end
@@ -510,7 +514,7 @@ local function buildPresetTable()
   if scopeIndex == 0 or scopeIndex == 1 then
     findMacro = '$type == $note'
   else
-    findMacro = '$type :all'
+    findMacro = '$type :all '
   end
 
   -- add range filter if enabled (skip filter when distance scaling handles interpolation)
@@ -560,23 +564,6 @@ local function buildPresetTable()
     notes = '',
     rangeFilterGrid = rangeFilterGrid,
   }
-end
-
--- enumerate preset files
-local function enumeratePresets()
-  local presets = {}
-  local idx = 0
-  while true do
-    local filename = r.EnumerateFiles(presetPath, idx)
-    if not filename then break end
-    if filename:match('%.quantPreset$') then
-      local name = filename:gsub('%.quantPreset$', '')
-      table.insert(presets, name)
-    end
-    idx = idx + 1
-  end
-  table.sort(presets)
-  return presets
 end
 
 -- count preset files in folder
@@ -758,7 +745,6 @@ local function pickRgtFolder()
   if folder then
     rgtRootPath = folder
     rgtSubPath = nil
-    rgtListDirty = true
     r.SetExtState(scriptID, 'rgtRootPath', folder, true)
     r.SetExtState(scriptID, 'rgtSubPath', '', true)
   end
@@ -877,7 +863,6 @@ local function pickMidiFolder()
   if folder then
     midiRootPath = folder
     midiSubPath = nil
-    midiListDirty = true
     r.SetExtState(scriptID, 'midiRootPath', folder, true)
     r.SetExtState(scriptID, 'midiSubPath', '', true)
   end
@@ -1129,7 +1114,7 @@ local function loadQuantizePreset(name, fromPath)
     if lengthGridDivIndex > 10 then lengthGridDivIndex = 10 end
     swingStrength = ui.swingStrength or swingStrength
     fixOverlaps = ui.fixOverlaps or fixOverlaps
-    -- bypass intentionally not restored from presets
+    -- preview state intentionally not restored from presets
 
     canMoveLeft = ui.canMoveLeft ~= false  -- default true if missing (old presets)
     canMoveRight = ui.canMoveRight ~= false
@@ -1397,9 +1382,14 @@ local restoreMIDIState
 
 -- lifecycle
 local function shutdown()
-  -- restore cached MIDI state if live preview was on
-  if not bypass then
+  -- restore cached MIDI state if preview was on
+  if previewActive then
     restoreMIDIState()
+  end
+  -- focus MIDI editor on exit
+  local me = r.MIDIEditor_GetActive()
+  if me and r.JS_Window_SetFocus then
+    r.JS_Window_SetFocus(me)
   end
 end
 
@@ -1427,86 +1417,168 @@ local function getAffectedTakes()
   return takes
 end
 
+-- convenience accessors for ops state
+local function getOpsState() return ops.getState() end
+
+-- wrapper functions that delegate to ops module
+local function computeMIDIContentHash() return ops.computeMIDIContentHash() end
+local function computeOriginalHash() return ops.computeOriginalHash() end
+local function detectSelectionChange() return ops.detectSelectionChange() end
+local function capturePreRestoreSnapshot() return ops.capturePreRestoreSnapshot() end
+restoreMIDIState = function() return ops.restoreMIDIState() end
+local parseMIDIEvents = ops.parseMIDIEvents
+local encodeMIDIEvents = ops.encodeMIDIEvents
+local matchNotesByIdentity = ops.matchNotesByIdentity
+local deepcopy = ops.deepcopy
+
 -- cache MIDI state for all affected takes
 local function cacheMIDIState()
-  originalMIDICache = {}
-  local takes = getAffectedTakes()
-  for _, take in ipairs(takes) do
-    local rv, midiStr = r.MIDI_GetAllEvts(take, '')
-    if rv then
-      originalMIDICache[take] = midiStr
+  ops.cacheMIDIState(getAffectedTakes)
+end
+
+-- apply quantize to events array (in-memory, does not write to take)
+local function applyQuantizeToEvents(events, take)
+  if not events or #events == 0 then return events end
+
+  -- get PPQ for conversion
+  local ppq = 960  -- default
+  if take and r.ValidatePtr(take, 'MediaItem_Take*') then
+    local ppqAtZero = r.MIDI_GetPPQPosFromProjTime(take, 0)
+    local ppqAtOne = r.MIDI_GetPPQPosFromProjTime(take, 1)
+    ppq = math.abs(ppqAtOne - ppqAtZero)
+  end
+
+  -- get quantize params from UI
+  local notation = buildMusicalParams('position')
+
+  -- skip if groove mode (not implemented yet)
+  if notation:match('^%$groove') then
+    return events
+  end
+
+  -- parse notation: $grid or $qn|mod|preslop|postslop
+  local gridUnit, swing, dirFlags
+
+  if notation:match('^%$grid') then
+    -- use MIDI editor grid
+    local editor = r.MIDIEditor_GetActive()
+    local editorTake = editor and r.MIDIEditor_GetTake(editor)
+    if editorTake then
+      local _, div, swingVal = r.MIDI_GetGrid(editorTake)
+      gridUnit = ppq * 4 * div  -- div is fraction of whole note
+      swing = swingVal or 0
+    else
+      return events  -- no grid available
+    end
+  else
+    -- manual grid: parse notation
+    local qnStr = notation:match('^%$([^|]+)')
+    local modStr = notation:match('|([^|]+)|')
+
+    -- subdivision from qn string
+    local qnToPPQ = {
+      ['1/128'] = ppq / 32,
+      ['1/64'] = ppq / 16,
+      ['1/32'] = ppq / 8,
+      ['1/16'] = ppq / 4,
+      ['1/8'] = ppq / 2,
+      ['1/4'] = ppq,
+      ['1/2'] = ppq * 2,
+      ['1'] = ppq * 4,
+      ['2'] = ppq * 8,
+      ['4'] = ppq * 16,
+    }
+    gridUnit = qnToPPQ[qnStr] or ppq
+
+    -- apply modifier (t=triplet, d=dotted, r=swing, -=straight)
+    local mod = modStr and modStr:sub(1, 1) or '-'
+    if mod == 't' then
+      gridUnit = gridUnit * 2 / 3
+    elseif mod == 'd' then
+      gridUnit = gridUnit * 1.5
+    end
+
+    -- extract swing if present
+    swing = 0
+    local swingMatch = notation:match('|sw%(([%d%.]+)%)')
+    if swingMatch then
+      swing = tonumber(swingMatch) / 100
+    end
+
+    -- extract direction flags if present
+    local dirMatch = notation:match('|df%((%d+)%)')
+    dirFlags = dirMatch and tonumber(dirMatch) or 0xF
+  end
+
+  -- get strength
+  local strengthVal = strength / 100
+
+  -- helper to quantize a single ppq position
+  local function quantizePPQ(oldPPQ)
+    -- find measure start
+    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, oldPPQ)
+    local measure = r.TimeMap_timeToQN(projTime) / 4  -- measures
+    local measureStart = math.floor(measure) * 4  -- QN at measure start
+    local measureStartTime = r.TimeMap_QNToTime(measureStart)
+    local measureStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, measureStartTime)
+
+    -- quantize relative to measure
+    local ppqInMeasure = oldPPQ - measureStartPPQ
+    local newPPQInMeasure = gridUnit * math.floor((ppqInMeasure / gridUnit) + 0.5)
+
+    -- apply swing (offset every other grid position)
+    if swing > 0 then
+      local gridIndex = math.floor(ppqInMeasure / gridUnit)
+      if gridIndex % 2 == 1 then
+        newPPQInMeasure = newPPQInMeasure + (gridUnit * swing)
+      end
+    end
+
+    local newPPQ = measureStartPPQ + newPPQInMeasure
+
+    -- apply strength
+    return oldPPQ + ((newPPQ - oldPPQ) * strengthVal)
+  end
+
+  -- quantize note and CC events
+  for i, event in ipairs(events) do
+    if (event.type == 'note' or event.type == 'cc') and event.ppqTime then
+      events[i].ppqTime = quantizePPQ(event.ppqTime)
     end
   end
-end
 
--- restore MIDI state from cache
-restoreMIDIState = function()
-  for take, midiStr in pairs(originalMIDICache) do
-    if r.ValidatePtr(take, 'MediaItem_Take*') then
-      r.MIDI_SetAllEvts(take, midiStr)
-      r.MIDI_Sort(take)
-      -- force item update
-      local item = r.GetMediaItemTake_Item(take)
-      if item then r.UpdateItemInProject(item) end
-    end
+  -- recalculate offsets from ppqTime
+  for i = 1, #events do
+    local prevPPQ = (i == 1) and 0 or events[i-1].ppqTime
+    events[i].offset = math.floor(events[i].ppqTime - prevPPQ + 0.5)
   end
-  r.UpdateArrange()
-end
 
--- compute hash of current take selection
-local function computeTakeHash()
-  local me = r.MIDIEditor_GetActive()
-  if not me then return '' end
-  local hash = ''
-  local idx = 0
-  while true do
-    local take = r.MIDIEditor_EnumTakes(me, idx, true)
-    if not take then break end
-    hash = hash .. tostring(take)
-    idx = idx + 1
-  end
-  return hash
+  return events
 end
-
--- detect if selection changed
-local function detectSelectionChange()
-  local currentHash = computeTakeHash()
-  if currentHash ~= lastTakeHash then
-    lastTakeHash = currentHash
-    return true
-  end
-  return false
-end
-
--- compute hash of original (cached) MIDI state
-local function computeOriginalHash()
-  local hash = ''
-  for take, midiStr in pairs(originalMIDICache) do
-    if r.ValidatePtr(take, 'MediaItem_Take*') then
-      -- use string length + checksum as quick hash of cached data
-      hash = hash .. tostring(#midiStr) .. '_'
-    end
-  end
-  return hash
-end
-
-local lastOriginalHash = nil  -- hash of cached original state
-local lastPreviewApplied = false  -- flag to prevent redundant applies
 
 -- apply preview (restore then re-apply without undo)
 local function applyLivePreview()
-  if bypass then return end
+  if not previewActive then
+    if CACHE_DEBUG then r.ShowConsoleMsg('APPLY: skipped (previewActive=false)\n') end
+    return
+  end
+
+  local state = getOpsState()
 
   -- compute hash of original state to detect if cache changed
   local origHash = computeOriginalHash()
 
   -- skip if we already applied preview with same original data and no param change
-  if lastPreviewApplied and origHash == lastOriginalHash and not previewPending then
+  if state.lastPreviewApplied and origHash == state.lastOriginalHash and not state.previewPending then
+    if CACHE_DEBUG then r.ShowConsoleMsg('APPLY: skipped (already applied, same hash)\n') end
     return
   end
 
+  if CACHE_DEBUG then r.ShowConsoleMsg('=== APPLY LIVE PREVIEW ===\n') end
+  capturePreRestoreSnapshot()  -- capture current state before restore to preserve user edits
   restoreMIDIState()
 
+  if CACHE_DEBUG then r.ShowConsoleMsg('  running quantize...\n') end
   r.PreventUIRefresh(1)
   local preset = buildPresetTable()
   local loadOk = pcall(tx.loadPresetFromTable, preset)
@@ -1523,44 +1595,55 @@ local function applyLivePreview()
   r.PreventUIRefresh(-1)
   r.UpdateArrange()
 
-  lastOriginalHash = origHash
-  lastPreviewApplied = true
+  state.lastOriginalHash = origHash
+  state.lastPreviewApplied = true
+  -- update baseline after apply (captures post-quantize state)
+  if CACHE_DEBUG then r.ShowConsoleMsg('  updating baseline...\n') end
+  ops.updateBaselineAfterApply()
+  if CACHE_DEBUG then r.ShowConsoleMsg('=== APPLY DONE ===\n') end
 end
 
--- mark control as changed (triggers debounce)
-markControlChanged = function()
-  lastControlChangeTime = r.time_precise()
-  previewPending = true
-  applyButtonEnabled = true
-  lastPreviewApplied = false  -- force re-apply with new params
+-- wrapper for onExternalMIDIChange that passes applyQuantizeToEvents callback
+local function onExternalMIDIChange()
+  return ops.onExternalMIDIChange(applyQuantizeToEvents)
 end
 
 local firstFrame = true
+local DEBOUNCE_INTERVAL = 0.033  -- 33ms in seconds
 
 local function loop()
+  local state = getOpsState()
+
   -- check MIDI editor still open
   if not r.MIDIEditor_GetActive() then
     wantsQuit = true
   end
 
   -- live preview: check for selection change (skip first frame - handled below)
-  if not firstFrame and not bypass and detectSelectionChange() then
+  if not firstFrame and previewActive and detectSelectionChange() then
     restoreMIDIState()  -- restore old takes before caching new ones
     cacheMIDIState()
     applyLivePreview()
   end
 
-  -- note: removed MIDI hash external change detection - it was triggering on note
-  -- selection changes (MIDI_GetHash includes selection state), causing the preview
-  -- to reset when user tried to examine quantized note positions.
-  -- take change detection above (detectSelectionChange) handles item switches.
+  -- change detection: poll MIDI hash for external edits
+  if not firstFrame and previewActive and not state.isApplying and not state.pauseLiveMode then
+    local currentHash = computeMIDIContentHash()
+    if state.lastMIDIContentHash and currentHash ~= state.lastMIDIContentHash then
+      -- external change detected
+      if DEBUG then r.ShowConsoleMsg('MIDI change detected\n') end
+      local result = onExternalMIDIChange()
+      -- 'skip' means transient REAPER state, will retry next frame
+    end
+    state.lastMIDIContentHash = currentHash
+  end
 
   -- live preview: check debounce expiry (skip first frame)
-  if not firstFrame and previewPending and lastControlChangeTime then
-    local elapsed = r.time_precise() - lastControlChangeTime
+  if not firstFrame and state.previewPending and state.lastControlChangeTime then
+    local elapsed = r.time_precise() - state.lastControlChangeTime
     if elapsed >= DEBOUNCE_INTERVAL then
       applyLivePreview()
-      previewPending = false
+      state.previewPending = false
     end
   end
 
@@ -1611,12 +1694,8 @@ local function loop()
   if firstFrame then
     ImGui.SetNextWindowPos(ctx, windowPos.left, windowPos.top, ImGui.Cond_FirstUseEver)
     firstFrame = false
-    -- initialize live preview on first frame
-    if not bypass then
-      lastTakeHash = computeTakeHash()
-      cacheMIDIState()
-      applyLivePreview()
-    end
+    -- preview starts off by default, no initialization needed
+    state.lastTakeHash = ops.computeTakeHash()
   end
 
   -- fixed window size to prevent layout jumps
@@ -1624,7 +1703,7 @@ local function loop()
   ImGui.SetNextWindowBgAlpha(ctx, 1)
 
   -- visual indicator for live preview mode
-  local liveMode = not bypass
+  local liveMode = previewActive
   local displayTitle = liveMode and 'Quantize (Transformer) \u{25CF} LIVE' or 'Quantize (Transformer)'
   local windowTitle = displayTitle .. '###QuantizeWindow'
   if liveMode then
@@ -1645,7 +1724,6 @@ local function loop()
 
     -- refresh preset list if dirty
     if presetListDirty then
-      presetList = enumeratePresets()
       presetTree = enumerateQuantizePresets(presetPath)
       presetListDirty = false
     end
@@ -1735,7 +1813,7 @@ local function loop()
     ImGui.Separator(ctx)
     ImGui.Dummy(ctx, 0, 2)
 
-    -- settings row: grid mode + bypass right-aligned
+    -- settings row: grid mode + preview button right-aligned
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Settings:')
     ImGui.SameLine(ctx, labelWidthHeader)
@@ -1748,27 +1826,103 @@ local function loop()
       r.SetExtState(scriptID, 'gridMode', tostring(gridMode), true)
       markControlChanged()
     end
-    -- bypass: label then checkbox, right-aligned
-    local bypassTextW = ImGui.CalcTextSize(ctx, 'Bypass')
-    local checkboxW = ImGui.GetFrameHeight(ctx)
-    local bypassX = 350 - 14 - bypassTextW - 4 - checkboxW
-    ImGui.SameLine(ctx, bypassX)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, 'Bypass')
-    ImGui.SameLine(ctx)
-    local prevBypass = bypass
-    rv, bypass = ImGui.Checkbox(ctx, '##bypass', bypass)
-    if rv then
-      r.SetExtState(scriptID, 'bypass', tostring(bypass), true)
-      if bypass then
-        -- turning live preview OFF: restore cached state
+    -- preview button: right-aligned to match target combo right edge
+    -- click+hold = momentary, opt-click = toggle on, click when latched = toggle off
+    local previewLabel = 'Preview'
+    local previewTextW = ImGui.CalcTextSize(ctx, previewLabel)
+    local buttonPadding = 10  -- approximate button padding
+    local targetRightEdge = ImGui.GetContentRegionMax(ctx)
+    local buttonWidth = previewTextW + buttonPadding
+    local previewX = targetRightEdge - buttonWidth
+    ImGui.SameLine(ctx, previewX)
+
+    -- check for opt/alt modifier
+    local optHeld = ImGui.IsKeyDown(ctx, ImGui.Mod_Alt)
+
+    -- draw button with frame border and active state styling
+    ImGui.PushStyleVar(ctx, ImGui.StyleVar_FrameBorderSize, 1)
+    if previewActive then
+      -- orange to match LIVE title bar
+      ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0x804020FF)
+      ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0x905030FF)
+      ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0x703010FF)
+      ImGui.PushStyleColor(ctx, ImGui.Col_Border, 0xC06030FF)
+    else
+      ImGui.PushStyleColor(ctx, ImGui.Col_Border, 0x606060FF)
+    end
+
+    local clicked = ImGui.Button(ctx, previewLabel)
+    local buttonHovered = ImGui.IsItemHovered(ctx)
+    local mouseDown = ImGui.IsMouseDown(ctx, 0)  -- left mouse button
+
+    if previewActive then
+      ImGui.PopStyleColor(ctx, 4)
+    else
+      ImGui.PopStyleColor(ctx, 1)
+    end
+    ImGui.PopStyleVar(ctx, 1)
+
+    -- handle button interaction
+    if clicked then
+      if previewLatched then
+        -- click when latched: turn off
+        if CACHE_DEBUG then r.ShowConsoleMsg('=== PREVIEW OFF (unlatch) ===\n') end
+        previewLatched = false
+        capturePreRestoreSnapshot()
+        previewActive = false
         restoreMIDIState()
-      else
-        -- turning live preview ON: cache current state, apply preview
+      elseif optHeld then
+        -- opt-click: toggle latch on
+        previewLatched = true
+        if not previewActive then
+          previewActive = true
+          cacheMIDIState()
+          applyLivePreview()
+          if CACHE_DEBUG then r.ShowConsoleMsg('PREVIEW: opt-click, latching on\n') end
+        end
+      end
+      -- regular click without latch: handled by buttonActive below
+    end
+
+    -- momentary behavior: track mouse hold (only when not latched, not opt-clicking, not shift-previewing)
+    local windowFocused = ImGui.IsWindowFocused(ctx, ImGui.FocusedFlags_RootAndChildWindows)
+    local shiftHeld = windowFocused and ImGui.IsKeyDown(ctx, ImGui.Mod_Shift)
+    if not previewLatched and not optHeld and not shiftHeld then
+      if buttonHovered and mouseDown and not previewButtonDown then
+        -- mouse just pressed on button (start hold)
+        previewButtonDown = true
+        previewActive = true
         cacheMIDIState()
         applyLivePreview()
+        if CACHE_DEBUG then r.ShowConsoleMsg('PREVIEW: button down, activating\n') end
+      elseif previewButtonDown and not mouseDown then
+        -- mouse released globally (end hold - don't require hover)
+        if CACHE_DEBUG then r.ShowConsoleMsg('=== PREVIEW OFF (button up) ===\n') end
+        previewButtonDown = false
+        capturePreRestoreSnapshot()
+        previewActive = false
+        restoreMIDIState()
+        if CACHE_DEBUG then r.ShowConsoleMsg('=== PREVIEW OFF COMPLETE ===\n') end
       end
-      markControlChanged()
+    end
+
+    -- shift key: momentary preview (only when not latched)
+    if not previewLatched then
+      if shiftHeld and not previewShiftDown and not previewButtonDown then
+        -- shift just pressed
+        previewShiftDown = true
+        previewActive = true
+        cacheMIDIState()
+        applyLivePreview()
+        if CACHE_DEBUG then r.ShowConsoleMsg('PREVIEW: shift down, activating\n') end
+      elseif not shiftHeld and previewShiftDown then
+        -- shift just released
+        if CACHE_DEBUG then r.ShowConsoleMsg('=== PREVIEW OFF (shift up) ===\n') end
+        previewShiftDown = false
+        capturePreRestoreSnapshot()
+        previewActive = false
+        restoreMIDIState()
+      end
     end
     ImGui.Dummy(ctx, 0, 2)
 
@@ -2257,13 +2411,16 @@ local function loop()
 
     -- buttons
     local isSelectedScope = (scopeIndex == 1 or scopeIndex == 3)
-    local shouldDisable = (isSelectedScope and (noteCount == 0 and eventCount == 0)) or bypass
-    ImGui.BeginDisabled(ctx, shouldDisable or isExecuting or not applyButtonEnabled)
+    local shouldDisable = isSelectedScope and (noteCount == 0 and eventCount == 0)
+    ImGui.BeginDisabled(ctx, shouldDisable or isExecuting)
     if ImGui.Button(ctx, 'Apply') then
       isExecuting = true
       statusMessage = ''
+      local applyState = getOpsState()
 
       local success, err = pcall(function()
+        applyState.isApplying = true  -- mark start of Apply to filter self-changes
+
         -- restore to cached state first (clean slate)
         restoreMIDIState()
 
@@ -2282,8 +2439,15 @@ local function loop()
         -- re-cache current state as new baseline
         cacheMIDIState()
 
-        -- disable Apply until next change
-        applyButtonEnabled = false
+        -- update content hash after Apply completes (new baseline)
+        applyState.lastMIDIContentHash = computeMIDIContentHash()
+
+        -- end preview mode (quantize is now permanent)
+        previewActive = false
+        previewLatched = false
+        previewButtonDown = false
+        previewShiftDown = false
+        ops.resetState()  -- clear all cache state
 
         -- build success message
         local gridLabel = gridMode == 0 and 'grid' or gridMode == 2 and 'groove' or gridDivLabels[gridDivIndex + 1]
@@ -2299,6 +2463,7 @@ local function loop()
         restoreMIDIState()
       end
 
+      applyState.isApplying = false  -- clear flag after Apply completes
       isExecuting = false
     end
     ImGui.EndDisabled(ctx)
@@ -2553,6 +2718,95 @@ local function loop()
         confirmDeleteFolder = false
         ImGui.CloseCurrentPopup(ctx)
       end
+      ImGui.EndPopup(ctx)
+    end
+
+    -- conflict dialog for catastrophic MIDI changes
+    local conflictState = getOpsState()
+    if conflictState.showConflictDialog then
+      -- only show if still in preview mode; clear state if not
+      if previewActive then
+        -- center dialog on main window
+        local winX, winY = ImGui.GetWindowPos(ctx)
+        local winW, winH = ImGui.GetWindowSize(ctx)
+        ImGui.SetNextWindowPos(ctx, winX + winW * 0.5, winY + winH * 0.5, ImGui.Cond_Appearing, 0.5, 0.5)
+        ImGui.OpenPopup(ctx, 'MIDI Changed')
+      else
+        -- not in preview mode - clear catastrophic state without showing dialog
+        conflictState.catastrophicTakes = {}
+        conflictState.pauseLiveMode = false
+      end
+      conflictState.showConflictDialog = false
+    end
+
+    if ImGui.BeginPopupModal(ctx, 'MIDI Changed', true, ImGui.WindowFlags_AlwaysAutoResize) then
+      ImGui.Text(ctx, 'MIDI changed during preview.')
+      ImGui.Spacing(ctx)
+
+      -- Accept Changes: bake current state (quantized + user edit), turn preview off
+      if ImGui.Button(ctx, 'Accept Changes') then
+        -- current MIDI (with quantization baked in) becomes the new state
+        for take, _ in pairs(conflictState.catastrophicTakes) do
+          if r.ValidatePtr(take, 'MediaItem_Take*') then
+            local rv, midiStr = r.MIDI_GetAllEvts(take, '')
+            if rv then
+              conflictState.originalMIDICache[take] = midiStr
+              conflictState.reconciliationBaseline[take] = midiStr
+            end
+          end
+        end
+        conflictState.catastrophicTakes = {}
+        conflictState.pauseLiveMode = false
+        -- turn preview off (don't restore - user accepted the current state)
+        previewActive = false
+        previewLatched = false
+        previewButtonDown = false
+        previewShiftDown = false
+        ops.resetState()  -- clear all cache state
+        ImGui.CloseCurrentPopup(ctx)
+      end
+
+      ImGui.SameLine(ctx)
+
+      -- Undo Edit: restore original, re-apply preview (stay in preview mode)
+      if ImGui.Button(ctx, 'Undo Edit') then
+        -- restore to pre-preview state, then re-apply quantize
+        conflictState.catastrophicTakes = {}
+        conflictState.pauseLiveMode = false
+        -- restore original MIDI (forceRaw=true to discard all edits)
+        ops.restoreMIDIState(true)
+        -- clear pristinePostQuantize so it gets refreshed by applyLivePreview
+        conflictState.pristinePostQuantize = {}
+        -- force fresh apply (skip early-exit check)
+        conflictState.lastPreviewApplied = false
+        applyLivePreview()
+        ImGui.CloseCurrentPopup(ctx)
+      end
+
+      -- escape key closes (treat as Accept Changes)
+      local keyEscape = not handledEscape and isFreshEscapePress()
+      if keyEscape then
+        handledEscape = true
+        -- same as Accept Changes
+        for take, _ in pairs(conflictState.catastrophicTakes) do
+          if r.ValidatePtr(take, 'MediaItem_Take*') then
+            local rv, midiStr = r.MIDI_GetAllEvts(take, '')
+            if rv then
+              conflictState.originalMIDICache[take] = midiStr
+              conflictState.reconciliationBaseline[take] = midiStr
+            end
+          end
+        end
+        conflictState.catastrophicTakes = {}
+        conflictState.pauseLiveMode = false
+        previewActive = false
+        previewLatched = false
+        previewButtonDown = false
+        previewShiftDown = false
+        ops.resetState()  -- clear all cache state
+        ImGui.CloseCurrentPopup(ctx)
+      end
+
       ImGui.EndPopup(ctx)
     end
 

@@ -1,12 +1,15 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.2
+-- @version 1.1.0-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix janky preset name display
---   - adjust some UI sizes
---   - complete SMFParser implementation
+--   - Live preview mode overhaul: replaced bypass checkbox with momentary preview button (hold to preview, opt-click to latch)
+--   - User edits during preview now preserved (if possible) on exit (selection, velocity, pitch, position changes)
+--   - Conflict dialog when unreconcilable user edits detected during preview
+--   - Undo Edit option in conflict dialog to discard changes and re-apply quantize
+--   - Focus returns to MIDI editor on script exit
+--   - Apply button always enabled when preview active
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*

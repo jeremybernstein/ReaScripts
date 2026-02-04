@@ -1,13 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.4
+-- @version 1.1.0-beta.5
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - retrofit Quantize standalone as an Action in the main script
---   - main script can load quantPreset files (in addition to tfmrPreset)
---   - big refactor to reduce organic growth tech debt and simplify future additions
---   - lots of tests added to reduce breakage potential of future expansion
+--   - fix icon path
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -28,7 +25,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.1.0-beta.4'
+local versionStr = '1.1.0-beta.5'
 
 local r = reaper
 
@@ -42,7 +39,9 @@ local function fileExists(path)
   if f then f:close() return true end
   return false
 end
+local inTransformerFolder = false
 if fileExists(scriptPath .. 'TransformerLib.lua') then
+  inTransformerFolder = true
   package.path = scriptPath .. '?.lua;' .. package.path
 elseif fileExists(scriptPath .. 'Transformer/TransformerLib.lua') then
   package.path = scriptPath .. 'Transformer/?.lua;' .. package.path
@@ -112,8 +111,7 @@ local scriptID = 'sockmonkey72_Transformer'
 local ctx = ImGui.CreateContext(scriptID)
 ImGui.SetConfigVar(ctx, ImGui.ConfigVar_DockingWithShift, 1)
 
--- local iconPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/'
-local iconPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'icons/'
+local iconPath = scriptPath .. (inTransformerFolder and 'icons/' or 'Transformer/icons/')
 local GearImage = ImGui.CreateImage(iconPath .. 'gear_40031.png')
 if GearImage then ImGui.Attach(ctx, GearImage) end
 local UndoImage = ImGui.CreateImage(iconPath .. 'left-arrow_9144323.png')

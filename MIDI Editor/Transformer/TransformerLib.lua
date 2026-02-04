@@ -20,8 +20,12 @@ local mu
 local DEBUG = false
 local DEBUGPOST = false
 
+-- early-load glob for cache (before MIDIUtils)
+local glob_early = require 'TransformerGlobal'
+glob_early.initCache() -- cached C library values (constant for session) -- cached for loop iteration (perf)
+
 if DEBUG then
-  package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
+  package.path = glob_early.cache.resourcePath .. '/Scripts/sockmonkey72 Scripts/MIDI/?.lua'
   mu = require 'MIDIUtils'
 else
   package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
@@ -55,6 +59,12 @@ end
 
 local TransformerLib = {}
 
+-- Range constants for parameter handling
+TransformerLib.PARAM_PERCENT_RANGE = { 0, 100 }
+TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE = { -100, 100 }
+TransformerLib.PARAM_PITCHBEND_RANGE = { 0, 16383 }
+TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE = { -8192, 8191 }
+
 package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. '?.lua;' -- GET DIRECTORY FOR REQUIRE
 local tg = require 'TransformerGlobal'
 local p3 = require 'TransformerParam3'
@@ -63,13 +73,69 @@ local gdefs = require 'TransformerGeneralDefs'
 local fdefs = require 'TransformerFindDefs'
 local adefs = require 'TransformerActionDefs'
 
-local mgdefs = require 'TransformerMetricGrid'
-local evndefs = require 'TransformerEveryN'
-local nmedefs = require 'TransformerNewMIDIEvent'
-local evseldefs = require 'TransformerEventSelector'
-
+local mgdefs = require 'types/TransformerMetricGrid'
+local evndefs = require 'types/TransformerEveryN'
+local nmedefs = require 'types/TransformerNewMIDIEvent'
+local evseldefs = require 'types/TransformerEventSelector'
 local ffuns = require 'TransformerFindFuns'
 local afuns = require 'TransformerActionFuns'
+
+local TypeRegistry = require 'TransformerTypeRegistry'
+require 'types/TransformerQuantizeType' -- registers quantize type
+local TimeUtils = require 'TransformerTimeUtils'
+local Notation = require 'TransformerNotation'
+require 'types/TransformerTimeType' -- registers 'time' and 'timedur' types
+require 'types/TransformerNumericType' -- registers 'inteditor' and 'floateditor' types
+require 'types/TransformerMenuType' -- registers 'menu', 'param3', and 'hidden' types
+
+-- Register shims for existing types (Phase 26: no behavior change)
+-- Shims delegate to existing modules; renderUI = nil signals "use legacy"
+TypeRegistry.register({
+  name = 'everyn',
+  detectType = function(src) return src and src.everyn == true end,
+  parseNotation = evndefs.parseEveryNNotation,
+  generateNotation = evndefs.generateEveryNNotation,
+  makeDefault = evndefs.makeDefaultEveryN,
+  renderUI = evndefs.renderUI,
+})
+
+TypeRegistry.register({
+  name = 'newmidievent',
+  detectType = function(src) return src and src.newevent == true end,
+  parseNotation = nmedefs.parseNewMIDIEventNotation,
+  generateNotation = nmedefs.generateNewMIDIEventNotation,
+  makeDefault = nmedefs.makeDefaultNewMIDIEvent,
+  renderUI = nmedefs.renderUI,
+})
+
+TypeRegistry.register({
+  name = 'eventselector',
+  detectType = function(src) return src and src.eventselector == true end,
+  parseNotation = evseldefs.parseEventSelectorNotation,
+  generateNotation = evseldefs.generateEventSelectorNotation,
+  makeDefault = evseldefs.makeDefaultEventSelector,
+  renderUI = evseldefs.renderUI,
+})
+
+TypeRegistry.register({
+  name = 'metricgrid',
+  detectType = function(src) return src and src.metricgrid == true end,
+  parseNotation = mgdefs.parseMetricGridNotation,
+  generateNotation = mgdefs.generateMetricGridNotation,
+  makeDefault = function(row, data) return mgdefs.makeDefaultMetricGrid(row, data) end,
+  renderUI = mgdefs.renderUI,
+})
+
+TypeRegistry.register({
+  name = 'musical',
+  detectType = function(src) return src and src.musical == true end,
+  parseNotation = mgdefs.parseMetricGridNotation,
+  generateNotation = mgdefs.generateMetricGridNotation,
+  makeDefault = function(row, data) return mgdefs.makeDefaultMetricGrid(row, data) end,
+  renderUI = mgdefs.renderUI,
+})
+
+-- quantize type now self-registers via TransformerQuantizeType.lua (Phase 27)
 
 -----------------------------------------------------------------------------
 ----------------------------- GLOBAL VARS -----------------------------------
@@ -119,9 +185,23 @@ local scriptIgnoreSelectionInArrangeView = false
 ----------------------------- OPERATION FUNS --------------------------------
 
 -- forward declarations
-local ppqToTime
 local getHasTable
 -- end forward declarations
+
+-- TimeUtils delegation (local aliases for internal use)
+local getTimeOffset = TimeUtils.getTimeOffset
+local calcMIDITime = TimeUtils.calcMIDITime
+local lengthFormatRebuf = TimeUtils.lengthFormatRebuf
+local timeFormatRebuf = TimeUtils.timeFormatRebuf
+local determineTimeFormatStringType = TimeUtils.determineTimeFormatStringType
+local TIME_FORMAT_MEASURES = TimeUtils.TIME_FORMAT_MEASURES
+local TIME_FORMAT_MINUTES = TimeUtils.TIME_FORMAT_MINUTES
+local TIME_FORMAT_HMSF = TimeUtils.TIME_FORMAT_HMSF
+
+-- Shared table delegation (backward compat)
+Shared.getTimeOffset = TimeUtils.getTimeOffset
+Shared.calcMIDITime = TimeUtils.calcMIDITime
+Shared.lengthFormatRebuf = TimeUtils.lengthFormatRebuf
 
 local gridInfo = { currentGrid = 0, currentSwing = 0. } -- swing is -1. to 1
 Shared.gridInfo = function()
@@ -140,7 +220,7 @@ end
 local function getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
   local gridUnit
   local mgMods = mgdefs.getMetricGridModifiers(mgParams)
-  if subdiv >= 0 then
+  if subdiv and subdiv >= 0 then
     gridUnit = PPQ * (subdiv * 4)
     if mgMods == gdefs.MG_GRID_DOTTED then gridUnit = gridUnit * 1.5
     elseif mgMods == gdefs.MG_GRID_TRIPLET then gridUnit = (gridUnit * 2 / 3) end
@@ -160,28 +240,6 @@ local function getValue(event, property, bipolar)
   return oldval
 end
 Shared.getValue = getValue
-
-local function getTimeOffset(correctMeasures)
-  local offset = r.GetProjectTimeOffset(0, false)
-  if correctMeasures then
-    local rv, measoff = r.get_config_var_string('projmeasoffs')
-    if rv then
-      local mo = tonumber(measoff)
-      if mo then
-        local qn1, qn2
-        _, qn1 = r.TimeMap_GetMeasureInfo(0, mo)
-        _, qn2 = r.TimeMap_GetMeasureInfo(0, -1) -- 0 in the prefs interface is -1, go figure
-        if qn1 and qn2 then
-          local time1 = r.TimeMap2_QNToTime(0, qn1)
-          local time2 = r.TimeMap2_QNToTime(0, qn2)
-          offset = offset + (time2 - time1)
-        end
-      end
-    end
-  end
-  return offset
-end
-Shared.getTimeOffset = getTimeOffset
 
 local function chanMsgToType(chanmsg)
   if chanmsg == 0x90 then return gdefs.NOTE_TYPE
@@ -220,15 +278,153 @@ local function isANote(target, condOp, paramType, index)
 end
 Shared.isANote = isANote
 
+-- Context Object Pattern (Phase 35)
+local TransformerContext = tg.class()
+
+function TransformerContext:init()
+  -- per-execution state (mirrors module-level locals)
+  self._allEvents = {}
+  self._selectedEvents = {}
+  self._gridInfo = { currentGrid = 0, currentSwing = 0. }
+  self._addLengthInfo = { addLengthFirstEventOffset = nil, addLengthFirstEventOffset_Take = nil, addLengthFirstEventStartTime = nil }
+  self._moveCursorInfo = { moveCursorFirstEventPosition = nil, moveCursorFirstEventPosition_Take = nil }
+  self._rangeFilterGridOverride = nil
+  self._contextInfo = nil
+end
+
+-- Accessor methods (same interface as current Shared.*)
+function TransformerContext:allEvents()
+  return self._allEvents
+end
+
+function TransformerContext:selectedEvents()
+  return self._selectedEvents
+end
+
+function TransformerContext:gridInfo()
+  return self._gridInfo
+end
+
+function TransformerContext:addLengthInfo()
+  return self._addLengthInfo
+end
+
+function TransformerContext:moveCursorInfo()
+  return self._moveCursorInfo
+end
+
+function TransformerContext:setRangeFilterGrid(grid)
+  self._rangeFilterGridOverride = grid
+end
+
+function TransformerContext:getRangeFilterGrid()
+  return self._rangeFilterGridOverride
+end
+
+function TransformerContext:getContextInfo()
+  return self._contextInfo
+end
+
+function TransformerContext:setContextInfo(info)
+  self._contextInfo = info
+end
+
+-- Delegate methods for functions that need context
+-- These call the module-level functions defined above
+function TransformerContext:getValue(event, property, bipolar)
+  return getValue(event, property, bipolar)
+end
+
+function TransformerContext:getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+  return getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
+end
+
+function TransformerContext:chanMsgToType(chanmsg)
+  return chanMsgToType(chanmsg)
+end
+
+function TransformerContext:getEventType(event)
+  return getEventType(event)
+end
+
+function TransformerContext:getSubtypeValueName(event)
+  return getSubtypeValueName(event)
+end
+
+function TransformerContext:getMainValueName(event)
+  return getMainValueName(event)
+end
+
+function TransformerContext:isANote(target, condOp, paramType, index)
+  return isANote(target, condOp, paramType, index)
+end
+
+-- Global context instance (Phase 35 migration bridge)
+local globalCtx = TransformerContext()
+
+-- Deprecation tracking (warns once per key per session)
+local sharedAccessWarnings = {}
+local SHARED_DEPRECATION_ENABLED = true -- set false to silence during dev
+
+-- Shared proxy for deprecation warnings
+local SharedProxy = {}
+local SharedMT = {
+  __index = function(t, key)
+    local value = rawget(t, key)
+    if value and SHARED_DEPRECATION_ENABLED and not sharedAccessWarnings[key] then
+      sharedAccessWarnings[key] = true
+      local info = debug.getinfo(2, 'Sl')
+      local source = info and info.source and info.source:match('([^/\\]+)$') or '?'
+      local line = info and info.currentline or 0
+      mu.post(string.format('[DEPRECATION] Shared.%s used at %s:%d (migrate to ctx)', key, source, line))
+    end
+    return value
+  end,
+  __newindex = function(t, key, value)
+    rawset(t, key, value)
+  end
+}
+setmetatable(SharedProxy, SharedMT)
+
+-- SharedProxy delegates to globalCtx (backward compat)
+SharedProxy.mu = mu
+SharedProxy.parserError = ''
+
+SharedProxy.allEvents = function() return globalCtx:allEvents() end
+SharedProxy.selectedEvents = function() return globalCtx:selectedEvents() end
+SharedProxy.gridInfo = function() return globalCtx:gridInfo() end
+SharedProxy.addLengthInfo = function() return globalCtx:addLengthInfo() end
+SharedProxy.moveCursorInfo = function() return globalCtx:moveCursorInfo() end
+SharedProxy.setRangeFilterGrid = function(grid) globalCtx:setRangeFilterGrid(grid) end
+SharedProxy.getRangeFilterGrid = function() return globalCtx:getRangeFilterGrid() end
+SharedProxy.getValue = getValue
+SharedProxy.getGridUnitFromSubdiv = getGridUnitFromSubdiv
+SharedProxy.chanMsgToType = chanMsgToType
+SharedProxy.getEventType = getEventType
+SharedProxy.getSubtypeValueName = getSubtypeValueName
+SharedProxy.getMainValueName = getMainValueName
+SharedProxy.isANote = isANote
+-- TimeUtils delegation
+SharedProxy.getTimeOffset = TimeUtils.getTimeOffset
+SharedProxy.calcMIDITime = TimeUtils.calcMIDITime
+SharedProxy.lengthFormatRebuf = TimeUtils.lengthFormatRebuf
+-- fnStringToFn will be added after it's defined (line ~1110)
+
+-- Replace Shared table with proxy (keeps existing assignments but adds deprecation tracking)
+for k, v in pairs(Shared) do
+  SharedProxy[k] = v
+end
+Shared = SharedProxy
+
 ---------------------------------------------------------------
 
 local function getTimeSelectionStart()
-  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  local ts_start = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   return ts_start + getTimeOffset()
 end
 
 local function getTimeSelectionEnd()
-  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  local _, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   return ts_end + getTimeOffset()
 end
 
@@ -360,43 +556,6 @@ end
 --   return wantsBBU and (name == 'ticks' or name == 'notedur' or name == 'selposticks' or name == 'seldurticks')
 -- end
 
-local function bbtToPPQ(take, measures, beats, ticks, relativeppq, nosubtract)
-  local nilmeas = measures == nil
-  if not measures then measures = 0 end
-  if not beats then beats = 0 end
-  if not ticks then ticks = 0 end
-  if relativeppq then
-    local relMeasures, relBeats, _, relTicks = ppqToTime(relativeppq)
-    measures = measures + relMeasures
-    beats = beats + relBeats
-    ticks = ticks + relTicks
-  end
-  local bbttime
-  if nilmeas then
-    bbttime = r.TimeMap2_beatsToTime(0, beats) -- have to do it this way, passing nil as 3rd arg is equivalent to 0 and breaks things
-  else
-    bbttime = r.TimeMap2_beatsToTime(0, beats, measures)
-  end
-  local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, bbttime) + ticks
-  if relativeppq and not nosubtract then ppqpos = ppqpos - relativeppq end
-  return math.floor(ppqpos)
-end
-
--- local
-ppqToTime = function(take, ppqpos, projtime)
-  local _, posMeasures, cml, posBeats = r.TimeMap2_timeToBeats(0, projtime)
-  local _, posMeasuresSOM, _, posBeatsSOM = r.TimeMap2_timeToBeats(0, r.MIDI_GetProjTimeFromPPQPos(take, r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)))
-
-  local measures = posMeasures
-  local beats = math.floor(posBeats - posBeatsSOM)
-  cml = tonumber(cml) or 0
-  posBeats = tonumber(posBeats) or 0
-  local beatsmax = math.floor(cml)
-  local posBeats_PPQ = bbtToPPQ(take, nil, math.floor(posBeats))
-  local ticks = math.floor(ppqpos - posBeats_PPQ)
-  return measures, beats, beatsmax, ticks
-end
-
   -- function PpqToLength(ppqpos, ppqlen)
   --   -- REAPER, why is this so difficult?
   --   -- get the PPQ position of the nearest measure start (to ensure that we're dealing with round values)
@@ -415,224 +574,8 @@ end
   --   return measures, beats, ticks
   -- end
 
-local function calcMIDITime(take, e)
-  local timeAdjust = getTimeOffset()
-  e.projtime = r.MIDI_GetProjTimeFromPPQPos(take, e.ppqpos) + timeAdjust
-  if e.endppqpos then
-    e.projlen = (r.MIDI_GetProjTimeFromPPQPos(take, e.endppqpos) + timeAdjust) - e.projtime
-  else
-    e.projlen = 0
-  end
-  e.measures, e.beats, e.beatsmax, e.ticks = ppqToTime(take, e.ppqpos, e.projtime)
-end
-Shared.calcMIDITime = calcMIDITime
-
 ---------------------------------------------------------------------------
 --------------------------------- UTILITIES -------------------------------
-
-local function timeFormatClampPad(str, min, max, fmt, startVal)
-  local num = tonumber(str)
-  if not num then num = 0 end
-  num = num + (startVal and startVal or 0)
-  num = (min and num < min) and min or (max and num > max) and max or num
-  return string.format(fmt, num), num
-end
-
-local TIME_FORMAT_UNKNOWN = 0
-local TIME_FORMAT_MEASURES = 1
-local TIME_FORMAT_MINUTES = 2
-local TIME_FORMAT_HMSF = 3
-
-local function determineTimeFormatStringType(buf)
-  if string.match(buf, '%d+') then
-    local isMSF = false
-    local isHMSF = false
-
-    isHMSF = string.match(buf, '^%s-%d+:%d+:%d+:%d+')
-    if isHMSF then return TIME_FORMAT_HMSF end
-
-    isMSF = string.match(buf, '^%s-%d-:')
-    if isMSF then return TIME_FORMAT_MINUTES end
-
-    return TIME_FORMAT_MEASURES
-  end
-  return TIME_FORMAT_UNKNOWN
-end
-
-local function lengthFormatRebuf(buf)
-  local format = determineTimeFormatStringType(buf)
-  if format == TIME_FORMAT_UNKNOWN then return gdefs.DEFAULT_LENGTHFORMAT_STRING end
-
-  local isneg = string.match(buf, '^%s*%-')
-
-  if format == TIME_FORMAT_MEASURES then
-    local absTicks = false
-    local bars, beats, fraction, subfrac = string.match(buf, '(%d-)%.(%d+)%.(%d+)%.(%d+)')
-    if not bars then
-      bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
-    end
-    if not bars then
-      bars, beats = string.match(buf, '(%d-)%.(%d+)')
-    end
-    if not bars then
-      bars = string.match(buf, '(%d+)')
-    end
-    absTicks = string.match(buf, 't%s*$')
-
-    if not bars or bars == '' then bars = 0 end
-    bars = timeFormatClampPad(bars, 0, nil, '%d')
-    if not beats or beats == '' then beats = 0 end
-    beats = timeFormatClampPad(beats, 0, nil, '%d')
-
-    if not fraction or fraction == '' then fraction = 0 end
-    if absTicks and not subfrac then -- no range check on ticks
-      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
-    else
-      fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
-
-      if not subfrac or subfrac == '' then subfrac = nil end
-      if subfrac then
-        subfrac = timeFormatClampPad(subfrac, 0, 9, '%d')
-      end
-      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
-    end
-  elseif format == TIME_FORMAT_MINUTES then
-    local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
-    local minutesVal, secondsVal
-    if not minutes then
-      minutes, seconds = string.match(buf, '(%d-):(%d+)')
-      if not minutes then
-        minutes = string.match(buf, '(%d-):')
-      end
-    end
-
-    if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
-    if secondsVal > 59 then
-      minutesVal = math.floor(secondsVal / 60)
-      seconds = string.format('%02d', secondsVal % 60)
-    end
-    if not minutes or minutes == '' then minutes = 0 end
-    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
-    return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
-  elseif format == TIME_FORMAT_HMSF then
-    local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
-    local hoursVal, minutesVal, secondsVal, framesVal
-    local frate = r.TimeMap_curFrameRate(0)
-
-    if not frames or frames == '' then frames = 0 end
-    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
-    if framesVal > frate then
-      secondsVal = math.floor(framesVal / frate)
-      frames = string.format('%03d', framesVal % frate)
-    end
-    if not seconds or seconds == '' then seconds = 0 end
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
-    if secondsVal > 59 then
-      minutesVal = math.floor(secondsVal / 60)
-      seconds = string.format('%02d', secondsVal % 60)
-    end
-    if not minutes or minutes == '' then minutes = 0 end
-    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
-    if minutesVal > 59 then
-      hoursVal = math.floor(minutesVal / 60)
-      minutes = string.format('%02d', minutesVal % 60)
-    end
-    if not hours or hours == '' then hours = 0 end
-    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
-    return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
-  end
-  return gdefs.DEFAULT_LENGTHFORMAT_STRING
-end
-Shared.lengthFormatRebuf = lengthFormatRebuf
-
-local function timeFormatRebuf(buf)
-  local format = determineTimeFormatStringType(buf)
-  if format == TIME_FORMAT_UNKNOWN then return gdefs.DEFAULT_TIMEFORMAT_STRING end
-
-  local isneg = string.match(buf, '^%s*%-')
-
-  if format == TIME_FORMAT_MEASURES then
-    local absTicks = false
-    local bars, beats, fraction, subfrac = string.match(buf, '(%d-)%.(%d+)%.(%d+)%.(%d+)')
-    if not bars then
-      bars, beats, fraction = string.match(buf, '(%d-)%.(%d+)%.(%d+)')
-    end
-    if not bars then
-      bars, beats = string.match(buf, '(%d-)%.(%d+)')
-    end
-    if not bars then
-      bars = string.match(buf, '(%d+)')
-    end
-    absTicks = string.match(buf, 't%s*$')
-
-    if not bars or bars == '' then bars = 0 end
-    bars = timeFormatClampPad(bars, nil, nil, '%d')
-    if not beats or beats == '' then beats = 1 end
-    beats = timeFormatClampPad(beats, 1, nil, '%d')
-
-    if not fraction or fraction == '' then fraction = 0 end
-    if absTicks and not subfrac then -- no range check on ticks
-      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. 't'
-    else
-      fraction = timeFormatClampPad(fraction, 0, 99, '%02d')
-
-      if not subfrac or subfrac == '' then subfrac = nil end
-      if subfrac then
-        subfrac = timeFormatClampPad(subfrac, 0, 9, '%d')
-      end
-      return (isneg and '-' or '') .. bars .. '.' .. beats .. '.' .. fraction .. (subfrac and ('.' .. subfrac) or '')
-    end
-  elseif format == TIME_FORMAT_MINUTES then
-    local minutes, seconds, fraction = string.match(buf, '(%d-):(%d+)%.(%d+)')
-    local minutesVal, secondsVal, fractionVal
-    if not minutes then
-      minutes, seconds = string.match(buf, '(%d-):(%d+)')
-      if not minutes then
-        minutes = string.match(buf, '(%d-):')
-      end
-    end
-
-    if not fraction or fraction == '' then fraction = 0 end
-    fraction = timeFormatClampPad(fraction, 0, 999, '%03d')
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%d')
-    if secondsVal > 59 then
-      minutesVal = math.floor(secondsVal / 60)
-      seconds = string.format('%02d', secondsVal % 60)
-    end
-    if not minutes or minutes == '' then minutes = 0 end
-    minutes = timeFormatClampPad(minutes, 0, nil, '%d', minutesVal)
-    return (isneg and '-' or '') .. minutes .. ':' .. seconds .. '.' .. fraction
-  elseif format == TIME_FORMAT_HMSF then
-    local hours, minutes, seconds, frames = string.match(buf, '(%d-):(%d-):(%d-):(%d+)')
-    local hoursVal, minutesVal, secondsVal, framesVal
-    local frate = r.TimeMap_curFrameRate(0)
-
-    if not frames or frames == '' then frames = 0 end
-    frames, framesVal = timeFormatClampPad(frames, 0, nil, '%02d')
-    if framesVal > frate then
-      secondsVal = math.floor(framesVal / frate)
-      frames = string.format('%02d', framesVal % frate)
-    end
-    if not seconds or seconds == '' then seconds = 0 end
-    seconds, secondsVal = timeFormatClampPad(seconds, 0, nil, '%02d', secondsVal)
-    if secondsVal > 59 then
-      minutesVal = math.floor(secondsVal / 60)
-      seconds = string.format('%02d', secondsVal % 60)
-    end
-    if not minutes or minutes == '' then minutes = 0 end
-    minutes, minutesVal = timeFormatClampPad(minutes, 0, nil, '%02d', minutesVal)
-    if minutesVal > 59 then
-      hoursVal = math.floor(minutesVal / 60)
-      minutes = string.format('%02d', minutesVal % 60)
-    end
-    if not hours or hours == '' then hours = 0 end
-    hours = timeFormatClampPad(hours, 0, nil, '%d', hoursVal)
-    return (isneg and '-' or '') .. hours .. ':' .. minutes .. ':' .. seconds .. ':' .. frames
-  end
-  return gdefs.DEFAULT_TIMEFORMAT_STRING
-end
 
 local function findTabsFromTarget(row)
   local condTab = {}
@@ -721,19 +664,37 @@ local function findTabsFromTarget(row)
 end
 
 local function getParamType(src)
+  -- Check registry first (REG-02)
+  local typeName = TypeRegistry.detectType(src)
+  if typeName then
+    -- Map registered type to PARAM_TYPE constant for backward compat
+    local typeMapping = {
+      quantize = gdefs.PARAM_TYPE_QUANTIZE,
+      everyn = gdefs.PARAM_TYPE_EVERYN,
+      newmidievent = gdefs.PARAM_TYPE_NEWMIDIEVENT,
+      eventselector = gdefs.PARAM_TYPE_EVENTSELECTOR,
+      metricgrid = gdefs.PARAM_TYPE_METRICGRID,
+      musical = gdefs.PARAM_TYPE_METRICGRID, -- unified: musical detection routes to METRICGRID
+      time = gdefs.PARAM_TYPE_TIME,
+      timedur = gdefs.PARAM_TYPE_TIMEDUR,
+      inteditor = gdefs.PARAM_TYPE_INTEDITOR,
+      floateditor = gdefs.PARAM_TYPE_FLOATEDITOR,
+      menu = gdefs.PARAM_TYPE_MENU,
+      param3 = gdefs.PARAM_TYPE_PARAM3,
+      hidden = gdefs.PARAM_TYPE_HIDDEN,
+    }
+    if typeMapping[typeName] then
+      return typeMapping[typeName]
+    end
+  end
+
+  -- Legacy detection chain (preserved for backward compat)
   return not src and gdefs.PARAM_TYPE_UNKNOWN
-    or src.menu and gdefs.PARAM_TYPE_MENU
-    or src.inteditor and gdefs.PARAM_TYPE_INTEDITOR
-    or src.floateditor and gdefs.PARAM_TYPE_FLOATEDITOR
-    or src.time and gdefs.PARAM_TYPE_TIME
-    or src.timedur and gdefs.PARAM_TYPE_TIMEDUR
-    or src.metricgrid and gdefs.PARAM_TYPE_METRICGRID
-    or src.musical and gdefs.PARAM_TYPE_MUSICAL
+    or (src.metricgrid or src.musical) and gdefs.PARAM_TYPE_METRICGRID
     or src.everyn and gdefs.PARAM_TYPE_EVERYN
     or src.newevent and gdefs.PARAM_TYPE_NEWMIDIEVENT
-    or src.param3 and gdefs.PARAM_TYPE_PARAM3
     or src.eventselector and gdefs.PARAM_TYPE_EVENTSELECTOR
-    or src.hidden and gdefs.PARAM_TYPE_HIDDEN
+    or src.quantize and gdefs.PARAM_TYPE_QUANTIZE
     or gdefs.PARAM_TYPE_UNKNOWN
 end
 
@@ -774,231 +735,17 @@ local function opIsBipolar(condOp, index)
   return condOp.bipolar or (condOp.split and condOp.split[index].bipolar)
 end
 
-local function handleMacroParam(row, target, condOp, paramTab, paramStr, index)
-  local paramType
-  local paramTypes = getParamTypesForRow(row, target, condOp)
-  paramType = paramTypes[index] or gdefs.PARAM_TYPE_UNKNOWN
-
-  local percent = string.match(paramStr, 'percent<(.-)>')
-  if percent then
-    local percentNum = tonumber(percent)
-    if percentNum then
-      local min = opIsBipolar(condOp, index) and -100 or 0
-      percentNum = percentNum < min and min or percentNum > 100 and 100 or percentNum -- what about negative percents???
-      row.params[index].percentVal = percentNum
-      row.params[index].textEditorStr = string.format('%g', percentNum)
-      return row.params[index].textEditorStr
-    end
-  end
-
-  paramStr = string.gsub(paramStr, '^%s*(.-)%s*$', '%1') -- trim whitespace
-
-  local isEveryN = paramType == gdefs.PARAM_TYPE_EVERYN
-  local isNewEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
-  local isEventSelector = paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
-
-  if not (isEveryN or isNewEvent or isEventSelector) and #paramTab ~= 0 then
-    for kk, vv in ipairs(paramTab) do
-      local pa, pb
-      if paramStr == vv.notation then
-         pa = 1
-         pb = vv.notation:len() + 1
-      elseif vv.alias then
-        for _, alias in ipairs(vv.alias) do
-          if paramStr == alias then
-            pa = 1
-            pb = alias:len() + 1
-            break
-          end
-        end
-      else
-        pa, pb = string.find(paramStr, vv.notation .. '[%W]')
-      end
-      if pa and pb then
-        row.params[index].menuEntry = kk
-        if paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL then
-          row.mg = mgdefs.parseMetricGridNotation(paramStr:sub(pb))
-          row.mg.showswing = condOp.showswing or (condOp.split and condOp.split[index].showswing)
-          row.mg.showround = condOp.showround or (condOp.split and condOp.split[index].showround)
-        end
-        break
-      end
-    end
-  elseif isEveryN then
-    row.evn = evndefs.parseEveryNNotation(paramStr)
-  elseif isNewEvent then
-    nmedefs.parseNewMIDIEventNotation(paramStr, row, paramTab, index)
-  elseif isEventSelector then
-    row.evsel = evseldefs.parseEventSelectorNotation(paramStr, row, paramTab)
-  elseif condOp.bitfield or (condOp.split and condOp.split[index] and condOp.split[index].bitfield) then
-    row.params[index].textEditorStr = paramStr
-  elseif paramType == gdefs.PARAM_TYPE_INTEDITOR or paramType == gdefs.PARAM_TYPE_FLOATEDITOR then
-    local range = condOp.range and condOp.range or target.range
-    local has14bit, hasOther = check14Bit(paramType)
-    if has14bit then
-      if hasOther then range = opIsBipolar(condOp, index) and TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE or TransformerLib.PARAM_PERCENT_RANGE
-      else range = opIsBipolar(condOp, index) and TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE or TransformerLib.PARAM_PITCHBEND_RANGE
-      end
-    end
-    row.params[index].textEditorStr = tg.ensureNumString(paramStr, range)
-  elseif paramType == gdefs.PARAM_TYPE_TIME then
-    row.params[index].timeFormatStr = timeFormatRebuf(paramStr)
-  elseif paramType == gdefs.PARAM_TYPE_TIMEDUR then
-    row.params[index].timeFormatStr = lengthFormatRebuf(paramStr)
-  elseif paramType == gdefs.PARAM_TYPE_METRICGRID
-    or paramType == gdefs.PARAM_TYPE_MUSICAL
-    or paramType == gdefs.PARAM_TYPE_EVERYN
-    or paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT -- fallbacks or used?
-    or paramType == gdefs.PARAM_TYPE_PARAM3
-    or paramType == gdefs.PARAM_TYPE_HIDDEN
-  then
-    row.params[index].textEditorStr = paramStr
-  end
-  return paramStr
-end
-Shared.handleMacroParam = handleMacroParam
-
-local function getParamPercentTerm(val, bipolar)
-  local percent = val / 100 -- it's a percent coming from the system
-  local min = bipolar and -100 or 0
-  local max = 100
-  if percent < min then percent = min end
-  if percent > max then percent = max end
-  return '(event.chanmsg == 0xE0 and math.floor((((1 << 14) - 1) * ' ..  percent .. ') + 0.5) or math.floor((((1 << 7) - 1) * ' .. percent .. ') + 0.5))'
-end
-
-local function processFindMacroRow(buf, boolstr)
-  local row = fdefs.FindRow()
-  local bufstart = 0
-  local findstart, findend, parens = string.find(buf, '^%s*(%(+)%s*')
-
-  row.targetEntry = 0
-  row.conditionEntry = 0
-
-  if findstart and findend and parens ~= '' then
-    parens = string.sub(parens, 0, 3)
-    for k, v in ipairs(fdefs.startParenEntries) do
-      if v.notation == parens then
-        row.startParenEntry = k
-        break
-      end
-    end
-    bufstart = findend + 1
-  end
-  for k, v in ipairs(fdefs.findTargetEntries) do
-    findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
-    if findstart and findend then
-      row.targetEntry = k
-      bufstart = findend + 1
-      -- mu.post('found target: ' .. v.label)
-      break
-    end
-  end
-
-  if row.targetEntry < 1 then return end
-
-  local param1Tab, param2Tab
-  local condTab = findTabsFromTarget(row)
-
-  -- do we need some way to filter out extraneous (/) chars?
-  for k, v in ipairs(condTab) do
-    -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
-    local param1, param2, hasNot
-
-    findstart, findend, hasNot = string.find(buf, '^%s-(!*)' .. v.notation .. '%s+', bufstart)
-    if findstart and findend then
-      row.conditionEntry = k
-      row.isNot = hasNot == '!' and true or false
-      bufstart = findend + 1
-      condTab, param1Tab, param2Tab = findTabsFromTarget(row)
-      findstart, findend, param1 = string.find(buf, '^%s*([^%s%)]*)%s*', bufstart)
-      if tg.isValidString(param1) then
-        bufstart = findend + 1
-        param1 = handleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
-      end
-      break
-    else
-      findstart, findend, hasNot, param1, param2 = string.find(buf, '^%s-(!*)' .. v.notation .. '%(([^,]-)[,%s]*([^,]-)%)', bufstart)
-      if not (findstart and findend) then
-        findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%(%s-%)', bufstart)
-      end
-      if findstart and findend then
-        row.conditionEntry = k
-        row.isNot = hasNot == '!' and true or false
-        bufstart = findend + 1
-
-        condTab, param1Tab, param2Tab = findTabsFromTarget(row)
-        if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
-        if tg.isValidString(param1) then
-          param1 = handleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param1Tab, param1, 1)
-          -- mu.post('param1', param1)
-        end
-        if tg.isValidString(param2) then
-          param2 = handleMacroParam(row, fdefs.findTargetEntries[row.targetEntry], condTab[row.conditionEntry], param2Tab, param2, 2)
-          -- mu.post('param2', param2)
-        end
-        break
-      -- else -- still not found, maybe an old thing (can be removed post-release)
-      --   P(string.sub(buf, bufstart))
-      end
-    end
-  end
-
-  findstart, findend, parens = string.find(buf, '^%s*(%)+)%s*', bufstart)
-  if findstart and findend and parens ~= '' then
-    parens = string.sub(parens, 0, 3)
-    for k, v in ipairs(fdefs.endParenEntries) do
-      if v.notation == parens then
-        row.endParenEntry = k
-        break
-      end
-    end
-    bufstart = findend + 1
-  end
-
-  if row.targetEntry ~= 0 and row.conditionEntry ~= 0 then
-    if boolstr == '||' then row.booleanEntry = 2 end
-    fdefs.addFindRow(row)
-    return true
-  end
-
-  mu.post('Error parsing criteria: ' .. buf)
-  return false
-end
-
-local function processFindMacro(buf)
-  local bufstart = 0
-  local rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+')
-  if not (rowstart and rowend) then
-    rowstart, rowend, boolstr = string.find(buf, '%s+(||)%s+')
-  end
-  while rowstart and rowend do
-    local rowbuf = string.sub(buf, bufstart, rowend)
-    -- mu.post('got row: ' .. rowbuf) -- process
-    processFindMacroRow(rowbuf, boolstr)
-    bufstart = rowend + 1
-    rowstart, rowend, boolstr = string.find(buf, '%s+(&&)%s+', bufstart)
-    if not (rowstart and rowend) then
-      rowstart, rowend, boolstr = string.find(buf, '%s+(||)%s+', bufstart)
-    end
-  end
-  -- last iteration
-  -- mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
-  processFindMacroRow(string.sub(buf, bufstart))
-end
-
 local function timeFormatToSeconds(buf, baseTime, context, isLength)
   local format = determineTimeFormatStringType(buf)
 
   local isneg = string.match(buf, '^%s*%-')
 
   if format == TIME_FORMAT_MEASURES then
-    local absTicks = false
     local tbars, tbeats, tfraction, tsubfrac = string.match(buf, '(%d+)%.(%d+)%.(%d+)%.(%d+)')
     if not tbars then
       tbars, tbeats, tfraction = string.match(buf, '(%d+)%.(%d+)%.(%d+)')
     end
-    absTicks = string.match(buf, 't%s*$')
+    local absTicks = string.match(buf, 't%s*$')
 
     local bars = tonumber(tbars)
     local beats = tonumber(tbeats)
@@ -1110,6 +857,27 @@ context.SetMusicalLength = afuns.setMusicalLength
 context.QuantizeMusicalPosition = afuns.quantizeMusicalPosition
 context.QuantizeMusicalLength = afuns.quantizeMusicalLength
 context.QuantizeMusicalEndPos = afuns.quantizeMusicalEndPos
+context.quantizeGroovePosition = afuns.quantizeGroovePosition
+context.quantizeGrooveLength = afuns.quantizeGrooveLength
+context.quantizeGrooveEndPos = afuns.quantizeGrooveEndPos
+-- QuantizeMIDI dispatcher for integrated Quantize action (routes by targetIndex)
+context.QuantizeMIDI = function(event, take, PPQ, params)
+  local target = params.targetIndex or 0
+  if target == 0 then -- position only
+    return afuns.quantizeMusicalPosition(event, take, PPQ, params)
+  elseif target == 1 then -- position + end
+    afuns.quantizeMusicalPosition(event, take, PPQ, params)
+    return afuns.quantizeMusicalEndPos(event, take, PPQ, params)
+  elseif target == 2 then -- position + length
+    afuns.quantizeMusicalPosition(event, take, PPQ, params)
+    return afuns.quantizeMusicalLength(event, take, PPQ, params)
+  elseif target == 3 then -- end only
+    return afuns.quantizeMusicalEndPos(event, take, PPQ, params)
+  elseif target == 4 then -- length only
+    return afuns.quantizeMusicalLength(event, take, PPQ, params)
+  end
+  return afuns.quantizeMusicalPosition(event, take, PPQ, params)
+end
 context.MoveToItemPos = afuns.moveToItemPos
 context.CCSetCurve = afuns.ccSetCurve
 context.AddDuration = afuns.addDuration
@@ -1135,14 +903,15 @@ local function doProcessParams(row, target, condOp, paramType, paramTab, index, 
   local addMetricGridNotation = false
   local addEveryNNotation = false
   local addNewMIDIEventNotation = false
-  local isParam3 = paramType == gdefs.PARAM_TYPE_PARAM3
   local addEventSelectorNotation = false
+  local addQuantizeNotation = false
 
   if paramType == gdefs.PARAM_TYPE_METRICGRID
     or paramType == gdefs.PARAM_TYPE_MUSICAL
     or paramType == gdefs.PARAM_TYPE_EVERYN
     or paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
     or paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
+    or paramType == gdefs.PARAM_TYPE_QUANTIZE
   then
     if index == 1 then
       if notation then
@@ -1152,6 +921,8 @@ local function doProcessParams(row, target, condOp, paramType, paramTab, index, 
           addNewMIDIEventNotation = true
         elseif paramType == gdefs.PARAM_TYPE_EVENTSELECTOR then
           addEventSelectorNotation = true
+        elseif paramType == gdefs.PARAM_TYPE_QUANTIZE then
+          addQuantizeNotation = true
         else
           addMetricGridNotation = true
         end
@@ -1209,6 +980,8 @@ local function doProcessParams(row, target, condOp, paramType, paramTab, index, 
     paramVal = nmedefs.generateNewMIDIEventNotation(row)
   elseif addEventSelectorNotation then
     paramVal = evseldefs.generateEventSelectorNotation(row)
+  elseif addQuantizeNotation then
+    paramVal = '' -- quantize uses child window config, no inline notation needed
   end
 
   return paramVal
@@ -1227,62 +1000,12 @@ end
   ---------------------------------------------------------------------------
   -------------------------------- FIND UTILS -------------------------------
 
-local function findRowToNotation(row, index)
-  local rowText = ''
-
-  local _, param1Tab, param2Tab, curTarget, curCondition = findTabsFromTarget(row)
-  rowText = curTarget.notation .. ' ' .. (row.isNot and '!' or '') .. curCondition.notation
-  local param1Val, param2Val
-  local paramTypes = getParamTypesForRow(row, curTarget, curCondition)
-
-  param1Val, param2Val = processParams(row, curTarget, curCondition, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
-  if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
-    param1Val = (curCondition.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
-  end
-  if paramTypes[2] == gdefs.PARAM_TYPE_MENU then
-    param2Val = (curCondition.terms > 1 and #param2Tab) and param2Tab[row.params[2].menuEntry].notation or nil
-  end
-
-  if string.match(curCondition.notation, '[!]*%:') then
-    rowText = rowText .. '('
-    if tg.isValidString(param1Val) then
-      rowText = rowText .. param1Val
-      if tg.isValidString(param2Val) then
-        rowText = rowText .. ', ' .. param2Val
-      end
-    end
-    rowText = rowText .. ')'
-  else
-    if tg.isValidString(param1Val) then
-      rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
-    end
-  end
-
-  if row.startParenEntry > 1 then rowText = fdefs.startParenEntries[row.startParenEntry].notation .. ' ' .. rowText end
-  if row.endParenEntry > 1 then rowText = rowText .. ' ' .. fdefs.endParenEntries[row.endParenEntry].notation end
-
-  if index and index ~= #fdefs.findRowTable() then
-    rowText = rowText .. (row.booleanEntry == 2 and ' || ' or ' && ')
-  end
-  return rowText
-end
-
-local function findRowsToNotation()
-  local notationString = ''
-  for k, v in ipairs(fdefs.findRowTable()) do
-    local rowText = findRowToNotation(v, k)
-    notationString = notationString .. rowText
-  end
-  -- mu.post('find macro: ' .. notationString)
-  return notationString
-end
 
 local function eventToIdx(event)
   return event.chanmsg + (event.chan and event.chan or 0)
 end
 
 local function updateEventCount(event, counts, onlyNoteRow)
-  local char
   if getEventType(event) == gdefs.NOTE_TYPE and not onlyNoteRow then
     event.count = counts.noteCount + 1
     counts.noteCount = event.count
@@ -1359,13 +1082,26 @@ local function handleFindPostProcessing(found, unfound)
   return found, unfound
 end
 
-local function makeContextInfo(take)
+local function makeContextInfo(take, ctx)
   if take then
-    Shared.contextInfo = { take = take, tsInfo = {}, takeInfo = {} }
-    Shared.contextInfo.tsInfo.tsStart = getTimeSelectionStart()
-    Shared.contextInfo.tsInfo.tsEnd = getTimeSelectionEnd()
-    Shared.contextInfo.takeInfo.takeStart = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_POSITION') + getTimeOffset()
-    Shared.contextInfo.takeInfo.takeEnd = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_LENGTH') + Shared.contextInfo.takeInfo.takeStart
+    local info = {
+      take = take,
+      tsInfo = {
+        tsStart = getTimeSelectionStart(),
+        tsEnd = getTimeSelectionEnd(),
+      },
+      takeInfo = {
+        takeStart = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_POSITION') + getTimeOffset(),
+        takeEnd = nil, -- set below
+      },
+    }
+    info.takeInfo.takeEnd = r.GetMediaItemInfo_Value(r.GetMediaItemTake_Item(take), 'D_LENGTH') + info.takeInfo.takeStart
+
+    if ctx then
+      ctx:setContextInfo(info)
+    else
+      Shared.contextInfo = info
+    end
   end
 end
 
@@ -1517,9 +1253,14 @@ local function runFind(findFn, params, runFn)
   return found, contextTab, getUnfound and unfound or nil
 end
 
-local function fnStringToFn(fnString, errFn)
+local function fnStringToFn(fnString, errFn, ctx)
   local fn
-  local success, pret, err = pcall(load, fnString, nil, nil, context)
+  -- Add ctx to context table for generated code
+  local execContext = context
+  if ctx then
+    execContext = setmetatable({ ctx = ctx }, { __index = context })
+  end
+  local success, pret, err = pcall(load, fnString, nil, nil, execContext)
   if success and pret then
     fn = pret()
     Shared.parserError = ''
@@ -1530,7 +1271,15 @@ local function fnStringToFn(fnString, errFn)
 end
 Shared.fnStringToFn = fnStringToFn
 
-local function processFind(take, fromHasTable)
+local function processFind(take, fromHasTable, ctx)
+  -- Create or use provided context
+  ctx = ctx or globalCtx
+
+  -- Sync module-level locals TO context via reference assignment
+  -- (ctx fields point to SAME tables as module locals - read-only bridge during Phase 35)
+  -- No sync-back needed: mutations to ctx._allEvents mutate allEvents directly
+  ctx._allEvents = allEvents
+  ctx._selectedEvents = selectedEvents
 
   local fnString = ''
   local wantsEventPreprocessing = false
@@ -1557,7 +1306,6 @@ local function processFind(take, fromHasTable)
     local condition = curCondition
     local conditionVal = condition.text
     if row.isNot then conditionVal = 'not ( ' .. conditionVal .. ' )' end
-    local findTerm = ''
 
     -- this involves extra processing and is therefore only done if necessary
     if curTarget.notation == '$lastevent' then wantsEventPreprocessing = true
@@ -1629,16 +1377,19 @@ local function processFind(take, fromHasTable)
     findTerm = string.gsub(findTerm, '{param1}', tostring(paramTerms[1]))
     findTerm = string.gsub(findTerm, '{param2}', tostring(paramTerms[2]))
 
-    local isMetricGrid = paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID and true or false
-    local isMusical = paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL and true or false
+    local isMetricOrMusical = paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID
     local isEveryN = paramTypes[1] == gdefs.PARAM_TYPE_EVERYN and true or false
     local isEventSelector = paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR and true or false
 
-    if isMetricGrid or isMusical then
+    if isMetricOrMusical then
       local mgParams = tg.tableCopy(row.mg)
       mgParams.param1 = paramNums[1]
       mgParams.param2 = paramTerms[2]
-      findTerm = string.gsub(findTerm, isMetricGrid and '{metricgridparams}' or '{musicalparams}', tg.serialize(mgParams))
+      -- use condition definition flags for placeholder selection (NOT param type)
+      -- condition.metricgrid = true for :onmetricgrid (uses {metricgridparams})
+      -- condition.musical = true for :eqmusical (uses {musicalparams})
+      local placeholder = condition.metricgrid and '{metricgridparams}' or '{musicalparams}'
+      findTerm = string.gsub(findTerm, placeholder, tg.serialize(mgParams))
     elseif isEveryN then
       local evnParams = tg.tableCopy(row.evn)
       findTerm = string.gsub(findTerm, '{everyNparams}', tg.serialize(evnParams))
@@ -1675,6 +1426,15 @@ local function processFind(take, fromHasTable)
 
   fnString = 'return function(event, _value1, _value2)\nreturn ' .. fnString .. '\nend'
 
+  -- catch unsubstituted placeholders (regression guard)
+  local placeholder = fnString:match('{%w+}')
+  if placeholder then
+    local err = 'Unsubstituted placeholder in generated find code: ' .. placeholder
+    mu.post(err)
+    Shared.parserError = err
+    return nil
+  end
+
   if DEBUGPOST then
     mu.post('======== FIND FUN ========')
     mu.post(fnString)
@@ -1686,8 +1446,8 @@ local function processFind(take, fromHasTable)
   context.take = take
   if take then
     local cg, cs = r.MIDI_GetGrid(take)
-    Shared.gridInfo().currentGrid = cg or 0
-    Shared.gridInfo().currentSwing = cs or 0
+    ctx:gridInfo().currentGrid = cg or 0
+    ctx:gridInfo().currentSwing = cs or 0
   end -- 1.0 is QN, 1.5 dotted, etc.
   _, findFn = fnStringToFn(fnString, function(err)
     Shared.parserError = 'Fatal error: could not load selection criteria'
@@ -1696,7 +1456,7 @@ local function processFind(take, fromHasTable)
         Shared.parserError = Shared.parserError .. ' (Unmatched Parentheses)'
       end
     end
-  end)
+  end, ctx)
 
   if not fromHasTable then dirtyFind = true end
   return findFn, wantsEventPreprocessing, { type = rangeType, frStart = findRangeStart, frEnd = findRangeEnd }, fnString
@@ -1735,6 +1495,8 @@ local function actionTabsFromTarget(row)
     opTab = adefs.actionVelocityOperationEntries
   elseif notation == '$newevent' then
     opTab = adefs.actionNewEventOperationEntries
+  elseif notation == '$quantize' then
+    opTab = adefs.actionQuantizeOperationEntries
   else
     opTab = adefs.actionGenericOperationEntries
   end
@@ -1785,6 +1547,9 @@ local function actionTabsFromTarget(row)
   elseif notation == '$newevent' then
     param1Tab = fdefs.typeEntries -- no $syx
     param2Tab = adefs.newMIDIEventPositionEntries
+  elseif notation == '$quantize' then
+    param1Tab = { }
+    param2Tab = { }
   end
 
   return opTab, param1Tab, param2Tab, target, operation
@@ -1802,126 +1567,61 @@ local function defaultValueIfAny(row, operation, index)
 end
 Shared.defaultValueIfAny = defaultValueIfAny
 
-local function processActionMacroRow(buf)
-  local row = adefs.ActionRow()
-  local bufstart = 0
-  local findstart, findend
+----------------------------------------------------------------------------------------
+-- NOTATION DELEGATION (Phase 34)
 
-  row.targetEntry = 0
-  row.operationEntry = 0
+-- Helper table for Notation module (contains functions needed by notation parsing)
+local notationHelpers = {
+  findTabsFromTarget = findTabsFromTarget,
+  actionTabsFromTarget = actionTabsFromTarget,
+  getParamTypesForRow = getParamTypesForRow,
+  opIsBipolar = opIsBipolar,
+  check14Bit = check14Bit,
+  processParams = processParams,
+  defaultValueIfAny = defaultValueIfAny,
+  PARAM_PERCENT_RANGE = TransformerLib.PARAM_PERCENT_RANGE,
+  PARAM_PERCENT_BIPOLAR_RANGE = TransformerLib.PARAM_PERCENT_BIPOLAR_RANGE,
+  PARAM_PITCHBEND_RANGE = TransformerLib.PARAM_PITCHBEND_RANGE,
+  PARAM_PITCHBEND_BIPOLAR_RANGE = TransformerLib.PARAM_PITCHBEND_BIPOLAR_RANGE,
+}
 
-  for k, v in ipairs(adefs.actionTargetEntries) do
-    findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s*', bufstart)
-    if findstart and findend then
-      row.targetEntry = k
-      bufstart = findend + 1
-      -- mu.post('found target: ' .. v.label)
-      break
-    end
-  end
-
-  if row.targetEntry < 1 then return end
-
-  local opTab, _, _, target = actionTabsFromTarget(row) -- a little simpler than findTargets, no operation-based overrides (yet)
-  if not (target and opTab) then
-    mu.post('could not process action macro row: ' .. buf)
-    return false
-  end
-
-  -- do we need some way to filter out extraneous (/) chars?
-  for k, v in ipairs(opTab) do
-    -- mu.post('testing ' .. buf .. ' against ' .. '/^%s*' .. v.notation .. '%s+/')
-    local tryagain = true
-    findstart, findend = string.find(buf, '^%s*' .. v.notation .. '%s+', bufstart)
-    if findstart and findend then
-      local cachestart = bufstart
-      row.operationEntry = k
-      local _, param1Tab, _, _, operation = actionTabsFromTarget(row)
-      bufstart = findend + (buf[findend] ~= '(' and 1 or 0)
-
-      local _, _, param1 = string.find(buf, '^%s*([^%s%()]*)%s*', bufstart)
-      if tg.isValidString(param1) then
-        param1 = handleMacroParam(row, target, operation, param1Tab, param1, 1)
-        tryagain = false
-      else
-        if operation.terms == 0 then tryagain = false
-        else bufstart = cachestart end
-      end
-      if not tryagain then
-        row.params[1].textEditorStr = param1
-        break
-      end
-    end
-    if tryagain then
-      local param1, param2, param3
-      findstart, findend, param1, param2, param3 = string.find(buf, '^%s*' .. v.notation .. '%s*%(([^,]*)[,%s]*([^,]*)[,%s]*([^,]*)%)', bufstart)
-      if not (findstart and findend) then
-        findstart, findend, param1, param2 = string.find(buf, '^%s*' .. v.notation .. '%s*%(([^,]*)[,%s]*([^,]*)%)', bufstart)
-      end
-      if findstart and findend then
-        row.operationEntry = k
-
-        if param3 and v.param3 then
-          row.params[3] = tg.ParamInfo()
-          for p3k, p3v in pairs(v.param3) do row.params[3][p3k] = p3v end
-          row.params[3].textEditorStr = param3
-        else
-          row.params[3] = nil -- just to be safe
-          param3 = nil
-        end
-
-        if row.params[3] and row.params[3].parser then row.params[3].parser(row, param1, param2, param3)
-        else
-          local _, param1Tab, param2Tab, _, operation = actionTabsFromTarget(row)
-
-          if param2 and not tg.isValidString(param1) then param1 = param2 param2 = nil end
-          if tg.isValidString(param1) then
-            param1 = handleMacroParam(row, target, operation, param1Tab, param1, 1)
-          else
-            param1 = defaultValueIfAny(row, operation, 1)
-          end
-          if tg.isValidString(param2) then
-            param2 = handleMacroParam(row, target, operation, param2Tab, param2, 2)
-          else
-            param2 = defaultValueIfAny(row, operation, 2)
-          end
-          if tg.isValidString(param3) then
-            row.params[3].textEditorStr = param3 -- very primitive
-          end
-          row.params[1].textEditorStr = param1
-          row.params[2].textEditorStr = param2
-        end
-
-        -- mu.post(v.label .. ': ' .. (param1 and param1 or '') .. ' / ' .. (param2 and param2 or ''))
-        break
-      end
-    end
-  end
-
-  if row.targetEntry ~= 0 and row.operationEntry ~= 0 then
-    adefs.addActionRow(row)
-    return true
-  end
-
-  mu.post('Error parsing action: ' .. buf)
-  return false
+-- Local wrapper functions (for internal callers)
+local function processFindMacro(buf)
+  return Notation.processFindMacro(buf, notationHelpers)
 end
 
 local function processActionMacro(buf)
-  local bufstart = 0
-  local rowstart, rowend = string.find(buf, '%s+(&&)%s+')
-  while rowstart and rowend do
-    local rowbuf = string.sub(buf, bufstart, rowend)
-    -- mu.post('got row: ' .. rowbuf) -- process
-    processActionMacroRow(rowbuf)
-    bufstart = rowend + 1
-    rowstart, rowend = string.find(buf, '%s+(&&)%s+', bufstart)
-  end
-  -- last iteration
-  -- mu.post('last row: ' .. string.sub(buf, bufstart)) -- process
-  processActionMacroRow(string.sub(buf, bufstart))
+  return Notation.processActionMacro(buf, notationHelpers)
 end
 
+local function findRowToNotation(row, index)
+  return Notation.findRowToNotation(row, index, notationHelpers)
+end
+
+local function findRowsToNotation()
+  return Notation.findRowsToNotation(notationHelpers)
+end
+
+local function actionRowToNotation(row, index)
+  return Notation.actionRowToNotation(row, index, notationHelpers)
+end
+
+local function actionRowsToNotation()
+  return Notation.actionRowsToNotation(notationHelpers)
+end
+
+local function getParamPercentTerm(val, bipolar)
+  return Notation.getParamPercentTerm(val, bipolar)
+end
+
+-- Shared table delegations (for TransformerParam3 backward compat)
+Shared.handleMacroParam = function(row, target, condOp, paramTab, paramStr, index)
+  return Notation.handleMacroParam(row, target, condOp, paramTab, paramStr, index, notationHelpers)
+end
+
+Shared.getRowTextAndParameterValues = function(row)
+  return Notation.getRowTextAndParameterValues(row, notationHelpers)
+end
 
   ----------------------------------------------
   ---------------- ACTIONS TABLE ---------------
@@ -2089,66 +1789,6 @@ local function initializeTake(take)
   table.sort(allEvents, function(a, b) return a.projtime < b.projtime end )
 end
 
-local function getRowTextAndParameterValues(row)
-  local _, param1Tab, param2Tab, curTarget, curOperation = actionTabsFromTarget(row)
-  local rowText = curTarget.notation .. ' ' .. curOperation.notation
-
-  local paramTypes = getParamTypesForRow(row, curTarget, curOperation)
-
-  local param1Val, param2Val, param3Val = processParams(row, curTarget, curOperation, { param1Tab, param2Tab, {} }, true, { PPQ = 960 } )
-  if paramTypes[1] == gdefs.PARAM_TYPE_MENU then
-    param1Val = (curOperation.terms > 0 and #param1Tab) and param1Tab[row.params[1].menuEntry].notation or nil
-  end
-  if paramTypes[2] == gdefs.PARAM_TYPE_MENU then
-    param2Val = (curOperation.terms > 1 and #param2Tab) and param2Tab[row.params[2].menuEntry].notation or nil
-  end
-  return rowText, param1Val, param2Val, param3Val
-end
-Shared.getRowTextAndParameterValues = getRowTextAndParameterValues
-
-local function actionRowToNotation(row, index)
-  local rowText = ''
-
-  local _, _, _, _, curOperation = actionTabsFromTarget(row)
-
-  if row.params[3] and row.params[3].formatter then rowText = rowText .. row.params[3].formatter(row)
-  else
-    local param1Val, param2Val, param3Val
-    rowText, param1Val, param2Val, param3Val = getRowTextAndParameterValues(row)
-    if string.match(curOperation.notation, '[!]*%:') then
-      rowText = rowText .. '('
-      if tg.isValidString(param1Val) then
-        rowText = rowText .. param1Val
-        if tg.isValidString(param2Val) then
-          rowText = rowText .. ', ' .. param2Val
-          if tg.isValidString(param3Val) then
-            rowText = rowText .. ', ' .. param3Val
-          end
-        end
-      end
-      rowText = rowText .. ')'
-    else
-      if tg.isValidString(param1Val) then
-        rowText = rowText .. ' ' .. param1Val -- no param2 val without a function
-      end
-    end
-  end
-
-  if index and index ~= #adefs.actionRowTable() then
-    rowText = rowText .. ' && '
-  end
-  return rowText
-end
-
-local function actionRowsToNotation()
-  local notationString = ''
-  for k, v in ipairs(adefs.actionRowTable()) do
-    local rowText = actionRowToNotation(v, k)
-    notationString = notationString .. rowText
-  end
-  -- mu.post('action macro: ' .. notationString)
-  return notationString
-end
 
 local function deleteEventsInTake(take, eventTab, doTx)
   if doTx == true or doTx == nil then
@@ -2437,8 +2077,6 @@ local function newTakeInNewLane(take)
     local itemPos = r.GetMediaItemInfo_Value(item, 'D_POSITION')
     local itemLen = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
 
-    local trackid = r.GetMediaTrackInfo_Value(track, 'IP_TRACKNUMBER')
-
     local tmi = r.CountTrackMediaItems(track)
     local lastItem = r.GetTrackMediaItem(track, tmi - 1)
     if lastItem then
@@ -2489,7 +2127,10 @@ local function grabAllTakes()
   return takes
 end
 
-local function processActionForTake(take)
+local function processActionForTake(take, ctx)
+  -- ctx is optional for backward compat
+  ctx = ctx or globalCtx
+
   local fnString = ''
 
   context.PPQ = take and mu.MIDI_GetPPQ(take) or 960
@@ -2510,7 +2151,6 @@ local function processActionForTake(take)
     local targetTerm = curTarget.text
     local operation = curOperation
     local operationVal = operation.text
-    local actionTerm = ''
 
     local paramTerms = { processParams(v, curTarget, curOperation, { param1Tab, param2Tab, {} }, false, context) }
 
@@ -2544,14 +2184,51 @@ local function processActionForTake(take)
       actionTerm = string.gsub(actionTerm, '{param3}', row.params[3].funArg and row.params[3].funArg(row, curTarget, curOperation, paramTerms[3]) or row.params[3].textEditorStr)
     end
 
-    local isMusical = paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL and true or false
-    if isMusical then
-      local mgParams = tg.tableCopy(row.mg)
-      mgParams.param1 = paramNums[1]
-      mgParams.param2 = paramTerms[2]
+    -- musical operations have operation.musical = true OR operation.split[1].musical = true
+    -- after unification, paramTypes[1] is METRICGRID for both musical and metricgrid types
+    -- check both top-level and split[1] for musical flag
+    local opMusical = operation.musical or (operation.split and operation.split[1] and operation.split[1].musical)
+    local isMusicalAction = paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID and opMusical
+    if isMusicalAction then
+      local mgParams = row.mg and tg.tableCopy(row.mg) or {}
+      mgParams.param1 = paramNums[1] or -1  -- default to REAPER grid if notation parsing failed
+      mgParams.param2 = paramTerms[2] or '100'  -- default to 100% strength
+      mgParams.modifiers = mgParams.modifiers or 0  -- ensure modifiers exists
+      mgParams.swing = mgParams.swing or 50  -- default swing value
+      mgParams.roundmode = mgParams.roundmode or 'round'  -- default round mode
+
+      -- inject groove data from quantizeParams (Phase 23 gap closure)
+      if row.quantizeParams and row.quantizeParams.grooveData then
+        mgParams.isGroove = true
+        mgParams.groove = {
+          data = row.quantizeParams.grooveData,
+          direction = row.quantizeParams.grooveDirection or 0,
+          velStrength = row.quantizeParams.grooveVelStrength or 0,
+          toleranceMin = row.quantizeParams.grooveToleranceMin or 0,
+          toleranceMax = row.quantizeParams.grooveToleranceMax or 100,
+        }
+      end
+
       local serialized = tg.serialize(mgParams)
       -- use function replacement to avoid % escape issues in serialized data
       actionTerm = string.gsub(actionTerm, '{musicalparams}', function() return serialized end)
+    end
+
+    -- handle quantize via type's codeTemplate (Phase 27)
+    -- detectType checks for src.quantize == true; curTarget (action def from ActionDefs)
+    -- has this flag, not row.params[1] (param data)
+    local isQuantize = paramTypes[1] == gdefs.PARAM_TYPE_QUANTIZE and true or false
+    if isQuantize then
+      local _, typeDef = TypeRegistry.detectType(curTarget)
+      if typeDef and typeDef.codeTemplate then
+        local code
+        if type(typeDef.codeTemplate) == 'function' then
+          code = typeDef.codeTemplate(row, ctx)
+        else
+          code = typeDef.codeTemplate
+        end
+        actionTerm = code
+      end
     end
 
     local isNewMIDIEvent = paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT and true or false
@@ -2574,6 +2251,15 @@ local function processActionForTake(take)
 
   fnString = 'return function(event, _value1, _value2, _context)\n' .. fnString .. '\n return event' .. '\nend'
 
+  -- catch unsubstituted placeholders (regression guard)
+  local placeholder = fnString:match('{%w+}')
+  if placeholder then
+    local err = 'Unsubstituted placeholder in generated action code: ' .. placeholder
+    mu.post(err)
+    Shared.parserError = err
+    return nil
+  end
+
   if DEBUGPOST then
     mu.post('======== ACTION FUN ========')
     mu.post(fnString)
@@ -2590,7 +2276,10 @@ local function itemInTable(it, t)
   return false
 end
 
-local function processAction(execute, fromScript, skipUndo)
+local function processAction(execute, fromScript, skipUndo, ctx)
+  -- Create or use provided context
+  ctx = ctx or globalCtx
+
   mediaItemCount = nil
   mediaItemIndex = nil
 
@@ -2660,16 +2349,16 @@ local function processAction(execute, fromScript, skipUndo)
 
   -- fast early return after sanity check
   if not execute then
-    local findFn = processFind()
+    local findFn = processFind(nil, nil, ctx)
     if findFn then
-      local fnString = processActionForTake()
+      local fnString = processActionForTake(nil, ctx)
       if fnString then
         fnStringToFn(fnString, function(err)
           if err then
             mu.post(err)
           end
           Shared.parserError = 'Fatal error: could not load action description'
-        end)
+        end, ctx)
       else
         Shared.parserError = 'Fatal error: could not load action description'
       end
@@ -2686,24 +2375,24 @@ local function processAction(execute, fromScript, skipUndo)
     local take = v.take
     initializeTake(take)
 
-    makeContextInfo(take)
+    makeContextInfo(take, ctx)
 
-    Shared.moveCursorInfo().moveCursorFirstEventPosition_Take = nil
-    Shared.addLengthInfo().addLengthFirstEventOffset_Take = nil
-    Shared.addLengthInfo().addLengthFirstEventStartTime = nil
+    ctx:moveCursorInfo().moveCursorFirstEventPosition_Take = nil
+    ctx:addLengthInfo().addLengthFirstEventOffset_Take = nil
+    ctx:addLengthInfo().addLengthFirstEventStartTime = nil
 
     local actionFn
     local actionFnString
-    local findFn, wantsEventPreprocessing, findRange, findFnString = processFind(take, nil)
+    local findFn, wantsEventPreprocessing, findRange, findFnString = processFind(take, nil, ctx)
     if findFn then
-      actionFnString = processActionForTake(take)
+      actionFnString = processActionForTake(take, ctx)
       if actionFnString then
         _, actionFn = fnStringToFn(actionFnString, function(err)
           if err then
             mu.post(err)
           end
           Shared.parserError = 'Fatal error: could not load action description'
-        end)
+        end, ctx)
       else
         Shared.parserError = 'Fatal error: could not load action description'
       end
@@ -2864,6 +2553,23 @@ local function getCurrentPresetState()
     if ppFlags & fdefs.FIND_POSTPROCESSING_FLAG_LASTEVENT ~= 0 then table.insert(ppInfo.flags, '$lastevent') end
   end
 
+  -- serialize action rows with structured data (for quantizeParams)
+  local actionRows = {}
+  for k, v in ipairs(adefs.actionRowTable()) do
+    local row = {
+      targetEntry = v.targetEntry,
+      operationEntry = v.operationEntry,
+    }
+    if v.quantizeParams then
+      row.quantizeParams = tg.tableCopy(v.quantizeParams)
+      -- convert grooveFilePath to portable format for cross-system compatibility
+      if row.quantizeParams.grooveFilePath then
+        row.quantizeParams.grooveFilePath = tg.toPortablePath(row.quantizeParams.grooveFilePath)
+      end
+    end
+    table.insert(actionRows, row)
+  end
+
   local presetTab = {
     findScope = fdefs.findScopeTable[currentFindScope].notation,
     findScopeFlags = fsFlags,
@@ -2871,6 +2577,7 @@ local function getCurrentPresetState()
     findPostProcessing = ppInfo,
     actionScope = adefs.actionScopeTable[currentActionScope].notation,
     actionMacro = actionRowsToNotation(),
+    actionRows = actionRows,
     actionScopeFlags = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation,
     notes = libPresetNotesBuffer,
     scriptIgnoreSelectionInArrangeView = false,
@@ -2971,6 +2678,21 @@ local function loadPresetFromTable(presetTab)
   processFindMacro(presetTab.findMacro)
   adefs.clearActionRowTable()
   processActionMacro(presetTab.actionMacro)
+
+  -- restore quantizeParams from structured actionRows (if present)
+  if presetTab.actionRows then
+    local actionRowTable = adefs.actionRowTable()
+    for k, presetRow in ipairs(presetTab.actionRows) do
+      if actionRowTable[k] and presetRow.quantizeParams then
+        actionRowTable[k].quantizeParams = tg.tableCopy(presetRow.quantizeParams)
+        -- convert portable grooveFilePath back to absolute
+        if actionRowTable[k].quantizeParams.grooveFilePath then
+          actionRowTable[k].quantizeParams.grooveFilePath = tg.fromPortablePath(actionRowTable[k].quantizeParams.grooveFilePath)
+        end
+      end
+    end
+  end
+
   scriptIgnoreSelectionInArrangeView = presetTab.scriptIgnoreSelectionInArrangeView
   tg.setNotesInChord(presetTab.notesInChord)
   currentStripRepetitions = presetTab.stripRepetitions
@@ -3017,9 +2739,12 @@ local function setRowParam(row, index, paramType, editorType, strVal, range, lit
   local isMetricOrMusical = (paramType == gdefs.PARAM_TYPE_METRICGRID or paramType == gdefs.PARAM_TYPE_MUSICAL)
   local isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
   local isBitField = editorType == gdefs.EDITOR_TYPE_BITFIELD
+  local isQuantize = paramType == gdefs.PARAM_TYPE_QUANTIZE
+  local isSpecial = (isMetricOrMusical or isBitField or isNewMIDIEvent or isQuantize)
+
   -- here is where range is enforced after text entry (in ensureNumString)
-  row.params[index].textEditorStr = (isMetricOrMusical or isBitField or isNewMIDIEvent) and strVal or tg.ensureNumString(strVal, range)
-  if (isMetricOrMusical or isBitField or isNewMIDIEvent) or not editorType then
+  row.params[index].textEditorStr = isSpecial and strVal or tg.ensureNumString(strVal, range)
+  if isSpecial or not editorType then
     row.params[index].percentVal = nil
     -- nothing
   else
@@ -3196,6 +2921,7 @@ TransformerLib.processActionMacro = processActionMacro
 
 TransformerLib.processFind = processFind
 TransformerLib.processAction = processAction
+TransformerLib.processActionForTake = processActionForTake
 
 TransformerLib.savePreset = savePreset
 TransformerLib.loadPreset = loadPreset
@@ -3337,6 +3063,11 @@ TransformerLib.isANote = isANote
 
 TransformerLib.getWantsStripRepetitions = function() return currentStripRepetitions end
 TransformerLib.setWantsStripRepetitions = function(way) currentStripRepetitions = way and true or false end
+
+TransformerLib.TypeRegistry = TypeRegistry
+
+TransformerLib.TransformerContext = TransformerContext
+TransformerLib.getGlobalContext = function() return globalCtx end
 
 return TransformerLib
 

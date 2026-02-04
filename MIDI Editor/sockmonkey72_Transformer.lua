@@ -1,18 +1,19 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.3
+-- @version 1.1.0-beta.4
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - Live preview mode overhaul: replaced bypass checkbox with momentary preview button (hold to preview, opt-click to latch)
---   - User edits during preview now preserved (if possible) on exit (selection, velocity, pitch, position changes)
---   - Conflict dialog when unreconcilable user edits detected during preview
---   - Undo Edit option in conflict dialog to discard changes and re-apply quantize
---   - Focus returns to MIDI editor on script exit
---   - Apply button always enabled when preview active
+--   - retrofit Quantize standalone as an Action in the main script
+--   - main script can load quantPreset files (in addition to tfmrPreset)
+--   - big refactor to reduce organic growth tech debt and simplify future additions
+--   - lots of tests added to reduce breakage potential of future expansion
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
+--   Transformer/tests/*
+--   Transformer/tests/helpers/*
+--   Transformer/types/*
 --   {Transformer}/{lib}/{SMFParser}/*
 --   Transformer/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua
 --   Transformer Presets/Factory Presets/**/*.tfmrPreset > ../$path
@@ -21,23 +22,41 @@
 
 -----------------------------------------------------------------------------
 
+-- copyright (c) 2026 Jeremy Bernstein
 -- note that the @provides path with $path only works due to a reapack-index hack (at the moment)
 
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.1.0-beta.1'
+local versionStr = '1.1.0-beta.4'
 
 local r = reaper
 
 -- local fontStyle = 'monospace'
 local fontStyle = 'sans-serif'
 
-package.path = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]..'Transformer/?.lua'
+-- resolve library path relative to script location
+local scriptPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
+local function fileExists(path)
+  local f = io.open(path, 'r')
+  if f then f:close() return true end
+  return false
+end
+if fileExists(scriptPath .. 'TransformerLib.lua') then
+  package.path = scriptPath .. '?.lua;' .. package.path
+elseif fileExists(scriptPath .. 'Transformer/TransformerLib.lua') then
+  package.path = scriptPath .. 'Transformer/?.lua;' .. package.path
+end
+
 local tx = require 'TransformerLib'
 local mu = tx.mu
 local tg = require 'TransformerGlobal'
 local gdefs = require 'TransformerGeneralDefs'
+local quantizeUI = require 'TransformerQuantizeUI'
+local mgdefs = require 'types/TransformerMetricGrid'
+local evndefs = require 'types/TransformerEveryN'
+local nmedefs = require 'types/TransformerNewMIDIEvent'
+local evseldefs = require 'types/TransformerEventSelector'
 -- NOTE: do NOT use Shared here, it will work, but that's not what it's for
 
 local canStart = true
@@ -93,14 +112,15 @@ local scriptID = 'sockmonkey72_Transformer'
 local ctx = ImGui.CreateContext(scriptID)
 ImGui.SetConfigVar(ctx, ImGui.ConfigVar_DockingWithShift, 1)
 
-local IMAGEBUTTON_SIZE = 13
-local GearImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'gear_40031.png')
+-- local iconPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/'
+local iconPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'icons/'
+local GearImage = ImGui.CreateImage(iconPath .. 'gear_40031.png')
 if GearImage then ImGui.Attach(ctx, GearImage) end
-local UndoImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'left-arrow_9144323.png')
+local UndoImage = ImGui.CreateImage(iconPath .. 'left-arrow_9144323.png')
 if UndoImage then ImGui.Attach(ctx, UndoImage) end
-local RedoImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'right-arrow_9144322.png')
+local RedoImage = ImGui.CreateImage(iconPath .. 'right-arrow_9144322.png')
 if RedoImage then ImGui.Attach(ctx, RedoImage) end
-local FocusImage = ImGui.CreateImage(debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]] .. 'Transformer/icons/' .. 'focus.png')
+local FocusImage = ImGui.CreateImage(iconPath .. 'focus.png')
 if FocusImage then ImGui.Attach(ctx, FocusImage) end
 
 -----------------------------------------------------------------------------
@@ -110,10 +130,18 @@ local showConsoles = false
 
 local viewPort
 
+-- preset path: determine how many dirs to go up based on script location
+-- in Transformer/ (dev): go 2 levels up to sockmonkey72 Scripts/
+-- in MIDI Editor/ (deploy): go 1 level up to sockmonkey72 Scripts/
 local presetPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
-presetPath = presetPath:gsub('(.*[/\\]).*[/\\]', '%1Transformer Presets')
+if presetPath:match('[/\\]Transformer[/\\]?$') then
+  -- dev: script in Transformer/, go up 2 levels
+  presetPath = presetPath:gsub('(.*[/\\]).*[/\\].*[/\\]$', '%1Transformer Presets')
+else
+  -- deploy: script in MIDI Editor/, go up 1 level
+  presetPath = presetPath:gsub('(.*[/\\]).*[/\\]$', '%1Transformer Presets')
+end
 
--- local presetPath = r.GetResourcePath() .. '/Scripts/Transformer Presets'
 local scriptPrefix = 'Xform_'
 local scriptPrefix_Empty = '<no prefix>'
 local presetExt = '.tfmrPreset'
@@ -215,6 +243,65 @@ local defaultActionRow
 
 local inTextInput = false
 
+-- Quantize child window state
+local showQuantizeConfig = false
+local quantizeWorkingParams = nil
+local grooveErrorMessage = nil  -- inline error for groove loading
+
+-- groove browser state (shared with child window)
+local grooveBrowserState = {
+  rgtRootPath = nil,
+  rgtSubPath = nil,
+  midiRootPath = nil,
+  midiSubPath = nil
+}
+
+-- initialize from ExtState
+local function initGrooveBrowserState()
+  tg.initCache() -- ensure cache populated (perf)
+  local defaultRgtPath = tg.cache.resourcePath .. '/Data/Grooves'
+  if not tg.dirExists(defaultRgtPath) then
+    defaultRgtPath = tg.cache.resourcePath .. '/Grooves'
+  end
+  if tg.dirExists(defaultRgtPath) then
+    grooveBrowserState.rgtRootPath = defaultRgtPath
+  end
+
+  if r.HasExtState('sockmonkey72_TransformerQuantize', 'rgtRootPath') then
+    local val = r.GetExtState('sockmonkey72_TransformerQuantize', 'rgtRootPath')
+    if val ~= '' and tg.dirExists(val) then grooveBrowserState.rgtRootPath = val end
+  end
+  if r.HasExtState('sockmonkey72_TransformerQuantize', 'rgtSubPath') then
+    local val = r.GetExtState('sockmonkey72_TransformerQuantize', 'rgtSubPath')
+    if val ~= '' and tg.dirExists(val) then grooveBrowserState.rgtSubPath = val end
+  end
+  if r.HasExtState('sockmonkey72_TransformerQuantize', 'midiRootPath') then
+    local val = r.GetExtState('sockmonkey72_TransformerQuantize', 'midiRootPath')
+    if val ~= '' and tg.dirExists(val) then grooveBrowserState.midiRootPath = val end
+  end
+  if r.HasExtState('sockmonkey72_TransformerQuantize', 'midiSubPath') then
+    local val = r.GetExtState('sockmonkey72_TransformerQuantize', 'midiSubPath')
+    if val ~= '' and tg.dirExists(val) then grooveBrowserState.midiSubPath = val end
+  end
+end
+
+-- groove helpers for quantize UI (use shared implementations)
+local function parseMIDIGrooveWrapper(filepath, opts)
+  local thresholdModes = { [0] = 'ticks', [1] = 'ms', [2] = 'percent' }
+  local coalesceModes = { [0] = 'first', [1] = 'loudest' }
+  return mgdefs.parseMIDIGroove(filepath, {
+    threshold = opts.threshold or 10,
+    thresholdMode = thresholdModes[opts.thresholdMode or 1] or 'ms',
+    coalescingMode = coalesceModes[opts.coalesceMode or 0] or 'first'
+  })
+end
+
+local grooveHelpers = {
+  enumerateGrooveFiles = tg.enumerateGrooveFiles,
+  parseGrooveFile = function(fp) return mgdefs.parseGrooveFile(fp) end,
+  parseMIDIGroove = parseMIDIGrooveWrapper
+}
+
 -- should be global
 NewHasTable = false
 
@@ -296,6 +383,151 @@ local function positionModalWindow(yOff, yScale)
   end
   ImGui.SetNextWindowPos(ctx, okPosX, okPosY)
   --ImGui.SetNextWindowPos(ctx, ImGui.GetMousePos(ctx))
+end
+
+-- render widget definitions returned by type's renderUI
+local function renderTypeWidgets(widgets)
+  if not widgets then return false end
+  local changed = false
+  for i, def in ipairs(widgets) do
+    if i > 1 then ImGui.SameLine(ctx) end
+
+    if def.widget == 'text' then
+      ImGui.TextDisabled(ctx, def.value or '')
+    elseif def.widget == 'button' then
+      if ImGui.Button(ctx, def.label or 'Button') then
+        if def.onClick then def.onClick() end
+      end
+    elseif def.widget == 'combo' then
+      ImGui.SetNextItemWidth(ctx, def.width or 150)
+      local rv, val = ImGui.Combo(ctx, '##' .. (def.label or 'combo'), def.value or 0, def.items or '')
+      if rv and def.onChange then
+        def.onChange(val)
+        changed = true
+      end
+    elseif def.widget == 'slider' then
+      ImGui.SetNextItemWidth(ctx, def.width or 150)
+      local rv, val = ImGui.SliderInt(ctx, '##' .. (def.label or 'slider'), def.value or 0, def.min or 0, def.max or 100, def.format or '%d')
+      if rv and def.onChange then
+        def.onChange(val)
+        changed = true
+      end
+    elseif def.widget == 'checkbox' then
+      local rv, val = ImGui.Checkbox(ctx, def.label or '', def.value or false)
+      if rv and def.onChange then
+        def.onChange(val)
+        changed = true
+      end
+    end
+  end
+  return changed
+end
+
+local function renderQuantizeChildWindow()
+  if not showQuantizeConfig then return end
+
+  -- get current action row
+  local actionRows = tx.actionRowTable()
+  local currentRow = actionRows[selectedActionRow]
+  if not currentRow then
+    showQuantizeConfig = false
+    return
+  end
+
+  -- check if still a Quantize action
+  local _, _, _, currentActionTarget = tx.actionTabsFromTarget(currentRow)
+  if not currentActionTarget or not currentActionTarget.quantize then
+    showQuantizeConfig = false
+    return
+  end
+
+  -- position modal window (centered on parent)
+  local childW, childH = 355, 520
+  local winPosX, winPosY = ImGui.Viewport_GetPos(viewPort)
+  local winSizeX, winSizeY = ImGui.Viewport_GetSize(viewPort)
+  ImGui.SetNextWindowPos(ctx, winPosX + (winSizeX / 2) - (childW / 2),
+                              winPosY + (winSizeY / 2) - (childH / 2))
+  ImGui.SetNextWindowSize(ctx, childW, childH)
+
+  -- open popup if not already open
+  if not ImGui.IsPopupOpen(ctx, 'Quantize Configuration') then
+    ImGui.OpenPopup(ctx, 'Quantize Configuration')
+  end
+
+  local popupVisible, popupOpen = ImGui.BeginPopupModal(ctx, 'Quantize Configuration', true,
+      ImGui.WindowFlags_NoResize | ImGui.WindowFlags_NoMove)
+
+  -- X button clicked
+  if not popupOpen then
+    quantizeWorkingParams = nil
+    showQuantizeConfig = false
+  end
+
+  if popupVisible then
+    -- initialize working params if needed
+    if not quantizeWorkingParams then
+      quantizeWorkingParams = currentRow.quantizeParams and tg.tableCopy(currentRow.quantizeParams) or quantizeUI.defaultParams()
+    end
+
+    -- render the UI
+    local _, inputDeactivated = quantizeUI.render(ctx, ImGui, quantizeWorkingParams, {
+      hideScope = true,  -- Transformer handles scope via find rows
+      inlineSettingsTarget = true,  -- Settings + Target on same row
+      itemWidth = 275,  -- match standalone width
+      grooveHelpers = grooveHelpers,
+      grooveBrowserState = grooveBrowserState,
+      grooveErrorMessage = grooveErrorMessage,
+      r = r  -- reaper alias
+    })
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    -- OK/Cancel buttons
+    local buttonWidth = 80
+    local startX = ImGui.GetCursorPosX(ctx)
+    local availWidth = ImGui.GetContentRegionAvail(ctx)
+    ImGui.SetCursorPosX(ctx, startX + (availWidth - buttonWidth * 2 - 10) / 2)
+
+    if ImGui.Button(ctx, 'OK', buttonWidth, 0) then
+      -- save working params to action row
+      currentRow.quantizeParams = tg.tableCopy(quantizeWorkingParams)
+      quantizeWorkingParams = nil
+      showQuantizeConfig = false
+      doActionUpdate()
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.SameLine(ctx)
+
+    if ImGui.Button(ctx, 'Cancel', buttonWidth, 0) then
+      -- discard working params
+      quantizeWorkingParams = nil
+      showQuantizeConfig = false
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    -- keyboard shortcuts (only when no input field active or just deactivated)
+    if ImGui.IsWindowFocused(ctx, ImGui.FocusedFlags_RootAndChildWindows)
+       and not ImGui.IsAnyItemActive(ctx)
+       and not inputDeactivated then
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter) then
+        currentRow.quantizeParams = tg.tableCopy(quantizeWorkingParams)
+        quantizeWorkingParams = nil
+        showQuantizeConfig = false
+        doActionUpdate()
+        ImGui.CloseCurrentPopup(ctx)
+      end
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+        quantizeWorkingParams = nil
+        showQuantizeConfig = false
+        ImGui.CloseCurrentPopup(ctx)
+      end
+    end
+
+    ImGui.EndPopup(ctx)
+  end
 end
 
 local function addFindRow(idx, row)
@@ -573,7 +805,7 @@ local function handleExtState()
   end
 end
 
-local _, _, sectionID, commandID = reaper.get_action_context()
+local _, _, sectionID, commandID = r.get_action_context()
 
 local function prepRandomShit()
   r.set_action_options(1)
@@ -717,6 +949,23 @@ local function setPresetNotesBuffer(buf)
   tx.setPresetNotesBuffer(presetNotesBuffer)
 end
 
+local function importQuantizePreset(filepath)
+  local f = io.open(filepath, 'r')
+  if not f then return nil, 'Failed to open file' end
+
+  local content = f:read('*all')
+  f:close()
+
+  local preset = tg.deserialize(content)
+  if not preset then return nil, 'Failed to deserialize' end
+
+  if not preset.quantizeUI then
+    return nil, 'Not a valid .quantPreset file'
+  end
+
+  return preset.quantizeUI
+end
+
 local function endPresetLoad(pLabel, notes, ignoreSelectInArrange)
   overrideEditorTypeForAllRows()
   presetNameTextBuffer = pLabel
@@ -779,8 +1028,11 @@ local function handleKeys(handledEscape)
   -- local optdown = mods & 16 ~= 0
   -- local PPQCent = math.floor(PPQ * 0.01) -- for BBU conversion
 
-  -- escape key kills our arrow key focus
-  if not handledEscape and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+  -- escape key kills our arrow key focus (skip if popup is open)
+  if not handledEscape
+    and not ImGui.IsPopupOpen(ctx, '', ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel)
+    and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape)
+  then
     if focusKeyboardHere then focusKeyboardHere = nil
     else
       isClosing = true
@@ -800,7 +1052,10 @@ local function handleKeys(handledEscape)
     end
   end
 
-  if not inTextInput and ImGui.GetKeyMods(ctx) == ImGui.Mod_Ctrl then
+  if not inTextInput
+    and not ImGui.IsPopupOpen(ctx, '', ImGui.PopupFlags_AnyPopupId + ImGui.PopupFlags_AnyPopupLevel)
+    and ImGui.GetKeyMods(ctx) == ImGui.Mod_Ctrl
+  then
     if ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) then
       handledKey = true
       if lastSelectedRowType == 0 then
@@ -961,8 +1216,8 @@ local function windowFn()
     local ibSize = FONTSIZE_LARGE * canvasScale
 
     local x = ImGui.GetContentRegionMax(ctx)
-    local frame_padding_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
-    ImGui.SetCursorPosX(ctx, x - ibSize - (frame_padding_x * 2))
+    -- use cached framePaddingX (perf)
+    ImGui.SetCursorPosX(ctx, x - ibSize - (framePaddingX * 2))
 
     ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, 0x333355FF)
 
@@ -981,7 +1236,7 @@ local function windowFn()
         ImGui.CloseCurrentPopup(ctx)
         handledEscape = true
       end
-      local rv, selected, v
+      local rv, v
 
       ImGui.BeginDisabled(ctx)
       ImGui.Text(ctx, 'Version ' .. versionStr)
@@ -1079,7 +1334,8 @@ local function windowFn()
     ImGui.PushFont(ctx, fontInfo.small)
     ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFFFFEF)
     local tw, th = ImGui.CalcTextSize(ctx, label)
-    local fp = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding) / 2
+    -- use cached framePaddingX (perf)
+    local fp = framePaddingX / 2
     local minx = ix + 2
     local miny = iy - ImGui.GetTextLineHeight(ctx) - 3
     ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx), minx - fp, miny - fp, minx + tw + fp + 2, miny + th + fp + 1, 0xFFFFFF2F)
@@ -1098,7 +1354,6 @@ local function windowFn()
       ImGui.SameLine(ctx)
     end
     updateCurrentRect()
-    local oldX, oldY = ImGui.GetCursorPos(ctx)
     generateLabel(label)
     ImGui.SetCursorPosY(ctx, restoreY)
   end
@@ -1144,7 +1399,7 @@ local function windowFn()
     ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, 0x333355FF)
 
     if inNewFolderDialog then
-      positionModalWindow(ImGui.GetFrameHeight(ctx) / 2, 1.2)
+      positionModalWindow(currentFrameHeight / 2, 1.2)
       ImGui.OpenPopup(ctx, title)
     elseif folderNameTextBuffer:len() ~= 0
       and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
@@ -1316,12 +1571,57 @@ local function windowFn()
 
         if rv or srv then
           if selected or srv then
-            local filename = source[i].label .. presetExt
-            local success, notes, ignoreSelectInArrange = tx.loadPreset(path .. '/' .. filename)
-            if success then
-              presetLabel = source[i].label
-              endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
-              presetIsEdited = false
+            -- check if .quantPreset exists first
+            local quantFilepath = path .. '/' .. source[i].label .. quantPresetExt
+            local qf = io.open(quantFilepath, 'r')
+            if qf then
+              qf:close()
+              -- import .quantPreset
+              local params, err = importQuantizePreset(quantFilepath)
+              if params then
+                tx.clearFindRows()
+                tx.clearActionRows()
+                selectedFindRow = 0
+                selectedActionRow = 0
+
+                -- find Quantize target index
+                local quantizeTargetIdx = nil
+                for k, v in ipairs(tx.actionTargetEntries) do
+                  if v.notation == '$quantize' then
+                    quantizeTargetIdx = k
+                    break
+                  end
+                end
+
+                if quantizeTargetIdx then
+                  local row = tx.ActionRow()
+                  row.targetEntry = quantizeTargetIdx
+                  row.quantizeParams = params
+                  table.insert(tx.actionRowTable(), row)
+                  selectedActionRow = 1
+                  lastSelectedRowType = 1
+
+                  presetLabel = source[i].label
+                  presetIsEdited = false
+                  statusMsg = 'Imported: ' .. source[i].label
+                  statusTime = r.time_precise()
+                  statusContext = 2
+                  doActionUpdate()
+                end
+              else
+                statusMsg = 'Error: ' .. (err or 'unknown')
+                statusTime = r.time_precise()
+                statusContext = 2
+              end
+            else
+              -- load .tfmrPreset
+              local filename = source[i].label .. presetExt
+              local success, notes, ignoreSelectInArrange = tx.loadPreset(path .. '/' .. filename)
+              if success then
+                presetLabel = source[i].label
+                endPresetLoad(presetLabel, notes, ignoreSelectInArrange)
+                presetIsEdited = false
+              end
             end
           end
           ImGui.CloseCurrentPopup(ctx)
@@ -1655,6 +1955,7 @@ local function windowFn()
     flags.isNewMIDIEvent = paramType == gdefs.PARAM_TYPE_NEWMIDIEVENT
     flags.isParam3 = condOp.param3 and paramType ~= gdefs.PARAM_TYPE_MENU -- param3 exception -- make this nicer
     flags.isEventSelector = paramType == gdefs.PARAM_TYPE_EVENTSELECTOR
+    flags.isQuantize = paramType == gdefs.PARAM_TYPE_QUANTIZE
 
     if flags.isParam3 and condOp.param3.tableParamType and condOp.param3.tableParamType[index] then
       paramType = condOp.param3.tableParamType[index]
@@ -1668,6 +1969,7 @@ local function windowFn()
       or flags.isNewMIDIEvent
       or flags.isParam3
       or flags.isEventSelector
+      or flags.isQuantize
     then
       paramType = gdefs.PARAM_TYPE_MENU
     end
@@ -1677,7 +1979,7 @@ local function windowFn()
       local target = targetTab[row.targetEntry]
 
       if paramType == gdefs.PARAM_TYPE_MENU then
-        local canOpen = (flags.isEveryN or flags.isParam3 or flags.isEventSelector) and true or #paramTab ~= 0
+        local canOpen = (flags.isEveryN or flags.isParam3 or flags.isEventSelector or flags.isNewMIDIEvent) and true or #paramTab ~= 0
         local paramEntry = paramTab[row.params[index].menuEntry]
         local label =  #paramTab ~= 0 and paramEntry.label or '---'
         if flags.isEveryN then
@@ -1707,6 +2009,8 @@ local function windowFn()
             .. (row.evsel.chanmsg == 0x90 and mu.MIDI_NoteNumberToNoteName(row.evsel.msg2) or tostring(row.evsel.msg2))
             .. ')'
           end
+        elseif flags.isQuantize then
+          label = 'Quantize'
         end
         if flags.isMetricOrMusical and paramEntry.notation ~= '$grid' then
           local mgMods, mgReaSwing = tx.getMetricGridModifiers(row.mg)
@@ -1740,26 +2044,42 @@ local function windowFn()
           end
         end
       elseif paramType == gdefs.PARAM_TYPE_TIME or paramType == gdefs.PARAM_TYPE_TIMEDUR then
-        ImGui.BeginGroup(ctx)
-        local retval, buf = ImGui.InputText(ctx, '##' .. 'param' .. index .. 'Edit', row.params[index].timeFormatStr, ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
-        if kbdEntryIsCompleted(retval) then
-          row.params[index].timeFormatStr = paramType == gdefs.PARAM_TYPE_TIMEDUR and tx.lengthFormatRebuf(buf) or tx.timeFormatRebuf(buf)
-          procFn()
-          inTextInput = false
-        elseif retval then inTextInput = true
-        end
-        local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
-        if rangelabel then
-          ImGui.SameLine(ctx)
-          ImGui.AlignTextToFramePadding(ctx)
-          ImGui.PushFont(ctx, fontInfo.small)
-          ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
-          ImGui.PopFont(ctx)
-        end
-        ImGui.EndGroup(ctx)
-        if ImGui.IsItemHovered(ctx) then
-          if ImGui.IsMouseClicked(ctx, 0) then
-            rv = true
+        -- delegate to type's renderUI
+        local typeName = paramType == gdefs.PARAM_TYPE_TIME and 'time' or 'timedur'
+        local typeDef = tx.TypeRegistry.getType(typeName)
+        if typeDef and typeDef.renderUI then
+          ImGui.BeginGroup(ctx)
+          local widgets = typeDef.renderUI(ctx, ImGui, row, index, {
+            onChange = procFn,
+            textFlags = ImGui.InputTextFlags_CallbackCharFilter,
+            timeFormatCallback = timeFormatOnlyCallback,
+          })
+          if widgets then
+            for _, widget in ipairs(widgets) do
+              if widget.widget == 'text' then
+                local retval, buf = ImGui.InputText(ctx, '##' .. 'param' .. index .. 'Edit', widget.value, widget.flags or 0, widget.callback)
+                if kbdEntryIsCompleted(retval) then
+                  if widget.onChange then widget.onChange(buf) end
+                  inTextInput = false
+                elseif retval then inTextInput = true
+                end
+              end
+            end
+          end
+          -- rangelabel handling preserved
+          local rangelabel = condOp.split and condOp.split[index].rangelabel or condOp.rangelabel and condOp.rangelabel[index]
+          if rangelabel then
+            ImGui.SameLine(ctx)
+            ImGui.AlignTextToFramePadding(ctx)
+            ImGui.PushFont(ctx, fontInfo.small)
+            ImGui.TextColored(ctx, 0xFFFFFF7F, '(' .. condOp.rangelabel[index] .. ')')
+            ImGui.PopFont(ctx)
+          end
+          ImGui.EndGroup(ctx)
+          if ImGui.IsItemHovered(ctx) then
+            if ImGui.IsMouseClicked(ctx, 0) then
+              rv = true
+            end
           end
         end
       end
@@ -1813,492 +2133,76 @@ local function windowFn()
     if fresh then NewHasTable = true end
   end
 
-  local function musicalActionParam1Special(fun, row, addMetric, addSlop, paramEntry)
-    ImGui.Separator(ctx)
+  ---------------------------------------------------------------------------
+  -------------------------- TYPE-DELEGATED SPECIAL FNS ---------------------
 
-    local mg = row.mg
-    local useGrid = paramEntry.notation == '$grid'
-    local mgMods, mgReaSwing = tx.getMetricGridModifiers(mg)
-    local newMgMods = mgMods
-    local dotVal = not useGrid and mgMods == gdefs.MG_GRID_DOTTED or false
-    local tripVal = not useGrid and mgMods == gdefs.MG_GRID_TRIPLET or false
-    local swingVal = not useGrid and mgMods == gdefs.MG_GRID_SWING or false
-    local showSwing = mg.showswing
-    local showRound = mg.showround
-
-    if useGrid then ImGui.BeginDisabled(ctx) end
-    local rv, sel = ImGui.Checkbox(ctx, 'Dotted', dotVal)
-    if rv then
-      newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_DOTTED or gdefs.MG_GRID_STRAIGHT)
-      doActionUpdate()
-    end
-
-    rv, sel = ImGui.Checkbox(ctx, 'Triplet', tripVal)
-    if rv then
-      newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
-      doActionUpdate()
-    end
-
-    if showSwing then
-      rv, sel = ImGui.Checkbox(ctx, 'Swing', swingVal)
-      if rv then
-        newMgMods = tx.setMetricGridModifiers(mg, sel and gdefs.MG_GRID_SWING or gdefs.MG_GRID_STRAIGHT)
-      doActionUpdate()
-      end
-
-      ImGui.SameLine(ctx)
-      local isSwing = newMgMods == gdefs.MG_GRID_SWING
-
-      if not isSwing then ImGui.BeginDisabled(ctx) end
-      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-      local swbuf
-      rv, swbuf = ImGui.InputText(ctx, '##swing', tostring(mg.swing), ImGui.InputTextFlags_CharsDecimal)
-      mg.swing = tonumber(swbuf)
-
-      ImGui.SameLine(ctx)
-      ImGui.Text(ctx, '[')
-      ImGui.SameLine(ctx)
-      rv, sel = ImGui.Checkbox(ctx, 'MPC', not mgReaSwing)
-      if rv then
-        local _, newMgReaSwing = tx.SetMetricGridModifiers(mg, nil, not sel)
-        if mgReaSwing ~= newMgReaSwing then
-          if mgReaSwing then -- from REAPER to MPC
-            mg.swing = ((mg.swing + 100) / 4) + 25
-          else -- MPC to REAPER
-            mg.swing = ((mg.swing) * 4) - 200
-          end
-          mgReaSwing = newMgReaSwing
-        end
-        doActionUpdate()
-      end
-      ImGui.SameLine(ctx)
-      ImGui.Text(ctx, ']')
-      if not isSwing then ImGui.EndDisabled(ctx) end
-
-      if mgReaSwing then
-        mg.swing = not mg.swing and 0 or mg.swing < -100 and -100 or mg.swing > 100 and 100 or mg.swing
-      else
-        mg.swing = not mg.swing and 50 or mg.swing < 0 and 0 or mg.swing > 100 and 100 or mg.swing
-      end
-    end
-
-    if showRound then
-      ImGui.Separator(ctx)
-      if ImGui.RadioButton(ctx, 'Round', not mg.roundmode or mg.roundmode == 'round') then
-        mg.roundmode = 'round'
-        doActionUpdate()
-      end
-      if ImGui.RadioButton(ctx, 'Round Down', mg.roundmode == 'floor') then
-        mg.roundmode = 'floor'
-        doActionUpdate()
-      end
-      if ImGui.RadioButton(ctx, 'Round Up', mg.roundmode == 'ceil') then
-        mg.roundmode = 'ceil'
-        doActionUpdate()
-      end
-    end
-
-    if useGrid then ImGui.EndDisabled(ctx) end
-
-    if addMetric then
-      ImGui.Separator(ctx)
-      rv, sel = ImGui.Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
-      if rv then
-        mg.wantsBarRestart = sel
-        doActionUpdate()
-      end
-    end
-
-    if addSlop then
-      ImGui.Separator(ctx)
-      ImGui.AlignTextToFramePadding(ctx)
-      ImGui.Text(ctx, 'Slop (% of unit)')
-      ImGui.SameLine(ctx)
-      local tbuf
-      ImGui.SetNextItemWidth(ctx, scaled(50))
-      rv, tbuf = ImGui.InputDouble(ctx, 'Pre', mg.preSlopPercent, nil, nil, '%0.2f')
-      if kbdEntryIsCompleted(rv) then
-        mg.preSlopPercent = tbuf
-        doActionUpdate()
-      end
-      ImGui.SameLine(ctx)
-      ImGui.SetNextItemWidth(ctx, scaled(50))
-      rv, tbuf = ImGui.InputDouble(ctx, 'Post', mg.postSlopPercent, nil, nil, '%0.2f')
-      if kbdEntryIsCompleted(rv) then
-        mg.postSlopPercent = tbuf
-        doActionUpdate()
-      end
-    end
+  -- build options object for type popup functions
+  local function buildTypeOptions(onChange)
+    return {
+      onChange = onChange or function() end,
+      styleColors = {
+        hoverAlpha = hoverAlphaCol,
+        activeAlpha = activeAlphaCol,
+      },
+      defaultWidth = DEFAULT_ITEM_WIDTH,
+      scaled = scaled,
+      currentFontWidth = currentFontWidth,
+      currentFrameHeight = currentFrameHeight,
+      completionKeyPress = completionKeyPress,
+      kbdEntryIsCompleted = kbdEntryIsCompleted,
+      fontInfo = fontInfo,
+      inputFlag = inputFlag,
+      bitFieldCallback = bitFieldCallback,
+      numbersOnlyCallback = numbersOnlyCallback,
+      timeFormatRebuf = tx.timeFormatRebuf,
+      lengthFormatRebuf = tx.lengthFormatRebuf,
+      noteNumberToNoteName = mu.MIDI_NoteNumberToNoteName,
+      dontCloseXPos = dontCloseXPos,
+    }
   end
 
-  local function musicalParam1Special(fun, row, source, entry)
-    musicalActionParam1Special(fun, row, false, true, source[entry])
+  -- wrapper: metricgrid/musical param1 special (unified)
+  local function metricGridParam1SpecialViaType(fun, row, source, entry, isMetric, addSlop)
+    local paramEntry = source[entry]
+    local callback = isMetric and doActionUpdate or (addSlop and doFindUpdate or doActionUpdate)
+    local options = buildTypeOptions(callback)
+    options.isMetric = isMetric or false
+    options.addSlop = addSlop or false
+    mgdefs.renderMetricGridPopup(ctx, ImGui, row, options, paramEntry)
   end
 
-  local function musicalParam1SpecialNoSlop(fun, row, source, entry)
-    musicalActionParam1Special(fun, row, false, false, source[entry])
+  -- wrapper: everyn param1 special (delegates to evndefs.renderEveryNPopup)
+  local function everyNParam1SpecialViaType(fun, row)
+    local options = buildTypeOptions(doFindUpdate)
+    evndefs.renderEveryNPopup(ctx, ImGui, row, options)
   end
 
-  local function metricParam1Special(fun, row, source, entry)
-    musicalActionParam1Special(fun, row, true, true, source[entry])
+  -- wrapper: newmidievent param1 special (delegates to nmedefs.renderNewMIDIEventParam1Popup)
+  local function newMIDIEventParam1SpecialViaType(fun, row)
+    local options = buildTypeOptions(doActionUpdate)
+    nmedefs.renderNewMIDIEventParam1Popup(ctx, ImGui, row, options)
   end
 
-  local function everyNActionParam1Special(fun, row)
-    local evn = row.evn
-    local deactivated = false
-
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
-
-    ImGui.AlignTextToFramePadding(ctx)
-
-    ImGui.Text(ctx, evn.isBitField and 'Pattern' or 'Interval')
-    ImGui.SameLine(ctx)
-
-    local saveX = ImGui.GetCursorPosX(ctx)
-    if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
-    if evn.isBitField then evn.textEditorStr = evn.textEditorStr:gsub('[2-9]', '1')
-    else evn.textEditorStr = tostring(tonumber(evn.textEditorStr))
-    end
-    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
-    local rv, buf = ImGui.InputText(ctx, '##everyNentry', evn.textEditorStr,
-      inputFlag | ImGui.InputTextFlags_CallbackCharFilter,
-      evn.isBitField and bitFieldCallback or numbersOnlyCallback)
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-    if kbdEntryIsCompleted(rv) then
-      if tg.isValidString(buf) then
-        evn.textEditorStr = buf
-        if evn.isBitField then
-          evn.pattern = evn.textEditorStr
-        else
-          evn.interval = tonumber(evn.textEditorStr)
-        end
-        fun(2, true)
-      end
-    end
-
-    ImGui.SameLine(ctx)
-
-    ImGui.PushFont(ctx, fontInfo.smaller)
-    local yCache = ImGui.GetCursorPosY(ctx)
-    local _, smallerHeight = ImGui.CalcTextSize(ctx, '0') -- could make this global if it is expensive
-    ImGui.SetCursorPosY(ctx, yCache + ((ImGui.GetFrameHeight(ctx) - smallerHeight) / 2))
-    local selected
-    rv, selected = ImGui.Checkbox(ctx, 'Bitfield', evn.isBitField)
-    if rv then
-      evn.isBitField = selected
-      fun(1, true)
-    end
-    ImGui.PopFont(ctx)
-
-    ImGui.Separator(ctx)
-
-    ImGui.Text(ctx, 'Offset')
-    ImGui.SameLine(ctx)
-
-    ImGui.SetCursorPosX(ctx, saveX)
-    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
-    rv, buf = ImGui.InputText(ctx, '##everyNoffset', evn.offsetEditorStr, ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-    if kbdEntryIsCompleted(rv) then
-      if tg.isValidString(buf) then
-        evn.offsetEditorStr = buf
-        evn.offset = tonumber(evn.offsetEditorStr)
-        fun(3, true)
-      end
-    end
-
-    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
-      if completionKeyPress() then
-        ImGui.CloseCurrentPopup(ctx)
-      end
-    end
-
-    ImGui.PopStyleColor(ctx, 2)
+  -- wrapper: newmidievent param2 special (delegates to nmedefs.renderNewMIDIEventParam2Popup)
+  local function newMIDIEventParam2SpecialViaType(fun, row)
+    local options = buildTypeOptions(doActionUpdate)
+    nmedefs.renderNewMIDIEventParam2Popup(ctx, ImGui, row, options)
   end
 
-  local function everyNParam1Special(fun, row)
-    everyNActionParam1Special(fun, row)
+  -- wrapper: eventselector param1 special (delegates to evseldefs.renderEventSelectorParam1Popup)
+  local function eventSelectorParam1SpecialViaType(fun, row)
+    local options = buildTypeOptions(doFindUpdate)
+    evseldefs.renderEventSelectorParam1Popup(ctx, ImGui, row, options)
   end
 
-  local function newMIDIEventActionParam1Special(fun, row) -- type list is main menu
-    local nme = row.nme
-    local deactivated = false
-
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
-
-    ImGui.Separator(ctx)
-
-    ImGui.AlignTextToFramePadding(ctx)
-
-    ImGui.Text(ctx, 'Channel')
-    ImGui.SameLine(ctx)
-
-    if ImGui.BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
-      for i = 1, 16 do
-        local rv = ImGui.MenuItem(ctx, tostring(i), nil, nme.channel == i - 1)
-        if rv then
-          if nme.channel == i - 1 then ImGui.CloseCurrentPopup(ctx) end
-          nme.channel = i - 1
-        end
-      end
-      ImGui.EndListBox(ctx)
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-    ImGui.SameLine(ctx)
-
-    local saveX, saveY = ImGui.GetCursorPos(ctx)
-    saveX = saveX + scaled(20)
-    saveY = saveY + currentFrameHeight * 0.5
-
-    ImGui.SetCursorPos(ctx, saveX, saveY)
-
-    local rv, sel = ImGui.Checkbox(ctx, 'Sel?', nme.selected)
-    if rv then
-      nme.selected = sel
-    end
-
-    ImGui.SetCursorPos(ctx, saveX, saveY + (currentFrameHeight * 1.1))
-
-    rv, sel = ImGui.Checkbox(ctx, 'Mute?', nme.muted)
-    if rv then
-      nme.muted = sel
-    end
-
-    ImGui.SetCursorPosY(ctx, saveY + (currentFrameHeight * 2.7))
-
-    ImGui.Separator(ctx)
-
-    local isNote = nme.chanmsg == 0x90
-
-    local twobyte = nme.chanmsg >= 0xC0
-    local is14 = nme.chanmsg == 0xE0
-    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local byte1Txt = is14 and tostring((nme.msg3 << 7 | nme.msg2) - (1 << 13)) or tostring(nme.msg2)
-    rv, byte1Txt = ImGui.InputText(ctx, 'Val1', byte1Txt, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
-    if rv then
-      local nummy = tonumber(byte1Txt) or 0
-      if is14 then
-        if nummy < -8192 then nummy = -8192 elseif nummy > 8191 then nummy = 8191 end
-        nummy = nummy + (1 << 13)
-        nme.msg2 = nummy & 0x7F
-        nme.msg3 = nummy >> 7 & 0x7F
-      else
-        nme.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
-      end
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-    ImGui.SameLine(ctx)
-
-    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + DEFAULT_ITEM_WIDTH * 0.25)
-
-    if is14 or twobyte then ImGui.BeginDisabled(ctx) end
-    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local byte2Txt = (is14 or twobyte) and '0' or tostring(nme.msg3)
-    rv, byte2Txt = ImGui.InputText(ctx, 'Val2', byte2Txt, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
-    if rv then
-      local nummy = tonumber(byte2Txt) or 0
-      if is14 or twobyte then
-      else
-        local min = isNote and 1 or 0
-        nme.msg3 = nummy < min and min or nummy > 127 and 127 or nummy
-      end
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-    if is14 or twobyte then ImGui.EndDisabled(ctx) end
-
-    if nme.chanmsg == 0x90 then
-      ImGui.Separator(ctx)
-
-      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-      rv, nme.durText = ImGui.InputText(ctx, 'Dur.', nme.durText, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
-      if rv then
-        nme.durText = tx.lengthFormatRebuf(nme.durText)
-      end
-      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-      ImGui.SameLine(ctx)
-
-      ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-      local relVelTxt = tostring(nme.relvel)
-      rv, relVelTxt = ImGui.InputText(ctx, 'RelVel', relVelTxt, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, numbersOnlyCallback)
-      if rv then
-        nme.relvel = tonumber(relVelTxt) or 0
-        nme.relvel = nme.relvel < 0 and 0 or nme.relvel > 127 and 127 or nme.relvel
-      end
-      if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-    end
-
-    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
-      if completionKeyPress() then
-        ImGui.CloseCurrentPopup(ctx)
-      end
-    end
-
-    ImGui.PopStyleColor(ctx, 2)
+  -- wrapper: eventselector param2 special (delegates to evseldefs.renderEventSelectorParam2Popup)
+  local function eventSelectorParam2SpecialViaType(fun, row)
+    local options = buildTypeOptions(doFindUpdate)
+    evseldefs.renderEventSelectorParam2Popup(ctx, ImGui, row, options)
   end
 
-  local function newMIDIEventParam1Special(fun, row)
-    newMIDIEventActionParam1Special(fun, row)
-  end
-
-  local function eventSelectorActionParam1Special(fun, row) -- type list is main menu
-    local evsel = row.evsel
-    local deactivated = false
-    local rv
-
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
-
-    ImGui.Separator(ctx)
-
-    ImGui.AlignTextToFramePadding(ctx)
-
-    ImGui.Text(ctx, 'Chan.')
-    ImGui.SameLine(ctx)
-
-    if dontCloseXPos then ImGui.SetCursorPosX(ctx, dontCloseXPos) end
-
-    if ImGui.BeginListBox(ctx, '##chanList', currentFontWidth * 10, currentFrameHeight * 3) then
-      rv = ImGui.MenuItem(ctx, tostring('Any'), nil, evsel.channel == -1)
-      if rv then
-        if evsel.channel == -1 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.channel = -1
-      end
-
-      for i = 1, 16 do
-        rv = ImGui.MenuItem(ctx, tostring(i), nil, evsel.channel == i - 1)
-        if rv then
-          if evsel.channel == i - 1 then ImGui.CloseCurrentPopup(ctx) end
-          evsel.channel = i - 1
-        end
-      end
-      ImGui.EndListBox(ctx)
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-    local saveNextLineY = ImGui.GetCursorPosY(ctx)
-
-    ImGui.SameLine(ctx)
-
-    local disableUseVal1 = evsel.chanmsg == 0x00 or evsel.chanmsg >= 0xD0
-    local saveX, saveY = ImGui.GetCursorPos(ctx)
-    if disableUseVal1 then
-      ImGui.BeginDisabled(ctx)
-    end
-    local sel
-    rv, sel = ImGui.Checkbox(ctx, 'Use Val1?', evsel.useval1)
-    if rv then
-      evsel.useval1 = sel
-    end
-    if disableUseVal1 then
-      ImGui.EndDisabled(ctx)
-    end
-
-    local isNote = evsel.chanmsg == 0x90
-    local disableVal1 = disableUseVal1 or not evsel.useval1
-    if disableVal1 then
-      ImGui.BeginDisabled(ctx)
-    end
-    ImGui.SetCursorPos(ctx, saveX, saveY + currentFrameHeight * 1.5)
-    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local byte1Txt = tostring(evsel.msg2)
-    rv, byte1Txt = ImGui.InputText(ctx, '##Val1', byte1Txt,
-      inputFlag | ImGui.InputTextFlags_CallbackCharFilter,
-      isNote and numbersOrNoteNameCallback or numbersOnlyCallback)
-    if rv then
-      if isNote then
-        byte1Txt = rewriteNoteName(byte1Txt)
-      end
-      local nummy = tonumber(byte1Txt) or 0
-      evsel.msg2 = nummy < 0 and 0 or nummy > 127 and 127 or nummy
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-    if isNote then
-      local noteName = mu.MIDI_NoteNumberToNoteName(evsel.msg2)
-      if noteName then
-        ImGui.SameLine(ctx)
-        ImGui.AlignTextToFramePadding(ctx)
-        ImGui.TextColored(ctx, 0x7FFFFFCF, '[' .. noteName .. ']')
-      end
-    end
-    if disableVal1 then
-      ImGui.EndDisabled(ctx)
-    end
-
-    ImGui.SetCursorPosY(ctx, saveNextLineY)
-
-    ImGui.Separator(ctx)
-
-    ImGui.Text(ctx, 'Sel.')
-    ImGui.SameLine(ctx)
-
-    if dontCloseXPos then ImGui.SetCursorPosX(ctx, dontCloseXPos) end
-
-    if ImGui.BeginListBox(ctx, '##selList', currentFontWidth * 14, currentFrameHeight * 3) then
-      rv = ImGui.MenuItem(ctx, tostring('Any'), nil, evsel.selected == -1)
-      if rv then
-        if evsel.selected == -1 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.selected = -1
-      end
-
-      rv = ImGui.MenuItem(ctx, tostring('Unselected'), nil, evsel.selected == 0)
-      if rv then
-        if evsel.selected == 0 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.selected = 0
-      end
-
-      rv = ImGui.MenuItem(ctx, tostring('Selected'), nil, evsel.selected == 1)
-      if rv then
-        if evsel.selected == 1 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.selected = 1
-      end
-      ImGui.EndListBox(ctx)
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-    ImGui.SameLine(ctx)
-
-    ImGui.Text(ctx, 'Muted')
-    ImGui.SameLine(ctx)
-
-    if ImGui.BeginListBox(ctx, '##muteList', currentFontWidth * 12, currentFrameHeight * 3) then
-      rv = ImGui.MenuItem(ctx, tostring('Any'), nil, evsel.muted == -1)
-      if rv then
-        if evsel.muted == -1 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.muted = -1
-      end
-
-      rv = ImGui.MenuItem(ctx, tostring('Unmuted'), nil, evsel.muted == 0)
-      if rv then
-        if evsel.muted == 0 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.muted = 0
-      end
-
-      rv = ImGui.MenuItem(ctx, tostring('Muted'), nil, evsel.muted == 1)
-      if rv then
-        if evsel.muted == 1 then ImGui.CloseCurrentPopup(ctx) end
-        evsel.muted = 1
-      end
-      ImGui.EndListBox(ctx)
-    end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
-      if completionKeyPress() then
-        ImGui.CloseCurrentPopup(ctx)
-      end
-    end
-
-    ImGui.PopStyleColor(ctx, 2)
-  end
-
-  local function eventSelectorParam1Special(fun, row)
-    eventSelectorActionParam1Special(fun, row)
-  end
+  ---------------------------------------------------------------------------
+  ---------------------- OTHER SPECIAL FNS (NON-MIGRATED) -------------------
 
   local function musicalSlopParamSpecial(fun, row, underEditCursor)
     local deactivated = false
@@ -2338,61 +2242,8 @@ local function windowFn()
     ImGui.PopStyleColor(ctx, 2)
   end
 
-  local function eventSelectorParam2Special(fun, row)
-    musicalSlopParamSpecial(fun, row, false)
-  end
-
   local function underEditCursorParam1Special(fun, row)
     musicalSlopParamSpecial(fun, row, true)
-  end
-
-  local function newMIDIEventActionParam2Special(fun, row) -- type list is main menu
-    local nme = row.nme
-    local deactivated = false
-
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, hoverAlphaCol)
-    ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, activeAlphaCol)
-
-    ImGui.Separator(ctx)
-
-    ImGui.AlignTextToFramePadding(ctx)
-
-    local xPos = ImGui.GetCursorPosX(ctx)
-    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
-    local absPos = nme.posmode == tx.NEWEVENT_POSITION_ATPOSITION
-    local isRel = nme.relmode and not absPos
-    local disableNumbox = not isRel and not absPos
-    if disableNumbox then ImGui.BeginDisabled(ctx) end
-    local label = not absPos and 'Pos+-' or 'Pos.'
-    local rv
-    rv, nme.posText = ImGui.InputText(ctx, label, nme.posText, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
-    if rv then
-      nme.posText = isRel and tx.lengthFormatRebuf(nme.posText) or tx.timeFormatRebuf(nme.posText)
-    end
-    if disableNumbox then ImGui.EndDisabled(ctx) end
-    if ImGui.IsItemDeactivated(ctx) then deactivated = true end
-
-    ImGui.SameLine(ctx)
-    ImGui.SetCursorPosX(ctx, xPos + DEFAULT_ITEM_WIDTH + (currentFontWidth * 7))
-
-    local disableCheckbox = absPos
-    if disableCheckbox then ImGui.BeginDisabled(ctx) end
-    local relval
-    rv, relval = ImGui.Checkbox(ctx, 'Relative', nme.relmode)
-    if rv then nme.relmode = relval end
-    if disableCheckbox then ImGui.EndDisabled(ctx) end
-
-    if not ImGui.IsAnyItemActive(ctx) and not deactivated then
-      if completionKeyPress() then
-        ImGui.CloseCurrentPopup(ctx)
-      end
-    end
-
-    ImGui.PopStyleColor(ctx, 2)
-  end
-
-  local function newMIDIEventParam2Special(fun, row)
-    newMIDIEventActionParam2Special(fun, row)
   end
 
   local function positionScaleOffsetParam1Special(fun, row)
@@ -2404,11 +2255,12 @@ local function windowFn()
     ImGui.AlignTextToFramePadding(ctx)
 
     ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
-    local rv, buf = ImGui.InputText(ctx, 'Scale', row.params[1].textEditorStr, inputFlag | ImGui.InputTextFlags_CharsDecimal | ImGui.InputTextFlags_CharsNoBlank)
+    local _, buf = ImGui.InputText(ctx, 'Scale', row.params[1].textEditorStr, inputFlag | ImGui.InputTextFlags_CharsDecimal | ImGui.InputTextFlags_CharsNoBlank)
     if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     tx.setRowParam(row, 1, gdefs.PARAM_TYPE_FLOATEDITOR, nil, buf, nil, false)
 
     ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 0.75)
+    local rv
     rv, buf = ImGui.InputText(ctx, 'Offset', (row.params[3] and row.params[3].textEditorStr) and row.params[3].textEditorStr or gdefs.DEFAULT_LENGTHFORMAT_STRING, inputFlag | ImGui.InputTextFlags_CallbackCharFilter, timeFormatOnlyCallback)
     if rv then
       row.params[3].textEditorStr = tx.lengthFormatRebuf(buf)
@@ -2479,10 +2331,10 @@ local function windowFn()
       mod = (modrange[1] and mod < modrange[1]) and modrange[1] or (modrange[2] and mod > modrange[2]) and modrange[2] or mod
     end
 
-    local DBL_MIN, DBL_MAX = 2.22507e-308, 1.79769e+308
+    local DBL_MAX = 1.79769e+308
     local dmin = row.params[2].menuEntry == 4 and -1 or 0
     local dmax = row.params[2].menuEntry == 4 and 1 or DBL_MAX
-    local rv, dmod = ImGui.DragDouble(ctx, 'Curve Var.', mod, 0.005, dmin, dmax, '%0.3f')
+    local _, dmod = ImGui.DragDouble(ctx, 'Curve Var.', mod, 0.005, dmin, dmax, '%0.3f')
     -- local rv, buf = ImGui.InputText(ctx, 'Exp/Log Factor', tostring(mod), inputFlag | ImGui.InputTextFlags_CharsDecimal | ImGui.InputTextFlags_CharsNoBlank)
     if ImGui.IsItemDeactivated(ctx) then deactivated = true end
     if row.params[2].menuEntry == 1 then ImGui.EndDisabled(ctx) end
@@ -2585,15 +2437,12 @@ local function windowFn()
     for k, v in ipairs(tx.findRowTable()) do
       ImGui.PushID(ctx, tostring(k))
       local currentRow = v
-      local currentFindTarget = {}
-      local currentFindCondition = {}
-      local conditionEntries = {}
-      local param1Entries = {}
-      local param2Entries = {}
+      local currentFindTarget, currentFindCondition
 
       currentRow.dirty = false
       if v.disabled then ImGui.BeginDisabled(ctx) end
 
+      local conditionEntries, param1Entries, param2Entries
       conditionEntries, param1Entries, param2Entries, currentFindTarget, currentFindCondition = tx.findTabsFromTarget(currentRow)
 
       ImGui.TableNextRow(ctx)
@@ -2638,7 +2487,7 @@ local function windowFn()
         ImGui.PushFont(ctx, fontInfo.smaller)
         local yCache = ImGui.GetCursorPosY(ctx)
         local _, smallerHeight = ImGui.CalcTextSize(ctx, '0') -- could make this global if it is expensive
-        ImGui.SetCursorPosY(ctx, yCache + ((ImGui.GetFrameHeight(ctx) - smallerHeight) / 2))
+        ImGui.SetCursorPosY(ctx, yCache + ((currentFrameHeight - smallerHeight) / 2))
         local rv, selected = ImGui.Checkbox(ctx, '##notBox', currentRow.isNot)
         if rv then
           currentRow.isNot = selected
@@ -2780,7 +2629,6 @@ local function windowFn()
 
       createPopup(currentRow, 'conditionMenu', conditionEntries, currentRow.conditionEntry, function(i)
           currentRow.conditionEntry = i
-          local condNotation = conditionEntries[i].notation
           setupRowFormat(currentRow, conditionEntries)
           doFindUpdate()
         end)
@@ -2794,14 +2642,14 @@ local function windowFn()
           end
           doFindUpdate()
         end,
-        paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID
-            and metricParam1Special
-          or paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL
-            and musicalParam1Special
+        (paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID or paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL)
+            and function(fun, row, source, entry)
+              metricGridParam1SpecialViaType(fun, row, source, entry, true, true)
+            end
           or paramTypes[1] == gdefs.PARAM_TYPE_EVERYN
-            and everyNParam1Special
+            and everyNParam1SpecialViaType
           or paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR
-            and eventSelectorParam1Special
+            and eventSelectorParam1SpecialViaType
           or conditionEntries[currentRow.conditionEntry].notation == ':undereditcursor'
             and underEditCursorParam1Special
           or nil,
@@ -2812,7 +2660,7 @@ local function windowFn()
           doFindUpdate()
         end,
         paramTypes[1] == gdefs.PARAM_TYPE_EVENTSELECTOR
-          and eventSelectorParam2Special
+          and eventSelectorParam2SpecialViaType
         or nil)
 
       if showTimeFormatColumn then
@@ -2915,7 +2763,7 @@ local function windowFn()
   ImGui.SameLine(ctx)
 
   local crx = ImGui.GetContentRegionMax(ctx)
-  local frame_padding_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
+  -- use cached framePaddingX (perf)
 
   ImGui.SetCursorPos(ctx, crx - (DEFAULT_ITEM_WIDTH * 1.5), saveY)
   ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH * 1.5)
@@ -3041,15 +2889,12 @@ local function windowFn()
     for k, v in ipairs(tx.actionRowTable()) do
       ImGui.PushID(ctx, tostring(k))
       local currentRow = v
-      local currentActionTarget = {}
-      local currentActionOperation = {}
-      local operationEntries = {}
-      local param1Entries = {}
-      local param2Entries = {}
+      local currentActionTarget, currentActionOperation
 
       currentRow.dirty = false
       if v.disabled then ImGui.BeginDisabled(ctx) end
 
+      local operationEntries, param1Entries, param2Entries
       operationEntries, param1Entries, param2Entries, currentActionTarget, currentActionOperation = tx.actionTabsFromTarget(currentRow)
 
       ImGui.TableNextRow(ctx)
@@ -3077,18 +2922,68 @@ local function windowFn()
 
       local paramTypes = tx.getParamTypesForRow(currentRow, currentActionTarget, currentActionOperation)
 
-      ImGui.TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
-      overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
-      if handleTableParam(currentRow, currentActionOperation, param1Entries, paramTypes[1], 1, doActionUpdate) then
-        selectedActionRow = k
-        lastSelectedRowType = 1
-      end
+      -- Check if type has renderUI (quantize migrated, others pending)
+      local _, typeDef = tx.TypeRegistry.detectType(currentActionOperation)
+      if typeDef and typeDef.renderUI then
+        ImGui.TableSetColumnIndex(ctx, 2)
+        local rowIdx = k  -- capture for closure
+        local typeOptions = buildTypeOptions(doActionUpdate)
+        typeOptions.onOpenChildWindow = function(row, index)
+          selectedActionRow = rowIdx
+          lastSelectedRowType = 1
+          showQuantizeConfig = true
+          local params = row.quantizeParams or quantizeUI.defaultParams()
+          quantizeWorkingParams = tg.tableCopy(params)
+        end
+        typeOptions.onOpenPopup = function(popupName, row, renderFn)
+          selectedActionRow = rowIdx
+          lastSelectedRowType = 1
+          ImGui.OpenPopup(ctx, popupName)
+        end
+        typeOptions.paramTab = param1Entries
+        typeOptions.rowIndex = rowIdx
 
-      ImGui.TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
-      overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
-      if handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, doActionUpdate) then
-        selectedActionRow = k
-        lastSelectedRowType = 1
+        local widgets = typeDef.renderUI(ctx, ImGui, currentRow, rowIdx, typeOptions)
+        renderTypeWidgets(widgets)
+
+        -- Handle NewMIDIEvent popups (param1 and param2)
+        if currentActionOperation.newevent then
+          local popup1Name = 'newMIDIEvent_param1_' .. rowIdx
+          local popup2Name = 'newMIDIEvent_param2_' .. rowIdx
+          if ImGui.BeginPopup(ctx, popup1Name, ImGui.WindowFlags_NoMove) then
+            if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+              ImGui.CloseCurrentPopup(ctx)
+              handledEscape = true
+            end
+            nmedefs.renderNewMIDIEventParam1Popup(ctx, ImGui, currentRow, typeOptions)
+            ImGui.EndPopup(ctx)
+          end
+          if ImGui.BeginPopup(ctx, popup2Name, ImGui.WindowFlags_NoMove) then
+            if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+              ImGui.CloseCurrentPopup(ctx)
+              handledEscape = true
+            end
+            nmedefs.renderNewMIDIEventParam2Popup(ctx, ImGui, currentRow, typeOptions)
+            ImGui.EndPopup(ctx)
+          end
+        end
+
+        ImGui.TableSetColumnIndex(ctx, 3)  -- empty column 3 (button handled by widgets)
+      else
+        -- Normal parameter rendering
+        ImGui.TableSetColumnIndex(ctx, 2) -- 'Parameter 1'
+        overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 1)
+        if handleTableParam(currentRow, currentActionOperation, param1Entries, paramTypes[1], 1, doActionUpdate) then
+          selectedActionRow = k
+          lastSelectedRowType = 1
+        end
+
+        ImGui.TableSetColumnIndex(ctx, 3) -- 'Parameter 2'
+        overrideEditorType(currentRow, currentActionTarget, currentActionOperation, paramTypes, 2)
+        if handleTableParam(currentRow, currentActionOperation, param2Entries, paramTypes[2], 2, doActionUpdate) then
+          selectedActionRow = k
+          lastSelectedRowType = 1
+        end
       end
 
       if currentActionOperation.param3 then
@@ -3177,10 +3072,12 @@ local function windowFn()
             doActionUpdate()
           end
         end,
-        paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL
-            and musicalParam1SpecialNoSlop
+        (paramTypes[1] == gdefs.PARAM_TYPE_METRICGRID or paramTypes[1] == gdefs.PARAM_TYPE_MUSICAL)
+            and function(fun, row, source, entry)
+              metricGridParam1SpecialViaType(fun, row, source, entry, false, false)
+            end
           or paramTypes[1] == gdefs.PARAM_TYPE_NEWMIDIEVENT
-            and newMIDIEventParam1Special
+            and newMIDIEventParam1SpecialViaType
           or currentActionOperation.param3
             and (currentActionOperation.notation == ':scaleoffset' and positionScaleOffsetParam1Special
               or isLineOp and lineParam1Special)
@@ -3199,7 +3096,7 @@ local function windowFn()
           end
         end,
         paramTypes[2] == gdefs.PARAM_TYPE_NEWMIDIEVENT
-            and newMIDIEventParam2Special
+            and newMIDIEventParam2SpecialViaType
           or (currentActionOperation.param3
             and (isLineOp and lineParam2Special
               or currentActionOperation.notation == ':thresh' and threshParam2Special))
@@ -3388,7 +3285,7 @@ local function windowFn()
     ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, 0x333355FF)
 
     if inOKDialog then
-      positionModalWindow(ImGui.GetFrameHeight(ctx) / 2)
+      positionModalWindow(currentFrameHeight / 2)
       ImGui.OpenPopup(ctx, title)
     elseif ImGui.IsKeyPressed(ctx, ImGui.Key_Enter
       or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
@@ -3626,8 +3523,6 @@ local function windowFn()
     end
     updateCurrentRect()
   end
-
-  restoreY = ImGui.GetCursorPosY(ctx) - 10 * canvasScale
 
   generateLabel('Preset Notes')
 
@@ -3934,6 +3829,8 @@ local function loop()
 
     updateWindowPosition()
 
+    renderQuantizeChildWindow()
+
     ImGui.End(ctx)
   end
 
@@ -3950,6 +3847,7 @@ end
 prepRandomShit()
 prepWindowAndFont()
 windowInfo.left, windowInfo.top, windowInfo.width, windowInfo.height = initializeWindowPosition()
+initGrooveBrowserState()
 r.defer(function() xpcall(loop, onCrash) end)
 r.atexit(shutdown)
 

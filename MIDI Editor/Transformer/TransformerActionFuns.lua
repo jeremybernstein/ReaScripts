@@ -16,14 +16,14 @@ local r = reaper
 local gdefs = require 'TransformerGeneralDefs'
 local adefs = require 'TransformerActionDefs'
 
-local mgdefs = require 'TransformerMetricGrid'
+local mgdefs = require 'types/TransformerMetricGrid'
 
 local function setMusicalLength(event, take, PPQ, mgParams)
   if not take then return event.projlen end
 
   if Shared.getEventType(event) ~= gdefs.NOTE_TYPE then return event.projlen end
 
-  local subdiv = mgParams.param1
+  local subdiv = mgParams.param1 or -1  -- default to REAPER grid if nil
   local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 
   local oldppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime)
@@ -86,11 +86,8 @@ local function findNearestGroovePoint(posInBeats, grooveData)
   end
 
   local nBeats = grooveData.nBeats
-  -- wrap position to groove cycle
-  local cyclePos = posInBeats % nBeats
   -- how many complete cycles before this position
   local cycleNum = math.floor(posInBeats / nBeats)
-  local cycleStart = cycleNum * nBeats
 
   local nearestBeat = posInBeats
   local nearestAmp = 1.0
@@ -222,7 +219,7 @@ local function quantizeGrooveEndPos(event, take, PPQ, mgParams)
   local endInMeasureQN = (endppqpos - som) / PPQ
 
   -- find nearest groove point for end position
-  local nearestBeat, nearestAmp, distance, requiresEarly, requiresLate = findNearestGroovePoint(endInMeasureQN, groove.data)
+  local nearestBeat, _, distance, requiresEarly, requiresLate = findNearestGroovePoint(endInMeasureQN, groove.data)
 
   -- direction filtering for length: shrink=early, grow=late
   local direction = groove.direction or 0
@@ -312,7 +309,7 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
     return quantizeGroovePosition(event, take, PPQ, mgParams)
   end
 
-  local subdiv = mgParams.param1
+  local subdiv = mgParams.param1 or -1  -- default to REAPER grid if nil or -1  -- default to REAPER grid if nil
   local strength = tonumber(mgParams.param2)
 
   local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
@@ -385,7 +382,7 @@ local function quantizeMusicalLength(event, take, PPQ, mgParams)
     return quantizeGrooveLength(event, take, PPQ, mgParams)
   end
 
-  local subdiv = mgParams.param1
+  local subdiv = mgParams.param1 or -1  -- default to REAPER grid if nil
   local strength = tonumber(mgParams.param2)
 
   local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
@@ -442,7 +439,7 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
     return quantizeGrooveEndPos(event, take, PPQ, mgParams)
   end
 
-  local subdiv = mgParams.param1
+  local subdiv = mgParams.param1 or -1  -- default to REAPER grid if nil
   local strength = tonumber(mgParams.param2)
 
   local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
@@ -588,11 +585,9 @@ local function randomValue(event, property, min, max, single)
   local oldval = Shared.getValue(event, property)
   if event.firstlastevent then return oldval end
 
-  local newval = oldval
-
   local rnd = single and single or math.random()
 
-  newval = (rnd * ((max - min) + 1)) + min
+  local newval = (rnd * ((max - min) + 1)) + min
   newval = newval < min and min or newval > max and max or newval
   if math.type(min) == 'integer' and math.type(max) == 'integer' then newval = math.floor(newval) end
   return setValue(event, property, newval)
@@ -629,7 +624,6 @@ local function getLerpVal(projTime, p1, type, p2, mult, context)
 
   if firstTime ~= lastTime and projTime >= firstTime and projTime <= lastTime then
     local linearPos = (projTime - firstTime) / (lastTime - firstTime)
-    local newval = projTime
     local scalePos = linearPos
     if type == 0 then
       -- done

@@ -12,9 +12,10 @@ local MetricGrid = {}
 
 local gdefs = require 'TransformerGeneralDefs'
 local SMFParser = require 'lib.SMFParser.SMFParser'
+local TypeRegistry = require 'TransformerTypeRegistry'
 
 local function getMetricGridModifiers(mg) -- used in ActionFuns, can we improve on that
-  if mg then
+  if mg and mg.modifiers then
     local mods = mg.modifiers & 0x7
     local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
     return mods, reaperSwing
@@ -42,13 +43,14 @@ local function generateMetricGridNotation(row)
 end
 
 local function setMetricGridModifiers(mg, mgMods, mgReaSwing)
+  if not mg or not mg.modifiers then
+    return gdefs.MG_GRID_STRAIGHT, false
+  end
   local mods = mg.modifiers & 0x7
   local reaperSwing = mg.modifiers & gdefs.MG_GRID_SWING_REAPER ~= 0
-  if mg then
-    mods = mgMods and (mgMods & 0x7) or mods
-    if mgReaSwing ~= nil then reaperSwing = mgReaSwing end
-    mg.modifiers = mods | (reaperSwing and gdefs.MG_GRID_SWING_REAPER or 0)
-  end
+  mods = mgMods and (mgMods & 0x7) or mods
+  if mgReaSwing ~= nil then reaperSwing = mgReaSwing end
+  mg.modifiers = mods | (reaperSwing and gdefs.MG_GRID_SWING_REAPER or 0)
   return mods, reaperSwing
 end
 
@@ -236,6 +238,11 @@ local function parseMetricGridNotation(str)
       mg.distanceRangeMin = tonumber(dmMin)
       mg.distanceRangeMax = tonumber(dmMax)
     end
+  else
+    -- notation didn't match - provide defaults to avoid nil errors downstream
+    mg.modifiers = gdefs.MG_GRID_STRAIGHT
+    mg.swing = 50
+    mg.roundmode = 'round'
   end
   return mg
 end
@@ -257,6 +264,184 @@ local function makeDefaultMetricGrid(row, data)
   return row.mg
 end
 
+----------------------------------------------------------------------------------------
+-- UI rendering
+----------------------------------------------------------------------------------------
+
+-- generate display label for metricgrid button
+-- format: gridUnit + modifiers (T for triplet, . for dotted, sw for swing) + round mode
+local function generateMetricGridLabel(row, paramEntry)
+  local label = paramEntry and paramEntry.label or ''
+  if not paramEntry or paramEntry.notation == '$grid' then
+    return label
+  end
+
+  local mgMods, mgReaSwing = getMetricGridModifiers(row.mg)
+  if mgMods == gdefs.MG_GRID_TRIPLET then label = label .. 'T'
+  elseif mgMods == gdefs.MG_GRID_DOTTED then label = label .. '.'
+  elseif mgMods == gdefs.MG_GRID_SWING then label = label .. 'sw' .. (mgReaSwing and 'R' or '')
+  end
+
+  if row.mg and row.mg.roundmode then
+    if row.mg.roundmode == 'floor' then label = label .. ' (floor)'
+    elseif row.mg.roundmode == 'ceil' then label = label .. ' (ceil)'
+    end
+  end
+
+  return label
+end
+
+-- popup content for metricgrid/musical param configuration
+-- relocated from sockmonkey72_Transformer.lua musicalActionParam1Special
+local function renderMetricGridPopup(ctx, ImGui, row, options, paramEntry)
+  local mg = row.mg
+  local useGrid = paramEntry and paramEntry.notation == '$grid'
+  local mgMods, mgReaSwing = getMetricGridModifiers(mg)
+  local onChange = options.onChange or function() end
+  local addMetric = options.isMetric
+  local addSlop = options.addSlop ~= false
+  local showSwing = mg.showswing
+  local showRound = mg.showround
+  local scaled = options.scaled or function(v) return v end
+  local DEFAULT_ITEM_WIDTH = options.defaultWidth or 60
+
+  ImGui.Separator(ctx)
+
+  if useGrid then ImGui.BeginDisabled(ctx) end
+
+  local rv, sel = ImGui.Checkbox(ctx, 'Dotted', not useGrid and mgMods == gdefs.MG_GRID_DOTTED or false)
+  if rv then
+    setMetricGridModifiers(mg, sel and gdefs.MG_GRID_DOTTED or gdefs.MG_GRID_STRAIGHT)
+    onChange()
+  end
+
+  rv, sel = ImGui.Checkbox(ctx, 'Triplet', not useGrid and mgMods == gdefs.MG_GRID_TRIPLET or false)
+  if rv then
+    setMetricGridModifiers(mg, sel and gdefs.MG_GRID_TRIPLET or gdefs.MG_GRID_STRAIGHT)
+    onChange()
+  end
+
+  if showSwing then
+    rv, sel = ImGui.Checkbox(ctx, 'Swing', not useGrid and mgMods == gdefs.MG_GRID_SWING or false)
+    if rv then
+      setMetricGridModifiers(mg, sel and gdefs.MG_GRID_SWING or gdefs.MG_GRID_STRAIGHT)
+      onChange()
+    end
+
+    ImGui.SameLine(ctx)
+    local isSwing = mgMods == gdefs.MG_GRID_SWING
+
+    if not isSwing then ImGui.BeginDisabled(ctx) end
+    ImGui.SetNextItemWidth(ctx, DEFAULT_ITEM_WIDTH)
+    local swbuf
+    rv, swbuf = ImGui.InputText(ctx, '##swing', tostring(mg.swing), ImGui.InputTextFlags_CharsDecimal)
+    mg.swing = tonumber(swbuf)
+
+    ImGui.SameLine(ctx)
+    ImGui.Text(ctx, '[')
+    ImGui.SameLine(ctx)
+    rv, sel = ImGui.Checkbox(ctx, 'MPC', not mgReaSwing)
+    if rv then
+      local _, newMgReaSwing = setMetricGridModifiers(mg, nil, not sel)
+      if mgReaSwing ~= newMgReaSwing then
+        if mgReaSwing then -- from REAPER to MPC
+          mg.swing = ((mg.swing + 100) / 4) + 25
+        else -- MPC to REAPER
+          mg.swing = ((mg.swing) * 4) - 200
+        end
+        mgReaSwing = newMgReaSwing
+      end
+      onChange()
+    end
+    ImGui.SameLine(ctx)
+    ImGui.Text(ctx, ']')
+    if not isSwing then ImGui.EndDisabled(ctx) end
+
+    if mgReaSwing then
+      mg.swing = not mg.swing and 0 or mg.swing < -100 and -100 or mg.swing > 100 and 100 or mg.swing
+    else
+      mg.swing = not mg.swing and 50 or mg.swing < 0 and 0 or mg.swing > 100 and 100 or mg.swing
+    end
+  end
+
+  if showRound then
+    ImGui.Separator(ctx)
+    if ImGui.RadioButton(ctx, 'Round', not mg.roundmode or mg.roundmode == 'round') then
+      mg.roundmode = 'round'
+      onChange()
+    end
+    if ImGui.RadioButton(ctx, 'Round Down', mg.roundmode == 'floor') then
+      mg.roundmode = 'floor'
+      onChange()
+    end
+    if ImGui.RadioButton(ctx, 'Round Up', mg.roundmode == 'ceil') then
+      mg.roundmode = 'ceil'
+      onChange()
+    end
+  end
+
+  if useGrid then ImGui.EndDisabled(ctx) end
+
+  if addMetric then
+    ImGui.Separator(ctx)
+    rv, sel = ImGui.Checkbox(ctx, 'Restart pattern at next bar', mg.wantsBarRestart)
+    if rv then
+      mg.wantsBarRestart = sel
+      onChange()
+    end
+  end
+
+  if addSlop then
+    ImGui.Separator(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Slop (% of unit)')
+    ImGui.SameLine(ctx)
+    local tbuf
+    ImGui.SetNextItemWidth(ctx, scaled(50))
+    local kbdCompleted = options.kbdEntryIsCompleted or function(r) return r end
+    rv, tbuf = ImGui.InputDouble(ctx, 'Pre', mg.preSlopPercent, nil, nil, '%0.2f')
+    if kbdCompleted(rv) then
+      mg.preSlopPercent = tbuf
+      onChange()
+    end
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, scaled(50))
+    rv, tbuf = ImGui.InputDouble(ctx, 'Post', mg.postSlopPercent, nil, nil, '%0.2f')
+    if kbdCompleted(rv) then
+      mg.postSlopPercent = tbuf
+      onChange()
+    end
+  end
+end
+
+-- renderUI for metricgrid and musical param types
+-- returns widget definitions for host to render
+local function renderUI(ctx, ImGui, row, index, options)
+  if index ~= 1 then return nil end  -- only param[1] has special UI
+
+  local data = options.data or {}
+  row.mg = row.mg or makeDefaultMetricGrid(row, data)
+
+  local paramTab = options.paramTab or {}
+  local menuEntry = row.params and row.params[1] and row.params[1].menuEntry
+  local paramEntry = menuEntry and paramTab[menuEntry] or {}
+  local label = generateMetricGridLabel(row, paramEntry)
+
+  return {
+    {
+      widget = 'button',
+      label = label,
+      onClick = function()
+        if options and options.onOpenPopup then
+          options.onOpenPopup('metricGrid_' .. (options.rowIndex or 0), row, function()
+            renderMetricGridPopup(ctx, ImGui, row, options, paramEntry)
+          end)
+        end
+      end,
+    }
+  }
+end
+
 MetricGrid.generateMetricGridNotation = generateMetricGridNotation
 MetricGrid.setMetricGridModifiers = setMetricGridModifiers
 MetricGrid.parseMetricGridNotation = parseMetricGridNotation
@@ -264,6 +449,10 @@ MetricGrid.makeDefaultMetricGrid = makeDefaultMetricGrid
 MetricGrid.getMetricGridModifiers = getMetricGridModifiers
 MetricGrid.parseGrooveNotation = parseGrooveNotation
 MetricGrid.parseGrooveFile = parseGrooveFile
+MetricGrid.parseMIDIGroove = parseMIDIGroove
 MetricGrid.loadGrooveFromFile = loadGrooveFromFile
+MetricGrid.renderUI = renderUI
+MetricGrid.renderMetricGridPopup = renderMetricGridPopup
+MetricGrid.generateMetricGridLabel = generateMetricGridLabel
 
 return MetricGrid

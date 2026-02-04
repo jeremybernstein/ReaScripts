@@ -266,6 +266,106 @@ local function setNotesInChord(nic)
   notesInChord = nic and (nic < 2 and 2 or math.floor(nic)) or 3
 end
 
+-- enumerate files/folders for groove browsers
+-- extPattern: lua pattern for file extension (e.g., '%.rgt$')
+-- extStrip: pattern to strip extension for display
+local function enumerateGrooveFiles(gPath, extPattern, extStrip)
+  if not gPath or not dirExists(gPath) then return {} end
+  local entries = {}
+  local idx = 0
+  reaper.EnumerateSubdirectories(gPath, -1)
+  local fname = reaper.EnumerateSubdirectories(gPath, idx)
+  while fname do
+    table.insert(entries, { label = fname, sub = true, count = 0 })
+    idx = idx + 1
+    fname = reaper.EnumerateSubdirectories(gPath, idx)
+  end
+  for _, v in ipairs(entries) do
+    local subPath = gPath .. '/' .. v.label
+    local count, fidx = 0, 0
+    reaper.EnumerateFiles(subPath, -1)
+    local f = reaper.EnumerateFiles(subPath, fidx)
+    while f do
+      if f:match(extPattern) then count = count + 1 end
+      fidx = fidx + 1
+      f = reaper.EnumerateFiles(subPath, fidx)
+    end
+    v.count = count
+  end
+  idx = 0
+  reaper.EnumerateFiles(gPath, -1)
+  fname = reaper.EnumerateFiles(gPath, idx)
+  while fname do
+    if fname:match(extPattern) then
+      table.insert(entries, { label = fname:gsub(extStrip, ''), filename = fname })
+    end
+    idx = idx + 1
+    fname = reaper.EnumerateFiles(gPath, idx)
+  end
+  local sorted = {}
+  for _, v in spairs(entries, function(t, a, b)
+    local aIsFolder, bIsFolder = t[a].sub, t[b].sub
+    if aIsFolder ~= bIsFolder then return aIsFolder end
+    return string.lower(t[a].label) < string.lower(t[b].label)
+  end) do
+    table.insert(sorted, v)
+  end
+  return sorted
+end
+
+-----------------------------------------------------------------------------
+--------------------------- PORTABLE PATHS ----------------------------------
+
+-- cached C library values (constant for session) -- cached for loop iteration (perf)
+local cache = {}
+
+-- lazy-init path prefixes (reaper may not be available at require time)
+local reaperResourcePath, homePath
+
+local function initPathPrefixes()
+  if not reaperResourcePath then
+    local r = reaper
+    reaperResourcePath = r and r.GetResourcePath() or ''
+    homePath = os.getenv('HOME') or os.getenv('USERPROFILE') or ''
+    -- populate cache
+    cache.resourcePath = reaperResourcePath
+    cache.homePath = homePath
+  end
+end
+
+-- public init for cache (call after reaper is available)
+local function initCache()
+  if not cache.resourcePath then
+    initPathPrefixes()
+  end
+end
+
+local function toPortablePath(absPath)
+  if not absPath or absPath == '' then return nil end
+  initPathPrefixes()
+  if reaperResourcePath ~= '' and absPath:sub(1, #reaperResourcePath) == reaperResourcePath then
+    return '$RESOURCE' .. absPath:sub(#reaperResourcePath + 1)
+  end
+  if homePath ~= '' and absPath:sub(1, #homePath) == homePath then
+    return '~' .. absPath:sub(#homePath + 1)
+  end
+  return absPath
+end
+
+local function fromPortablePath(portablePath)
+  if not portablePath or portablePath == '' then return nil end
+  initPathPrefixes()
+  if portablePath:sub(1, 9) == '$RESOURCE' then
+    return reaperResourcePath .. portablePath:sub(10)
+  end
+  if portablePath:sub(1, 1) == '~' then
+    return homePath .. portablePath:sub(2)
+  end
+  return portablePath
+end
+
+-----------------------------------------------------------------------------
+
 TransformerGlobal.class = class
 TransformerGlobal.ParamInfo = ParamInfo
 TransformerGlobal.isREAPER7 = isREAPER7
@@ -281,5 +381,10 @@ TransformerGlobal.dirExists = dirExists
 TransformerGlobal.ensureNumString = ensureNumString
 TransformerGlobal.getNotesInChord = getNotesInChord
 TransformerGlobal.setNotesInChord = setNotesInChord
+TransformerGlobal.enumerateGrooveFiles = enumerateGrooveFiles
+TransformerGlobal.toPortablePath = toPortablePath
+TransformerGlobal.fromPortablePath = fromPortablePath
+TransformerGlobal.initCache = initCache
+TransformerGlobal.cache = cache
 
 return TransformerGlobal

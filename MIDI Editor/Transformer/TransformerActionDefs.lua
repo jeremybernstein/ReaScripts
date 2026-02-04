@@ -41,6 +41,7 @@ local actionTargetEntries = {
   { notation = '$velocity', label = 'Velocity (Notes)', text = '\'msg3\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {1, 127} },
   { notation = '$relvel', label = 'Release Velocity (Notes)', text = '\'relvel\'', inteditor = true, cond = 'event.chanmsg == 0x90', range = {0, 127} },
   { notation = '$newevent', label = 'Create Event', text = '\'\'', newevent = true },
+  { notation = '$quantize', label = 'Quantize', text ='\'\'', quantize = true },
 }
 actionTargetEntries.targetTable = true
 
@@ -230,6 +231,10 @@ local actionNewEventOperationEntries = {
   { notation = ':newmidievent', label = 'Create New Event', text = 'CreateNewMIDIEvent()', terms = 2, newevent = true }
 }
 
+local actionQuantizeOperationEntries = {
+  { notation = ':quantize', label = 'Quantize...', text = 'QuantizeMIDI(event, take, PPQ, {quantizeparams})', terms = 2, quantize = true }
+}
+
 local NEWEVENT_POSITION_ATCURSOR = 1
 local NEWEVENT_POSITION_ITEMSTART = 2
 local NEWEVENT_POSITION_ITEMEND = 3
@@ -268,6 +273,7 @@ ActionDefs.actionLineParam2Entries = actionLineParam2Entries
 ActionDefs.actionSubtypeOperationEntries = actionSubtypeOperationEntries
 ActionDefs.actionVelocityOperationEntries = actionVelocityOperationEntries
 ActionDefs.actionNewEventOperationEntries = actionNewEventOperationEntries
+ActionDefs.actionQuantizeOperationEntries = actionQuantizeOperationEntries
 ActionDefs.newMIDIEventPositionEntries = newMIDIEventPositionEntries
 ActionDefs.actionGenericOperationEntries = actionGenericOperationEntries
 

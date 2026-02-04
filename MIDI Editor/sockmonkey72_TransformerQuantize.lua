@@ -36,14 +36,26 @@ if not ImGui then
   return
 end
 
--- add Transformer directory to path for TransformerLib
-package.path = r.GetResourcePath() .. '/Scripts/sockmonkey72 Scripts/MIDI Editor/Transformer/?.lua;' .. package.path
+-- resolve library path relative to script location
+local scriptPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
+local function fileExists(path)
+  local f = io.open(path, 'r')
+  if f then f:close() return true end
+  return false
+end
+if fileExists(scriptPath .. 'TransformerLib.lua') then
+  package.path = scriptPath .. '?.lua;' .. package.path
+elseif fileExists(scriptPath .. 'Transformer/TransformerLib.lua') then
+  package.path = scriptPath .. 'Transformer/?.lua;' .. package.path
+end
+
 local tx = require 'TransformerLib'
 local tg = require 'TransformerGlobal'
 local mu = require 'MIDIUtils'
-local mgdefs = require 'TransformerMetricGrid'
+local mgdefs = require 'types/TransformerMetricGrid'
 local SMFParser = require 'lib.SMFParser.SMFParser' -- only partially impmeneted for this case
 local ops = require 'TransformerQuantizeOps'
+local QuantizeUI = require 'TransformerQuantizeUI'
 
 -- initialize ops module with dependencies
 ops.init(r, mu, CACHE_DEBUG)
@@ -84,7 +96,7 @@ local isExecuting = false  -- prevent double-click during execution
 -- grid parameters
 local gridMode = 0  -- 0=Use Grid, 1=Manual, 2=Groove
 local gridModeItems = 'Use Grid\0Manual\0Groove\0'
-local gridDivIndex = 3  -- default 1/16
+local gridDivIndex = 10  -- default 'grid' (use MIDI editor grid)
 local gridDivLabels = {'1/128', '1/64', '1/32', '1/16', '1/8', '1/4', '1/2', '1/1', '2/1', '4/1', 'grid'}
 local gridStyleIndex = 0  -- 0=straight, 1=triplet, 2=dotted, 3=swing
 local gridStyleItems = 'straight\0triplet\0dotted\0swing\0'
@@ -130,9 +142,17 @@ local labelWidthHeader = 65   -- Settings, Quantize labels
 local labelWidthMain = 65     -- Strength, Grid labels
 local labelWidthSwing = 100   -- Swing strength label
 
--- preset state (go up 2 dirs: Transformer/ and MIDI Editor/ -> sockmonkey72 Scripts/)
+-- preset state: determine how many dirs to go up based on script location
+-- in Transformer/ (dev): go 2 levels up to sockmonkey72 Scripts/
+-- in MIDI Editor/ (deploy): go 1 level up to sockmonkey72 Scripts/
 local presetPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
-presetPath = presetPath:gsub('(.*[/\\]).*[/\\].*[/\\]', '%1Transformer Presets')
+if presetPath:match('[/\\]Transformer[/\\]?$') then
+  -- dev: script in Transformer/, go up 2 levels
+  presetPath = presetPath:gsub('(.*[/\\]).*[/\\].*[/\\]$', '%1Transformer Presets')
+else
+  -- deploy: script in MIDI Editor/, go up 1 level
+  presetPath = presetPath:gsub('(.*[/\\]).*[/\\]$', '%1Transformer Presets')
+end
 
 -- helper: remove prefix from string (plain, not pattern)
 local function removePrefix(str, prefix)
@@ -141,6 +161,11 @@ local function removePrefix(str, prefix)
   end
   return str
 end
+
+-- portable path conversion (use shared functions from TransformerGlobal)
+local toPortablePath = tg.toPortablePath
+local fromPortablePath = tg.fromPortablePath
+
 local currentPresetName = ''
 local loadedPresetState = nil  -- snapshot for modified detection
 local presetListDirty = true  -- refresh flag
@@ -310,9 +335,10 @@ local function initializeQuantizeState()
     end
   end
   -- RGT groove browser: set default root path
-  local defaultRgtPath = r.GetResourcePath() .. '/Data/Grooves'
+  tg.initCache() -- ensure cache populated (perf)
+  local defaultRgtPath = tg.cache.resourcePath .. '/Data/Grooves'
   if not tg.dirExists(defaultRgtPath) then
-    defaultRgtPath = r.GetResourcePath() .. '/Grooves'
+    defaultRgtPath = tg.cache.resourcePath .. '/Grooves'
   end
   if tg.dirExists(defaultRgtPath) then
     rgtRootPath = defaultRgtPath
@@ -628,64 +654,18 @@ local function enumerateQuantizePresets(pPath)
   return sorted
 end
 
--- generic file enumeration for groove browsers
--- extPattern: lua pattern for file extension (e.g., '%.rgt$' or '%.[mM][iI][dD]$')
--- extStrip: pattern to strip extension for display
-local function enumerateGrooveFiles(gPath, extPattern, extStrip)
-  if not gPath or not tg.dirExists(gPath) then return {} end
+-- use shared groove file enumeration from TransformerGlobal
+local enumerateGrooveFiles = tg.enumerateGrooveFiles
 
-  local entries = {}
-  local idx = 0
-
-  -- enumerate subdirectories first
-  r.EnumerateSubdirectories(gPath, -1)  -- reset cache
-  local fname = r.EnumerateSubdirectories(gPath, idx)
-  while fname do
-    local entry = { label = fname, sub = true, count = 0 }  -- sub=true marks as folder
-    table.insert(entries, entry)
-    idx = idx + 1
-    fname = r.EnumerateSubdirectories(gPath, idx)
-  end
-
-  -- count matching files in each subfolder
-  for _, v in ipairs(entries) do
-    local subPath = gPath .. '/' .. v.label
-    local count = 0
-    local fidx = 0
-    r.EnumerateFiles(subPath, -1)
-    local f = r.EnumerateFiles(subPath, fidx)
-    while f do
-      if f:match(extPattern) then count = count + 1 end
-      fidx = fidx + 1
-      f = r.EnumerateFiles(subPath, fidx)
-    end
-    v.count = count
-  end
-
-  -- enumerate matching files
-  idx = 0
-  r.EnumerateFiles(gPath, -1)  -- reset cache
-  fname = r.EnumerateFiles(gPath, idx)
-  while fname do
-    if fname:match(extPattern) then
-      local entry = { label = fname:gsub(extStrip, ''), filename = fname }
-      table.insert(entries, entry)
-    end
-    idx = idx + 1
-    fname = r.EnumerateFiles(gPath, idx)
-  end
-
-  -- sort alphabetically case-insensitive (folders first)
-  local sorted = {}
-  for _, v in tg.spairs(entries, function(t, a, b)
-    local aIsFolder = t[a].sub
-    local bIsFolder = t[b].sub
-    if aIsFolder ~= bIsFolder then return aIsFolder end
-    return string.lower(t[a].label) < string.lower(t[b].label)
-  end) do
-    table.insert(sorted, v)
-  end
-  return sorted
+-- wrapper for mgdefs.parseMIDIGroove with numeric index conversion
+local function parseMIDIGroove(filepath, opts)
+  local thresholdModes = { [0] = 'ticks', [1] = 'ms', [2] = 'percent' }
+  local coalesceModes = { [0] = 'first', [1] = 'loudest' }
+  return mgdefs.parseMIDIGroove(filepath, {
+    threshold = opts.threshold or 10,
+    thresholdMode = thresholdModes[opts.thresholdMode or 1] or 'ms',
+    coalescingMode = coalesceModes[opts.coalesceMode or 0] or 'first'
+  })
 end
 
 -- RGT groove browser functions
@@ -729,7 +709,8 @@ local function loadRgtFile(filename)
 end
 
 local function pickRgtFolder()
-  local initPath = rgtRootPath or r.GetResourcePath() .. '/Data/Grooves'
+  tg.initCache() -- ensure cache populated (perf)
+  local initPath = rgtRootPath or tg.cache.resourcePath .. '/Data/Grooves'
   local folder
   if r.APIExists('JS_Dialog_BrowseForFolder') then
     local retval, path = r.JS_Dialog_BrowseForFolder('Select RGT Groove Folder', initPath)
@@ -847,7 +828,8 @@ local function loadMidiFile(fullFilename)
 end
 
 local function pickMidiFolder()
-  local initPath = midiRootPath or r.GetResourcePath()
+  tg.initCache() -- ensure cache populated (perf)
+  local initPath = midiRootPath or tg.cache.resourcePath
   local folder
   if r.APIExists('JS_Dialog_BrowseForFolder') then
     local retval, path = r.JS_Dialog_BrowseForFolder('Select MIDI Groove Folder', initPath)
@@ -1053,8 +1035,11 @@ local function saveQuantizePreset(name, toPath)
   -- build preset table
   local preset = buildPresetTable()
 
-  -- add quantizeUI metadata
+  -- add quantizeUI metadata (convert groove path to portable format)
   preset.quantizeUI = capturePresetState()
+  if preset.quantizeUI.grooveFilePath then
+    preset.quantizeUI.grooveFilePath = toPortablePath(preset.quantizeUI.grooveFilePath)
+  end
 
   -- serialize and write
   local filepath = savePath .. '/' .. name .. '.quantPreset'
@@ -1127,8 +1112,8 @@ local function loadQuantizePreset(name, fromPath)
 
     distanceScaling = ui.distanceScaling or false  -- default Off for old presets
 
-    -- groove settings
-    grooveFilePath = ui.grooveFilePath  -- nil if not in preset
+    -- groove settings (expand portable path to absolute)
+    grooveFilePath = fromPortablePath(ui.grooveFilePath)  -- nil if not in preset
     grooveDirection = ui.grooveDirection or 0
     grooveVelStrength = ui.grooveVelStrength or 0
     grooveToleranceMin = ui.grooveToleranceMin or 0.0
@@ -1699,7 +1684,7 @@ local function loop()
   end
 
   -- fixed window size to prevent layout jumps
-  ImGui.SetNextWindowSizeConstraints(ctx, 350, 0, 350, 9999)
+  ImGui.SetNextWindowSizeConstraints(ctx, 355, 0, 355, 9999)
   ImGui.SetNextWindowBgAlpha(ctx, 1)
 
   -- visual indicator for live preview mode
@@ -1961,453 +1946,198 @@ local function loop()
     ImGui.PopItemWidth(ctx)
     ImGui.Dummy(ctx, 0, 2)
 
-    -- status line: show statusMessage if set, else countDisplay
+    -- status line with subtle frame
+    local statusX, statusY = ImGui.GetCursorScreenPos(ctx)
+    local availW = ImGui.GetContentRegionAvail(ctx)
+    local frameH = ImGui.GetFrameHeight(ctx)
+    local drawList = ImGui.GetWindowDrawList(ctx)
+    ImGui.DrawList_AddRectFilled(drawList, statusX, statusY, statusX + availW, statusY + frameH, 0x40404080)
+    ImGui.DrawList_AddRect(drawList, statusX, statusY, statusX + availW, statusY + frameH, 0x60606080)
+    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 4)  -- pad text from frame edge
+    ImGui.AlignTextToFramePadding(ctx)
     local displayText = statusMessage ~= '' and statusMessage or countDisplay
     if displayText == '' then displayText = ' ' end
     ImGui.Text(ctx, displayText)
     ImGui.Separator(ctx)
     ImGui.Dummy(ctx, 0, 2)
 
-    -- strength slider
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, 'Strength:')
-    ImGui.SameLine(ctx, labelWidthMain)
-    ImGui.PushItemWidth(ctx, 275)
-    rv, strength = ImGui.SliderInt(ctx, '##strength', strength, 0, 100, '%d%%')
-    strength = math.max(0, math.min(100, strength))
-    ImGui.PopItemWidth(ctx)
-    if rv then
-      r.SetExtState(scriptID, 'strength', tostring(strength), true)
-      markControlChanged()
-    end
-    ImGui.Dummy(ctx, 0, 2)
+    -- build params table for shared UI
+    local uiParams = {
+      scopeIndex = scopeIndex,
+      targetIndex = targetIndex,
+      strength = strength,
+      gridMode = gridMode,
+      gridDivIndex = gridDivIndex,
+      gridStyleIndex = gridStyleIndex,
+      lengthGridDivIndex = lengthGridDivIndex,
+      swingStrength = swingStrength,
+      fixOverlaps = fixOverlaps,
+      canMoveLeft = canMoveLeft,
+      canMoveRight = canMoveRight,
+      canShrink = canShrink,
+      canGrow = canGrow,
+      rangeFilterEnabled = rangeFilterEnabled,
+      rangeMin = rangeMin,
+      rangeMax = rangeMax,
+      distanceScaling = distanceScaling,
+      grooveFilePath = grooveFilePath,
+      grooveDirection = grooveDirection,
+      grooveVelStrength = grooveVelStrength,
+      grooveToleranceMin = grooveToleranceMin,
+      grooveToleranceMax = grooveToleranceMax,
+      midiThreshold = midiThreshold,
+      midiThresholdMode = midiThresholdMode,
+      midiCoalesceMode = midiCoalesceMode,
+      grooveData = grooveData,
+    }
 
-    -- grid row: Grid [div] [style] Length [div] (only shown in Manual mode)
-    local lengthGridEnabled = (targetIndex == 2 or targetIndex == 4)
-    if gridMode == 1 then
-      ImGui.AlignTextToFramePadding(ctx)
-      ImGui.Text(ctx, 'Grid:')
-      ImGui.SameLine(ctx, labelWidthMain)
-      ImGui.PushItemWidth(ctx, 69)
-      if ImGui.BeginCombo(ctx, '##gridDiv', gridDivLabels[gridDivIndex + 1]) then
-        for i, label in ipairs(gridDivLabels) do
-          if ImGui.Selectable(ctx, label, gridDivIndex == i - 1) then
-            gridDivIndex = i - 1
-            r.SetExtState(scriptID, 'gridDivIndex', tostring(gridDivIndex), true)
-            markControlChanged()
-          end
-        end
-        ImGui.EndCombo(ctx)
-      end
-      ImGui.PopItemWidth(ctx)
-      ImGui.SameLine(ctx)
-      ImGui.PushItemWidth(ctx, 68)
-      rv, newIdx = ImGui.Combo(ctx, '##gridStyle', gridStyleIndex, gridStyleItems)
-      if rv then
-        gridStyleIndex = newIdx
-        r.SetExtState(scriptID, 'gridStyleIndex', tostring(gridStyleIndex), true)
+    -- shared UI rendering with ExtState persistence callbacks
+    local uiOptions = {
+      itemWidth = 275,
+      labelWidth = labelWidthMain,
+      hideScope = true,     -- scope shown separately above
+      hideTarget = true,    -- target shown separately above
+      hideGridMode = true,  -- grid mode shown in Settings row above
+      r = r,
+      grooveHelpers = {
+        enumerateGrooveFiles = enumerateGrooveFiles,
+        parseGrooveFile = function(fp) return mgdefs.parseGrooveFile(fp) end,
+        parseMIDIGroove = parseMIDIGroove,
+      },
+      grooveBrowserState = {
+        rgtRootPath = rgtRootPath,
+        rgtSubPath = rgtSubPath,
+        midiRootPath = midiRootPath,
+        midiSubPath = midiSubPath,
+      },
+      grooveErrorMessage = grooveErrorMessage,
+      
+      -- ExtState persistence callbacks
+      onStrengthChanged = function(val)
+        strength = val
+        r.SetExtState(scriptID, 'strength', tostring(val), true)
         markControlChanged()
-      end
-      ImGui.PopItemWidth(ctx)
-      ImGui.SameLine(ctx, 0, 15)
-      ImGui.BeginDisabled(ctx, not lengthGridEnabled)
-      ImGui.Text(ctx, 'Length:')
-      ImGui.SameLine(ctx)
-      ImGui.PushItemWidth(ctx, 69)
-      if ImGui.BeginCombo(ctx, '##lengthDiv', gridDivLabels[lengthGridDivIndex + 1]) then
-        for i, label in ipairs(gridDivLabels) do
-          if ImGui.Selectable(ctx, label, lengthGridDivIndex == i - 1) then
-            lengthGridDivIndex = i - 1
-            r.SetExtState(scriptID, 'lengthGridDivIndex', tostring(lengthGridDivIndex), true)
-            markControlChanged()
-          end
-        end
-        ImGui.EndCombo(ctx)
-      end
-      ImGui.PopItemWidth(ctx)
-      ImGui.EndDisabled(ctx)
-      ImGui.Dummy(ctx, 0, 2)
-    end
-
-    -- swing strength row (visible when swing selected in Manual mode)
-    if gridMode == 1 then
-      local showSwing = (gridStyleIndex == 3)
-      if showSwing then
-        ImGui.AlignTextToFramePadding(ctx)
-        ImGui.Text(ctx, 'Swing strength:')
-        ImGui.SameLine(ctx, labelWidthSwing)
-        ImGui.PushItemWidth(ctx, 240)
-        rv, swingStrength = ImGui.SliderInt(ctx, '##swing', swingStrength, 0, 100, '%d%%')
-        ImGui.PopItemWidth(ctx)
-        if rv then
-          r.SetExtState(scriptID, 'swingStrength', tostring(swingStrength), true)
-          markControlChanged()
-        end
-      else
-        -- dummy for stable height when Manual mode but non-swing style
-        ImGui.Dummy(ctx, 0, ImGui.GetFrameHeight(ctx))
-      end
-      ImGui.Dummy(ctx, 0, 2)
-    end
-
-    -- groove settings section (visible in Groove mode)
-    local grooveModeActive = gridMode == 2
-    if grooveModeActive then
-      ImGui.Separator(ctx)
-      ImGui.Dummy(ctx, 0, 2)
-      ImGui.Text(ctx, 'Groove Settings')
-      ImGui.Dummy(ctx, 0, 2)
-
-      -- groove file picker (single menu with RGT/MIDI submenus)
-      ImGui.AlignTextToFramePadding(ctx)
-      ImGui.Text(ctx, 'Groove:')
-      ImGui.SameLine(ctx, labelWidthMain)
-
-      -- display: extract filename from full path
-      local grooveDisplay = '(none)'
-      if grooveFilePath then
-        grooveDisplay = grooveFilePath:match('([^/\\]+)$') or grooveFilePath
-      end
-
-      ImGui.PushItemWidth(ctx, 275)
-      if ImGui.BeginCombo(ctx, '##grooveCombo', grooveDisplay) then
-
-        -- === RGT SUBMENU ===
-        ImGui.SetNextWindowSizeConstraints(ctx, 150, 0, 300, 400)
-        if ImGui.BeginMenu(ctx, 'RGT') then
-          if ImGui.MenuItem(ctx, 'Set folder...') then
-            pickRgtFolder()
-          end
-
-          if rgtRootPath then
-            ImGui.Separator(ctx)
-
-            if rgtSubPath then
-              if ImGui.Selectable(ctx, '..', false, ImGui.SelectableFlags_DontClosePopups) then
-                navigateRgtParent()
-              end
-            end
-
-            local rgtContents = getRgtContents()
-            for _, entry in ipairs(rgtContents) do
-              if entry.sub then
-                local folderLabel = entry.label .. '/'
-                if entry.count > 0 then
-                  folderLabel = folderLabel .. ' (' .. entry.count .. ')'
-                end
-                if ImGui.Selectable(ctx, folderLabel, false, ImGui.SelectableFlags_DontClosePopups) then
-                  navigateRgtFolder(entry.label)
-                end
-              else
-                local selected = grooveFilePath and grooveFilePath:match('([^/\\]+)$') == entry.filename
-                if ImGui.MenuItem(ctx, entry.label, nil, selected) then
-                  loadRgtFile(entry.label)
-                end
-              end
-            end
-
-            if #rgtContents == 0 then
-              ImGui.TextDisabled(ctx, '(no .rgt files)')
-            end
-          else
-            ImGui.Separator(ctx)
-            ImGui.TextDisabled(ctx, '(folder not set)')
-          end
-
-          ImGui.EndMenu(ctx)
-        end
-
-        -- === MIDI SUBMENU ===
-        ImGui.SetNextWindowSizeConstraints(ctx, 150, 0, 300, 400)
-        if ImGui.BeginMenu(ctx, 'MIDI') then
-          if ImGui.MenuItem(ctx, 'Set folder...') then
-            pickMidiFolder()
-          end
-
-          if midiRootPath then
-            ImGui.Separator(ctx)
-
-            if midiSubPath then
-              if ImGui.Selectable(ctx, '..', false, ImGui.SelectableFlags_DontClosePopups) then
-                navigateMidiParent()
-              end
-            end
-
-            local midiContents = getMidiContents()
-            for _, entry in ipairs(midiContents) do
-              if entry.sub then
-                local folderLabel = entry.label .. '/'
-                if entry.count > 0 then
-                  folderLabel = folderLabel .. ' (' .. entry.count .. ')'
-                end
-                if ImGui.Selectable(ctx, folderLabel, false, ImGui.SelectableFlags_DontClosePopups) then
-                  navigateMidiFolder(entry.label)
-                end
-              else
-                local selected = grooveFilePath and grooveFilePath:match('([^/\\]+)$') == entry.filename
-                if ImGui.MenuItem(ctx, entry.label, nil, selected) then
-                  loadMidiFile(entry.filename)
-                end
-              end
-            end
-
-            if #midiContents == 0 then
-              ImGui.TextDisabled(ctx, '(no MIDI files)')
-            end
-          else
-            ImGui.Separator(ctx)
-            ImGui.TextDisabled(ctx, '(folder not set)')
-          end
-
-          ImGui.EndMenu(ctx)
-        end
-
-        ImGui.EndCombo(ctx)
-      end
-      ImGui.PopItemWidth(ctx)
-
-      -- inline error display (red text)
-      if grooveErrorMessage then
-        ImGui.TextColored(ctx, 0xFF4444FF, grooveErrorMessage)
-      end
-      ImGui.Dummy(ctx, 0, 2)
-
-      -- direction combo + velocity strength slider
-      local grooveDirectionItems = 'Both\0Early only\0Late only\0'
-      ImGui.AlignTextToFramePadding(ctx)
-      ImGui.Text(ctx, 'Direction:')
-      ImGui.SameLine(ctx, labelWidthMain)
-      ImGui.PushItemWidth(ctx, 90)
-      rv, newIdx = ImGui.Combo(ctx, '##grooveDir', grooveDirection, grooveDirectionItems)
-      if rv then
-        grooveDirection = newIdx
-        r.SetExtState(scriptID, 'grooveDirection', tostring(grooveDirection), true)
+      end,
+      onGridModeChanged = function(val)
+        gridMode = val
+        r.SetExtState(scriptID, 'gridMode', tostring(val), true)
         markControlChanged()
-      end
-      ImGui.PopItemWidth(ctx)
-
-      ImGui.SameLine(ctx, 0, 19)
-      ImGui.Text(ctx, 'Vel Str:')
-      ImGui.SameLine(ctx)
-      ImGui.PushItemWidth(ctx, 120)
-      rv, grooveVelStrength = ImGui.SliderInt(ctx, '##grooveVel', grooveVelStrength, 0, 100, '%d%%')
-      grooveVelStrength = math.max(0, math.min(100, grooveVelStrength))
-      if rv then
-        r.SetExtState(scriptID, 'grooveVelStrength', tostring(grooveVelStrength), true)
+      end,
+      onGridDivChanged = function(val)
+        gridDivIndex = val
+        r.SetExtState(scriptID, 'gridDivIndex', tostring(val), true)
         markControlChanged()
-      end
-      ImGui.PopItemWidth(ctx)
-      ImGui.Dummy(ctx, 0, 2)
-
-      -- tolerance sliders
-      ImGui.AlignTextToFramePadding(ctx)
-      ImGui.Text(ctx, 'Tolerance:')
-      ImGui.SameLine(ctx, labelWidthMain)
-      local tolSliderW = 125
-      ImGui.PushItemWidth(ctx, tolSliderW)
-      rv, grooveToleranceMin = ImGui.SliderDouble(ctx, '##grooveTolMin', grooveToleranceMin, 0.0, 100.0, '%.0f%%')
-      if rv then
-        r.SetExtState(scriptID, 'grooveToleranceMin', tostring(grooveToleranceMin), true)
-        if grooveToleranceMin > grooveToleranceMax then
-          grooveToleranceMax = grooveToleranceMin
-          r.SetExtState(scriptID, 'grooveToleranceMax', tostring(grooveToleranceMax), true)
-        end
+      end,
+      onGridStyleChanged = function(val)
+        gridStyleIndex = val
+        r.SetExtState(scriptID, 'gridStyleIndex', tostring(val), true)
         markControlChanged()
-      end
-      ImGui.PopItemWidth(ctx)
-      ImGui.SameLine(ctx)
-      ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) - 1)
-      ImGui.Text(ctx, 'to')
-      ImGui.SameLine(ctx)
-      ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) - 1)
-      ImGui.PushItemWidth(ctx, tolSliderW)
-      rv, grooveToleranceMax = ImGui.SliderDouble(ctx, '##grooveTolMax', grooveToleranceMax, 0.0, 100.0, '%.0f%%')
-      if rv then
-        r.SetExtState(scriptID, 'grooveToleranceMax', tostring(grooveToleranceMax), true)
-        if grooveToleranceMax < grooveToleranceMin then
-          grooveToleranceMin = grooveToleranceMax
-          r.SetExtState(scriptID, 'grooveToleranceMin', tostring(grooveToleranceMin), true)
-        end
+      end,
+      onLengthGridChanged = function(val)
+        lengthGridDivIndex = val
+        r.SetExtState(scriptID, 'lengthGridDivIndex', tostring(val), true)
         markControlChanged()
-      end
-      ImGui.PopItemWidth(ctx)
-      ImGui.Dummy(ctx, 0, 2)
+      end,
+      onSwingStrengthChanged = function(val)
+        swingStrength = val
+        r.SetExtState(scriptID, 'swingStrength', tostring(val), true)
+        markControlChanged()
+      end,
+      onFixOverlapsChanged = function(val)
+        fixOverlaps = val
+        r.SetExtState(scriptID, 'fixOverlaps', tostring(val), true)
+        markControlChanged()
+      end,
+      onCanMoveLeftChanged = function(val)
+        canMoveLeft = val
+        r.SetExtState(scriptID, 'canMoveLeft', tostring(val), true)
+        markControlChanged()
+      end,
+      onCanMoveRightChanged = function(val)
+        canMoveRight = val
+        r.SetExtState(scriptID, 'canMoveRight', tostring(val), true)
+        markControlChanged()
+      end,
+      onCanShrinkChanged = function(val)
+        canShrink = val
+        r.SetExtState(scriptID, 'canShrink', tostring(val), true)
+        markControlChanged()
+      end,
+      onCanGrowChanged = function(val)
+        canGrow = val
+        r.SetExtState(scriptID, 'canGrow', tostring(val), true)
+        markControlChanged()
+      end,
+      onRangeFilterEnabledChanged = function(val)
+        rangeFilterEnabled = val
+        r.SetExtState(scriptID, 'rangeFilterEnabled', tostring(val), true)
+        markControlChanged()
+      end,
+      onRangeMinChanged = function(val)
+        rangeMin = val
+        r.SetExtState(scriptID, 'rangeMin', tostring(val), true)
+        markControlChanged()
+      end,
+      onRangeMaxChanged = function(val)
+        rangeMax = val
+        r.SetExtState(scriptID, 'rangeMax', tostring(val), true)
+        markControlChanged()
+      end,
+      onDistanceScalingChanged = function(val)
+        distanceScaling = val
+        r.SetExtState(scriptID, 'distanceScaling', tostring(val), true)
+        markControlChanged()
+      end,
+      onGrooveFileChanged = function(filepath, data)
+        grooveFilePath = filepath
+        grooveData = data
+        r.SetExtState(scriptID, 'grooveFilePath', filepath, true)
+        markControlChanged()
+      end,
+      onGrooveDirectionChanged = function(val)
+        grooveDirection = val
+        r.SetExtState(scriptID, 'grooveDirection', tostring(val), true)
+        markControlChanged()
+      end,
+      onGrooveVelStrengthChanged = function(val)
+        grooveVelStrength = val
+        r.SetExtState(scriptID, 'grooveVelStrength', tostring(val), true)
+        markControlChanged()
+      end,
+      onGrooveToleranceMinChanged = function(val)
+        grooveToleranceMin = val
+        r.SetExtState(scriptID, 'grooveToleranceMin', tostring(val), true)
+        markControlChanged()
+      end,
+      onGrooveToleranceMaxChanged = function(val)
+        grooveToleranceMax = val
+        r.SetExtState(scriptID, 'grooveToleranceMax', tostring(val), true)
+        markControlChanged()
+      end,
+      onMidiThresholdChanged = function(val)
+        midiThreshold = val
+        r.SetExtState(scriptID, 'midiThreshold', tostring(val), true)
+        markControlChanged()
+      end,
+      onMidiThresholdModeChanged = function(val)
+        midiThresholdMode = val
+        r.SetExtState(scriptID, 'midiThresholdMode', tostring(val), true)
+        markControlChanged()
+      end,
+      onMidiCoalesceModeChanged = function(val)
+        midiCoalesceMode = val
+        r.SetExtState(scriptID, 'midiCoalesceMode', tostring(val), true)
+        markControlChanged()
+      end,
+    }
 
-      -- MIDI extraction settings (only shown when MIDI file loaded)
-      local ext = grooveFilePath and grooveFilePath:lower():match('%.([^%.]+)$')
-      local isMidiGroove = ext == 'mid' or ext == 'smf' or ext == 'midi'
-      if isMidiGroove then
-        ImGui.Separator(ctx)
-        ImGui.Dummy(ctx, 0, 2)
-        ImGui.TextDisabled(ctx, 'MIDI Extraction')
+    local uiChanged, inputDeactivated = QuantizeUI.render(ctx, ImGui, uiParams, uiOptions)
 
-        -- threshold row: value + mode
-        ImGui.AlignTextToFramePadding(ctx)
-        ImGui.Text(ctx, 'Coalesce:')
-        ImGui.SameLine(ctx, labelWidthMain)
-        ImGui.PushItemWidth(ctx, 66)
-        local newThreshold
-        rv, newThreshold = ImGui.InputDouble(ctx, '##midiThreshold', midiThreshold, 0, 0, '%.1f')
-        if rv then
-          midiThreshold = math.max(0, newThreshold)
-          r.SetExtState(scriptID, 'midiThreshold', tostring(midiThreshold), true)
-          loadGrooveMIDIFile(grooveFilePath)
-          markControlChanged()
-        end
-        ImGui.PopItemWidth(ctx)
+    -- sync browser state changes back
+    rgtSubPath = uiOptions.grooveBrowserState.rgtSubPath
+    midiSubPath = uiOptions.grooveBrowserState.midiSubPath
+    grooveErrorMessage = uiOptions.grooveErrorMessage
 
-        ImGui.SameLine(ctx)
-        ImGui.PushItemWidth(ctx, 65)
-        local thresholdModeItems = 'ticks\0ms\0%beat\0'
-        rv, newIdx = ImGui.Combo(ctx, '##midiThreshMode', midiThresholdMode, thresholdModeItems)
-        if rv then
-          midiThresholdMode = newIdx
-          r.SetExtState(scriptID, 'midiThresholdMode', tostring(midiThresholdMode), true)
-          loadGrooveMIDIFile(grooveFilePath)
-          markControlChanged()
-        end
-        ImGui.PopItemWidth(ctx)
-
-        ImGui.SameLine(ctx, 0, 10)
-        ImGui.AlignTextToFramePadding(ctx)
-        ImGui.Text(ctx, 'preferring')
-        -- coalesce mode
-        ImGui.SameLine(ctx)
-        ImGui.PushItemWidth(ctx, 66)
-        local coalesceModeItems = 'first\0loudest\0'
-        rv, newIdx = ImGui.Combo(ctx, '##midiCoalesce', midiCoalesceMode, coalesceModeItems)
-        if rv then
-          midiCoalesceMode = newIdx
-          r.SetExtState(scriptID, 'midiCoalesceMode', tostring(midiCoalesceMode), true)
-          loadGrooveMIDIFile(grooveFilePath)
-          markControlChanged()
-        end
-        ImGui.PopItemWidth(ctx)
-        ImGui.Dummy(ctx, 0, 2)
-      end
-    end
-
-    ImGui.Separator(ctx)
-    ImGui.Dummy(ctx, 0, 2)
-
-    -- direction constraints
-    ImGui.Text(ctx, 'Allow events to:')
-    ImGui.Dummy(ctx, 0, 2)
-
-    local positionApplicable = (targetIndex <= 2)  -- Position only (0), Position+end (1), Position+length (2)
-    local lengthApplicable = (targetIndex >= 1)  -- all except Position only (0)
-    -- gray out move left/right when groove mode active (direction controlled by groove Direction combo)
-    local groovePositionActive = gridMode == 2
-
-    ImGui.BeginDisabled(ctx, not positionApplicable or groovePositionActive)
-    rv, canMoveLeft = ImGui.Checkbox(ctx, 'Move left', canMoveLeft)
-    if rv then
-      r.SetExtState(scriptID, 'canMoveLeft', tostring(canMoveLeft), true)
-      if not canMoveLeft and not canMoveRight then
-        canMoveRight = true
-        r.SetExtState(scriptID, 'canMoveRight', 'true', true)
-      end
-      markControlChanged()
-    end
-
-    local cbSpacer = 16
-
-    ImGui.SameLine(ctx)
-    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
-    rv, canMoveRight = ImGui.Checkbox(ctx, 'Move right', canMoveRight)
-    if rv then
-      r.SetExtState(scriptID, 'canMoveRight', tostring(canMoveRight), true)
-      if not canMoveLeft and not canMoveRight then
-        canMoveLeft = true
-        r.SetExtState(scriptID, 'canMoveLeft', 'true', true)
-      end
-      markControlChanged()
-    end
-    ImGui.EndDisabled(ctx)
-
-    ImGui.SameLine(ctx)
-    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
-    ImGui.BeginDisabled(ctx, not lengthApplicable)
-    rv, canShrink = ImGui.Checkbox(ctx, 'Shrink', canShrink)
-    if rv then
-      r.SetExtState(scriptID, 'canShrink', tostring(canShrink), true)
-      if not canShrink and not canGrow then
-        canGrow = true
-        r.SetExtState(scriptID, 'canGrow', 'true', true)
-      end
-      markControlChanged()
-    end
-
-    ImGui.SameLine(ctx)
-    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
-    rv, canGrow = ImGui.Checkbox(ctx, 'Grow', canGrow)
-    if rv then
-      r.SetExtState(scriptID, 'canGrow', tostring(canGrow), true)
-      if not canShrink and not canGrow then
-        canShrink = true
-        r.SetExtState(scriptID, 'canShrink', 'true', true)
-      end
-      markControlChanged()
-    end
-    ImGui.EndDisabled(ctx)
-    ImGui.Dummy(ctx, 0, 2)
-    ImGui.Separator(ctx)
-    ImGui.Dummy(ctx, 0, 2)
-
-    -- range filter section
-    rv, rangeFilterEnabled = ImGui.Checkbox(ctx, 'Only quantize range (0% = on grid, 50% = between grid):', rangeFilterEnabled)
-    if rv then
-      r.SetExtState(scriptID, 'rangeFilterEnabled', tostring(rangeFilterEnabled), true)
-      markControlChanged()
-    end
-    ImGui.BeginDisabled(ctx, not rangeFilterEnabled)
-    local availWidth = ImGui.GetContentRegionAvail(ctx) - 10
-    local sliderWidth = (availWidth - 20) / 2  -- subtract space for "to" text
-    ImGui.PushItemWidth(ctx, sliderWidth)
-    rv, rangeMin = ImGui.SliderDouble(ctx, '##rangeMin', rangeMin, 0.0, 100.0, '%.1f%%')
-    if rv then
-      r.SetExtState(scriptID, 'rangeMin', tostring(rangeMin), true)
-      if rangeMin > rangeMax then
-        rangeMax = rangeMin
-        r.SetExtState(scriptID, 'rangeMax', tostring(rangeMax), true)
-      end
-      markControlChanged()
-    end
-    ImGui.PopItemWidth(ctx)
-    ImGui.SameLine(ctx)
-    ImGui.Text(ctx, 'to')
-    ImGui.SameLine(ctx)
-    ImGui.PushItemWidth(ctx, sliderWidth)
-    rv, rangeMax = ImGui.SliderDouble(ctx, '##rangeMax', rangeMax, 0.0, 100.0, '%.1f%%')
-    if rv then
-      r.SetExtState(scriptID, 'rangeMax', tostring(rangeMax), true)
-      if rangeMax < rangeMin then
-        rangeMin = rangeMax
-        r.SetExtState(scriptID, 'rangeMin', tostring(rangeMin), true)
-      end
-      markControlChanged()
-    end
-    ImGui.PopItemWidth(ctx)
-    -- distance scaling checkbox (linear interpolation within range)
-    rv, distanceScaling = ImGui.Checkbox(ctx, 'Scale strength by distance', distanceScaling)
-    if rv then
-      r.SetExtState(scriptID, 'distanceScaling', tostring(distanceScaling), true)
-      markControlChanged()
-    end
-    ImGui.EndDisabled(ctx)
-    ImGui.Dummy(ctx, 0, 2)
-    ImGui.Separator(ctx)
-    ImGui.Dummy(ctx, 0, 2)
-
-    -- fix overlaps checkbox
-    rv, fixOverlaps = ImGui.Checkbox(ctx, 'Fix overlaps', fixOverlaps)
-    if rv then
-      r.SetExtState(scriptID, 'fixOverlaps', tostring(fixOverlaps), true)
-      markControlChanged()
-    end
-    ImGui.Dummy(ctx, 0, 2)
-
-    ImGui.Separator(ctx)
 
     -- buttons
     local isSelectedScope = (scopeIndex == 1 or scopeIndex == 3)
@@ -2848,10 +2578,29 @@ local function loop()
   end
 end
 
-initializeWindowPosition()
-initializeScopeState()
-initializeQuantizeState()
-ensureFactoryPresets()
-presetListDirty = true
-r.defer(function() xpcall(loop, onCrash) end)
-r.atexit(shutdown)
+-- only run when executed directly, not when required as module
+if select('#', ...) == 0 then
+  initializeWindowPosition()
+  initializeScopeState()
+  initializeQuantizeState()
+  ensureFactoryPresets()
+  presetListDirty = true
+  r.defer(function() xpcall(loop, onCrash) end)
+  r.atexit(shutdown)
+end
+
+-- export for TransformerQuantizeUI (groove browser reuse)
+return {
+  enumerateGrooveFiles = enumerateGrooveFiles,
+  loadGrooveMIDIFile = loadGrooveMIDIFile,
+  -- state init helpers
+  getDefaultRgtPath = function()
+    tg.initCache() -- ensure cache populated (perf)
+    local p = tg.cache.resourcePath .. '/Data/Grooves'
+    if not tg.dirExists(p) then p = tg.cache.resourcePath .. '/Grooves' end
+    return tg.dirExists(p) and p or nil
+  end,
+  -- parser refs for groove loading
+  parseGrooveFile = function(filepath) return mgdefs.parseGrooveFile(filepath) end,
+  parseMIDIGroove = parseMIDIGroove
+}

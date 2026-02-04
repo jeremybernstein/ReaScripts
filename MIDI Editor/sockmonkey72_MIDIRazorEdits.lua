@@ -1,13 +1,13 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.8
+-- @version 1.5.0-beta.9
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - use semver for childwindow version checking (https://github.com/kikito/semver.lua)
---   - fix a ton of annoying bugs when copying areas (thanks BirdBird!)
---   - fix a few obnoxious bugs when using invert, duplicate and retrograde operations (thanks BirdBird!)
---   - minor fixes and improvements
+--   - add a special right-mouse-button main icon to prevent massive WTF confusion
+--   - fix widget offset mode to properly clip at min/max
+--   - fix startup mode flag parsing (crash when launching SelectedNotes script)
+--   - some refactoring to unify extra module structure
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

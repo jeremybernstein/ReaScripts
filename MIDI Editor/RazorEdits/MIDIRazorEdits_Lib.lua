@@ -5,11 +5,6 @@
    * NoIndex: true
 --]]
 
--- TODOs
---   x multiple widget support {post-public}
---   x move/copy area to next lane {post-public}
---   x rewrite to use LICE coords (although it's not a big deal, isn't causing performance issues)
-
 local r = reaper
 local Lib = {}
 
@@ -63,9 +58,16 @@ local mod = keys.mod
 local helper = require 'MIDIRazorEdits_Helper'
 local slicer = require 'MIDIRazorEdits_Slicer'
 local pitchbend = require 'MIDIRazorEdits_PitchBend'
+local Mode = require 'MIDIRazorEdits_Mode'
+local analyze = require 'MIDIRazorEdits_Analyze'
 local semver = require 'lib.semver.semver'
 
 pitchbend.setMIDIUtils(mu)
+
+-- mode registry for standardized dispatch
+local modeRegistry = Mode.createRegistry()
+modeRegistry:register('slicer', slicer)
+modeRegistry:register('pitchbend', pitchbend)
 
 local needsupdate = false
 if not r.APIExists('rcw_GetVersion') then
@@ -190,15 +192,7 @@ end
 
 local equalIsh = helper.equalIsh
 
-local function clipInt(val, min, max)
-  if not val then return nil end
-
-  min = min or 0
-  max = max or 127
-
-  val = val < min and min or val > max and max or val
-  return math.floor(val)
-end
+local clipInt = helper.clipInt
 
 ------------------------------------------------
 ------------------------------------------------
@@ -233,47 +227,9 @@ local function callWidgetProcessingMode(val, outputMin, outputMax, offsetFactorS
   return newval and math.floor(newval + 0.5)
 end
 
--- the fruits of 2 hours of hard labor with chatGPT 4 -- in the end, I had to fix it for the AI
+-- delegate to analyze module
 local function calculateVisibleRangeWithMargin(scroll, zoom, marginSize, viewHeight, minValue, maxValue)
-  -- Default values for minValue and maxValue
-  minValue = minValue or 0
-  maxValue = maxValue or 127
-
-  -- Logical value range
-  local valueRange = maxValue - minValue
-
-  -- Logical height for the value range
-  local logicalValueHeight = (viewHeight - 2 * marginSize) * zoom
-
-  -- Total logical height (values + fixed margins)
-  local totalLogicalHeight = logicalValueHeight + 2 * marginSize
-
-  -- Center of the visible area in the total logical height
-  local center = scroll * (totalLogicalHeight - viewHeight) + viewHeight / 2
-
-  -- Visible range in the total logical height
-  local visibleStart = center - viewHeight / 2
-  local visibleEnd = center + viewHeight / 2
-
-  -- Margins (renamed for inverted coordinates)
-  local bottomMarginStart = totalLogicalHeight - marginSize
-  local bottomMarginEnd = totalLogicalHeight
-  local topMarginStart = 0
-  local topMarginEnd = marginSize
-
-  -- Calculate visible portions of the margins
-  local marginBottomVisible = math.max(0, math.min(visibleEnd, bottomMarginEnd) - math.max(visibleStart, bottomMarginStart))
-  local marginTopVisible = math.max(0, math.min(visibleEnd, topMarginEnd) - math.max(visibleStart, topMarginStart))
-
-  -- Clamp the visible value range within the logical value height
-  local visibleValueStart = math.max(visibleStart - marginSize, 0)
-  local visibleValueEnd = math.min(visibleEnd - marginSize, logicalValueHeight)
-
-  -- Convert logical value range to actual values (inverted range)
-  local visibleMin = maxValue - (visibleValueEnd / logicalValueHeight) * valueRange
-  local visibleMax = maxValue - (visibleValueStart / logicalValueHeight) * valueRange
-
-  return visibleMin, visibleMax, marginTopVisible, marginBottomVisible
+  return analyze.calculateVisibleRangeWithMargin(scroll, zoom, marginSize, viewHeight, minValue, maxValue)
 end
 
 local function getEditorAndSnapWish()
@@ -647,7 +603,6 @@ local function pitchInRange(pitch, bottomPitch, topPitch)
   end
   return false
 end
-_G.pitchInRange = pitchInRange -- find a better place for this
 
 local DEBUG_COPY = false  -- DEBUG flag for copy mode
 local DEBUG_DUPLICATE = false  -- DEBUG flag for duplicate mode
@@ -1216,7 +1171,6 @@ local function processNotes(activeTake, area, operation)
               pitchidx = pitchidx - deltaPitch
               pitchidx = math.min(math.max(pitchidx, 1), #meState.noteTab)
               newpitch = meState.noteTab[pitchidx]
-              -- _P(save, pitchidx, pitch, newpitch)
             end
           else
             newpitch = pitch - deltaPitch
@@ -1256,7 +1210,7 @@ local function processNotes(activeTake, area, operation)
           if newppqpos and newendppqpos and newppqpos < newendppqpos then
             if newendppqpos - newppqpos > GLOBAL_PREF_SLOP then
               if insert then -- only called for stretching
-                local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch)
+                local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil, meState)
                 if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
                   for _, seg in ipairs(segments) do
                     helper.addUnique(tInsertions,
@@ -2539,43 +2493,9 @@ local function setCustomOrder(hwnd, visible_note_rows)
   meState.showNoteRows = 3
 end
 
+-- delegate to analyze module
 local function getVisibleNoteRows(hwnd, mode, chunk)
-  local visible_rows = {}
-
-  if mode == 0 then -- reaper.GetToggleCommandStateEx(32060, 40452) == 1 then
-    for n = 0, 127 do visible_rows[n + 1] = n end -- won't be called
-  elseif mode == 3 then -- reaper.GetToggleCommandStateEx(32060, 40143) == 1 then
-    local note_order
-    if chunk then
-      note_order = chunk:match('CUSTOM_NOTE_ORDER (.-)\n')
-    end
-    if note_order then
-      for value in (note_order .. ' '):gmatch('(.-) ') do
-        visible_rows[#visible_rows + 1] = tonumber(value)
-      end
-    else
-      for n = 0, 127 do visible_rows[n + 1] = n end
-    end
-  else -- mode == 1 or mode == 2
-    local GetSetting = reaper.MIDIEditor_GetSetting_int
-    local SetSetting = reaper.MIDIEditor_SetSetting_int
-    local key = 'active_note_row'
-
-    local prev_row = GetSetting(hwnd, key)
-
-    local highest_row = -1
-    for i = 0, 127 do
-      SetSetting(hwnd, key, i)
-      local row = GetSetting(hwnd, key)
-      if row > highest_row then
-        highest_row = row
-        visible_rows[#visible_rows + 1] = row
-      end
-    end
-
-    SetSetting(hwnd, key, prev_row)
-  end
-  return visible_rows
+  return analyze.getVisibleNoteRows(hwnd, mode, chunk)
 end
 
 -- cribbed from Julian Sader
@@ -2600,7 +2520,9 @@ local function analyzeChunk()
   local mePrevState = meState
   -- this needs to persist!
   meState = { noteTab = mePrevState.noteTab, noteTabReverse = mePrevState.noteTabReverse}
-  glob.deadZones = {} -- does this need to be more efficient?
+  -- reuse table to reduce GC pressure (called every 200ms)
+  if not glob.deadZones then glob.deadZones = {} end
+  for k in pairs(glob.deadZones) do glob.deadZones[k] = nil end
 
   local takeNum = r.GetMediaItemTakeInfo_Value(activeTake, 'IP_TAKENUMBER')
   local chunkOK, chunk = r.GetItemStateChunk(activeItem, '', false)
@@ -2623,9 +2545,6 @@ local function analyzeChunk()
   -- The MIDI editor scroll and zoom are hidden within the CFGEDITVIEW field
   -- If the MIDI editor's timebase = project synced or project time, horizontal zoom is given as pixels per second.  If timebase is beats, pixels per tick
   meState.leftmostTick, meState.horzZoom, meState.topPitch, meState.pixelsPerPitch = activeTakeChunk:match('\nCFGEDITVIEW (%S+) (%S+) (%S+) (%S+)')
-
-  -- _P('CFGEDITVIEW', meState.leftmostTick, meState.horzZoom, meState.topPitch, meState.pixelsPerPitch)
-
   meState.leftmostTick, meState.horzZoom, meState.topPitch, meState.pixelsPerPitch = tonumber(meState.leftmostTick), tonumber(meState.horzZoom), 127 - tonumber(meState.topPitch), tonumber(meState.pixelsPerPitch)
 
   meState.leftmostTick = meState.leftmostTick and math.floor(meState.leftmostTick + 0.5)
@@ -2644,8 +2563,6 @@ local function analyzeChunk()
   filterEnabled = tonumber(filterEnabled)
   editorFilterChannels = filterEnabled ~= 0 and multiChanFilter ~= 0 and multiChanFilter or nil
 
-  -- _P('CFGEDIT', activeChannel, meState.timeBase)
-
   --[[
   0 = show all
   1 = hide unused
@@ -2657,9 +2574,10 @@ local function analyzeChunk()
   -- so probably every tick
   -- REAPER BUG prevents this from being good: https://forum.cockos.com/showthread.php?t=298446
   meState.showNoteRows = tonumber(meState.showNoteRows)
+  local noteRowsChanged = false
   if mePrevState.showNoteRows ~= meState.showNoteRows then
     glob.refreshNoteTab = true
-    clearAreas()
+    noteRowsChanged = true  -- caller handles clearAreas
   end
   if meState.showNoteRows ~= 0 and (not meState.noteTab or glob.refreshNoteTab) then
     local tChunkOk, tChunk
@@ -2753,8 +2671,6 @@ local function analyzeChunk()
 
     meLanes[i].pixelsPerValue = ((meLanes[i].bottomPixel - meLanes[i].topPixel) / (meLanes[i].topValue - meLanes[i].bottomValue))
 
-    -- _P('meLanes', i, meLanes[i].bottomPixel, meLanes[i].topPixel, meLanes[i].bottomValue, meLanes[i].topValue, meLanes[i].bottomMargin, meLanes[i].topMargin, meLanes[i].pixelsPerValue)
-
     -- should also check margin on/off, what else?
     if not glob.meNeedsRecalc -- don't bother if we're doing it already
       and mePrevLanes
@@ -2790,8 +2706,6 @@ local function analyzeChunk()
   meLanes[-1].topValue = meState.topPitch
   meLanes[-1].pixelsPerValue = meState.pixelsPerPitch
 
-  -- _P('meLanes', -1, meLanes[-1].bottomPixel, meLanes[-1].topPixel, meLanes[-1].bottomValue, meLanes[-1].topValue, meLanes[-1].height, meLanes[-1].pixelsPerValue)
-
   if meLanes[0] then
     table.insert(glob.deadZones, Rect.new(0, meLanes[-1].bottomPixel, lice.MIDI_HANDLE_L, meLanes[0].topPixel - meLanes[0].topMargin)) -- piano roll -> first lane
     table.insert(glob.deadZones, Rect.new(sr:width() - (lice.MIDI_SCROLLBAR_R + lice.MIDI_HANDLE_R), meLanes[-1].bottomPixel, sr:width() - lice.MIDI_SCROLLBAR_R, meLanes[0].topPixel - meLanes[0].topMargin)) -- piano roll -> first lane
@@ -2807,7 +2721,7 @@ local function analyzeChunk()
   glob.meLanes = meLanes
   glob.meState = meState
 
-  return true
+  return true, noteRowsChanged
 end
 
 ------------------------------------------------
@@ -3520,13 +3434,7 @@ end
 
 ------------------------------------------------
 ------------------------------------------------
---- Thanks ChatGPT
-
--- Standard AABB overlap check:
-local function doOverlap(r1, r2)
-  return (r1.x1 < r2.x2) and (r1.x2 > r2.x1)
-     and (r1.y1 < r2.y2) and (r1.y2 > r2.y1)
-end
+local doOverlap = helper.doOverlap
 
 local function noConflicts(testRect, ignoreIndex)
   for i, area in ipairs(areas) do
@@ -3746,34 +3654,6 @@ end
 ------------------------------------------------
 ------------------------------------------------
 
--- Helper to check if extents1 fully contains extents2
-local function contains(extents1, extents2)
-  return extents1.ticks.min <= extents2.ticks.min and
-         extents1.ticks.max >= extents2.ticks.max and
-         extents1.vals.min <= extents2.vals.min and
-         extents1.vals.max >= extents2.vals.max
-end
-
--- Helper to check if two extents intersect at all
-local function intersects(extents1, extents2)
-  local ticks_overlap = not (extents1.ticks.max < extents2.ticks.min or
-                           extents2.ticks.max < extents1.ticks.min)
-
-  -- Changed to catch equal values between min and max
-  local vals_overlap = not (extents1.vals.max < extents2.vals.min or
-                           extents2.vals.max < extents1.vals.min or
-                           extents1.vals.min > extents2.vals.max or
-                           extents2.vals.min > extents1.vals.max)
-
-  return ticks_overlap and vals_overlap
-end
-
--- Helper to get extents area
-local function calcArea(extents)
-  return (extents.ticks.max - extents.ticks.min) *
-         (extents.vals.max - extents.vals.min)
-end
-
 -- Main function to resolve intersections
 local function resolveIntersections()
   local result = {}
@@ -3785,7 +3665,7 @@ local function resolveIntersections()
     for j = 1, #areas do
       if i ~= j then
         if areas[i].ccLane == areas[j].ccLane
-          and contains(areas[j].timeValue, extents1)
+          and areas[j].timeValue:contains(extents1)
         then
           is_contained = true
           break
@@ -3803,7 +3683,7 @@ local function resolveIntersections()
     local j = i + 1
     while j <= #result do
       if result[i].ccLane == result[j].ccLane
-        and intersects(result[i].timeValue, result[j].timeValue)
+        and result[i].timeValue:intersects(result[j].timeValue)
       then
         -- Get current extents
         local extents1 = result[i].timeValue
@@ -3811,7 +3691,7 @@ local function resolveIntersections()
 
         -- Determine which extents should stay unchanged
         local keep_first = result[i].active or
-                          (not result[j].active and calcArea(extents1) > calcArea(extents2))
+                          (not result[j].active and extents1:calcArea() > extents2:calcArea())
 
         -- Get the extents in the right order
         local keep_extents = keep_first and extents1 or extents2
@@ -4311,7 +4191,7 @@ local function processMouse()
     local areaCountPreClick = #areas
     lice.button.dblclickSeen = true
 
-    if lice.button.which == 0 then
+    if lice.isPrimaryButton() then
       for i = #areas, 1, -1 do
         local area = areas[i]
         if clickedLane == area.ccLane or (clickedLane == -1 and not area.ccLane) then
@@ -4326,8 +4206,7 @@ local function processMouse()
     if wantsWidgetToggle then
       glob.changeWidget = { area = wantsWidgetToggle or nil }
       return
-    elseif ((glob.wantsRightButton and lice.button.which == 1)
-      or (not glob.wantsRightButton and lice.button.which == 0))
+    elseif lice.isPrimaryButton()
     then
       resetState()
       processAreas(nil, true) -- get the state
@@ -4514,7 +4393,7 @@ local function processMouse()
     end
 
     if not cursorSet then
-      glob.setCursor(glob.razor_cursor1)
+      glob.setCursor(glob.wantsRightButton and glob.razor_cursor_rmb or glob.razor_cursor1)
     end
 
     if glob.widgetInfo then glob.widgetInfo.sourceEvents = nil end
@@ -5000,7 +4879,8 @@ local function loop()
 
   if glob.wantsAnalyze then
     analyzeCheckTime = (analyzeCheckTime and (glob.editorIsForeground or pitchbend.isConfigDialogOpen())) and glob.currentTime or nil
-    analyzeChunk()
+    local _, noteRowsChanged = analyzeChunk()
+    if noteRowsChanged then clearAreas() end
   end
 
   local wantsUndo = false
@@ -5020,13 +4900,10 @@ local function loop()
         clearAreas()
         createAreaForSelectedNotes()
         swapAreas(areas)
-        startupOptions = nil
-      end
-      if startupOptions & glob.STARTUP_SLICER_MODE ~= 0 then
+      elseif startupOptions & glob.STARTUP_SLICER_MODE ~= 0 then
         glob.inSlicerMode = true
         glob.slicerQuitAfterProcess = true
-      end
-      if startupOptions & glob.STARTUP_PITCHBEND_MODE ~= 0 then
+      elseif startupOptions & glob.STARTUP_PITCHBEND_MODE ~= 0 then
         glob.inPitchBendMode = true
         glob.pitchBendQuitOnToggle = true
         -- activeChannel is restored from ProjExtState in handleState (or falls back to editor's channel)

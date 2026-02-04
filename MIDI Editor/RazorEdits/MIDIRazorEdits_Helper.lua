@@ -34,7 +34,6 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
     end
   end
 end
-_G.spairs = spairs
 
 local function deserialize(str)
   local f, err = load('return ' .. str)
@@ -273,68 +272,71 @@ end
 
 ----------------------------------------------------
 
+-- single source of truth for MIDI editor lane type mappings
+-- chunk: lane number in item state chunk VELLANE field
+-- api: lane code from MIDIEditor_GetSetting_int(editor, 'last_clicked_cc_lane')
+--      0-127=CC, 0x100|(0-31)=14-bit CC, 0x200+=special lanes
+-- chanmsg: MIDI status byte (high nibble), 0 = not a standard MIDI message
+-- range: max value for this lane type (min is always 0)
+local LANE_TYPES = {
+  { name = 'velocity',     chunk = -1,  api = 0x200, chanmsg = 0x90, range = 127 },
+  { name = 'pitch',        chunk = 128, api = 0x201, chanmsg = 0xE0, range = 16383 },
+  { name = 'program',      chunk = 129, api = 0x202, chanmsg = 0xC0, range = 127 },
+  { name = 'chanPressure', chunk = 130, api = 0x203, chanmsg = 0xD0, range = 127 },
+  { name = 'bankProgram',  chunk = 131, api = 0x204, chanmsg = 0,    range = 127 },
+  { name = 'text',         chunk = 132, api = 0x205, chanmsg = 0,    range = 1 },
+  { name = 'sysex',        chunk = 133, api = 0x206, chanmsg = 0xF0, range = 1 },
+  { name = 'offVelocity',  chunk = 167, api = 0x207, chanmsg = 0x90, range = 127 },
+  { name = 'notation',     chunk = 166, api = 0x208, chanmsg = 0,    range = 1 },
+  { name = 'polyAT',       chunk = 168, api = 0x209, chanmsg = 0xA0, range = 127 },
+  { name = 'mediaItem',    chunk = -2,  api = 0x210, chanmsg = 0,    range = 1 },
+}
+
+-- derived lookup tables (built once at load time)
+local apiToChanmsg = {}
+local apiToRange = {}
+local chunkToApi = {}
+for _, lane in ipairs(LANE_TYPES) do
+  apiToChanmsg[lane.api] = lane.chanmsg
+  apiToRange[lane.api] = lane.range
+  chunkToApi[lane.chunk] = lane.api
+end
+
 local function ccTypeToChanmsg(ccType)
   if not ccType then return nil, nil end
-
-  local tLanes = {[0x200] = 0x90, -- Velocity
-                  [0x201] = 0xE0, -- Pitch
-                  [0x202] = 0xC0, -- Program select
-                  [0x203] = 0xD0, -- Channel pressure
-                  [0x204] = 0, -- Bank/program
-                  [0x205] = 0, -- Text
-                  [0x206] = 0xF0, -- Sysex
-                  [0x207] = 0x90, -- Off velocity
-                  [0x208] = 0, -- Notation
-                  [0x209] = 0xA0, -- Poly Aftertouch -- v7.29+dev0103
-                  [0x210] = 0, -- Media Item lane
-                  }
+  -- 14-bit CC (256-287 in API)
   if type(ccType) == 'number' and 256 <= ccType and ccType <= 287 then
-    return 0xB0, -1 -- 14 bit CC range from 256-287 in API
-  else
-    if tLanes[ccType] then return tLanes[ccType]
-    else return 0xB0, (ccType >= 0 and ccType < 128) and ccType or nil
-    end
+    return 0xB0, -1
   end
+  -- special lane types
+  if apiToChanmsg[ccType] then
+    return apiToChanmsg[ccType]
+  end
+  -- 7-bit CC (0-127)
+  return 0xB0, (ccType >= 0 and ccType < 128) and ccType or nil
 end
 
 local function ccTypeToRange(ccType)
   if not ccType then return 0 end
-
-  local max = 127
-
-  if ccType == 0x201 then max = (1 << 14) - 1 -- pitch bend
-  elseif ccType == 0x206 or ccType == 0x208 or ccType >= 0x210 then max = 1
-  end
-
+  -- 14-bit CC (256-287 in API)
   if type(ccType) == 'number' and 256 <= ccType and ccType <= 287 then
-    return (1 << 14) - 1 -- 14 bit CC range from 256-287 in API -- TODO: I guess only if the pref is set to display this as a single 14-bit number?
+    return 16383
   end
-  return max
+  -- special lane types
+  if apiToRange[ccType] then
+    return apiToRange[ccType]
+  end
+  -- default (7-bit CC)
+  return 127
 end
 
--- Lane numbers as used in the chunk's VELLANE field differ from those returned by API functions
---    such as MIDIEditor_GetSetting_int(editor, 'last_clicked').
---[[   last_clicked_cc_lane: returns 0-127=CC, 0x100|(0-31)=14-bit CC,
-       0x200=velocity, 0x201=pitch, 0x202=program, 0x203=channel pressure,
-       0x204=bank/program select, 0x205=text, 0x206=sysex, 0x207=off velocity]]
 local function convertCCTypeChunkToAPI(lane)
-local tLanes = {[ -1] = 0x200, -- Velocity
-                [128] = 0x201, -- Pitch
-                [129] = 0x202, -- Program select
-                [130] = 0x203, -- Channel pressure
-                [131] = 0x204, -- Bank/program
-                [132] = 0x205, -- Text
-                [133] = 0x206, -- Sysex
-                [167] = 0x207, -- Off velocity
-                [166] = 0x208, -- Notation
-                [168] = 0x209, -- Poly Aftertouch -- v7.29+dev0103
-                [ -2] = 0x210, -- Media Item lane
-                }
-if type(lane) == 'number' and 134 <= lane and lane <= 165 then
-  return (lane + 122) -- 14 bit CC range from 256-287 in API
-else
-  return (tLanes[lane] or lane) -- If 7bit CC, number remains the same
-end
+  -- 14-bit CC (134-165 in chunk → 256-287 in API)
+  if type(lane) == 'number' and 134 <= lane and lane <= 165 then
+    return lane + 122
+  end
+  -- special lane types or pass-through for 7-bit CC
+  return chunkToApi[lane] or lane
 end
 
 ----------------------------------------------------
@@ -387,7 +389,20 @@ end
 
 ----------------------------------------------------
 
-local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyArea)
+local function pitchInRange(pitch, bottomPitch, topPitch, meState)
+  if meState and meState.noteTab then
+    if meState.noteTabReverse[pitch] then
+      for i = bottomPitch, topPitch do
+        if pitch == meState.noteTab[i] then return true end
+      end
+    end
+  else
+    return pitch >= bottomPitch and pitch <= topPitch
+  end
+  return false
+end
+
+local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyArea, meState)
   local max, min = math.max, math.min
   local intersecting_areas = {}
 
@@ -411,7 +426,7 @@ local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyAr
     end
 
     for _, pos in ipairs(positions) do
-      if pitchInRange(pitch, pos.bottom, pos.top) then
+      if pitchInRange(pitch, pos.bottom, pos.top, meState) then
         if pos.right >= ppqpos and pos.left <= endppqpos then
           table.insert(intersecting_areas, {
             left = max(pos.left, ppqpos), --overlapMod() and ppqpos or max(pos.left, ppqpos),
@@ -654,16 +669,20 @@ local function offsetValue(input, outputMin, outputMax, offsetFactorStart, offse
   offsetFactor = 1 - offsetFactor -- offsetFactor is inverted
 
   -- Adjust the output based on the scaling factor
+  local result
   if equalIsh(offsetFactor, 0.5) then
-    return input
+    result = input
   elseif offsetFactor < 0.5 then
     local factor = (0.5 - offsetFactor) / 0.5
-    return input - ((outputMax - outputMin) * factor)
+    result = input - ((outputMax - outputMin) * factor)
   elseif offsetFactor > 0.5 then
     local factor = (offsetFactor - 0.5) / 0.5
-    return input + ((outputMax - outputMin) * factor)
+    result = input + ((outputMax - outputMin) * factor)
   end
+  -- clamp to valid range
+  return result and math.max(outputMin, math.min(outputMax, result))
 end
+
 local function compExpValueMiddle(input, outputMin, outputMax, offsetFactorStart, offsetFactorEnd, t, inputMin, inputMax)
   t = math.max(0, math.min(1, t))
 
@@ -788,6 +807,23 @@ Helper.addUnique = addUnique
 Helper.inUniqueTab = inUniqueTab
 Helper.equalIsh = equalIsh
 
+-- clamp value to integer range
+local function clipInt(val, min, max)
+  if not val then return nil end
+  min = min or 0
+  max = max or 127
+  val = val < min and min or val > max and max or val
+  return math.floor(val)
+end
+Helper.clipInt = clipInt
+
+-- AABB overlap check for rect-like tables with x1, y1, x2, y2
+local function doOverlap(r1, r2)
+  return (r1.x1 < r2.x2) and (r1.x2 > r2.x1)
+     and (r1.y1 < r2.y2) and (r1.y2 > r2.y1)
+end
+Helper.doOverlap = doOverlap
+
 Helper.getNoteSegments = getNoteSegments
 Helper.getNonIntersectingAreas = getNonIntersectingAreas
 Helper.getExtentUnion = getExtentUnion
@@ -803,17 +839,6 @@ Helper.VKeys_Intercept = VKeys_Intercept
 Helper.VKeys_GetState = VKeys_GetState
 Helper.VKeys_ClearState = VKeys_ClearState
 
--- convert screen Y from GetMousePosition() to native coords matching screenRect
--- macOS screen Y is flipped (origin at bottom), this converts to match lane.topPixel etc
-local function screenYToNative(y, windowRect)
-  if is_macos and windowRect then
-    local _, wy1, _, wy2 = r.JS_Window_GetViewportFromRect(windowRect.x1, windowRect.y1, windowRect.x2, windowRect.y2, false)
-    local screenHeight = math.abs(wy2 - wy1)
-    return screenHeight - y
-  end
-  return y
-end
-Helper.screenYToNative = screenYToNative
 
 -- show popup menu, preferring rcw_ShowMenu if available (better behavior with child windows)
 -- menuStr: same format as gfx.showmenu

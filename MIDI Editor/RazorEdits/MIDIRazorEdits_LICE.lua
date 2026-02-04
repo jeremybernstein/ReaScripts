@@ -19,6 +19,7 @@ local pitchbend = require 'MIDIRazorEdits_PitchBend'
 
 local Point = classes.Point
 local Rect = classes.Rect
+local Extent = classes.Extent
 
 local winscale = helper.is_windows and 2 or 1
 local pixelScale
@@ -378,6 +379,15 @@ local function resetButtons()
                  }
 end
 
+-- button abstraction for RMB mode
+Lice.isPrimaryButton = function()
+  return (glob.wantsRightButton and Lice.button.which == 1) or (not glob.wantsRightButton and Lice.button.which == 0)
+end
+
+Lice.isSecondaryButton = function()
+  return (glob.wantsRightButton and Lice.button.which == 0) or (not glob.wantsRightButton and Lice.button.which == 1)
+end
+
 local function peekAppIntercepts(force)
   if force or not appInterceptsHWND then
     endAppIntercepts()
@@ -491,11 +501,12 @@ local function peekIntercepts(m_x, m_y)
         lastClickTime = currentTime
       elseif msg == 'WM_RBUTTONDOWN' then
         if currentTime - prevClickTime > DOUBLE_CLICK_DELAY then
-          if not glob.wantsRightButton or hovering then
-            glob.handleRightClick()
-            if glob.wantsRightButton then
-              handleButtonResetState(1, 'clicked')
-              Lice.button.pressX, Lice.button.pressY = m_x, m_y
+          if not glob.wantsRightButton then
+            -- try handler first (deletes hovered area/point)
+            local handled = glob.handleRightClick()
+            if not handled then
+              -- handler didn't process, do normal button handling
+              handleButtonDown(m_x, m_y, 1, hovering)
             end
           else
             handleButtonDown(m_x, m_y, 1, hovering)
@@ -526,10 +537,15 @@ local function peekIntercepts(m_x, m_y)
         lastClickTime = currentTime
       elseif msg == 'WM_LBUTTONDOWN' then
         if currentTime - prevClickTime > DOUBLE_CLICK_DELAY then
-          if glob.wantsRightButton and not hovering then
-            r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+          if glob.wantsRightButton then
+            -- LMB is secondary in RMB mode, try handler first (deletes hovered area/point)
+            local handled = glob.handleRightClick()
+            if not handled then
+              -- handler didn't process, pass through to MIDI editor
+              r.JS_WindowMessage_Post(glob.liceData.midiview, intercept.message, wpl, wph, lpl, lph)
+            end
           else
-            handleButtonDown(m_x, m_y, 0, hovering)
+            handleButtonDown(m_x, m_y, 0, hovering)  -- normal LMB mode
           end
         end
         if not helper.is_macos then
@@ -1426,9 +1442,6 @@ local function drawLice()
           clearBitmap(area.bitmap, x1 - Lice.EDGE_SLOP, y1 - Lice.EDGE_SLOP, logWidth + (Lice.EDGE_SLOP * 2) + 1, logHeight + (Lice.EDGE_SLOP * 2) + 1)
           fillRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reFillColor, childHWND and 0.3 or 1, mode);
           frameRect(area.bitmap, x1, y1, logWidth, logHeight - 1, reBorderColor, alpha, mode, antialias)
-          -- if area.onClipboard then
-          --   frameRect(area.bitmap, x1 + 3, y1 + 3, logWidth - 6, logHeight - 7, reBorderContrastColor, alpha, mode, antialias)
-          -- end
           if area.hovering then
             local visTop = (y1 + math.abs(y1L - y1V))
             local visBottom = (y2 - math.abs(y2L - y2V) + 1)
@@ -1494,9 +1507,6 @@ local function drawLice()
                                             mx2 + Lice.EDGE_SLOP, my2 + Lice.EDGE_SLOP,
                                             reBorderContrastColor, 1., mode)
                 elseif glob.verticalLock then -- vertical lock scroll mode
-                  -- r.JS_LICE_FillRect(area.bitmap, middleX - Lice.EDGE_SLOP * 3, middleY - (Lice.EDGE_SLOP * 3),
-                  --                                     Lice.EDGE_SLOP * 6, (Lice.EDGE_SLOP * 6),
-                  --                                     ((reBorderColor & 0x00FFFFFF) | 0x88000000), helper.is_windows and 0x88/255 or 1, mode)
                   fillTriangle(area.bitmap, mx2, middleY - (Lice.EDGE_SLOP * 2),
                                mx2 - Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,
                                mx2 + Lice.EDGE_SLOP, middleY - Lice.EDGE_SLOP,

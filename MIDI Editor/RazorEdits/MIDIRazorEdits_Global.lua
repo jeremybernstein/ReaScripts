@@ -90,6 +90,7 @@ local scriptPath = debug.getinfo(1, 'S').source:match [[^@?(.*[\/])[^\/]-$]]
 
 Global.normal_cursor = r.JS_Mouse_LoadCursor(helper.is_windows and 32512 or 0)
 Global.razor_cursor1 = r.JS_Mouse_LoadCursor(599)
+Global.razor_cursor_rmb = r.JS_Mouse_LoadCursorFromFile(scriptPath .. 'rmb.cur')
 Global.resize_left_cursor = r.JS_Mouse_LoadCursor(417)
 Global.resize_right_cursor = r.JS_Mouse_LoadCursor(418)
 Global.resize_top_cursor = r.JS_Mouse_LoadCursor(419)

@@ -280,33 +280,6 @@ local vKeyLookup = {
   backslash = vKeys.VK_OEM_5,
   closebracket = vKeys.VK_OEM_6,
   quote = vKeys.VK_OEM_7,
-
-  -- A = vKeys.VK_A,
-  -- B = vKeys.VK_B,
-  -- C = vKeys.VK_C,
-  -- D = vKeys.VK_D,
-  -- E = vKeys.VK_E,
-  -- F = vKeys.VK_F,
-  -- G = vKeys.VK_G,
-  -- H = vKeys.VK_H,
-  -- I = vKeys.VK_I,
-  -- J = vKeys.VK_J,
-  -- K = vKeys.VK_K,
-  -- L = vKeys.VK_L,
-  -- M = vKeys.VK_M,
-  -- N = vKeys.VK_N,
-  -- O = vKeys.VK_O,
-  -- P = vKeys.VK_P,
-  -- Q = vKeys.VK_Q,
-  -- R = vKeys.VK_R,
-  -- S = vKeys.VK_S,
-  -- T = vKeys.VK_T,
-  -- U = vKeys.VK_U,
-  -- V = vKeys.VK_V,
-  -- W = vKeys.VK_W,
-  -- X = vKeys.VK_X,
-  -- Y = vKeys.VK_Y,
-  -- Z = vKeys.VK_Z,
 }
 
 -- (Win/Lin: add 1 for shift, 2 for control, 4 for alt, 8 for win.)
@@ -611,7 +584,6 @@ end
 mod.overlapMod = function(someMods)
   return mod.getMod(someMods, modMappings[Keys.MODTYPE_MOVE_OVERLAP].modKey)
 end
-_G.overlapMod = overlapMod
 
 mod.singleMod = function(someMods)
   return mod.getMod(someMods, modMappings[Keys.MODTYPE_MOVE_SINGLE].modKey)

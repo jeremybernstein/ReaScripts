@@ -12,6 +12,7 @@ local r = reaper
 local glob = require 'MIDIRazorEdits_Global'
 local mod = require 'MIDIRazorEdits_Keys'.mod
 local helper = require 'MIDIRazorEdits_Helper'
+local coords = require 'MIDIRazorEdits_Coords'
 
 -- scala tuning file parser
 local scl = require 'lib.lua-scala.scl'
@@ -92,6 +93,7 @@ local hoveredPoint = nil      -- Point under mouse
 local hoveredCurve = nil      -- Curve segment under mouse (for bezier tension editing)
 local dragState = nil         -- Current drag operation
 local notesByChannel = {}     -- Notes per channel for reference pitch lookup
+local candidatesPool = {}     -- reusable table for note association (GC reduction)
 
 -- center line state for compress/expand
 local centerLineState = {
@@ -167,75 +169,24 @@ local function clearCache()
   end
 end
 
--- convert 14-bit PB value to semitones
+-- convert 14-bit PB value to semitones (delegates to coords with config)
 local function pbToSemitones(pbValue)
-  local offset = pbValue - PB_CENTER
-  if offset >= 0 then
-    return (offset / PB_CENTER) * config.maxBendUp
-  else
-    return (offset / PB_CENTER) * config.maxBendDown
-  end
+  return coords.pbToSemitones(pbValue, config.maxBendUp, config.maxBendDown)
 end
 
--- convert semitones to 14-bit PB value
+-- convert semitones to 14-bit PB value (delegates to coords with config)
 local function semitonesToPb(semitones)
-  local pbValue
-  if semitones >= 0 then
-    pbValue = PB_CENTER + (semitones / config.maxBendUp) * PB_CENTER
-  else
-    pbValue = PB_CENTER + (semitones / config.maxBendDown) * PB_CENTER
-  end
-  return math.floor(math.max(0, math.min(PB_MAX, pbValue)) + 0.5)
+  return coords.semitonesToPb(semitones, config.maxBendUp, config.maxBendDown)
 end
 
 -- snap semitone value to nearest integer (equal temperament)
 local function snapToSemitone(semitones)
-  return math.floor(semitones + 0.5)
+  return coords.snapToSemitone(semitones)
 end
 
 -- microtonal snap using loaded Scale
 local function snapToMicrotonal(semitones, scale)
-  if not scale then return snapToSemitone(semitones) end
-
-  -- build snap points from scale pitches
-  -- handle both cents (denominator=1200) and ratios
-  local snapPoints = { 0 }  -- Start with unison
-  for _, pitch in ipairs(scale.pitches) do
-    local n, d = pitch[1], pitch[2]
-    local semitoneOffset
-    if d == 1200 then
-      -- cents value: n is cents, convert to semitones
-      semitoneOffset = n / 100
-    else
-      -- frequency ratio: convert to cents then semitones
-      local ratio = n / d
-      semitoneOffset = 12 * math.log(ratio) / math.log(2)
-    end
-    table.insert(snapPoints, semitoneOffset)
-  end
-
-  -- find octave and position within octave
-  -- use scale's octave interval (usually 12 semitones but could differ)
-  local octaveSize = snapPoints[#snapPoints] or 12
-  local octave = math.floor(semitones / octaveSize)
-  local withinOctave = semitones - (octave * octaveSize)
-  -- handle negative wrapping
-  if withinOctave < 0 then
-    withinOctave = withinOctave + octaveSize
-    octave = octave - 1
-  end
-
-  -- find closest snap point
-  local closest, minDist = 0, math.huge
-  for _, pt in ipairs(snapPoints) do
-    local dist = math.abs(withinOctave - pt)
-    if dist < minDist then
-      minDist = dist
-      closest = pt
-    end
-  end
-
-  return (octave * octaveSize) + closest
+  return coords.snapToMicrotonal(semitones, scale)
 end
 
 -- recalculate semitones for all points (call when bend range changes)
@@ -253,14 +204,12 @@ end
 
 -- encode PB value to msg2/msg3 (LSB/MSB)
 local function pbToBytes(pbValue)
-  local msg2 = pbValue & 0x7F           -- LSB (lower 7 bits)
-  local msg3 = (pbValue >> 7) & 0x7F    -- MSB (upper 7 bits)
-  return msg2, msg3
+  return coords.pbToBytes(pbValue)
 end
 
 -- decode msg2/msg3 to PB value
 local function bytesToPb(msg2, msg3)
-  return (msg3 << 7) | msg2
+  return coords.bytesToPb(msg2, msg3)
 end
 
 -- calculate screen Y position for a PB value relative to a note pitch
@@ -268,12 +217,8 @@ local function pbToScreenY(semitoneOffset, notePitch)
   local meLanes = glob.meLanes
   local meState = glob.meState
   if not meLanes[-1] or not meState.pixelsPerPitch then return nil end
-
-  -- noteY is the TOP of the note row; add half pitch height to center
-  local noteY = meLanes[-1].topPixel + ((meLanes[-1].topValue - notePitch) * meState.pixelsPerPitch)
-  local noteCenterY = noteY + (meState.pixelsPerPitch / 2)
-  local pbY = noteCenterY - (semitoneOffset * meState.pixelsPerPitch)
-  return pbY
+  return coords.semitonesToScreenY(semitoneOffset, notePitch,
+    meLanes[-1].topPixel, meLanes[-1].topValue, meState.pixelsPerPitch)
 end
 
 -- convert screen Y to pitch (fractional)
@@ -281,37 +226,16 @@ local function screenYToPitch(screenY)
   local meLanes = glob.meLanes
   local meState = glob.meState
   if not meLanes or not meLanes[-1] or not meState or not meState.pixelsPerPitch then return 60 end
-
-  local lane = meLanes[-1]
-  -- calculate pitch at this Y (can be fractional, accounts for position within row)
-  -- y increases downward, pitch increases upward
-  local pitchAtY = lane.topValue - ((screenY - lane.topPixel) / meState.pixelsPerPitch) + 0.5
-  return pitchAtY
+  return coords.screenYToPitch(screenY, meLanes[-1].topPixel, meLanes[-1].topValue, meState.pixelsPerPitch)
 end
 
 -- convert screen Y to semitone offset, given a reference pitch
 local function screenYToSemitones(screenY, refPitch)
-  local meState = glob.meState
   local meLanes = glob.meLanes
+  local meState = glob.meState
   if not meLanes or not meLanes[-1] or not meState or not meState.pixelsPerPitch then return 0 end
-
-  local lane = meLanes[-1]
-  -- reference note center Y
-  local noteY = lane.topPixel + ((lane.topValue - refPitch) * meState.pixelsPerPitch)
-  local noteCenterY = noteY + (meState.pixelsPerPitch / 2)
-  -- semitones = (noteCenterY - screenY) / pixelsPerPitch
-  local semitones = (noteCenterY - screenY) / meState.pixelsPerPitch
-  return semitones
-end
-
--- get time offset for MIDI positioning
--- note: Lib.lua has this disabled (returns 0), matching that behavior
-local function getTimeOffset()
-  return 0
-  -- if mu and mu.MIDI_GetTimeOffset then
-  --   return mu.MIDI_GetTimeOffset()
-  -- end
-  -- return 0
+  return coords.screenYToSemitones(screenY, refPitch,
+    meLanes[-1].topPixel, meLanes[-1].topValue, meState.pixelsPerPitch)
 end
 
 -- calculate screen X position for a PPQ position (returns relative, 0-based)
@@ -320,15 +244,9 @@ local function ppqToScreenX(ppqpos, take)
   if not take then return nil end
 
   if meState.timeBase == 'time' then
-    -- time-based mode: convert PPQ to project time, then to relative X
-    if not meState.pixelsPerSecond or not meState.leftmostTime then return nil end
-    local projTime = r.MIDI_GetProjTimeFromPPQPos(take, ppqpos)
-    local adjustedTime = projTime + getTimeOffset()
-    return (adjustedTime - meState.leftmostTime) * meState.pixelsPerSecond
+    return coords.ppqToScreenX_Time(ppqpos, take, 0, meState.leftmostTime, meState.pixelsPerSecond)
   else
-    -- tick-based mode
-    if not meState.pixelsPerTick then return nil end
-    return (ppqpos - meState.leftmostTick) * meState.pixelsPerTick
+    return coords.ppqToScreenX_Tick(ppqpos, 0, meState.leftmostTick, meState.pixelsPerTick)
   end
 end
 
@@ -338,14 +256,9 @@ local function screenXToPpq(screenX, take)
   if not take then return nil end
 
   if meState.timeBase == 'time' then
-    -- time-based mode: convert relative X to time, then to PPQ
-    if not meState.pixelsPerSecond or not meState.leftmostTime then return nil end
-    local projTime = meState.leftmostTime + (screenX / meState.pixelsPerSecond)
-    return r.MIDI_GetPPQPosFromProjTime(take, projTime - getTimeOffset())
+    return coords.screenXToPPQ_Time(screenX, take, 0, meState.leftmostTime, meState.pixelsPerSecond)
   else
-    -- tick-based mode
-    if not meState.pixelsPerTick then return nil end
-    return meState.leftmostTick + (screenX / meState.pixelsPerTick)
+    return coords.screenXToPPQ_Tick(screenX, 0, meState.leftmostTick, meState.pixelsPerTick)
   end
 end
 
@@ -759,7 +672,9 @@ local function associatePBWithNotes(take, pbEvents, mu)
       else
         -- find same-channel notes that are sounding or upcoming (within lookahead)
         -- use time proximity: note whose start is closest to PB event
-        local candidates = {}
+        -- reuse pooled table to reduce GC pressure
+        for k in pairs(candidatesPool) do candidatesPool[k] = nil end
+        local candidates = candidatesPool
         for _, note in ipairs(channelNotes) do
           local isSounding = note.startppq <= pt.ppqpos and note.endppq > pt.ppqpos
           local isUpcoming = note.startppq > pt.ppqpos and note.startppq <= lookaheadLimit
@@ -2428,7 +2343,7 @@ local function handleRightClick(mods)
 
     -- convert screen-absolute mouse coords to relative (0-based)
     local mx, my = r.GetMousePosition()
-    my = helper.screenYToNative(my, sr)
+    my = coords.screenYToNative(my, sr)
     mx = mx - sr.x1
     my = my - sr.y1
     local ppqpos = screenXToPpq(mx, take)
@@ -2597,5 +2512,48 @@ PitchBend.CURVE_LINEAR = CURVE_LINEAR
 PitchBend.CURVE_SLOW_START = CURVE_SLOW_START
 PitchBend.CURVE_SLOW_END = CURVE_SLOW_END
 PitchBend.CURVE_BEZIER = CURVE_BEZIER
+
+-- Mode interface implementation
+function PitchBend.isActive()
+  return glob.inPitchBendMode
+end
+
+function PitchBend.enter()
+  glob.inPitchBendMode = true
+  glob.inSlicerMode = false -- exclusive modes
+  -- seed activeChannel from ME if filtering is active
+  if not config.showAllNotes then
+    local meActiveChan = math.max(0, (glob.meState.activeChannel or 1) - 1)
+    config.activeChannel = meActiveChan
+  end
+end
+
+function PitchBend.exit()
+  glob.inPitchBendMode = false
+  hoveredPoint = nil
+  hoveredCurve = nil
+  dragState = nil
+  drawState = nil
+  centerLineState.active = false
+  centerLineState.locked = false
+end
+
+-- processInput wraps processPitchBend for mode interface
+function PitchBend.processInput(mx, my, mouseState, mu, activeTake)
+  if not glob.inPitchBendMode then return false, nil end
+  return processPitchBend(mx, my, mouseState, mu, activeTake)
+end
+
+-- render is delegated to LICE (keeps bitmap management centralized)
+function PitchBend.render(ctx)
+  -- rendering handled by LICE.drawPitchBend for now
+end
+
+-- handleKey returns true if key was consumed
+-- note: most PB key handling is in Lib.lua; this is for mode-specific keys
+function PitchBend.handleKey(vState, mods)
+  -- key handling currently in Lib.lua processKeys
+  return false
+end
 
 return PitchBend

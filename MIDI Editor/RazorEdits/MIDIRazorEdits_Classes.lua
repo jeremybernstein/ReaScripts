@@ -312,6 +312,31 @@ function TimeValueExtents:compare(other)
      and equalIsh(self.vals.max, other.vals.max)
 end
 
+-- check if self fully contains other
+function TimeValueExtents:contains(other)
+  return self.ticks.min <= other.ticks.min and
+         self.ticks.max >= other.ticks.max and
+         self.vals.min <= other.vals.min and
+         self.vals.max >= other.vals.max
+end
+
+-- check if self intersects with other
+function TimeValueExtents:intersects(other)
+  local ticks_overlap = not (self.ticks.max < other.ticks.min or
+                             other.ticks.max < self.ticks.min)
+  local vals_overlap = not (self.vals.max < other.vals.min or
+                            other.vals.max < self.vals.min or
+                            self.vals.min > other.vals.max or
+                            other.vals.min > self.vals.max)
+  return ticks_overlap and vals_overlap
+end
+
+-- calculate 2D area (ticks × vals)
+function TimeValueExtents:calcArea()
+  return (self.ticks.max - self.ticks.min) *
+         (self.vals.max - self.vals.min)
+end
+
 ----------------------------------------------------
 
 local Area = {}

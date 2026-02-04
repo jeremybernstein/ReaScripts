@@ -230,4 +230,39 @@ Slicer.restoreCursor = function()
   glob.setCursor(glob.slicer_cursor)
 end
 
+-- Mode interface implementation
+function Slicer.isActive()
+  return glob.inSlicerMode
+end
+
+function Slicer.enter()
+  glob.inSlicerMode = true
+  glob.inPitchBendMode = false -- exclusive modes
+end
+
+function Slicer.exit()
+  glob.inSlicerMode = false
+  slicerPoints = nil
+  slicerPointsUnquantized = nil
+  slicerPointsQuantized = nil
+end
+
+-- processInput wraps processSlicer for mode interface
+-- returns: handled (bool), undoText (string or nil)
+function Slicer.processInput(mx, my, mouseState, areaProcessor, quantizer)
+  if not glob.inSlicerMode then return false, nil end
+  return processSlicer(mx, my, mouseState, areaProcessor, quantizer)
+end
+
+-- render is delegated to LICE (keeps bitmap management centralized)
+-- this method exists for interface compliance; actual drawing in LICE.drawSlicer
+function Slicer.render(ctx)
+  -- rendering handled by LICE.drawSlicer for now
+end
+
+-- handleKey: slicer doesn't consume keys, just passes them through
+function Slicer.handleKey(vState, mods)
+  return false
+end
+
 return Slicer

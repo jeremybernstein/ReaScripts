@@ -1786,7 +1786,7 @@ local function loop()
     ImGui.PopItemWidth(ctx)
 
     ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, 'Save...') then
+    if ImGui.Button(ctx, 'Save...', 47) then
       -- open save popup near button
       savePopupJustOpened = true
       savePopupPos[1], savePopupPos[2] = ImGui.GetMousePos(ctx)
@@ -1923,7 +1923,7 @@ local function loop()
       markControlChanged()
     end
     ImGui.SameLine(ctx)
-    ImGui.PushItemWidth(ctx, 142)
+    ImGui.PushItemWidth(ctx, 147)
     -- in groove mode, only Position only is available
     if gridMode == 2 then
       ImGui.BeginDisabled(ctx, true)
@@ -1951,8 +1951,8 @@ local function loop()
     local availW = ImGui.GetContentRegionAvail(ctx)
     local frameH = ImGui.GetFrameHeight(ctx)
     local drawList = ImGui.GetWindowDrawList(ctx)
-    ImGui.DrawList_AddRectFilled(drawList, statusX, statusY, statusX + availW, statusY + frameH, 0x40404080)
-    ImGui.DrawList_AddRect(drawList, statusX, statusY, statusX + availW, statusY + frameH, 0x60606080)
+    ImGui.DrawList_AddRectFilled(drawList, statusX, statusY, statusX + availW - 2, statusY + frameH, 0x40404080)
+    ImGui.DrawList_AddRect(drawList, statusX, statusY, statusX + availW - 2, statusY + frameH, 0x60606080)
     ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 4)  -- pad text from frame edge
     ImGui.AlignTextToFramePadding(ctx)
     local displayText = statusMessage ~= '' and statusMessage or countDisplay
@@ -2011,7 +2011,7 @@ local function loop()
         midiSubPath = midiSubPath,
       },
       grooveErrorMessage = grooveErrorMessage,
-      
+
       -- ExtState persistence callbacks
       onStrengthChanged = function(val)
         strength = val

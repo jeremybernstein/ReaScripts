@@ -61,10 +61,11 @@ function QuantizeUI.render(ctx, ImGui, params, options)
   local changed = false
   local deactivated = false
   local itemWidth = options.itemWidth or 150
-  local labelWidth = options.labelWidth  -- optional label alignment width
+  local labelWidth = options.labelWidth or 65  -- optional label alignment width
 
   -- cache full content width once at start (for inline mode calculations)
   local fullAvailWidth = ImGui.GetContentRegionAvail(ctx)
+  local rv, val
 
   -- scope section (skip in Transformer - already handled by find rows)
   if not options.hideScope then
@@ -75,7 +76,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     end
     ImGui.SetNextItemWidth(ctx, itemWidth)
     local scopeLabels = {'Notes (All)', 'Notes (Selected)', 'All Events (All)', 'All Events (Selected)'}
-    local rv, val = ImGui.Combo(ctx, '##scope', params.scopeIndex, table.concat(scopeLabels, '\0') .. '\0')
+    rv, val = ImGui.Combo(ctx, '##scope', params.scopeIndex, table.concat(scopeLabels, '\0') .. '\0')
     if rv then
       params.scopeIndex = val
       changed = true
@@ -87,7 +88,6 @@ function QuantizeUI.render(ctx, ImGui, params, options)
   -- settings/target section - can be inline (same row) or separate
   local gridLabel = options.gridLabel or 'Grid'
   local gridModeLabels = {'REAPER Grid', 'Manual', 'Groove'}
-  local useAvailWidth = options.inlineSettingsTarget  -- use available width in inline mode
 
   if options.inlineSettingsTarget then
     -- inline mode: Settings combo + Target combo on same row, no labels
@@ -158,18 +158,14 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     else
       ImGui.SameLine(ctx)
     end
-    -- calculate combo widths: in inline mode use available width, else fixed
-    local gridComboW, styleComboW, lengthComboW
-    if useAvailWidth then
-      local availW = ImGui.GetContentRegionAvail(ctx)
-      -- reserve space for "Length:" label (~50px) and gaps (~20px)
-      local comboSpace = availW - 70
-      gridComboW = math.floor(comboSpace * 0.33)
-      styleComboW = math.floor(comboSpace * 0.33)
-      lengthComboW = math.floor(comboSpace * 0.33)
-    else
-      gridComboW, styleComboW, lengthComboW = 69, 68, 69
-    end
+
+    local availW = ImGui.GetContentRegionAvail(ctx)
+    -- reserve space for "Length:" label (~50px) and gaps (~20px)
+    local comboSpace = availW - 70
+    local gridComboW = math.floor(comboSpace * 0.33)
+    local styleComboW = math.floor(comboSpace * 0.33)
+    local lengthComboW = math.floor(comboSpace * 0.33)
+
     ImGui.SetNextItemWidth(ctx, gridComboW)
     rv, val = ImGui.Combo(ctx, '##gridDiv', params.gridDivIndex, table.concat(QuantizeUI.gridDivLabels, '\0') .. '\0')
     if rv then
@@ -187,7 +183,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     end
     -- Length combo on same row (disabled when not applicable)
     local lengthGridEnabled = params.targetIndex == 2 or params.targetIndex == 4
-    ImGui.SameLine(ctx, 0, 15)
+    ImGui.SameLine(ctx, 0, 16)
     ImGui.BeginDisabled(ctx, not lengthGridEnabled)
     ImGui.Text(ctx, 'Length:')
     ImGui.SameLine(ctx)
@@ -244,7 +240,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
       grooveDisplay = params.grooveFilePath:match('([^/\\]+)$') or params.grooveFilePath
     end
 
-    local grooveComboW = useAvailWidth and ImGui.GetContentRegionAvail(ctx) or 275
+    local grooveComboW = ImGui.GetContentRegionAvail(ctx) - 2
     ImGui.SetNextItemWidth(ctx, grooveComboW)
     if ImGui.BeginCombo(ctx, '##grooveCombo', grooveDisplay) then
       local browserState = options.grooveBrowserState or {}
@@ -411,7 +407,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
       ImGui.SameLine(ctx)
     end
     -- calculate widths: direction combo fixed, vel slider fills remaining
-    local dirComboW = useAvailWidth and math.floor(fullAvailWidth * 0.28) or 90
+    local dirComboW = math.floor(fullAvailWidth * 0.28)
     ImGui.SetNextItemWidth(ctx, dirComboW)
     local dirItems = 'Both\0Early only\0Late only\0'
     rv, val = ImGui.Combo(ctx, '##grooveDir', params.grooveDirection, dirItems)
@@ -425,7 +421,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     ImGui.Text(ctx, 'Vel Str:')
     ImGui.SameLine(ctx)
     -- vel slider fills remaining space
-    local velSliderW = useAvailWidth and ImGui.GetContentRegionAvail(ctx) or 120
+    local velSliderW = ImGui.GetContentRegionAvail(ctx) - 2
     ImGui.SetNextItemWidth(ctx, velSliderW)
     rv, val = ImGui.SliderInt(ctx, '##grooveVel', params.grooveVelStrength, 0, 100, '%d%%')
     if rv then
@@ -444,14 +440,10 @@ function QuantizeUI.render(ctx, ImGui, params, options)
       ImGui.SameLine(ctx)
     end
     -- calculate tolerance slider widths
-    local tolSliderW
-    if useAvailWidth then
-      local availW = ImGui.GetContentRegionAvail(ctx)
-      -- reserve space for "to" label (~20px) and gaps
-      tolSliderW = math.floor((availW - 28) / 2)
-    else
-      tolSliderW = 125
-    end
+    local availW = ImGui.GetContentRegionAvail(ctx)
+    -- reserve space for "to" label (~20px) and gaps
+    local tolSliderW = math.floor((availW - 28) / 2) - 1
+
     ImGui.SetNextItemWidth(ctx, tolSliderW)
     local tolMin = params.grooveToleranceMin or 0.0
     local tolMax = params.grooveToleranceMax or 100.0
@@ -465,7 +457,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
       if options.onGrooveToleranceMinChanged then options.onGrooveToleranceMinChanged(val) end
     end
 
-    ImGui.SameLine(ctx)
+    ImGui.SameLine(ctx, 0, 9)
     ImGui.Text(ctx, 'to')
     ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, tolSliderW)
@@ -526,7 +518,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
         if options.onMidiThresholdModeChanged then options.onMidiThresholdModeChanged(val) end
       end
 
-      ImGui.SameLine(ctx, 0, 10)
+      ImGui.SameLine(ctx, 0, 15)
       ImGui.Text(ctx, 'preferring')
       ImGui.SameLine(ctx)
       ImGui.SetNextItemWidth(ctx, 66)
@@ -550,11 +542,12 @@ function QuantizeUI.render(ctx, ImGui, params, options)
 
   -- strength slider
   if labelWidth then ImGui.AlignTextToFramePadding(ctx) end
-  ImGui.Text(ctx, 'Strength')
+  ImGui.Text(ctx, 'Strength:')
   if labelWidth then
     ImGui.SameLine(ctx, labelWidth)
   end
-  local strengthWidth = useAvailWidth and fullAvailWidth or itemWidth
+
+  local strengthWidth = fullAvailWidth - (labelWidth - 6)
   ImGui.SetNextItemWidth(ctx, strengthWidth)
   rv, val = ImGui.SliderInt(ctx, '##strength', params.strength, 0, 100, '%d%%')
   if rv then
@@ -572,7 +565,7 @@ function QuantizeUI.render(ctx, ImGui, params, options)
   ImGui.BeginDisabled(ctx, isGrooveMode)
   ImGui.Text(ctx, 'Allow events to:')
   ImGui.Dummy(ctx, 0, 2)
-  local cbSpacer = 16
+  local cbSpacer = 24
   rv, val = ImGui.Checkbox(ctx, 'Move left', params.canMoveLeft)
   if rv then
     -- at least one of left/right must be selected
@@ -584,8 +577,8 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     changed = true
     if options.onCanMoveLeftChanged then options.onCanMoveLeftChanged(val) end
   end
-  ImGui.SameLine(ctx)
-  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
+  ImGui.SameLine(ctx, 0, cbSpacer)
+  -- ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
   rv, val = ImGui.Checkbox(ctx, 'Move right', params.canMoveRight)
   if rv then
     -- at least one of left/right must be selected
@@ -597,8 +590,8 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     changed = true
     if options.onCanMoveRightChanged then options.onCanMoveRightChanged(val) end
   end
-  ImGui.SameLine(ctx)
-  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
+  ImGui.SameLine(ctx, 0, cbSpacer)
+  -- ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
   rv, val = ImGui.Checkbox(ctx, 'Shrink', params.canShrink)
   if rv then
     -- at least one of shrink/grow must be selected
@@ -610,8 +603,8 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     changed = true
     if options.onCanShrinkChanged then options.onCanShrinkChanged(val) end
   end
-  ImGui.SameLine(ctx)
-  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
+  ImGui.SameLine(ctx, 0, cbSpacer)
+  -- ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + cbSpacer)
   rv, val = ImGui.Checkbox(ctx, 'Grow', params.canGrow)
   if rv then
     -- at least one of shrink/grow must be selected
@@ -637,8 +630,8 @@ function QuantizeUI.render(ctx, ImGui, params, options)
     if options.onRangeFilterEnabledChanged then options.onRangeFilterEnabledChanged(val) end
   end
   ImGui.BeginDisabled(ctx, not params.rangeFilterEnabled)
-  local availW = ImGui.GetContentRegionAvail(ctx) - 10
-  local sliderW = (availW - 20) / 2
+  local availW = ImGui.GetContentRegionAvail(ctx) - 8
+  local sliderW = math.floor((availW - 20) / 2)
   ImGui.PushItemWidth(ctx, sliderW)
   rv, val = ImGui.SliderDouble(ctx, '##rangeMin', params.rangeMin, 0.0, 100.0, '%.1f%%')
   if rv then

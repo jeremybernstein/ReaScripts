@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.5
+-- @version 1.1.0-beta.6
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix icon path
+--   - layout tweaks
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -25,7 +25,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.1.0-beta.5'
+local versionStr = '1.1.0-beta.6'
 
 local r = reaper
 
@@ -472,6 +472,7 @@ local function renderQuantizeChildWindow()
       hideScope = true,  -- Transformer handles scope via find rows
       inlineSettingsTarget = true,  -- Settings + Target on same row
       itemWidth = 275,  -- match standalone width
+      labelWidth = 65,
       grooveHelpers = grooveHelpers,
       grooveBrowserState = grooveBrowserState,
       grooveErrorMessage = grooveErrorMessage,

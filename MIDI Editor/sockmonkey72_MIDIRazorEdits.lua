@@ -1,13 +1,11 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.9
+-- @version 1.5.0-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - add a special right-mouse-button main icon to prevent massive WTF confusion
---   - fix widget offset mode to properly clip at min/max
---   - fix startup mode flag parsing (crash when launching SelectedNotes script)
---   - some refactoring to unify extra module structure
+--   - add additional right-mouse-button cursors for main/slicer/bend modes
+--   - fix channel tooltip positioning on macOS
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

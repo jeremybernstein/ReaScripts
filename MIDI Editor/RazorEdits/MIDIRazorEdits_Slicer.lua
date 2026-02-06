@@ -113,7 +113,7 @@ local function processSlicer(mx, my, mouseState, areaProcessor, quantizer)
   if glob.inSlicerMode then
     local undoText = nil
     if mx and my then
-      glob.setCursor(glob.slicer_cursor)
+      glob.setCursor(glob.wantsRightButton and glob.slicer_cursor_rmb or glob.slicer_cursor)
 
       local meLanes = glob.meLanes
       local meState = glob.meState
@@ -227,7 +227,7 @@ Slicer.shutdown = function(destroyBitmap)
 end
 
 Slicer.restoreCursor = function()
-  glob.setCursor(glob.slicer_cursor)
+  glob.setCursor(glob.wantsRightButton and glob.slicer_cursor_rmb or glob.slicer_cursor)
 end
 
 -- Mode interface implementation

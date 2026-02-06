@@ -976,13 +976,15 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local reaperInForeground = fgWnd == mainWnd or r.JS_Window_IsChild(mainWnd, fgWnd)
       if reaperInForeground then
         -- show active channel indicator centered over ruler
-        -- TODO: screenRect has native-converted Y on macOS, should use proper screen coords
         local screenRect = glob.liceData and glob.liceData.screenRect
-        if screenRect then
+        local windRect = glob.liceData and glob.liceData.windRect
+        if screenRect and windRect then
           local activeChan = getActiveChannelFilter()
           if activeChan then
             local centerX = math.floor((screenRect.x1 + screenRect.x2) / 2)
-            local rulerY = math.floor(screenRect.y1) + (not helper.is_macos and -60 or -10)
+            -- screenRect Y is native-converted on macOS, convert back for TrackCtl_SetToolTip
+            -- offset direction differs: Y-down on Windows, Y-up on macOS (Cocoa)
+            local rulerY = math.floor(coords.nativeYToScreen(screenRect.y1, windRect)) + (helper.is_macos and 85 or -60)
             r.TrackCtl_SetToolTip(string.format("Ch %d (h=menu)", activeChan + 1), centerX, rulerY, true)
           end
         end
@@ -1673,7 +1675,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     elseif hoveredCurve then
       glob.setCursor(glob.bezier_cursor)
     else
-      glob.setCursor(glob.bend_cursor)
+      glob.setCursor(glob.wantsRightButton and glob.bend_cursor_rmb or glob.bend_cursor)
     end
   end
 
@@ -2493,7 +2495,7 @@ PitchBend.toggleMicrotonalLines = toggleMicrotonalLines
 PitchBend.getActiveChannel = getActiveChannel
 PitchBend.showChannelMenu = showChannelMenu
 PitchBend.restoreCursor = function()
-  glob.setCursor(glob.bend_cursor)
+  glob.setCursor(glob.wantsRightButton and glob.bend_cursor_rmb or glob.bend_cursor)
 end
 
 -- export utility functions for external use

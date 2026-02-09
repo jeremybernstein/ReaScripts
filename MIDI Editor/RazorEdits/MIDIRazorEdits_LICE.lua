@@ -1193,6 +1193,30 @@ local function drawPitchBend(hwnd, mode, antialias)
     if config.showAllNotes or chan == activeChannel then
     local npts = #points
     if npts > 0 then
+      -- tether on first point if it has a direct note association
+      local firstPt = points[1]
+      if firstPt and firstPt.screenX and firstPt.screenY then
+        local firstNote = firstPt.associatedNotes and firstPt.associatedNotes[1]
+        if firstNote and not firstPt.fallbackAssociation then
+          local _, fy = pointToLiceCoords(firstPt.screenX, firstPt.screenY)
+          local fx = math.floor(firstPt.screenX + 0.5)
+          local fCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - firstNote.pitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
+          local fY = math.floor(fCenterY + 0.5)
+          local fTop, fBottom = mmin(fY, fy), mmax(fY, fy)
+          local dashLen, gapLen = 4, 3
+          if childHWND then
+            r.rcw_DrawDashedLineWithAlpha(pbBitmap, fx, fTop, fx, fBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
+          else
+            local y = fTop
+            while y < fBottom do
+              local y2dash = mmin(y + dashLen, fBottom)
+              simpleLine(pbBitmap, fx, y, fx, y2dash, pbLineColor, 0.8, mode, false)
+              y = y + dashLen + gapLen
+            end
+          end
+        end
+      end
+
       -- Draw connecting lines between points
       for i = 1, npts do
         local pt1 = points[i]
@@ -1202,7 +1226,11 @@ local function drawPitchBend(hwnd, mode, antialias)
           -- check for note boundary: skip curve if associated notes differ
           local pt1Note = pt1.associatedNotes and pt1.associatedNotes[1]
           local pt2Note = pt2.associatedNotes and pt2.associatedNotes[1]
+          -- curve break: only when associated notes actually differ
           local noteBoundary = pt1Note and pt2Note and pt1Note ~= pt2Note
+          -- tether transitions: note ended (direct → fallback) or note started (fallback → direct)
+          local noteEnded = pt1Note and not pt1.fallbackAssociation and pt2.fallbackAssociation
+          local noteStarted = pt2Note and pt1.fallbackAssociation and not pt2.fallbackAssociation
 
           if not noteBoundary then
             local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
@@ -1235,26 +1263,83 @@ local function drawPitchBend(hwnd, mode, antialias)
                 end
               end
             end
-          else
-            -- note boundary: draw dashed vertical line from new note's pitch center to PB point
-            local _, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
-            local boundaryX = math.floor(pt2.screenX + 0.5)
-            -- compute note center Y for the new associated note
-            local notePitch = pt2Note.pitch
-            local noteCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - notePitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
-            local noteY = math.floor(noteCenterY + 0.5)
-            local yTop, yBottom = mmin(noteY, y2), mmax(noteY, y2)
+          end
+
+          -- draw tethers at note boundaries, note-end, or note-start transitions
+          if noteBoundary or noteEnded or noteStarted then
             local dashLen, gapLen = 4, 3
 
-            if childHWND then
-              r.rcw_DrawDashedLineWithAlpha(pbBitmap, boundaryX, yTop, boundaryX, yBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
-            else
-              -- Fallback: manual dashed vertical line
-              local y = yTop
-              while y < yBottom do
-                local y2dash = mmin(y + dashLen, yBottom)
-                simpleLine(pbBitmap, boundaryX, y, boundaryX, y2dash, pbLineColor, 0.8, mode, false)
-                y = y + dashLen + gapLen
+            -- outgoing tether: at note end for noteEnded, at pt1 for noteBoundary
+            if noteBoundary or noteEnded then
+              local outScreenX, outScreenY
+              if noteEnded then
+                -- interpolate screen position at note's endppq
+                local endppq = pt1Note.endppq
+                local ppqRange = pt2.ppqpos - pt1.ppqpos
+                if ppqRange > 0 then
+                  local t = (endppq - pt1.ppqpos) / ppqRange
+                  outScreenX = pt1.screenX + t * (pt2.screenX - pt1.screenX)
+                  outScreenY = pt1.screenY + t * (pt2.screenY - pt1.screenY)
+                else
+                  outScreenX, outScreenY = pt1.screenX, pt1.screenY
+                end
+              else
+                outScreenX, outScreenY = pt1.screenX, pt1.screenY
+              end
+
+              local _, y1 = pointToLiceCoords(outScreenX, outScreenY)
+              local outX = math.floor(outScreenX + 0.5)
+              local outPitch = pt1Note.pitch
+              local outCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - outPitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
+              local outY = math.floor(outCenterY + 0.5)
+              local outTop, outBottom = mmin(outY, y1), mmax(outY, y1)
+
+              if childHWND then
+                r.rcw_DrawDashedLineWithAlpha(pbBitmap, outX, outTop, outX, outBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
+              else
+                local y = outTop
+                while y < outBottom do
+                  local y2dash = mmin(y + dashLen, outBottom)
+                  simpleLine(pbBitmap, outX, y, outX, y2dash, pbLineColor, 0.8, mode, false)
+                  y = y + dashLen + gapLen
+                end
+              end
+            end
+
+            -- incoming tether: at note start for noteStarted, at pt2 for noteBoundary
+            if noteBoundary or noteStarted then
+              local inScreenX, inScreenY
+              if noteStarted then
+                -- interpolate screen position at note's startppq
+                local startppq = pt2Note.startppq
+                local ppqRange = pt2.ppqpos - pt1.ppqpos
+                if ppqRange > 0 then
+                  local t = (startppq - pt1.ppqpos) / ppqRange
+                  inScreenX = pt1.screenX + t * (pt2.screenX - pt1.screenX)
+                  inScreenY = pt1.screenY + t * (pt2.screenY - pt1.screenY)
+                else
+                  inScreenX, inScreenY = pt2.screenX, pt2.screenY
+                end
+              else
+                inScreenX, inScreenY = pt2.screenX, pt2.screenY
+              end
+
+              local _, y2 = pointToLiceCoords(inScreenX, inScreenY)
+              local inX = math.floor(inScreenX + 0.5)
+              local inPitch = pt2Note.pitch
+              local inCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - inPitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
+              local inY = math.floor(inCenterY + 0.5)
+              local inTop, inBottom = mmin(inY, y2), mmax(inY, y2)
+
+              if childHWND then
+                r.rcw_DrawDashedLineWithAlpha(pbBitmap, inX, inTop, inX, inBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
+              else
+                local y = inTop
+                while y < inBottom do
+                  local y2dash = mmin(y + dashLen, inBottom)
+                  simpleLine(pbBitmap, inX, y, inX, y2dash, pbLineColor, 0.8, mode, false)
+                  y = y + dashLen + gapLen
+                end
               end
             end
           end

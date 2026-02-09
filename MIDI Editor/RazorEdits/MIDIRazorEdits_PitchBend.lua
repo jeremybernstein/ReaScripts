@@ -667,7 +667,7 @@ local function associatePBWithNotes(take, pbEvents, mu)
       local lookaheadLimit = math.min(nextPbTime, pt.ppqpos + maxLookahead)
 
       -- continuity: if previous point's note is still sounding (or just ended), keep that association
-      if prevNote and prevNote.startppq <= pt.ppqpos and prevNote.endppq >= pt.ppqpos then
+      if prevNote and prevNote.startppq <= pt.ppqpos and prevNote.endppq > pt.ppqpos then
         table.insert(pt.associatedNotes, prevNote)
       else
         -- find same-channel notes that are sounding or upcoming (within lookahead)
@@ -708,6 +708,7 @@ local function associatePBWithNotes(take, pbEvents, mu)
         end
         if recentNote then
           table.insert(pt.associatedNotes, recentNote)
+          pt.fallbackAssociation = true
         else
           -- second try: closest upcoming note (for events before any notes)
           local closestNote = nil
@@ -723,6 +724,7 @@ local function associatePBWithNotes(take, pbEvents, mu)
           end
           if closestNote then
             table.insert(pt.associatedNotes, closestNote)
+            pt.fallbackAssociation = true
           end
         end
       end

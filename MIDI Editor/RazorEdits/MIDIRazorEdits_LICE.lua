@@ -362,6 +362,31 @@ local function passthroughIntercepts()
   end
 end
 
+-- when set, peekIntercepts will forward this button-up message to REAPER
+local pendingForwardUp = nil
+
+-- re-post the intercepted button-down message to REAPER so the ME handles it natively
+local function forwardInterceptedClick()
+  if not glob.liceData then return end
+  local which = Lice.button.which
+  if which == nil then return end
+
+  local msg
+  if Lice.button.dblclick then
+    msg = which == 0 and 'WM_LBUTTONDBLCLK' or 'WM_RBUTTONDBLCLK'
+  else
+    msg = which == 0 and 'WM_LBUTTONDOWN' or 'WM_RBUTTONDOWN'
+  end
+
+  local ret, _, _, wpl, wph, lpl, lph = r.JS_WindowMessage_Peek(glob.liceData.midiview, msg)
+  if ret then
+    r.JS_WindowMessage_Post(glob.liceData.midiview, msg, wpl, wph, lpl, lph)
+  end
+
+  -- arrange to also forward the matching button-up
+  pendingForwardUp = which == 0 and 'WM_LBUTTONUP' or 'WM_RBUTTONUP'
+end
+
 Lice.button = { pressX = nil, pressY = nil, click = nil, drag = nil, release = nil, dblclick = nil, dblclickSeen = nil }
 
 local function resetButtons()
@@ -493,7 +518,11 @@ local function peekIntercepts(m_x, m_y)
       --   glob._P('mousewheel', wpl, wph, lpl, lph)
       -- end
 
-      if msg == 'WM_RBUTTONDBLCLK' then
+      -- button-up matching a previously forwarded button-down
+      if pendingForwardUp and msg == pendingForwardUp then
+        r.JS_WindowMessage_Post(glob.liceData.midiview, msg, wpl, wph, lpl, lph)
+        pendingForwardUp = nil
+      elseif msg == 'WM_RBUTTONDBLCLK' then
         -- Got a double click - clear any pending single click state
         if not Lice.button.dblclick then
           handleButtonResetState(1, 'dblclick')
@@ -1207,11 +1236,14 @@ local function drawPitchBend(hwnd, mode, antialias)
               end
             end
           else
-            -- note boundary: draw dashed vertical line to show discontinuity
-            local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
-            local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
-            local boundaryX = x2  -- boundary at new note's first PB point
-            local yTop, yBottom = mmin(y1, y2), mmax(y1, y2)
+            -- note boundary: draw dashed vertical line from new note's pitch center to PB point
+            local _, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
+            local boundaryX = math.floor(pt2.screenX + 0.5)
+            -- compute note center Y for the new associated note
+            local notePitch = pt2Note.pitch
+            local noteCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - notePitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
+            local noteY = math.floor(noteCenterY + 0.5)
+            local yTop, yBottom = mmin(noteY, y2), mmax(noteY, y2)
             local dashLen, gapLen = 4, 3
 
             if childHWND then
@@ -1618,6 +1650,7 @@ Lice.startIntercepts = startIntercepts
 Lice.endIntercepts = endIntercepts
 
 Lice.passthroughIntercepts = passthroughIntercepts
+Lice.forwardInterceptedClick = forwardInterceptedClick
 Lice.peekIntercepts = peekIntercepts
 
 Lice.peekAppIntercepts = peekAppIntercepts

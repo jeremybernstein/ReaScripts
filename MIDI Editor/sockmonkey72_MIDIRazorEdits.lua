@@ -1,11 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.10
+-- @version 1.5.0-beta.11
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - add additional right-mouse-button cursors for main/slicer/bend modes
---   - fix channel tooltip positioning on macOS
+--   - pitchbend: fix note association logic for some edge cases
+--   - pitchbend: improve note association line (the dotted line) for some edge cases
+--   - pitchbend: improve mouse handling when clicks are detected in CC lanes
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

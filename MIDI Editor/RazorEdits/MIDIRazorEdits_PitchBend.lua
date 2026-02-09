@@ -1060,6 +1060,15 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       centerLineState.locked = false
     end
 
+    -- pass through clicks outside note area (CC lanes, ruler, etc.)
+    if mouseState.clicked or mouseState.doubleClicked then
+      local noteArea = glob.meLanes and glob.meLanes[-1]
+      if noteArea and not dragState and not drawState
+         and (my < noteArea.topPixel or my > noteArea.bottomPixel) then
+        return false
+      end
+    end
+
     -- handle mouse clicks for selection (and prepare for drag)
     -- note: Right-click is handled via glob.handleRightClick -> pitchbend.handleRightClick
     if mouseState.clicked then
@@ -1381,9 +1390,11 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       if currentNoteEnded then
         local targetPitch = math.floor(screenYToPitch(my) + 0.5)
         local noteAtCursor = findNoteAtTime(drawState.chan, ppqpos, targetPitch)
-        if noteAtCursor and noteAtCursor.pitch ~= drawState.refPitch then
-          drawState.refPitch = noteAtCursor.pitch
+        if noteAtCursor then
           drawState.refNoteEnd = noteAtCursor.endppq
+          if noteAtCursor.pitch ~= drawState.refPitch then
+            drawState.refPitch = noteAtCursor.pitch
+          end
         end
       end
 

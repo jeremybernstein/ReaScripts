@@ -4102,6 +4102,11 @@ local function processPitchBendMode(mx, my, mouseState)
         createUndoStep(undoText)
         resetMouse()
       end
+    elseif mouseState.clicked or mouseState.doubleClicked then
+      -- click outside note area, forward to REAPER for native CC/ruler handling
+      lice.forwardInterceptedClick()
+      lice.resetButtons()
+      resetMouse()
     end
     return true, rv
   end
@@ -4137,6 +4142,12 @@ local function processMouse()
   -- mouse coords are now relative (no screen offset added)
   -- only adjust for ruler offset
   my = my - lice.MIDI_RULER_H -- correct for the RULER
+
+  -- in PB mode, re-evaluate lane on each new click so CC/ruler clicks aren't
+  -- locked to a stale note-area clickedLane (which clamps my to note bounds)
+  if glob.inPitchBendMode and (lice.button.click or lice.button.dblclick) then
+    clickedLane = nil
+  end
 
   local valid = false
   if clickedLane then

@@ -1254,6 +1254,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
             path = {{ ppq = ppqpos, pbValue = pbValue, screenX = snappedScreenX, screenY = snappedScreenY }},
             lastPbValue = pbValue,
             lastPpq = ppqpos,
+            lastDirection = 0,  -- 1=ascending, -1=descending, 0=initial
           }
         else
           -- start marquee selection
@@ -1413,49 +1414,129 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local snappedScreenX = ppqToScreenX(ppqpos, activeTake) or mx
       local snappedScreenY = pbToScreenY(pbToSemitones(pbValue), drawState.refPitch or 60) or my
 
-      -- determine if we should add a point
-      local shouldAdd = false
-      if smooth then
-        -- smooth mode: add point if moved enough pixels (every 8px)
-        local lastPt = drawState.path[#drawState.path]
-        local dist = math.sqrt((mx - lastPt.screenX)^2 + (my - lastPt.screenY)^2)
-        shouldAdd = dist >= 8
-      else
-        -- grid mode: add point if at a new grid position
-        shouldAdd = ppqpos ~= drawState.lastPpq
-      end
+      -- backward drawing: retract live point, absorb at crossings
+      local lastPathPt = drawState.path[#drawState.path]
+      if #drawState.path > 1 and ppqpos < lastPathPt.ppq then
+        -- retract the live (last) point to cursor position
+        lastPathPt.ppq = ppqpos
+        lastPathPt.screenX = snappedScreenX
+        lastPathPt.pbValue = pbValue
+        lastPathPt.screenY = snappedScreenY
 
-      -- only add if value changed (dedup consecutive same values)
-      if shouldAdd and pbValue ~= drawState.lastPbValue then
-        -- insert anchor point if we've been coasting at the same value
-        -- this preserves curve shape when making a sudden change
-        local lastPt = drawState.path[#drawState.path]
-        if lastPt and drawState.lastPpq and lastPt.ppq < drawState.lastPpq then
-          -- gap exists: insert anchor at coast position with old value
-          local anchorScreenX = ppqToScreenX(drawState.lastPpq, activeTake) or lastPt.screenX
-          table.insert(drawState.path, {
-            ppq = drawState.lastPpq,
-            pbValue = drawState.lastPbValue,
-            screenX = anchorScreenX,
-            screenY = lastPt.screenY,
-          })
+        -- absorb at crossings: if live point reached a locked-in point, remove it
+        -- and promote the locked-in point to live (retract it to cursor too)
+        while #drawState.path > 1 do
+          local livePt = drawState.path[#drawState.path]
+          local prevPt = drawState.path[#drawState.path - 1]
+          if livePt.ppq <= prevPt.ppq then
+            table.remove(drawState.path)
+            if #drawState.path > 1 then
+              -- prev becomes new live: retract to cursor, update value
+              local newLive = drawState.path[#drawState.path]
+              newLive.ppq = ppqpos
+              newLive.screenX = snappedScreenX
+              newLive.pbValue = pbValue
+              newLive.screenY = snappedScreenY
+            end
+          else
+            break
+          end
         end
-        table.insert(drawState.path, {
-          ppq = ppqpos,
-          pbValue = pbValue,
-          screenX = snappedScreenX,
-          screenY = snappedScreenY,
-        })
-        drawState.lastPbValue = pbValue
+
+        -- first point: anchored, only adjust value if cursor is near
+        if #drawState.path == 1 then
+          local firstPt = drawState.path[1]
+          local halfGrid = (glob.currentGrid and activeTake)
+            and math.floor(mu.MIDI_GetPPQ(activeTake) * glob.currentGrid / 2) or 0
+          if ppqpos >= firstPt.ppq - halfGrid and ppqpos <= firstPt.ppq + halfGrid then
+            firstPt.pbValue = pbValue
+            firstPt.screenY = snappedScreenY
+          end
+        end
+
         drawState.lastPpq = ppqpos
-      elseif shouldAdd and pbValue == drawState.lastPbValue then
-        -- same value but new position - update lastPpq to track position without adding point
-        drawState.lastPpq = ppqpos
-        -- update last point's screen position for visual continuity (but not the first point)
-        if #drawState.path > 1 then
+        drawState.lastPbValue = drawState.path[#drawState.path].pbValue
+        drawState.lastDirection = 0
+      else
+        -- forward drawing: determine if we should add a point
+        local shouldAdd = false
+        if smooth then
+          -- smooth mode: add point if moved enough pixels (every 8px)
           local lastPt = drawState.path[#drawState.path]
-          lastPt.screenX = snappedScreenX
-          lastPt.screenY = snappedScreenY
+          local dist = math.sqrt((mx - lastPt.screenX)^2 + (my - lastPt.screenY)^2)
+          shouldAdd = dist >= 8
+        else
+          -- grid mode: add point if at a new grid position
+          shouldAdd = ppqpos ~= drawState.lastPpq
+        end
+
+        if shouldAdd and pbValue ~= drawState.lastPbValue then
+          local lastPt = drawState.path[#drawState.path]
+          local direction = pbValue > drawState.lastPbValue and 1 or -1
+          local coastSpan = lastPt and (drawState.lastPpq - lastPt.ppq) or 0
+          local gridUnit = glob.currentGrid and (mu.MIDI_GetPPQ(activeTake) * glob.currentGrid) or 0
+          local coasted = coastSpan > gridUnit  -- only for coasts longer than 1 grid
+
+          if coasted then
+            -- after sustained coast: hold-point + new point
+            if glob.defaultCCCurve ~= 0 and glob.currentGrid then
+              local holdPpq = ppqpos - 1
+              if holdPpq > lastPt.ppq then
+                local holdScreenX = ppqToScreenX(holdPpq, activeTake) or lastPt.screenX
+                table.insert(drawState.path, {
+                  ppq = holdPpq,
+                  pbValue = drawState.lastPbValue,
+                  screenX = holdScreenX,
+                  screenY = lastPt.screenY,
+                })
+              end
+            end
+            table.insert(drawState.path, {
+              ppq = ppqpos,
+              pbValue = pbValue,
+              screenX = snappedScreenX,
+              screenY = snappedScreenY,
+            })
+          elseif direction == drawState.lastDirection and #drawState.path > 1 then
+            -- same direction, no coast: extend ramp by updating last point in-place
+            -- (never update the start point — #path > 1 protects it)
+            lastPt.ppq = ppqpos
+            lastPt.pbValue = pbValue
+            lastPt.screenX = snappedScreenX
+            lastPt.screenY = snappedScreenY
+          else
+            -- direction change: lock in current point, start new ramp
+            table.insert(drawState.path, {
+              ppq = ppqpos,
+              pbValue = pbValue,
+              screenX = snappedScreenX,
+              screenY = snappedScreenY,
+            })
+          end
+          drawState.lastDirection = direction
+          drawState.lastPbValue = pbValue
+          drawState.lastPpq = ppqpos
+        elseif not shouldAdd and pbValue ~= drawState.lastPbValue then
+          -- same grid position, value changed: only update if continuing same direction
+          -- reversal at same position = vertex (lock extreme value)
+          local lastPt = drawState.path[#drawState.path]
+          if lastPt and lastPt.ppq == ppqpos then
+            local moveDir = pbValue > drawState.lastPbValue and 1 or -1
+            if drawState.lastDirection == 0 or moveDir == drawState.lastDirection then
+              lastPt.pbValue = pbValue
+              lastPt.screenY = snappedScreenY
+              drawState.lastPbValue = pbValue
+            end
+          end
+        elseif shouldAdd and pbValue == drawState.lastPbValue then
+          -- same value but new position - update lastPpq to track position without adding point
+          drawState.lastPpq = ppqpos
+          -- update last point's screen position for visual continuity (but not the first point)
+          if #drawState.path > 1 then
+            local lastPt = drawState.path[#drawState.path]
+            lastPt.screenX = snappedScreenX
+            lastPt.screenY = snappedScreenY
+          end
         end
       end
     end

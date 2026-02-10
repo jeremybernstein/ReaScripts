@@ -1,11 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.12
+-- @version 1.5.0-beta.13
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - pitchbend: improve note association line (the dotted line) for additional edge cases
---   - pitchbend: note association line displays at both in and out points for a note
+--   - pitchbend: draw-mode improvements
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

@@ -2515,6 +2515,9 @@ local function analyzeChunk()
 
   glob.currentGrid, glob.currentSwing = r.MIDI_GetGrid(activeTake)
 
+  local _, midiccenvConfig = r.get_config_var_string('midiccenv')
+  glob.defaultCCCurve = tonumber(midiccenvConfig) or 0
+
   local mePrevLanes = meLanes
   meLanes = {}
   local mePrevState = meState

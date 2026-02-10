@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.13
+-- @version 1.5.0-beta.14
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - pitchbend: draw-mode improvements
+--   - pitchbend: more (and better) draw-mode improvements
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

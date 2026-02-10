@@ -919,9 +919,9 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
   end
 
   if mx and my then
-    -- hit testing (skip during active drag to preserve hoveredPoint)
+    -- hit testing (skip during active drag/draw)
     local optHeld = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
-    if not dragState then
+    if not dragState and not drawState then
       local hit = hitTestPoint(mx, my)
       -- clear all hovered flags first
       for chan, points in pairs(pbPoints) do
@@ -1078,6 +1078,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
       -- check for ctrl+click for compress/expand mode (vibrato scaling)
       -- note: opt key affects snap during positioning, but doesn't prevent click
+      local drawHeld = mod.pbDrawMod and mod.pbDrawMod(mouseState.hottestMods)
       if compExpHeld then
         -- collect selected points for compress/expand
         local selectedStarts = {}
@@ -1104,6 +1105,80 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
             centerSemitones = centerLineState.semitones,
           }
         end
+      elseif drawHeld then
+        -- draw modifier: always start draw, even over existing points
+        local meState = glob.meState
+        local activeChan = meState.activeChannel and meState.activeChannel > 0 and (meState.activeChannel - 1) or 0
+
+        -- calculate initial point (snap based on current shift state)
+        local ppqpos = screenXToPpq(mx, activeTake)
+        if not ppqpos then return end
+
+        -- grid snap for X (unless shift held for smooth mode)
+        if not shiftHeld and activeTake and glob.currentGrid then
+          local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
+          local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, ppqpos)
+          local tickInMeasure = ppqpos - som
+          ppqpos = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+        end
+
+        -- find initial reference note from mouse Y position (nearest note by pitch)
+        -- search ALL channels, then adopt that channel for drawing
+        -- NOTE: keep in sync with associatePBWithNotes (~line 644)
+        local mousePitch = screenYToPitch(my)
+        local drawPpq = activeTake and mu.MIDI_GetPPQ(activeTake) or 960
+        local gridLookahead = glob.currentGrid and (drawPpq * glob.currentGrid * 2) or 0
+        local lookahead = math.max(gridLookahead, drawPpq / 8)  -- 2x grid, min 1/8 beat
+        local refNote = nil
+        local minPitchDist = math.huge
+        -- search all channels for nearest note by pitch
+        for chan, channelNotes in pairs(notesByChannel) do
+          for _, note in ipairs(channelNotes) do
+            -- include sounding notes OR notes starting within lookahead
+            local isSounding = note.startppq <= ppqpos and note.endppq > ppqpos
+            local isUpcoming = note.startppq > ppqpos and note.startppq <= ppqpos + lookahead
+            if isSounding or isUpcoming then
+              local pitchDist = math.abs(note.pitch - mousePitch)
+              if pitchDist < minPitchDist then
+                minPitchDist = pitchDist
+                refNote = note
+                activeChan = chan  -- adopt this channel
+              end
+            end
+          end
+        end
+        -- adopt channel: update config so display filters to this channel
+        -- (skip if showAllNotes - use cmd+rightclick to switch channel explicitly)
+        if refNote and not config.showAllNotes then
+          config.activeChannel = activeChan
+          saveActiveChannel()
+        end
+        local refPitch = refNote and refNote.pitch or 60
+
+        -- calculate semitones from mouse Y using the reference pitch
+        local semitones = screenYToSemitones(my, refPitch)
+        -- y snap to semitones (unless opt held)
+        local shouldSnapY = (config.snapToSemitone and not optHeld) or (not config.snapToSemitone and optHeld)
+        if shouldSnapY then
+          semitones = snapToMicrotonal(semitones, config.tuningScale)
+        end
+        semitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
+        local pbValue = semitonesToPb(semitones)
+
+        -- calculate snapped screen positions for visual feedback
+        local snappedScreenX = ppqToScreenX(ppqpos, activeTake) or mx
+        local snappedScreenY = pbToScreenY(pbToSemitones(pbValue), refPitch) or my
+
+        drawState = {
+          chan = activeChan,
+          refPitch = refPitch,
+          refNoteEnd = refNote and refNote.endppq or nil,  -- track when current note ends
+          path = {{ ppq = ppqpos, pbValue = pbValue, screenX = snappedScreenX, screenY = snappedScreenY }},
+          lastPbValue = pbValue,
+          lastPpq = ppqpos,
+          lastDirection = 0,  -- 1=ascending, -1=descending, 0=initial
+          drawDir = nil,  -- 1=LTR, -1=RTL, nil=undetermined
+        }
       elseif optHeld and not hoveredPoint then
       -- check for opt+click on curve for bezier tension editing (only bezier curves)
         local curveHit = hitTestCurve(mx, my)
@@ -1181,99 +1256,23 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           selectedStarts = selectedStarts,
         }
       else
-        -- clicked on empty space
-        local drawHeld = mod.pbDrawMod and mod.pbDrawMod(mouseState.hottestMods)
-        if drawHeld then
-          -- draw modifier + click on empty space: start draw mode
-          local meState = glob.meState
-          local activeChan = meState.activeChannel and meState.activeChannel > 0 and (meState.activeChannel - 1) or 0
-
-          -- calculate initial point (snap based on current shift state)
-          local ppqpos = screenXToPpq(mx, activeTake)
-          if not ppqpos then return end
-
-          -- grid snap for X (unless shift held for smooth mode)
-          if not shiftHeld and activeTake and glob.currentGrid then
-            local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-            local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, ppqpos)
-            local tickInMeasure = ppqpos - som
-            ppqpos = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
-          end
-
-          -- find initial reference note from mouse Y position (nearest note by pitch)
-          -- search ALL channels, then adopt that channel for drawing
-          -- NOTE: keep in sync with associatePBWithNotes (~line 644)
-          local mousePitch = screenYToPitch(my)
-          local drawPpq = activeTake and mu.MIDI_GetPPQ(activeTake) or 960
-          local gridLookahead = glob.currentGrid and (drawPpq * glob.currentGrid * 2) or 0
-          local lookahead = math.max(gridLookahead, drawPpq / 8)  -- 2x grid, min 1/8 beat
-          local refNote = nil
-          local minPitchDist = math.huge
-          -- search all channels for nearest note by pitch
-          for chan, channelNotes in pairs(notesByChannel) do
-            for _, note in ipairs(channelNotes) do
-              -- include sounding notes OR notes starting within lookahead
-              local isSounding = note.startppq <= ppqpos and note.endppq > ppqpos
-              local isUpcoming = note.startppq > ppqpos and note.startppq <= ppqpos + lookahead
-              if isSounding or isUpcoming then
-                local pitchDist = math.abs(note.pitch - mousePitch)
-                if pitchDist < minPitchDist then
-                  minPitchDist = pitchDist
-                  refNote = note
-                  activeChan = chan  -- adopt this channel
-                end
-              end
+        -- clicked on empty space without draw modifier
+        -- start marquee selection
+        if not shiftHeld then
+          -- clear selection
+          for chan, points in pairs(pbPoints) do
+            for _, pt in ipairs(points) do
+              if pt.selected then selectionChanged = true end
+              pt.selected = false
             end
           end
-          -- adopt channel: update config so display filters to this channel
-          -- (skip if showAllNotes - use cmd+rightclick to switch channel explicitly)
-          if refNote and not config.showAllNotes then
-            config.activeChannel = activeChan
-            saveActiveChannel()
-          end
-          local refPitch = refNote and refNote.pitch or 60
-
-          -- calculate semitones from mouse Y using the reference pitch
-          local semitones = screenYToSemitones(my, refPitch)
-          -- y snap to semitones (unless opt held)
-          local shouldSnapY = (config.snapToSemitone and not optHeld) or (not config.snapToSemitone and optHeld)
-          if shouldSnapY then
-            semitones = snapToMicrotonal(semitones, config.tuningScale)
-          end
-          semitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
-          local pbValue = semitonesToPb(semitones)
-
-          -- calculate snapped screen positions for visual feedback
-          local snappedScreenX = ppqToScreenX(ppqpos, activeTake) or mx
-          local snappedScreenY = pbToScreenY(pbToSemitones(pbValue), refPitch) or my
-
-          drawState = {
-            chan = activeChan,
-            refPitch = refPitch,
-            refNoteEnd = refNote and refNote.endppq or nil,  -- track when current note ends
-            path = {{ ppq = ppqpos, pbValue = pbValue, screenX = snappedScreenX, screenY = snappedScreenY }},
-            lastPbValue = pbValue,
-            lastPpq = ppqpos,
-            lastDirection = 0,  -- 1=ascending, -1=descending, 0=initial
-          }
-        else
-          -- start marquee selection
-          if not shiftHeld then
-            -- clear selection
-            for chan, points in pairs(pbPoints) do
-              for _, pt in ipairs(points) do
-                if pt.selected then selectionChanged = true end
-                pt.selected = false
-              end
-            end
-          end
-          dragState = {
-            startMx = mx,
-            startMy = my,
-            isMarquee = true,
-            selectedStarts = {},
-          }
         end
+        dragState = {
+          startMx = mx,
+          startMy = my,
+          isMarquee = true,
+          selectedStarts = {},
+        }
       end
 
       -- sync selection to MIDI on click
@@ -1414,9 +1413,18 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local snappedScreenX = ppqToScreenX(ppqpos, activeTake) or mx
       local snappedScreenY = pbToScreenY(pbToSemitones(pbValue), drawState.refPitch or 60) or my
 
-      -- backward drawing: retract live point, absorb at crossings
+      -- determine draw direction on first significant movement
       local lastPathPt = drawState.path[#drawState.path]
-      if #drawState.path > 1 and ppqpos < lastPathPt.ppq then
+      if not drawState.drawDir and ppqpos ~= drawState.path[1].ppq then
+        drawState.drawDir = ppqpos > drawState.path[1].ppq and 1 or -1
+      end
+
+      -- backward = opposite of draw direction
+      local dd = drawState.drawDir or 1
+      local isBackward = #drawState.path > 1
+        and ((dd == 1 and ppqpos < lastPathPt.ppq) or (dd == -1 and ppqpos > lastPathPt.ppq))
+
+      if isBackward then
         -- retract the live (last) point to cursor position
         lastPathPt.ppq = ppqpos
         lastPathPt.screenX = snappedScreenX
@@ -1428,10 +1436,11 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         while #drawState.path > 1 do
           local livePt = drawState.path[#drawState.path]
           local prevPt = drawState.path[#drawState.path - 1]
-          if livePt.ppq <= prevPt.ppq then
+          local shouldAbsorb = (dd == 1 and livePt.ppq <= prevPt.ppq)
+            or (dd == -1 and livePt.ppq >= prevPt.ppq)
+          if shouldAbsorb then
             table.remove(drawState.path)
             if #drawState.path > 1 then
-              -- prev becomes new live: retract to cursor, update value
               local newLive = drawState.path[#drawState.path]
               newLive.ppq = ppqpos
               newLive.screenX = snappedScreenX
@@ -1473,15 +1482,16 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         if shouldAdd and pbValue ~= drawState.lastPbValue then
           local lastPt = drawState.path[#drawState.path]
           local direction = pbValue > drawState.lastPbValue and 1 or -1
-          local coastSpan = lastPt and (drawState.lastPpq - lastPt.ppq) or 0
+          local coastSpan = math.abs(drawState.lastPpq - lastPt.ppq)
           local gridUnit = glob.currentGrid and (mu.MIDI_GetPPQ(activeTake) * glob.currentGrid) or 0
           local coasted = coastSpan > gridUnit  -- only for coasts longer than 1 grid
 
           if coasted then
             -- after sustained coast: hold-point + new point
             if glob.defaultCCCurve ~= 0 and glob.currentGrid then
-              local holdPpq = ppqpos - 1
-              if holdPpq > lastPt.ppq then
+              local holdPpq = dd == 1 and (ppqpos - 1) or (ppqpos + 1)
+              local holdOk = (dd == 1 and holdPpq > lastPt.ppq) or (dd == -1 and holdPpq < lastPt.ppq)
+              if holdOk then
                 local holdScreenX = ppqToScreenX(holdPpq, activeTake) or lastPt.screenX
                 table.insert(drawState.path, {
                   ppq = holdPpq,

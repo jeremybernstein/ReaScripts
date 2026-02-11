@@ -1466,18 +1466,21 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         drawState.lastPpq = ppqpos
         drawState.lastPbValue = drawState.path[#drawState.path].pbValue
         drawState.lastDirection = 0
-      else
-        -- forward drawing: determine if we should add a point
-        local shouldAdd = false
-        if smooth then
-          -- smooth mode: add point if moved enough pixels (every 8px)
-          local lastPt = drawState.path[#drawState.path]
-          local dist = math.sqrt((mx - lastPt.screenX)^2 + (my - lastPt.screenY)^2)
-          shouldAdd = dist >= 8
-        else
-          -- grid mode: add point if at a new grid position
-          shouldAdd = ppqpos ~= drawState.lastPpq
+      elseif smooth then
+        -- smooth mode: add point on any value change, no consolidation
+        if pbValue ~= drawState.lastPbValue then
+          table.insert(drawState.path, {
+            ppq = ppqpos,
+            pbValue = pbValue,
+            screenX = snappedScreenX,
+            screenY = snappedScreenY,
+          })
+          drawState.lastPbValue = pbValue
+          drawState.lastPpq = ppqpos
         end
+      else
+        -- grid mode forward drawing
+        local shouldAdd = ppqpos ~= drawState.lastPpq
 
         if shouldAdd and pbValue ~= drawState.lastPbValue then
           local lastPt = drawState.path[#drawState.path]

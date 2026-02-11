@@ -1,10 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.15
+-- @version 1.5.0-beta.16
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - pitchbend: improve off-grid draw mode (x and y)
+--   - pitchbend: drag-move points moves multiple points relative to the point under the mouse
+--   - pitchbend: expansion is not upwardly clamped (except by the 14-bit range of values)
+--   - pitchbend: fix some oddities with shift-click point (de)selection
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

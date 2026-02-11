@@ -904,7 +904,54 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
             outOfBoundsUndo = 'Select Pitch Bend'
           end
         end
-        -- cancel other drag types without committing
+        -- commit compress/expand or point drag even if released out of bounds
+        if dragState.isCompressExpand and activeTake then
+          local anyChanged = false
+          for _, sel in ipairs(dragState.selectedStarts) do
+            if sel.point.semitones ~= sel.startSemitones then
+              anyChanged = true
+              break
+            end
+          end
+          if anyChanged then
+            mu.MIDI_OpenWriteTransaction(activeTake)
+            for _, sel in ipairs(dragState.selectedStarts) do
+              local msg2, msg3 = pbToBytes(sel.point.pbValue)
+              mu.MIDI_SetCC(activeTake, sel.point.idx,
+                sel.point.selected,
+                sel.point.muted,
+                sel.point.ppqpos,
+                0xE0,
+                sel.chan,
+                msg2, msg3)
+            end
+            mu.MIDI_CommitWriteTransaction(activeTake, true, true)
+            outOfBoundsUndo = 'Compress/Expand Pitch Bend'
+          end
+        elseif dragState.selectedStarts and #dragState.selectedStarts > 0 and activeTake then
+          local anyMoved = false
+          for _, sel in ipairs(dragState.selectedStarts) do
+            if sel.point.ppqpos ~= sel.startPpq or sel.point.semitones ~= sel.startSemitones then
+              anyMoved = true
+              break
+            end
+          end
+          if anyMoved then
+            mu.MIDI_OpenWriteTransaction(activeTake)
+            for _, sel in ipairs(dragState.selectedStarts) do
+              local msg2, msg3 = pbToBytes(sel.point.pbValue)
+              mu.MIDI_SetCC(activeTake, sel.point.idx,
+                sel.point.selected,
+                sel.point.muted,
+                sel.point.ppqpos,
+                0xE0,
+                sel.chan,
+                msg2, msg3)
+            end
+            mu.MIDI_CommitWriteTransaction(activeTake, true, true)
+            outOfBoundsUndo = 'Modify Pitch Bend'
+          end
+        end
         dragState = nil
       end
       if drawState then
@@ -1097,12 +1144,16 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         -- only lock center and start drag if we have selected points
         if #selectedStarts > 0 then
           centerLineState.locked = true
+          -- store unclamped client Y so drag delta is zero at click point
+          local rawX, rawY = r.GetMousePosition()
+          local _, unclampedStartY = r.JS_Window_ScreenToClient(glob.liceData.midiview, rawX, rawY)
           dragState = {
             startMx = mx,
             startMy = my,
             isCompressExpand = true,
             selectedStarts = selectedStarts,
             centerSemitones = centerLineState.semitones,
+            unclampedStartY = unclampedStartY,
           }
         end
       elseif drawHeld then
@@ -1218,13 +1269,17 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         end
       elseif hoveredPoint then
         -- clicked on a point
+        local wasSelected = hoveredPoint.point.selected
         if shiftHeld then
-          -- toggle selection
-          hoveredPoint.point.selected = not hoveredPoint.point.selected
-          selectionChanged = true
+          if wasSelected then
+            -- defer deselect to mouse-up (so drag can still include this point)
+          else
+            hoveredPoint.point.selected = true
+            selectionChanged = true
+          end
         else
           -- if clicking unselected point, clear others and select this one
-          if not hoveredPoint.point.selected then
+          if not wasSelected then
             for chan, points in pairs(pbPoints) do
               for _, pt in ipairs(points) do
                 pt.selected = false
@@ -1249,11 +1304,21 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
             end
           end
         end
+        -- find the dragged anchor in selectedStarts
+        local anchorIdx = 1
+        for i, sel in ipairs(selectedStarts) do
+          if sel.point == hoveredPoint.point then
+            anchorIdx = i
+            break
+          end
+        end
         dragState = {
           startMx = mx,
           startMy = my,
           isMarquee = false,
           selectedStarts = selectedStarts,
+          anchorIdx = anchorIdx,
+          pendingDeselect = shiftHeld and wasSelected and hoveredPoint.point or nil,
         }
       else
         -- clicked on empty space without draw modifier
@@ -1299,9 +1364,12 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       elseif dragState.isCompressExpand then
         -- compress/expand vibrato - vertical drag scales raw PB semitone values around center
         -- drag up = expand (factor > 1), drag down = compress (factor < 1)
-        -- 100 pixels = full range (factor 0 to 2)
-        local factor = 1 - (dy / 100)
-        factor = math.max(0, math.min(2, factor))
+        -- use unclamped mouse position so expansion isn't limited by window bounds
+        local rawX, rawY = r.GetMousePosition()
+        local _, unclampedY = r.JS_Window_ScreenToClient(glob.liceData.midiview, rawX, rawY)
+        local rawDy = unclampedY - dragState.unclampedStartY
+        local factor = 1 - (rawDy / 100)
+        factor = math.max(0, factor)
 
         local center = dragState.centerSemitones or 0
         for _, sel in ipairs(dragState.selectedStarts) do
@@ -1319,48 +1387,68 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         dragState.currentMx = mx
         dragState.currentMy = my
       elseif dragState.selectedStarts and #dragState.selectedStarts > 0 then
-        -- point dragging - move all selected points
-        local deltaPpq = 0
-        local deltaSemitones = 0
+        -- point dragging: axis-locked, snap only anchor point, move others relative
+        local anchor = dragState.selectedStarts[dragState.anchorIdx or 1]
 
-        local pxPerPpq = getPixelsPerPpq(activeTake)
-        if pxPerPpq and pxPerPpq > 0 then
-          deltaPpq = dx / pxPerPpq
-        end
-        if meState.pixelsPerPitch and meState.pixelsPerPitch > 0 then
-          deltaSemitones = -dy / meState.pixelsPerPitch
-        end
-
-        -- pitch snap handling (modifier toggles, default ON)
-        local pitchSnapToggle = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
-        local shouldSnapPitch = (config.snapToSemitone and not pitchSnapToggle) or (not config.snapToSemitone and pitchSnapToggle)
-
-        -- grid snap handling (modifier toggles, respects editor snap setting)
-        local gridSnapToggle = mod.pbSnapToGridMod and mod.pbSnapToGridMod(mouseState.hottestMods)
-        local editorSnapEnabled = r.MIDIEditor_GetSetting_int(glob.liceData.editor, 'snap_enabled') == 1
-        local shouldSnapGrid = (editorSnapEnabled and not gridSnapToggle) or (not editorSnapEnabled and gridSnapToggle)
-
-        for _, sel in ipairs(dragState.selectedStarts) do
-          local newPpq = sel.startPpq + deltaPpq
-
-          -- apply grid snap if enabled
-          if shouldSnapGrid and activeTake and glob.currentGrid then
-            local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-            local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, newPpq)
-            local tickInMeasure = newPpq - som
-            newPpq = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+        -- detect drag axis on first significant movement
+        local AXIS_THRESHOLD = 4
+        if not dragState.dragAxis then
+          if math.abs(dx) > AXIS_THRESHOLD or math.abs(dy) > AXIS_THRESHOLD then
+            dragState.dragAxis = math.abs(dx) > math.abs(dy) and 'x' or 'y'
           end
-          sel.point.ppqpos = newPpq
+        end
 
-          local newSemitones = sel.startSemitones + deltaSemitones
+        if dragState.dragAxis == 'y' then
+          -- vertical: value change only
+          local deltaSemitones = 0
+          if meState.pixelsPerPitch and meState.pixelsPerPitch > 0 then
+            deltaSemitones = -dy / meState.pixelsPerPitch
+          end
+
+          -- pitch snap: snap anchor, derive delta from snapped position
+          local pitchSnapToggle = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
+          local shouldSnapPitch = (config.snapToSemitone and not pitchSnapToggle) or (not config.snapToSemitone and pitchSnapToggle)
+          local anchorNewSemitones = anchor.startSemitones + deltaSemitones
           if shouldSnapPitch then
-            newSemitones = snapToMicrotonal(newSemitones, config.tuningScale)
+            anchorNewSemitones = snapToMicrotonal(anchorNewSemitones, config.tuningScale)
           end
-          newSemitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, newSemitones))
+          anchorNewSemitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, anchorNewSemitones))
+          local snappedDeltaSemitones = anchorNewSemitones - anchor.startSemitones
 
-          local pbValue = semitonesToPb(newSemitones)
-          sel.point.pbValue = pbValue
-          sel.point.semitones = pbToSemitones(pbValue)
+          for _, sel in ipairs(dragState.selectedStarts) do
+            local newSemitones = sel.startSemitones + snappedDeltaSemitones
+            newSemitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, newSemitones))
+            local pbValue = semitonesToPb(newSemitones)
+            sel.point.pbValue = pbValue
+            sel.point.semitones = pbToSemitones(pbValue)
+          end
+        elseif dragState.dragAxis == 'x' then
+          -- horizontal: time change only
+          local deltaPpq = 0
+          if activeTake then
+            local pixPerPpq = getPixelsPerPpq(activeTake)
+            if pixPerPpq and pixPerPpq > 0 then
+              deltaPpq = dx / pixPerPpq
+            end
+          end
+
+          -- grid snap: snap anchor's new ppq, derive delta from snapped position
+          local gridSnapToggle = mod.pbSnapToGridMod and mod.pbSnapToGridMod(mouseState.hottestMods)
+          local editorSnapEnabled = glob.liceData and glob.liceData.editor
+            and r.MIDIEditor_GetSetting_int(glob.liceData.editor, 'snap_enabled') == 1
+          local shouldSnapGrid = (editorSnapEnabled and not gridSnapToggle) or (not editorSnapEnabled and gridSnapToggle)
+          local anchorNewPpq = anchor.startPpq + deltaPpq
+          if shouldSnapGrid and glob.currentGrid and activeTake then
+            local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
+            local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, anchorNewPpq)
+            local tickInMeasure = anchorNewPpq - som
+            anchorNewPpq = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+          end
+          local snappedDeltaPpq = math.floor(anchorNewPpq - anchor.startPpq + 0.5)
+
+          for _, sel in ipairs(dragState.selectedStarts) do
+            sel.point.ppqpos = sel.startPpq + snappedDeltaPpq
+          end
         end
       end
     end
@@ -1649,6 +1737,11 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           end
           mu.MIDI_CommitWriteTransaction(activeTake, true, true)
           undoText = 'Modify Pitch Bend'
+        elseif dragState.pendingDeselect then
+          -- no drag occurred: apply deferred shift-click deselect
+          dragState.pendingDeselect.selected = false
+          syncSelectionToMIDI(activeTake, mu)
+          undoText = 'Select Pitch Bend'
         end
       end
       dragState = nil

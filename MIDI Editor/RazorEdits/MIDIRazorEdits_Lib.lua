@@ -3959,10 +3959,13 @@ end
 
 local deadzone_button_state = 0
 local wasValid = false
+local cachedFocusWindow = nil
+local cachedFocusIsChild = false
 
 local function ValidateMouse()
 
   local mState = r.JS_Mouse_GetState(glob.wantsRightButton and 3 or 1)
+  local isMidiViewHovered = false
 
   if deadzone_button_state == 0 then
     local x, y = r.GetMousePosition()
@@ -3970,7 +3973,7 @@ local function ValidateMouse()
     local wx1, wy1, wx2, wy2 = glob.liceData.windRect:coords()
     if helper.is_macos then  wy1, wy2 = wy2, wy1 end
 
-    local isMidiViewHovered = x >= wx1 and x <= wx2 and y >= wy1 and y <= wy2
+    isMidiViewHovered = x >= wx1 and x <= wx2 and y >= wy1 and y <= wy2
     if not isMidiViewHovered then
       -- Limit mouse to midiview coordinates
       x = x < wx1 and wx1 or x > wx2 and wx2 or x
@@ -4016,7 +4019,10 @@ local function ValidateMouse()
   wasValid = false
 
   deadzone_button_state = mState
-  lice.passthroughIntercepts()
+  -- skip passthrough when mouse is outside midiview and no buttons held
+  if isMidiViewHovered or mState ~= 0 then
+    lice.passthroughIntercepts()
+  end
 
   lice.button.click = false
   lice.button.drag = false
@@ -4927,12 +4933,19 @@ local function loop()
 
   -- Intercept keyboard when focused and areas are present
   local focusWindow = glob.editorIsForeground and r.JS_Window_GetFocus() or nil
-  if focusWindow
+  local focusIsEditor = focusWindow
     and (focusWindow == currEditor
-      or focusWindow == glob.liceData.midiview -- don't call into JS_Window_IsChild unless necessary
-      or focusWindow == lice.childHWND()
-      or r.JS_Window_IsChild(currEditor, focusWindow))
-  then
+      or focusWindow == glob.liceData.midiview
+      or focusWindow == lice.childHWND())
+  if not focusIsEditor and focusWindow then
+    -- cache IsChild result, only recheck when focusWindow changes
+    if focusWindow ~= cachedFocusWindow then
+      cachedFocusWindow = focusWindow
+      cachedFocusIsChild = r.JS_Window_IsChild(currEditor, focusWindow)
+    end
+    focusIsEditor = cachedFocusIsChild
+  end
+  if focusIsEditor then
     lice.attendKeyIntercepts(#areas == 0)
     processKeys()
   else

@@ -350,6 +350,16 @@ local function endIntercepts()
   glob.prevCursor = -1
 end
 
+-- re-establish mouse intercepts (macOS can lose SWELL wndproc hooks on app switch)
+local function refreshMouseIntercepts()
+  if not glob.liceData or not glob.isIntercept then return end
+  for _, intercept in ipairs(mouseIntercepts) do
+    r.JS_WindowMessage_Release(glob.liceData.midiview, intercept.message)
+    intercept.timestamp = 0
+    r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
+  end
+end
+
 local function passthroughIntercepts()
   if not glob.liceData then return end
   for _, intercept in ipairs(mouseIntercepts) do -- no app passthroughs
@@ -439,10 +449,12 @@ local function peekAppIntercepts(force)
           glob.setCursor(glob.normal_cursor)
           resetButtons()  -- clear stale button state on focus loss
           helper.VKeys_ClearState()  -- clear stale key state on focus loss
+          r.TrackCtl_SetToolTip("", 0, 0, false)  -- dismiss lingering tooltips
         elseif not wasForeground then
           -- returning from background - force full state refresh
           glob.wantsAnalyze = true
           glob.needsRecomposite = true
+          refreshMouseIntercepts()
           if glob.inSlicerMode then
             slicer.restoreCursor()
           elseif glob.inPitchBendMode then
@@ -1100,12 +1112,16 @@ local function drawPitchBend(hwnd, mode, antialias)
 
   -- Create bitmap if needed, composite only on creation or size change
   local bmWidth, bmHeight = getBitmapSize(pbBitmap)
-  if not pbBitmap or bmWidth ~= noteAreaWidth or bmHeight ~= noteAreaHeight then
+  local sizeChanged = not pbBitmap or bmWidth ~= noteAreaWidth or bmHeight ~= noteAreaHeight
+  if sizeChanged then
     if pbBitmap then
       destroyBitmap(pbBitmap)
     end
     pbBitmap = createBitmap(noteAreaWidth, noteAreaHeight)
     composite(hwnd, 0, Lice.MIDI_RULER_H, noteAreaWidth, noteAreaHeight, pbBitmap, 0, 0, noteAreaWidth, noteAreaHeight)
+    pitchbend.consumeRedraw() -- consume so next frame doesn't redundantly redraw
+  elseif not pitchbend.consumeRedraw() and not recompositeInit then
+    return -- nothing visual changed, keep previous frame
   else
     clearBitmap(pbBitmap, 0, 0, noteAreaWidth, noteAreaHeight)
   end

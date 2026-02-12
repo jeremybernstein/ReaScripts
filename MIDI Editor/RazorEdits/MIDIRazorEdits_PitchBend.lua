@@ -92,6 +92,7 @@ local pbPoints = {}           -- Per-channel PB point data: { [chan] = { { ppqpo
 local hoveredPoint = nil      -- Point under mouse
 local hoveredCurve = nil      -- Curve segment under mouse (for bezier tension editing)
 local dragState = nil         -- Current drag operation
+local lastTooltipText = nil
 local notesByChannel = {}     -- Notes per channel for reference pitch lookup
 local candidatesPool = {}     -- reusable table for note association (GC reduction)
 
@@ -105,6 +106,16 @@ local centerLineState = {
 
 -- draw mode state
 local drawState = nil         -- { chan, path = {{ppq, pbValue, screenX, screenY}, ...}, lastPbValue, smooth }
+
+-- dirty flag for draw optimization (skip redraw when nothing visual changed)
+local pbNeedsRedraw = true
+
+local function setTooltip(text, x, y, topmost)
+  -- only skip redundant clears; non-empty tooltips need regular refresh to stay visible
+  if text == '' and lastTooltipText == '' then return end
+  lastTooltipText = text
+  r.TrackCtl_SetToolTip(text, x, y, topmost)
+end
 
 -- cache for change detection
 local cache = {
@@ -167,6 +178,7 @@ local function clearCache()
   for k in pairs(cache.viewState) do
     cache.viewState[k] = nil
   end
+  pbNeedsRedraw = true
 end
 
 -- convert 14-bit PB value to semitones (delegates to coords with config)
@@ -860,10 +872,12 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       updateScreenCoords(activeTake, leftPPQ, rightPPQ)
       cache.midiHash = currentHash
       updateViewStateCache()
+      pbNeedsRedraw = true
     elseif viewStateChanged() then
       -- view changed but MIDI didn't: just update screen coords
       updateScreenCoords(activeTake, leftPPQ, rightPPQ)
       updateViewStateCache()
+      pbNeedsRedraw = true
     end
     -- else: nothing changed, use cached data
   elseif activeTake and dragState then
@@ -871,6 +885,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     -- (we're modifying point positions in memory)
     local leftPPQ, rightPPQ = getVisiblePPQRange(activeTake)
     updateScreenCoords(activeTake, leftPPQ, rightPPQ)
+    pbNeedsRedraw = true
     if viewStateChanged() then
       updateViewStateCache()
     end
@@ -880,6 +895,10 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
   -- this prevents stuck drag state when mouse leaves the editor area
   if not mx or not my then
     if mouseState.released then
+      -- only redraw if there's active state to clean up
+      if dragState or drawState or centerLineState.active then
+        pbNeedsRedraw = true
+      end
       local outOfBoundsUndo = nil
       if dragState then
         -- for marquee, complete the selection with current bounds
@@ -969,6 +988,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     -- hit testing (skip during active drag/draw)
     local optHeld = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
     if not dragState and not drawState then
+      local prevHovered = hoveredPoint
+      local prevHoveredCurve = hoveredCurve
       local hit = hitTestPoint(mx, my)
       -- clear all hovered flags first
       for chan, points in pairs(pbPoints) do
@@ -1008,44 +1029,47 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           hoveredCurve = nil
         end
       end
+      -- compare underlying point identity, not wrapper table refs
+      local hPt = hoveredPoint and hoveredPoint.point
+      local pPt = prevHovered and prevHovered.point
+      local hCv = hoveredCurve and hoveredCurve.point
+      local pCv = prevHoveredCurve and prevHoveredCurve.point
+      if hPt ~= pPt or hCv ~= pCv then
+        pbNeedsRedraw = true
+      end
     end
 
     -- tooltip: show note name and semitone offset on hover, or channel filter info
-    if hoveredPoint then
+    if not glob.editorIsForeground then
+      setTooltip("", 0, 0, false)
+    elseif hoveredPoint then
       local st = hoveredPoint.point.semitones or 0
       local basePitch = hoveredPoint.point.associatedNotes and hoveredPoint.point.associatedNotes[1] and hoveredPoint.point.associatedNotes[1].pitch or 60
       local soundingPitch = basePitch + st
       local noteName = pitchToNoteName(soundingPitch)
       local tipX, tipY = r.GetMousePosition()
-      r.TrackCtl_SetToolTip(string.format("%.2f st (%s)", st, noteName), tipX + 12, tipY + 12, true)
-    elseif not config.showAllNotes and glob.editorIsForeground then
-      -- check if REAPER is in foreground (not just ME)
-      local fgWnd = r.JS_Window_GetForeground()
-      local mainWnd = r.GetMainHwnd()
-      local reaperInForeground = fgWnd == mainWnd or r.JS_Window_IsChild(mainWnd, fgWnd)
-      if reaperInForeground then
-        -- show active channel indicator centered over ruler
-        local screenRect = glob.liceData and glob.liceData.screenRect
-        local windRect = glob.liceData and glob.liceData.windRect
-        if screenRect and windRect then
-          local activeChan = getActiveChannelFilter()
-          if activeChan then
-            local centerX = math.floor((screenRect.x1 + screenRect.x2) / 2)
-            -- screenRect Y is native-converted on macOS, convert back for TrackCtl_SetToolTip
-            -- offset direction differs: Y-down on Windows, Y-up on macOS (Cocoa)
-            local rulerY = math.floor(coords.nativeYToScreen(screenRect.y1, windRect)) + (helper.is_macos and 85 or -60)
-            r.TrackCtl_SetToolTip(string.format("Ch %d (h=menu)", activeChan + 1), centerX, rulerY, true)
-          end
+      setTooltip(string.format("%.2f st (%s)", st, noteName), tipX + 12, tipY + 12, true)
+    elseif not config.showAllNotes then
+      local screenRect = glob.liceData and glob.liceData.screenRect
+      local windRect = glob.liceData and glob.liceData.windRect
+      if screenRect and windRect then
+        local activeChan = getActiveChannelFilter()
+        if activeChan then
+          local centerX = math.floor((screenRect.x1 + screenRect.x2) / 2)
+          -- screenRect Y is native-converted on macOS, convert back for TrackCtl_SetToolTip
+          -- offset direction differs: Y-down on Windows, Y-up on macOS (Cocoa)
+          local rulerY = math.floor(coords.nativeYToScreen(screenRect.y1, windRect)) + (helper.is_macos and 85 or -60)
+          setTooltip(string.format("Ch %d (h=menu)", activeChan + 1), centerX, rulerY, true)
         end
-      else
-        r.TrackCtl_SetToolTip("", 0, 0, false)
       end
     else
-      r.TrackCtl_SetToolTip("", 0, 0, false)
+      setTooltip("", 0, 0, false)
     end
 
     -- center line positioning mode (comp/exp modifier held without dragging)
     local compExpHeld = mod.pbCompExpMod and mod.pbCompExpMod(mouseState.hottestMods)
+    local prevCenterActive = centerLineState.active
+    local prevCenterY = centerLineState.screenY
     -- reset state if window loses focus
     if not glob.editorIsForeground then
       centerLineState.active = false
@@ -1066,7 +1090,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         -- no selection: show tooltip, don't draw center line
         centerLineState.active = false
         local tipX, tipY = r.GetMousePosition()
-        r.TrackCtl_SetToolTip("No points selected", tipX + 12, tipY + 12, true)
+        setTooltip("No points selected", tipX + 12, tipY + 12, true)
       else
         -- find reference pitch: nearest note (with PB points) to mouse Y position
         local mousePitch = screenYToPitch(my)
@@ -1108,6 +1132,9 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       centerLineState.active = false
       centerLineState.locked = false
     end
+    if centerLineState.active ~= prevCenterActive or centerLineState.screenY ~= prevCenterY then
+      pbNeedsRedraw = true
+    end
 
     -- pass through clicks outside note area (CC lanes, ruler, etc.)
     if mouseState.clicked or mouseState.doubleClicked then
@@ -1121,6 +1148,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     -- handle mouse clicks for selection (and prepare for drag)
     -- note: Right-click is handled via glob.handleRightClick -> pitchbend.handleRightClick
     if mouseState.clicked then
+      pbNeedsRedraw = true
       local shiftHeld = mod.shiftMod and mod.shiftMod(mouseState.hottestMods)  -- For selection toggle
 
       -- check for ctrl+click for compress/expand mode (vibrato scaling)
@@ -1349,6 +1377,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
     -- handle dragging
     if mouseState.dragging and dragState then
+      pbNeedsRedraw = true
       local meState = glob.meState
       local dx = mx - dragState.startMx
       local dy = my - dragState.startMy
@@ -1455,6 +1484,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
     -- handle draw mode dragging (separate from dragState)
     if mouseState.dragging and drawState then
+      pbNeedsRedraw = true
       local meState = glob.meState
       local pitchSnapToggle = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
       local smoothToggle = mod.pbSmoothDrawMod and mod.pbSmoothDrawMod(mouseState.hottestMods)
@@ -1644,6 +1674,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
     -- handle mouse release
     if mouseState.released and dragState then
+      pbNeedsRedraw = true
       if dragState.isBezierDrag then
         -- write bezier tension back to MIDI for all affected points
         if activeTake and dragState.bezierPoints then
@@ -1749,6 +1780,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
     -- handle draw mode release
     if mouseState.released and drawState then
+      pbNeedsRedraw = true
       if activeTake and #drawState.path > 0 then
         local chan = drawState.chan
         local path = drawState.path
@@ -1949,6 +1981,7 @@ end
 local function setConfig(key, value)
   if config[key] ~= nil then
     config[key] = value
+    pbNeedsRedraw = true
   end
 end
 
@@ -2055,6 +2088,7 @@ local function selectAll()
       end
     end
   end
+  pbNeedsRedraw = true
 end
 
 -- delete selected points (returns undo text if deleted)
@@ -2625,6 +2659,7 @@ end
 -- toggle microtonal line visualization
 local function toggleMicrotonalLines()
   config.showMicrotonalLines = not config.showMicrotonalLines
+  pbNeedsRedraw = true
   return config.showMicrotonalLines
 end
 
@@ -2661,6 +2696,7 @@ local function showChannelMenu()
     config.showAllNotes = false
     saveActiveChannel()
   end
+  pbNeedsRedraw = true
 end
 
 -- export module interface
@@ -2679,6 +2715,8 @@ PitchBend.syncSelectionToMIDI = syncSelectionToMIDI
 PitchBend.deleteSelectedPoints = deleteSelectedPoints
 PitchBend.snapSelectedToSemitone = snapSelectedToSemitone
 PitchBend.getCurveTypeName = getCurveTypeName
+PitchBend.consumeRedraw = function() if pbNeedsRedraw then pbNeedsRedraw = false return true end return false end
+PitchBend.markDirty = function() pbNeedsRedraw = true end
 PitchBend.getPBBitmap = getPBBitmap
 PitchBend.setPBBitmap = setPBBitmap
 PitchBend.shutdown = shutdown

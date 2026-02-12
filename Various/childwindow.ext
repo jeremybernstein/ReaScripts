@@ -1,6 +1,6 @@
 @description childwindow
 @author sockmonkey72
-@version 2.0.0-beta.7
+@version 2.0.0-beta.8
 @about
   # Layered child windows required for improved performance while running MIDI Razor Edits on all platforms
   The method used by MIDI Razor Edits to draw into the MIDI Editor (the same method
@@ -12,8 +12,7 @@
   MIDI Editor and performs fast, flicker-free drawing for the MIDI Razor Edits script.
   if you are using MIDI Razor Edits, please install it.
 @changelog
-  - various fixes
-  - add ShowWindow implementation (replace gfx.showmenu for MRE)
+  - performance updates
 @provides
   [win64] childwindow/Windows/reaper_childwindow_x64.dll > reaper_childwindow_x64.dll
   [win32] childwindow/Windows/reaper_childwindow_w32.dll > reaper_childwindow_w32.dll

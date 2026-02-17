@@ -735,6 +735,10 @@ local function opIsBipolar(condOp, index)
   return condOp.bipolar or (condOp.split and condOp.split[index].bipolar)
 end
 
+local function getParamPercentTerm(val, bipolar)
+  return Notation.getParamPercentTerm(val, bipolar)
+end
+
 local function timeFormatToSeconds(buf, baseTime, context, isLength)
   local format = determineTimeFormatStringType(buf)
 
@@ -1608,10 +1612,6 @@ end
 
 local function actionRowsToNotation()
   return Notation.actionRowsToNotation(notationHelpers)
-end
-
-local function getParamPercentTerm(val, bipolar)
-  return Notation.getParamPercentTerm(val, bipolar)
 end
 
 -- Shared table delegations (for TransformerParam3 backward compat)
@@ -2572,17 +2572,17 @@ local function getCurrentPresetState()
 
   local presetTab = {
     findScope = fdefs.findScopeTable[currentFindScope].notation,
-    findScopeFlags = fsFlags,
+    findScopeFlags = #fsFlags > 0 and fsFlags or nil,
     findMacro = findRowsToNotation(),
     findPostProcessing = ppInfo,
     actionScope = adefs.actionScopeTable[currentActionScope].notation,
     actionMacro = actionRowsToNotation(),
-    actionRows = actionRows,
+    actionRows = #actionRows > 0 and actionRows or nil,
     actionScopeFlags = adefs.actionScopeFlagsTable[currentActionScopeFlags].notation,
-    notes = libPresetNotesBuffer,
+    notes = libPresetNotesBuffer ~= '' and libPresetNotesBuffer or nil,
     scriptIgnoreSelectionInArrangeView = false,
     notesInChord = tg.getNotesInChord(),
-    stripRepetitions = currentStripRepetitions
+    stripRepetitions = currentStripRepetitions or nil
   }
   return presetTab
 end

@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.6
+-- @version 1.1.0-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - layout tweaks
+--   - fix preset crashing
+--   - tweak preset writing (eliminate empty fields)
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*

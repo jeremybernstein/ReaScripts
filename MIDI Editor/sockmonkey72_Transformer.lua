@@ -1,11 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.7
+-- @version 1.1.0-beta.8
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix preset crashing
---   - tweak preset writing (eliminate empty fields)
+--   - more general fixes
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -26,7 +25,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.1.0-beta.6'
+local versionStr = '1.1.0-beta.8'
 
 local r = reaper
 
@@ -392,7 +391,13 @@ local function renderTypeWidgets(widgets)
     if i > 1 then ImGui.SameLine(ctx) end
 
     if def.widget == 'text' then
-      ImGui.TextDisabled(ctx, def.value or '')
+      local retval, buf = ImGui.InputText(ctx, '##typeText' .. i, def.value or '', def.flags or 0, def.callback)
+      if retval and ImGui.IsItemDeactivatedAfterEdit(ctx) then
+        if def.onChange then def.onChange(buf) end
+        inTextInput = false
+        changed = true
+      elseif retval then inTextInput = true
+      end
     elseif def.widget == 'button' then
       if ImGui.Button(ctx, def.label or 'Button') then
         if def.onClick then def.onClick() end
@@ -2943,7 +2948,7 @@ local function windowFn()
         typeOptions.paramTab = param1Entries
         typeOptions.rowIndex = rowIdx
 
-        local widgets = typeDef.renderUI(ctx, ImGui, currentRow, rowIdx, typeOptions)
+        local widgets = typeDef.renderUI(ctx, ImGui, currentRow, 1, typeOptions)
         renderTypeWidgets(widgets)
 
         -- Handle NewMIDIEvent popups (param1 and param2)

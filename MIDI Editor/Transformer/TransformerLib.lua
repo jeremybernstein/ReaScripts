@@ -2572,7 +2572,7 @@ local function getCurrentPresetState()
 
   local presetTab = {
     findScope = fdefs.findScopeTable[currentFindScope].notation,
-    findScopeFlags = #fsFlags > 0 and fsFlags or nil,
+    findScopeFlags = fsFlags and #fsFlags > 0 and fsFlags or nil,
     findMacro = findRowsToNotation(),
     findPostProcessing = ppInfo,
     actionScope = adefs.actionScopeTable[currentActionScope].notation,

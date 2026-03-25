@@ -1285,11 +1285,11 @@ local function drawPitchBend(hwnd, mode, antialias)
           if noteBoundary or noteEnded or noteStarted then
             local dashLen, gapLen = 4, 3
 
-            -- outgoing tether: at note end for noteEnded, at pt1 for noteBoundary
-            if noteBoundary or noteEnded then
+            -- outgoing tether: at pt1 for noteBoundary, or noteEnded only if no boundary follows
+            if noteBoundary or (noteEnded and not pt2.fallbackAssociation) then
               local outScreenX, outScreenY
-              if noteEnded then
-                -- interpolate screen position at note's endppq
+              if noteEnded and not noteBoundary then
+                -- interpolate only when both points share the same note reference
                 local endppq = pt1Note.endppq
                 local ppqRange = pt2.ppqpos - pt1.ppqpos
                 if ppqRange > 0 then
@@ -1325,8 +1325,8 @@ local function drawPitchBend(hwnd, mode, antialias)
             -- incoming tether: at note start for noteStarted, at pt2 for noteBoundary
             if noteBoundary or noteStarted then
               local inScreenX, inScreenY
-              if noteStarted then
-                -- interpolate screen position at note's startppq
+              if noteStarted and not noteBoundary then
+                -- interpolate only when both points share the same note reference
                 local startppq = pt2Note.startppq
                 local ppqRange = pt2.ppqpos - pt1.ppqpos
                 if ppqRange > 0 then
@@ -1356,6 +1356,53 @@ local function drawPitchBend(hwnd, mode, antialias)
                   simpleLine(pbBitmap, inX, y, inX, y2dash, pbLineColor, 0.8, mode, false)
                   y = y + dashLen + gapLen
                 end
+              end
+            end
+          end
+        end
+      end
+
+      -- End tether on last point: extend line to note end and tether there
+      local lastPt = points[npts]
+      if lastPt and lastPt.screenX and lastPt.screenY then
+        local lastNote = lastPt.associatedNotes and lastPt.associatedNotes[1]
+        if lastNote and not lastPt.fallbackAssociation and lastNote.endppq > lastPt.ppqpos then
+          -- compute screen X at note end
+          local endScreenX
+          if meState.pixelsPerTick then
+            endScreenX = 0 + ((lastNote.endppq - meState.leftmostTick) * meState.pixelsPerTick)
+          elseif meState.pixelsPerSecond and glob.liceData then
+            local endTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.take, lastNote.endppq)
+            endScreenX = 0 + ((endTime - meState.leftmostTime) * meState.pixelsPerSecond)
+          end
+          if endScreenX then
+            local lx, ly = pointToLiceCoords(lastPt.screenX, lastPt.screenY)
+            local ex = math.floor(endScreenX + 0.5)
+            -- draw dashed extending line from last point to note end
+            local dashLen, gapLen = 4, 3
+            if childHWND then
+              r.rcw_DrawDashedLineWithAlpha(pbBitmap, lx, ly, ex, ly, pbLineColor, 0.8, 1, dashLen, gapLen)
+            else
+              local x = mmin(lx, ex)
+              local xEnd = mmax(lx, ex)
+              while x < xEnd do
+                local x2dash = mmin(x + dashLen, xEnd)
+                simpleLine(pbBitmap, x, ly, x2dash, ly, pbLineColor, 0.8, mode, false)
+                x = x + dashLen + gapLen
+              end
+            end
+            -- tether at note end
+            local endCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - lastNote.pitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
+            local endY = math.floor(endCenterY + 0.5)
+            local endTop, endBottom = mmin(endY, ly), mmax(endY, ly)
+            if childHWND then
+              r.rcw_DrawDashedLineWithAlpha(pbBitmap, ex, endTop, ex, endBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
+            else
+              local y = endTop
+              while y < endBottom do
+                local y2dash = mmin(y + dashLen, endBottom)
+                simpleLine(pbBitmap, ex, y, ex, y2dash, pbLineColor, 0.8, mode, false)
+                y = y + dashLen + gapLen
               end
             end
           end

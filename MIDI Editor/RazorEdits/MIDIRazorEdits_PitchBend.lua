@@ -95,6 +95,7 @@ local dragState = nil         -- Current drag operation
 local lastTooltipText = nil
 local notesByChannel = {}     -- Notes per channel for reference pitch lookup
 local candidatesPool = {}     -- reusable table for note association (GC reduction)
+local clipboardSpan = nil     -- stashed at copy time: { minPpq, maxPpq, channels = { [chan]=true } }
 
 -- center line state for compress/expand
 local centerLineState = {
@@ -669,74 +670,78 @@ local function associatePBWithNotes(take, pbEvents, mu)
 
   for chan, points in pairs(pbEvents) do
     local channelNotes = notesByChannel[chan] or {}
-    local prevNote = nil  -- track previous point's note for continuity
+    local noteIdx = 1  -- sliding window cursor into sorted notes
+    local nNotes = #channelNotes
+    local prevNote = nil  -- continuity: prefer previous point's note if still sounding
 
     for i, pt in ipairs(points) do
       pt.associatedNotes = {}
+      pt.fallbackAssociation = nil
 
       -- get the next PB event time (for lookahead limit), capped by maxLookahead
       local nextPbTime = points[i + 1] and points[i + 1].ppqpos or (pt.ppqpos + maxLookahead)
       local lookaheadLimit = math.min(nextPbTime, pt.ppqpos + maxLookahead)
 
-      -- continuity: if previous point's note is still sounding (or just ended), keep that association
-      if prevNote and prevNote.startppq <= pt.ppqpos and prevNote.endppq > pt.ppqpos then
+      -- continuity: if previous point's note is still sounding, keep that association
+      -- (prevents flipping between overlapping notes for consecutive points)
+      if prevNote and prevNote.startppq <= pt.ppqpos and prevNote.endppq >= pt.ppqpos then
         table.insert(pt.associatedNotes, prevNote)
       else
-        -- find same-channel notes that are sounding or upcoming (within lookahead)
-        -- use time proximity: note whose start is closest to PB event
-        -- reuse pooled table to reduce GC pressure
-        for k in pairs(candidatesPool) do candidatesPool[k] = nil end
-        local candidates = candidatesPool
-        for _, note in ipairs(channelNotes) do
-          local isSounding = note.startppq <= pt.ppqpos and note.endppq > pt.ppqpos
+        -- advance sliding window: skip notes that ended before this point
+        while noteIdx <= nNotes and channelNotes[noteIdx].endppq < pt.ppqpos do
+          noteIdx = noteIdx + 1
+        end
+
+        -- search from sliding window position: sounding or upcoming within lookahead
+        local bestNote = nil
+        local bestDist = math.huge
+        for j = noteIdx, nNotes do
+          local note = channelNotes[j]
+          if note.startppq > lookaheadLimit then break end  -- past lookahead window
+          local isSounding = note.startppq <= pt.ppqpos and note.endppq >= pt.ppqpos
           local isUpcoming = note.startppq > pt.ppqpos and note.startppq <= lookaheadLimit
           if isSounding or isUpcoming then
-            -- time distance: how close is note start to PB position
             local timeDist = math.abs(note.startppq - pt.ppqpos)
-            table.insert(candidates, { note = note, timeDist = timeDist })
+            if timeDist < bestDist then
+              bestDist = timeDist
+              bestNote = note
+            end
           end
         end
 
-        -- pick candidate with smallest time distance (closest note start to PB time)
-        if #candidates > 0 then
-          table.sort(candidates, function(a, b) return a.timeDist < b.timeDist end)
-          table.insert(pt.associatedNotes, candidates[1].note)
+        if bestNote then
+          table.insert(pt.associatedNotes, bestNote)
         end
       end
 
       -- update prevNote for next iteration
       prevNote = pt.associatedNotes[1]
 
-      -- if still no match, prefer most recently ended note, else closest upcoming
-      if #pt.associatedNotes == 0 and #channelNotes > 0 then
-        -- first try: most recently ended note (for events in gaps after notes)
+      -- fallback: most recently ended note, else closest upcoming
+      if #pt.associatedNotes == 0 and nNotes > 0 then
+        -- scan backward from window for most recently ended note
         local recentNote = nil
-        local recentEnd = -math.huge
-        for _, note in ipairs(channelNotes) do
-          if note.endppq <= pt.ppqpos and note.endppq > recentEnd then
-            recentEnd = note.endppq
+        for j = noteIdx - 1, 1, -1 do
+          local note = channelNotes[j]
+          if note.endppq <= pt.ppqpos then
             recentNote = note
+            break  -- sorted by start, most recent ended note is at highest index
           end
         end
         if recentNote then
           table.insert(pt.associatedNotes, recentNote)
           pt.fallbackAssociation = true
+          prevNote = recentNote
         else
-          -- second try: closest upcoming note (for events before any notes)
-          local closestNote = nil
-          local closestDist = math.huge
-          for _, note in ipairs(channelNotes) do
+          -- closest upcoming note (for events before any notes)
+          for j = noteIdx, nNotes do
+            local note = channelNotes[j]
             if note.startppq > pt.ppqpos then
-              local dist = note.startppq - pt.ppqpos
-              if dist < closestDist then
-                closestDist = dist
-                closestNote = note
-              end
+              table.insert(pt.associatedNotes, note)
+              pt.fallbackAssociation = true
+              prevNote = note
+              break
             end
-          end
-          if closestNote then
-            table.insert(pt.associatedNotes, closestNote)
-            pt.fallbackAssociation = true
           end
         end
       end
@@ -1004,24 +1009,10 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       else
         hoveredPoint = nil
         -- check for curve hover when not over a point (only for bezier curves)
-        -- only show bezier tool if: curve's point is selected, OR nothing is selected
         if optHeld then
           local curve = hitTestCurve(mx, my)
           if curve and curve.point.shape == 5 then
-            -- check if anything is selected
-            local hasSelection = false
-            for _, points in pairs(pbPoints) do
-              for _, pt in ipairs(points) do
-                if pt.selected then hasSelection = true break end
-              end
-              if hasSelection then break end
-            end
-            -- only show bezier tool if curve's point is selected, or nothing selected
-            if curve.point.selected or not hasSelection then
-              hoveredCurve = curve
-            else
-              hoveredCurve = nil
-            end
+            hoveredCurve = curve
           else
             hoveredCurve = nil
           end
@@ -1262,38 +1253,41 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       -- check for opt+click on curve for bezier tension editing (only bezier curves)
         local curveHit = hitTestCurve(mx, my)
         if curveHit and curveHit.point.shape == 5 then
-          -- check if any bezier points are selected
           local bezierPoints = {}
-          local hasSelection = false
-          for chan, points in pairs(pbPoints) do
-            for _, pt in ipairs(points) do
-              if pt.selected and pt.shape == 5 then
-                hasSelection = true
-                table.insert(bezierPoints, {
-                  point = pt,
-                  chan = chan,
-                  startTension = pt.beztension or 0,
-                })
+          if curveHit.point.selected then
+            -- batch: edit all selected bezier points together
+            for chan, points in pairs(pbPoints) do
+              for _, pt in ipairs(points) do
+                if pt.selected and pt.shape == 5 then
+                  table.insert(bezierPoints, {
+                    point = pt,
+                    chan = chan,
+                    startTension = pt.beztension or 0,
+                  })
+                end
               end
             end
-          end
-          -- only allow bezier drag if: curve's point is selected, or nothing selected
-          if curveHit.point.selected or not hasSelection then
-            -- if no selection, just edit the hovered curve
-            if not hasSelection then
-              table.insert(bezierPoints, {
-                point = curveHit.point,
-                chan = curveHit.chan,
-                startTension = curveHit.point.beztension or 0,
-              })
+          else
+            -- clicked unselected curve: deselect all, select this curve's start point, edit solo
+            for chan, points in pairs(pbPoints) do
+              for _, pt in ipairs(points) do
+                pt.selected = false
+              end
             end
-            dragState = {
-              startMx = mx,
-              startMy = my,
-              isBezierDrag = true,
-              bezierPoints = bezierPoints,
-            }
+            curveHit.point.selected = true
+            selectionChanged = true
+            table.insert(bezierPoints, {
+              point = curveHit.point,
+              chan = curveHit.chan,
+              startTension = curveHit.point.beztension or 0,
+            })
           end
+          dragState = {
+            startMx = mx,
+            startMy = my,
+            isBezierDrag = true,
+            bezierPoints = bezierPoints,
+          }
         end
       elseif hoveredPoint then
         -- clicked on a point
@@ -2116,6 +2110,52 @@ local function deleteSelectedPoints(take, midiUtils)
   end
 end
 
+-- stash selected point span for paste-replace (call at copy time)
+local function stashClipboardSpan()
+  local minPpq, maxPpq = math.huge, -math.huge
+  local channels = {}
+  local found = false
+  for chan, points in pairs(pbPoints) do
+    for _, pt in ipairs(points) do
+      if pt.selected then
+        if pt.ppqpos < minPpq then minPpq = pt.ppqpos end
+        if pt.ppqpos > maxPpq then maxPpq = pt.ppqpos end
+        channels[chan] = true
+        found = true
+      end
+    end
+  end
+  if found then
+    clipboardSpan = { minPpq = minPpq, maxPpq = maxPpq, channels = channels }
+  else
+    clipboardSpan = nil
+  end
+end
+
+-- delete existing PB events in paste target range (call before native paste)
+local function deleteBeforePaste(take, midiUtils)
+  if not clipboardSpan or not take or not midiUtils then return end
+
+  local cursorTime = r.GetCursorPositionEx(0)
+  local cursorPpq = r.MIDI_GetPPQPosFromProjTime(take, cursorTime)
+  local offset = cursorPpq - clipboardSpan.minPpq
+  local targetMin = clipboardSpan.minPpq + offset
+  local targetMax = clipboardSpan.maxPpq + offset
+
+  local _, _, ccCount = midiUtils.MIDI_CountEvts(take)
+  midiUtils.MIDI_OpenWriteTransaction(take)
+  local deleted = false
+  for i = 0, ccCount - 1 do
+    local rv, _, _, ppqpos, chanmsg, chan = midiUtils.MIDI_GetCC(take, i)
+    if rv and chanmsg == 0xE0 and clipboardSpan.channels[chan]
+       and ppqpos >= targetMin and ppqpos <= targetMax then
+      midiUtils.MIDI_DeleteCC(take, i)
+      deleted = true
+    end
+  end
+  midiUtils.MIDI_CommitWriteTransaction(take, deleted, deleted)
+end
+
 -- get curve type name for display
 local function getCurveTypeName(curveType)
   curveType = curveType or config.curveType
@@ -2713,6 +2753,8 @@ PitchBend.showCurveMenu = showCurveMenu
 PitchBend.selectAll = selectAll
 PitchBend.syncSelectionToMIDI = syncSelectionToMIDI
 PitchBend.deleteSelectedPoints = deleteSelectedPoints
+PitchBend.stashClipboardSpan = stashClipboardSpan
+PitchBend.deleteBeforePaste = deleteBeforePaste
 PitchBend.snapSelectedToSemitone = snapSelectedToSemitone
 PitchBend.getCurveTypeName = getCurveTypeName
 PitchBend.consumeRedraw = function() if pbNeedsRedraw then pbNeedsRedraw = false return true end return false end

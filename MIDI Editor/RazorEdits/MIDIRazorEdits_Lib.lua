@@ -3216,6 +3216,7 @@ local function processKeys()
 
     -- cmd-C: unselect all first so only PB events are copied
     if keyMatches(vState, pbKeyMappings.pitchBendCopy) then
+      pitchbend.stashClipboardSpan()
       mu.MIDI_OpenWriteTransaction(activeTake)
       mu.MIDI_SelectAll(activeTake, false)
       mu.MIDI_CommitWriteTransaction(activeTake, true, false)
@@ -3225,6 +3226,7 @@ local function processKeys()
     end
 
     if keyMatches(vState, pbKeyMappings.pitchBendPaste) then
+      pitchbend.deleteBeforePaste(activeTake, mu)
       r.MIDIEditor_OnCommand(glob.liceData.editor, 40011)
       pitchbend.clearCache()  -- force refresh to show pasted events
       return

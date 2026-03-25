@@ -1,11 +1,15 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.17
+-- @version 1.5.0-beta.18
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - improve mouse intercepts when switching apps
---   - drawing performance improvements
+--  - paste now deletes existing PB events in target range before inserting (stash clipboard span at copy time)
+--  - bezier curve editing matches REAPER: click unselected curve deselects all + selects start point; selected curves batch-edit
+--  - fix tether interpolation across note boundaries (was mixing coordinate frames)
+--  - suppress redundant noteEnded tethers when boundary follows
+--  - add end tether: dashed line from last PB point to note end
+--  - association logic: sliding window, inclusive endppq boundary, explicit fallback reset
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

@@ -1,5 +1,5 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.19
+-- @version 1.5.0-beta.20
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
@@ -9,7 +9,8 @@
 --   - fix note boundary curves: curve direction now matches pitch bend direction per note
 --   - fix pb note-search algo: no longer misses longer sounding notes behind short ones
 --   - tuning change now updates microtonal line display immediately
---   - perf: binary search for note lookups and center-line positioning-- @provides
+--   - perf: binary search for note lookups and center-line positioning
+-- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*
 --   {RazorEdits}/{lib}/{semver}/*

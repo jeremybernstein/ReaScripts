@@ -1,16 +1,15 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.18
+-- @version 1.5.0-beta.19
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---  - paste now deletes existing PB events in target range before inserting (stash clipboard span at copy time)
---  - bezier curve editing matches REAPER: click unselected curve deselects all + selects start point; selected curves batch-edit
---  - fix tether interpolation across note boundaries (was mixing coordinate frames)
---  - suppress redundant noteEnded tethers when boundary follows
---  - add end tether: dashed line from last PB point to note end
---  - association logic: sliding window, inclusive endppq boundary, explicit fallback reset
--- @provides
+--   - fix tuning menu: selection was off-by-N with grouped submenus
+--   - fix config dialog: 'b' key no longer immediately closes dialog on open
+--   - fix note boundary curves: curve direction now matches pitch bend direction per note
+--   - fix pb note-search algo: no longer misses longer sounding notes behind short ones
+--   - tuning change now updates microtonal line display immediately
+--   - perf: binary search for note lookups and center-line positioning-- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*
 --   {RazorEdits}/{lib}/{semver}/*

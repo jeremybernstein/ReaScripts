@@ -21,11 +21,11 @@ local scl = require 'lib.lua-scala.scl'
 local mu = nil
 
 -- constants
-local PB_CENTER = 8192 -- Center of 14-bit range (0-16383)
-local PB_MAX = 16383
+local PB_CENTER = coords.PB_CENTER
+local PB_MAX = coords.PB_MAX
+local CHANMSG_PITCHBEND = 0xE0
 local NOTE_NAMES = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' }
 
--- convert pitch (possibly fractional) to note name with +/- for microtonal offset
 local function pitchToNoteName(pitch)
   local basePitch = math.floor(pitch + 0.5)  -- Round to nearest semitone
   local fraction = pitch - basePitch
@@ -87,14 +87,12 @@ local projectOverrides = {
 }
 
 -- state
-local pbBitmap = nil
 local pbPoints = {}           -- Per-channel PB point data: { [chan] = { { ppqpos, value, selected, hovered } ... } }
 local hoveredPoint = nil      -- Point under mouse
 local hoveredCurve = nil      -- Curve segment under mouse (for bezier tension editing)
 local dragState = nil         -- Current drag operation
 local lastTooltipText = nil
 local notesByChannel = {}     -- Notes per channel for reference pitch lookup
-local candidatesPool = {}     -- reusable table for note association (GC reduction)
 local clipboardSpan = nil     -- stashed at copy time: { minPpq, maxPpq, channels = { [chan]=true } }
 
 -- center line state for compress/expand
@@ -133,6 +131,13 @@ local cache = {
     laneTopValue = nil,
   },
 }
+
+-- cache for getScaleSnapLines (invalidated on config/view change)
+local snapLineCache = {}  -- { [refPitch] = lines }
+local snapLineCacheKey = nil  -- serialized config+view state for invalidation
+
+-- sorted unique pitches from PB-associated notes (rebuilt on MIDI change)
+local uniquePitchList = {}  -- sorted array of unique pitches
 
 -- check if view state has changed (requires screen coord update)
 local function viewStateChanged()
@@ -182,24 +187,85 @@ local function clearCache()
   pbNeedsRedraw = true
 end
 
--- convert 14-bit PB value to semitones (delegates to coords with config)
 local function pbToSemitones(pbValue)
   return coords.pbToSemitones(pbValue, config.maxBendUp, config.maxBendDown)
 end
 
--- convert semitones to 14-bit PB value (delegates to coords with config)
 local function semitonesToPb(semitones)
   return coords.semitonesToPb(semitones, config.maxBendUp, config.maxBendDown)
 end
 
--- snap semitone value to nearest integer (equal temperament)
 local function snapToSemitone(semitones)
   return coords.snapToSemitone(semitones)
 end
 
--- microtonal snap using loaded Scale
 local function snapToMicrotonal(semitones, scale)
   return coords.snapToMicrotonal(semitones, scale)
+end
+
+-- clamp semitones to configured bend range
+local function clampSemitones(semitones)
+  return math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
+end
+
+-- XOR toggle: returns true when default is on and toggle is off, or vice versa
+local function shouldSnapToggle(default, toggle)
+  return (default and not toggle) or (not default and toggle)
+end
+
+-- snap PPQ to grid, returns snapped value (no-op if no grid)
+local function snapPpqToGrid(ppqpos, take)
+  if not take or not glob.currentGrid then return ppqpos end
+  local gridUnit = mu.MIDI_GetPPQ(take) * glob.currentGrid
+  local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
+  local tickInMeasure = ppqpos - som
+  return som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+end
+
+-- deselect all PB points across all channels
+local function deselectAll()
+  for _, points in pairs(pbPoints) do
+    for _, pt in ipairs(points) do
+      pt.selected = false
+    end
+  end
+end
+
+-- check if any PB point is selected
+local function hasSelection()
+  for _, points in pairs(pbPoints) do
+    for _, pt in ipairs(points) do
+      if pt.selected then return true end
+    end
+  end
+  return false
+end
+
+local function pbToBytes(pbValue)
+  return coords.pbToBytes(pbValue)
+end
+
+local function bytesToPb(msg2, msg3)
+  return coords.bytesToPb(msg2, msg3)
+end
+
+-- write selected points back to MIDI (values already updated in-memory)
+-- returns true if any points were written
+local function commitSelectedToMIDI(take, selectedStarts)
+  if not take or not mu or not selectedStarts then return false end
+  mu.MIDI_OpenWriteTransaction(take)
+  for _, sel in ipairs(selectedStarts) do
+    local msg2, msg3 = pbToBytes(sel.point.pbValue)
+    mu.MIDI_SetCC(take, sel.point.idx,
+      sel.point.selected,
+      sel.point.muted,
+      sel.point.ppqpos,
+      CHANMSG_PITCHBEND,
+      sel.chan,
+      msg2, msg3)
+  end
+  mu.MIDI_CommitWriteTransaction(take, true, true)
+  return true
 end
 
 -- recalculate semitones for all points (call when bend range changes)
@@ -215,17 +281,6 @@ local function recalcSemitones()
   end
 end
 
--- encode PB value to msg2/msg3 (LSB/MSB)
-local function pbToBytes(pbValue)
-  return coords.pbToBytes(pbValue)
-end
-
--- decode msg2/msg3 to PB value
-local function bytesToPb(msg2, msg3)
-  return coords.bytesToPb(msg2, msg3)
-end
-
--- calculate screen Y position for a PB value relative to a note pitch
 local function pbToScreenY(semitoneOffset, notePitch)
   local meLanes = glob.meLanes
   local meState = glob.meState
@@ -234,7 +289,6 @@ local function pbToScreenY(semitoneOffset, notePitch)
     meLanes[-1].topPixel, meLanes[-1].topValue, meState.pixelsPerPitch)
 end
 
--- convert screen Y to pitch (fractional)
 local function screenYToPitch(screenY)
   local meLanes = glob.meLanes
   local meState = glob.meState
@@ -242,7 +296,6 @@ local function screenYToPitch(screenY)
   return coords.screenYToPitch(screenY, meLanes[-1].topPixel, meLanes[-1].topValue, meState.pixelsPerPitch)
 end
 
--- convert screen Y to semitone offset, given a reference pitch
 local function screenYToSemitones(screenY, refPitch)
   local meLanes = glob.meLanes
   local meState = glob.meState
@@ -251,7 +304,6 @@ local function screenYToSemitones(screenY, refPitch)
     meLanes[-1].topPixel, meLanes[-1].topValue, meState.pixelsPerPitch)
 end
 
--- calculate screen X position for a PPQ position (returns relative, 0-based)
 local function ppqToScreenX(ppqpos, take)
   local meState = glob.meState
   if not take then return nil end
@@ -263,7 +315,6 @@ local function ppqToScreenX(ppqpos, take)
   end
 end
 
--- calculate PPQ position from screen X (accepts relative, 0-based)
 local function screenXToPpq(screenX, take)
   local meState = glob.meState
   if not take then return nil end
@@ -607,7 +658,7 @@ local function extractPBEvents(take, mu)
   local _, _, ccCount = mu.MIDI_CountEvts(take)  -- returns: rv, noteCount, ccCount, syxCount
   for i = 0, ccCount - 1 do
     local rv, selected, muted, ppqpos, chanmsg, chan, msg2, msg3 = mu.MIDI_GetCC(take, i)
-    if rv and chanmsg == 0xE0 then
+    if rv and chanmsg == CHANMSG_PITCHBEND then
       if not events[chan] then events[chan] = {} end
       local pbValue = bytesToPb(msg2, msg3)
       -- get curve shape for this event
@@ -751,26 +802,43 @@ end
 
 -- find notes sounding at a given time on a channel
 -- returns the note closest to targetPitch if multiple, or first sounding note
+-- notesByChannel is sorted by startppq; binary search to find the neighborhood
 local function findNoteAtTime(chan, ppqpos, targetPitch)
   local channelNotes = notesByChannel[chan]
   if not channelNotes then return nil end
+  local n = #channelNotes
+  if n == 0 then return nil end
 
+  -- binary search: find rightmost note with startppq <= ppqpos
+  local lo, hi = 1, n
+  while lo < hi do
+    local mid = lo + math.floor((hi - lo + 1) / 2)
+    if channelNotes[mid].startppq <= ppqpos then
+      lo = mid
+    else
+      hi = mid - 1
+    end
+  end
+
+  -- collect sounding notes: scan backward from lo (notes starting at or before ppqpos)
+  -- can't break early on short notes — longer notes at earlier indices may still sound
   local soundingNotes = {}
-  for _, note in ipairs(channelNotes) do
+  for i = lo, 1, -1 do
+    local note = channelNotes[i]
     if note.startppq <= ppqpos and note.endppq > ppqpos then
       table.insert(soundingNotes, note)
     end
   end
 
   if #soundingNotes == 0 then
-    -- no sounding note, find closest upcoming or recent note
-    local closestNote = nil
-    local closestDist = math.huge
-    for _, note in ipairs(channelNotes) do
-      local dist = math.min(math.abs(note.startppq - ppqpos), math.abs(note.endppq - ppqpos))
-      if dist < closestDist then
-        closestDist = dist
-        closestNote = note
+    -- no sounding note: closest is either channelNotes[lo] or channelNotes[lo+1]
+    local closestNote = channelNotes[lo]
+    local closestDist = math.min(math.abs(closestNote.startppq - ppqpos), math.abs(closestNote.endppq - ppqpos))
+    if lo < n then
+      local next = channelNotes[lo + 1]
+      local nextDist = math.abs(next.startppq - ppqpos)
+      if nextDist < closestDist then
+        closestNote = next
       end
     end
     return closestNote
@@ -840,10 +908,145 @@ local function syncSelectionToMIDI(take, mu)
   for chan, points in pairs(pbPoints) do
     for _, pt in ipairs(points) do
       local msg2, msg3 = pbToBytes(pt.pbValue)
-      mu.MIDI_SetCC(take, pt.idx, pt.selected, pt.muted, pt.ppqpos, 0xE0, chan, msg2, msg3)
+      mu.MIDI_SetCC(take, pt.idx, pt.selected, pt.muted, pt.ppqpos, CHANMSG_PITCHBEND, chan, msg2, msg3)
     end
   end
   mu.MIDI_CommitWriteTransaction(take, false, false)  -- no undo for selection changes
+end
+
+-- select all PB points within a screen rect, returns true if any selected
+local function marqueeSelectPoints(x1, y1, x2, y2)
+  local anySelected = false
+  for _, points in pairs(pbPoints) do
+    for _, pt in ipairs(points) do
+      if pt.screenX and pt.screenY
+         and pt.screenX >= x1 and pt.screenX <= x2
+         and pt.screenY >= y1 and pt.screenY <= y2 then
+        pt.selected = true
+        anySelected = true
+      end
+    end
+  end
+  return anySelected
+end
+
+-- finalize a drag operation on mouse release, returns undo text or nil
+local function finalizeDragRelease(activeTake)
+  if not dragState then return nil end
+
+  if dragState.isBezierDrag then
+    if activeTake and dragState.bezierPoints then
+      local anyChanged = false
+      for _, bp in ipairs(dragState.bezierPoints) do
+        if (bp.point.beztension or 0) ~= bp.startTension then
+          anyChanged = true
+          break
+        end
+      end
+      if anyChanged then
+        mu.MIDI_OpenWriteTransaction(activeTake)
+        for _, bp in ipairs(dragState.bezierPoints) do
+          mu.MIDI_SetCCShape(activeTake, bp.point.idx, bp.point.shape or 5, bp.point.beztension or 0)
+        end
+        mu.MIDI_CommitWriteTransaction(activeTake, true, true)
+        return 'Adjust Bezier Tension'
+      end
+    end
+
+  elseif dragState.isCompressExpand and activeTake then
+    -- reset center line state after compress/expand completes
+    centerLineState.active = false
+    centerLineState.locked = false
+    local anyChanged = false
+    for _, sel in ipairs(dragState.selectedStarts) do
+      if sel.point.semitones ~= sel.startSemitones then
+        anyChanged = true
+        break
+      end
+    end
+    if anyChanged then
+      commitSelectedToMIDI(activeTake, dragState.selectedStarts)
+      return 'Compress/Expand Pitch Bend'
+    end
+
+  elseif dragState.isMarquee and dragState.currentMx then
+    local x1 = math.min(dragState.startMx, dragState.currentMx)
+    local y1 = math.min(dragState.startMy, dragState.currentMy)
+    local x2 = math.max(dragState.startMx, dragState.currentMx)
+    local y2 = math.max(dragState.startMy, dragState.currentMy)
+    if marqueeSelectPoints(x1, y1, x2, y2) and activeTake then
+      syncSelectionToMIDI(activeTake, mu)
+      return 'Select Pitch Bend'
+    end
+
+  elseif dragState.selectedStarts and #dragState.selectedStarts > 0 and activeTake then
+    local anyMoved = false
+    for _, sel in ipairs(dragState.selectedStarts) do
+      if sel.point.ppqpos ~= sel.startPpq or sel.point.semitones ~= sel.startSemitones then
+        anyMoved = true
+        break
+      end
+    end
+    if anyMoved then
+      commitSelectedToMIDI(activeTake, dragState.selectedStarts)
+      return 'Modify Pitch Bend'
+    elseif dragState.pendingDeselect then
+      dragState.pendingDeselect.selected = false
+      syncSelectionToMIDI(activeTake, mu)
+      return 'Select Pitch Bend'
+    end
+  end
+
+  return nil
+end
+
+-- commit drawn path to MIDI, returns undo text or nil
+local function commitDrawPath(activeTake)
+  if not drawState or not activeTake or #drawState.path == 0 then return nil end
+
+  local chan = drawState.chan
+  local path = drawState.path
+
+  table.sort(path, function(a, b) return a.ppq < b.ppq end)
+
+  local minPpq = path[1].ppq
+  local maxPpq = path[#path].ppq
+
+  mu.MIDI_OpenWriteTransaction(activeTake)
+
+  -- delete existing PB events in the drawn range on this channel
+  local _, _, ccCount = mu.MIDI_CountEvts(activeTake)
+  local toDelete = {}
+  for i = 0, ccCount - 1 do
+    local rv, _, _, ppqpos, chanmsg, evtChan = mu.MIDI_GetCC(activeTake, i)
+    if rv and chanmsg == CHANMSG_PITCHBEND and evtChan == chan and ppqpos >= minPpq and ppqpos <= maxPpq then
+      table.insert(toDelete, i)
+    end
+  end
+  for i = #toDelete, 1, -1 do
+    mu.MIDI_DeleteCC(activeTake, toDelete[i])
+  end
+
+  -- insert new events
+  for _, pt in ipairs(path) do
+    local msg2, msg3 = pbToBytes(pt.pbValue)
+    mu.MIDI_InsertCC(activeTake, false, false, pt.ppq, CHANMSG_PITCHBEND, chan, msg2, msg3)
+  end
+
+  -- set curve type for new events if needed
+  if config.curveType ~= 0 then
+    local _, _, newCcCount = mu.MIDI_CountEvts(activeTake)
+    for i = 0, newCcCount - 1 do
+      local rv, _, _, ppqpos, chanmsg, evtChan = mu.MIDI_GetCC(activeTake, i)
+      if rv and chanmsg == CHANMSG_PITCHBEND and evtChan == chan and ppqpos >= minPpq and ppqpos <= maxPpq then
+        mu.MIDI_SetCCShape(activeTake, i, config.curveType, 0)
+      end
+    end
+  end
+
+  mu.MIDI_CommitWriteTransaction(activeTake, true, true)
+  clearCache()
+  return 'Draw Pitch Bend'
 end
 
 -- process PB mode (called from main loop)
@@ -874,6 +1077,22 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       -- full refresh: extract PB data and update screen coords
       pbPoints = extractPBEvents(activeTake, mu)
       associatePBWithNotes(activeTake, pbPoints, mu)
+      -- rebuild sorted unique pitch list for center-line binary search
+      local pitchSet = {}
+      for _, points in pairs(pbPoints) do
+        for _, pt in ipairs(points) do
+          if pt.associatedNotes then
+            for _, note in ipairs(pt.associatedNotes) do
+              pitchSet[note.pitch] = true
+            end
+          end
+        end
+      end
+      uniquePitchList = {}
+      for pitch in pairs(pitchSet) do
+        uniquePitchList[#uniquePitchList + 1] = pitch
+      end
+      table.sort(uniquePitchList)
       updateScreenCoords(activeTake, leftPPQ, rightPPQ)
       cache.midiHash = currentHash
       updateViewStateCache()
@@ -900,88 +1119,12 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
   -- this prevents stuck drag state when mouse leaves the editor area
   if not mx or not my then
     if mouseState.released then
-      -- only redraw if there's active state to clean up
       if dragState or drawState or centerLineState.active then
         pbNeedsRedraw = true
       end
-      local outOfBoundsUndo = nil
-      if dragState then
-        -- for marquee, complete the selection with current bounds
-        if dragState.isMarquee and dragState.currentMx then
-          local x1, y1 = math.min(dragState.startMx, dragState.currentMx), math.min(dragState.startMy, dragState.currentMy)
-          local x2, y2 = math.max(dragState.startMx, dragState.currentMx), math.max(dragState.startMy, dragState.currentMy)
-
-          local marqueeSelected = false
-          for chan, points in pairs(pbPoints) do
-            for _, pt in ipairs(points) do
-              if pt.screenX and pt.screenY then
-                if pt.screenX >= x1 and pt.screenX <= x2 and pt.screenY >= y1 and pt.screenY <= y2 then
-                  pt.selected = true
-                  marqueeSelected = true
-                end
-              end
-            end
-          end
-
-          if marqueeSelected and activeTake then
-            syncSelectionToMIDI(activeTake, mu)
-            outOfBoundsUndo = 'Select Pitch Bend'
-          end
-        end
-        -- commit compress/expand or point drag even if released out of bounds
-        if dragState.isCompressExpand and activeTake then
-          local anyChanged = false
-          for _, sel in ipairs(dragState.selectedStarts) do
-            if sel.point.semitones ~= sel.startSemitones then
-              anyChanged = true
-              break
-            end
-          end
-          if anyChanged then
-            mu.MIDI_OpenWriteTransaction(activeTake)
-            for _, sel in ipairs(dragState.selectedStarts) do
-              local msg2, msg3 = pbToBytes(sel.point.pbValue)
-              mu.MIDI_SetCC(activeTake, sel.point.idx,
-                sel.point.selected,
-                sel.point.muted,
-                sel.point.ppqpos,
-                0xE0,
-                sel.chan,
-                msg2, msg3)
-            end
-            mu.MIDI_CommitWriteTransaction(activeTake, true, true)
-            outOfBoundsUndo = 'Compress/Expand Pitch Bend'
-          end
-        elseif dragState.selectedStarts and #dragState.selectedStarts > 0 and activeTake then
-          local anyMoved = false
-          for _, sel in ipairs(dragState.selectedStarts) do
-            if sel.point.ppqpos ~= sel.startPpq or sel.point.semitones ~= sel.startSemitones then
-              anyMoved = true
-              break
-            end
-          end
-          if anyMoved then
-            mu.MIDI_OpenWriteTransaction(activeTake)
-            for _, sel in ipairs(dragState.selectedStarts) do
-              local msg2, msg3 = pbToBytes(sel.point.pbValue)
-              mu.MIDI_SetCC(activeTake, sel.point.idx,
-                sel.point.selected,
-                sel.point.muted,
-                sel.point.ppqpos,
-                0xE0,
-                sel.chan,
-                msg2, msg3)
-            end
-            mu.MIDI_CommitWriteTransaction(activeTake, true, true)
-            outOfBoundsUndo = 'Modify Pitch Bend'
-          end
-        end
-        dragState = nil
-      end
-      if drawState then
-        -- cancel draw without committing
-        drawState = nil
-      end
+      local outOfBoundsUndo = finalizeDragRelease(activeTake)
+      dragState = nil
+      drawState = nil  -- cancel draw without committing
       centerLineState.active = false
       centerLineState.locked = false
       return true, outOfBoundsUndo
@@ -996,11 +1139,9 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local prevHovered = hoveredPoint
       local prevHoveredCurve = hoveredCurve
       local hit = hitTestPoint(mx, my)
-      -- clear all hovered flags first
-      for chan, points in pairs(pbPoints) do
-        for _, pt in ipairs(points) do
-          pt.hovered = false
-        end
+      -- clear previous hovered flag
+      if prevHovered then
+        prevHovered.point.hovered = false
       end
       if hit then
         hoveredPoint = hit
@@ -1068,47 +1209,46 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       drawState = nil
       dragState = nil
     elseif compExpHeld and not dragState then
-      -- check if any points are selected
-      local hasSelection = false
-      for _, points in pairs(pbPoints) do
-        for _, pt in ipairs(points) do
-          if pt.selected then hasSelection = true break end
-        end
-        if hasSelection then break end
-      end
-
-      if not hasSelection then
+      if not hasSelection() then
         -- no selection: show tooltip, don't draw center line
         centerLineState.active = false
         local tipX, tipY = r.GetMousePosition()
         setTooltip("No points selected", tipX + 12, tipY + 12, true)
       else
         -- find reference pitch: nearest note (with PB points) to mouse Y position
+        -- uses pre-sorted uniquePitchList for O(log n) lookup
         local mousePitch = screenYToPitch(my)
         local refPitch = 60
-        local minDist = math.huge
-        for _, points in pairs(pbPoints) do
-          for _, pt in ipairs(points) do
-            if pt.associatedNotes then
-              for _, note in ipairs(pt.associatedNotes) do
-                local dist = math.abs(note.pitch - mousePitch)
-                if dist < minDist then
-                  minDist = dist
-                  refPitch = note.pitch
-                end
-              end
+        local nPitches = #uniquePitchList
+        if nPitches > 0 then
+          -- binary search for nearest pitch
+          local lo, hi = 1, nPitches
+          while lo < hi do
+            local mid = lo + math.floor((hi - lo) / 2)
+            if uniquePitchList[mid] < mousePitch then
+              lo = mid + 1
+            else
+              hi = mid
+            end
+          end
+          -- lo is the first pitch >= mousePitch; check lo and lo-1
+          refPitch = uniquePitchList[lo]
+          if lo > 1 then
+            local prev = uniquePitchList[lo - 1]
+            if math.abs(prev - mousePitch) < math.abs(refPitch - mousePitch) then
+              refPitch = prev
             end
           end
         end
 
         -- convert mouse Y to semitones (relative to nearest note)
         local semitones = screenYToSemitones(my, refPitch)
-        local shouldSnap = (config.snapToSemitone and not optHeld) or (not config.snapToSemitone and optHeld)
+        local shouldSnap = shouldSnapToggle(config.snapToSemitone, optHeld)
         if shouldSnap then
           semitones = snapToMicrotonal(semitones, config.tuningScale)
         end
         -- clamp to bend range
-        semitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
+        semitones = clampSemitones(semitones)
 
         -- convert snapped semitones back to screen Y for display
         local snappedScreenY = pbToScreenY(semitones, refPitch)
@@ -1185,11 +1325,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         if not ppqpos then return end
 
         -- grid snap for X (unless shift held for smooth mode)
-        if not shiftHeld and activeTake and glob.currentGrid then
-          local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-          local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, ppqpos)
-          local tickInMeasure = ppqpos - som
-          ppqpos = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+        if not shiftHeld then
+          ppqpos = snapPpqToGrid(ppqpos, activeTake)
         end
 
         -- find initial reference note from mouse Y position (nearest note by pitch)
@@ -1228,11 +1365,11 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         -- calculate semitones from mouse Y using the reference pitch
         local semitones = screenYToSemitones(my, refPitch)
         -- y snap to semitones (unless opt held)
-        local shouldSnapY = (config.snapToSemitone and not optHeld) or (not config.snapToSemitone and optHeld)
+        local shouldSnapY = shouldSnapToggle(config.snapToSemitone, optHeld)
         if shouldSnapY then
           semitones = snapToMicrotonal(semitones, config.tuningScale)
         end
-        semitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
+        semitones = clampSemitones(semitones)
         local pbValue = semitonesToPb(semitones)
 
         -- calculate snapped screen positions for visual feedback
@@ -1269,11 +1406,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
             end
           else
             -- clicked unselected curve: deselect all, select this curve's start point, edit solo
-            for chan, points in pairs(pbPoints) do
-              for _, pt in ipairs(points) do
-                pt.selected = false
-              end
-            end
+            deselectAll()
             curveHit.point.selected = true
             selectionChanged = true
             table.insert(bezierPoints, {
@@ -1302,11 +1435,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         else
           -- if clicking unselected point, clear others and select this one
           if not wasSelected then
-            for chan, points in pairs(pbPoints) do
-              for _, pt in ipairs(points) do
-                pt.selected = false
-              end
-            end
+            deselectAll()
             selectionChanged = true
           end
           hoveredPoint.point.selected = true
@@ -1346,13 +1475,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         -- clicked on empty space without draw modifier
         -- start marquee selection
         if not shiftHeld then
-          -- clear selection
-          for chan, points in pairs(pbPoints) do
-            for _, pt in ipairs(points) do
-              if pt.selected then selectionChanged = true end
-              pt.selected = false
-            end
-          end
+          selectionChanged = hasSelection()
+          deselectAll()
         end
         dragState = {
           startMx = mx,
@@ -1399,7 +1523,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           -- scale raw semitone values around center (ignores note association)
           local newSemitones = center + (sel.startSemitones - center) * factor
           -- clamp to max bend range
-          newSemitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, newSemitones))
+          newSemitones = clampSemitones(newSemitones)
 
           local pbValue = semitonesToPb(newSemitones)
           sel.point.pbValue = pbValue
@@ -1430,17 +1554,17 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
           -- pitch snap: snap anchor, derive delta from snapped position
           local pitchSnapToggle = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
-          local shouldSnapPitch = (config.snapToSemitone and not pitchSnapToggle) or (not config.snapToSemitone and pitchSnapToggle)
+          local shouldSnapPitch = shouldSnapToggle(config.snapToSemitone, pitchSnapToggle)
           local anchorNewSemitones = anchor.startSemitones + deltaSemitones
           if shouldSnapPitch then
             anchorNewSemitones = snapToMicrotonal(anchorNewSemitones, config.tuningScale)
           end
-          anchorNewSemitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, anchorNewSemitones))
+          anchorNewSemitones = clampSemitones(anchorNewSemitones)
           local snappedDeltaSemitones = anchorNewSemitones - anchor.startSemitones
 
           for _, sel in ipairs(dragState.selectedStarts) do
             local newSemitones = sel.startSemitones + snappedDeltaSemitones
-            newSemitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, newSemitones))
+            newSemitones = clampSemitones(newSemitones)
             local pbValue = semitonesToPb(newSemitones)
             sel.point.pbValue = pbValue
             sel.point.semitones = pbToSemitones(pbValue)
@@ -1459,13 +1583,10 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           local gridSnapToggle = mod.pbSnapToGridMod and mod.pbSnapToGridMod(mouseState.hottestMods)
           local editorSnapEnabled = glob.liceData and glob.liceData.editor
             and r.MIDIEditor_GetSetting_int(glob.liceData.editor, 'snap_enabled') == 1
-          local shouldSnapGrid = (editorSnapEnabled and not gridSnapToggle) or (not editorSnapEnabled and gridSnapToggle)
+          local shouldSnapGrid = shouldSnapToggle(editorSnapEnabled, gridSnapToggle)
           local anchorNewPpq = anchor.startPpq + deltaPpq
-          if shouldSnapGrid and glob.currentGrid and activeTake then
-            local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-            local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, anchorNewPpq)
-            local tickInMeasure = anchorNewPpq - som
-            anchorNewPpq = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+          if shouldSnapGrid then
+            anchorNewPpq = snapPpqToGrid(anchorNewPpq, activeTake)
           end
           local snappedDeltaPpq = math.floor(anchorNewPpq - anchor.startPpq + 0.5)
 
@@ -1491,11 +1612,8 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       if not ppqpos then return end
 
       -- grid snap for X (unless smooth mode)
-      if not smooth and activeTake and glob.currentGrid then
-        local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-        local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, ppqpos)
-        local tickInMeasure = ppqpos - som
-        ppqpos = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+      if not smooth then
+        ppqpos = snapPpqToGrid(ppqpos, activeTake)
       end
 
       -- dynamic reference pitch: only switch to new note when current note has ended
@@ -1514,11 +1632,11 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
       -- calculate semitones from mouse Y using (possibly updated) reference pitch
       local semitones = screenYToSemitones(my, drawState.refPitch or 60)
-      local shouldSnapY = (config.snapToSemitone and not pitchSnapToggle) or (not config.snapToSemitone and pitchSnapToggle)
+      local shouldSnapY = shouldSnapToggle(config.snapToSemitone, pitchSnapToggle)
       if shouldSnapY then
         semitones = snapToMicrotonal(semitones, config.tuningScale)
       end
-      semitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
+      semitones = clampSemitones(semitones)
       local pbValue = semitonesToPb(semitones)
 
       -- calculate snapped screen positions for visual feedback
@@ -1669,162 +1787,14 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     -- handle mouse release
     if mouseState.released and dragState then
       pbNeedsRedraw = true
-      if dragState.isBezierDrag then
-        -- write bezier tension back to MIDI for all affected points
-        if activeTake and dragState.bezierPoints then
-          local anyChanged = false
-          for _, bp in ipairs(dragState.bezierPoints) do
-            if (bp.point.beztension or 0) ~= bp.startTension then
-              anyChanged = true
-              break
-            end
-          end
-          if anyChanged then
-            mu.MIDI_OpenWriteTransaction(activeTake)
-            for _, bp in ipairs(dragState.bezierPoints) do
-              mu.MIDI_SetCCShape(activeTake, bp.point.idx, bp.point.shape or 5, bp.point.beztension or 0)
-            end
-            mu.MIDI_CommitWriteTransaction(activeTake, true, true)
-            undoText = 'Adjust Bezier Tension'
-          end
-        end
-      elseif dragState.isCompressExpand and activeTake then
-        -- write compressed/expanded PB values back to MIDI
-        local anyChanged = false
-        for _, sel in ipairs(dragState.selectedStarts) do
-          if sel.point.semitones ~= sel.startSemitones then
-            anyChanged = true
-            break
-          end
-        end
-        if anyChanged then
-          mu.MIDI_OpenWriteTransaction(activeTake)
-          for _, sel in ipairs(dragState.selectedStarts) do
-            local msg2, msg3 = pbToBytes(sel.point.pbValue)
-            mu.MIDI_SetCC(activeTake, sel.point.idx,
-              sel.point.selected,
-              sel.point.muted,
-              sel.point.ppqpos,
-              0xE0,
-              sel.chan,
-              msg2, msg3)
-          end
-          mu.MIDI_CommitWriteTransaction(activeTake, true, true)
-          undoText = 'Compress/Expand Pitch Bend'
-        end
-        -- reset center line state after compress/expand completes
-        centerLineState.active = false
-        centerLineState.locked = false
-      elseif dragState.isMarquee and dragState.currentMx then
-        -- complete marquee selection
-        local x1, y1 = math.min(dragState.startMx, dragState.currentMx), math.min(dragState.startMy, dragState.currentMy)
-        local x2, y2 = math.max(dragState.startMx, dragState.currentMx), math.max(dragState.startMy, dragState.currentMy)
-
-        local marqueeSelected = false
-        for chan, points in pairs(pbPoints) do
-          for _, pt in ipairs(points) do
-            if pt.screenX and pt.screenY then
-              if pt.screenX >= x1 and pt.screenX <= x2 and pt.screenY >= y1 and pt.screenY <= y2 then
-                pt.selected = true
-                marqueeSelected = true
-              end
-            end
-          end
-        end
-
-        -- sync selection after marquee
-        if marqueeSelected and activeTake then
-          syncSelectionToMIDI(activeTake, mu)
-          undoText = 'Select Pitch Bend'
-        end
-      elseif dragState.selectedStarts and #dragState.selectedStarts > 0 and activeTake then
-        -- check if any point actually moved
-        local anyMoved = false
-        for _, sel in ipairs(dragState.selectedStarts) do
-          if sel.point.ppqpos ~= sel.startPpq or sel.point.semitones ~= sel.startSemitones then
-            anyMoved = true
-            break
-          end
-        end
-
-        if anyMoved then
-          -- write all modified points back to MIDI
-          mu.MIDI_OpenWriteTransaction(activeTake)
-          for _, sel in ipairs(dragState.selectedStarts) do
-            local msg2, msg3 = pbToBytes(sel.point.pbValue)
-            mu.MIDI_SetCC(activeTake, sel.point.idx,
-              sel.point.selected,
-              sel.point.muted,
-              sel.point.ppqpos,
-              0xE0,
-              sel.chan,
-              msg2, msg3)
-          end
-          mu.MIDI_CommitWriteTransaction(activeTake, true, true)
-          undoText = 'Modify Pitch Bend'
-        elseif dragState.pendingDeselect then
-          -- no drag occurred: apply deferred shift-click deselect
-          dragState.pendingDeselect.selected = false
-          syncSelectionToMIDI(activeTake, mu)
-          undoText = 'Select Pitch Bend'
-        end
-      end
+      undoText = finalizeDragRelease(activeTake)
       dragState = nil
     end
 
     -- handle draw mode release
     if mouseState.released and drawState then
       pbNeedsRedraw = true
-      if activeTake and #drawState.path > 0 then
-        local chan = drawState.chan
-        local path = drawState.path
-
-        -- sort path by PPQ position
-        table.sort(path, function(a, b) return a.ppq < b.ppq end)
-
-        -- get PPQ range of drawn events
-        local minPpq = path[1].ppq
-        local maxPpq = path[#path].ppq
-
-        -- delete existing PB events in the drawn range on this channel
-        mu.MIDI_OpenWriteTransaction(activeTake)
-
-        -- find and delete existing events in range
-        local _, _, ccCount = mu.MIDI_CountEvts(activeTake)
-        local toDelete = {}
-        for i = 0, ccCount - 1 do
-          local rv, _, _, ppqpos, chanmsg, evtChan = mu.MIDI_GetCC(activeTake, i)
-          if rv and chanmsg == 0xE0 and evtChan == chan and ppqpos >= minPpq and ppqpos <= maxPpq then
-            table.insert(toDelete, i)
-          end
-        end
-        -- delete in reverse order to preserve indices
-        for i = #toDelete, 1, -1 do
-          mu.MIDI_DeleteCC(activeTake, toDelete[i])
-        end
-
-        -- insert new events (path is already deduped during drawing)
-        for _, pt in ipairs(path) do
-          local msg2, msg3 = pbToBytes(pt.pbValue)
-          mu.MIDI_InsertCC(activeTake, false, false, pt.ppq, 0xE0, chan, msg2, msg3)
-        end
-
-        -- set curve type for new events if needed
-        if config.curveType ~= 0 then
-          -- re-count to get new indices
-          local _, _, newCcCount = mu.MIDI_CountEvts(activeTake)
-          for i = 0, newCcCount - 1 do
-            local rv, _, _, ppqpos, chanmsg, evtChan = mu.MIDI_GetCC(activeTake, i)
-            if rv and chanmsg == 0xE0 and evtChan == chan and ppqpos >= minPpq and ppqpos <= maxPpq then
-              mu.MIDI_SetCCShape(activeTake, i, config.curveType, 0)
-            end
-          end
-        end
-
-        mu.MIDI_CommitWriteTransaction(activeTake, true, true)
-        clearCache()  -- Force refresh to show new points
-        undoText = 'Draw Pitch Bend'
-      end
+      undoText = undoText or commitDrawPath(activeTake)
       drawState = nil
     end
 
@@ -1841,12 +1811,9 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         -- grid snap handling (modifier toggles, respects editor snap setting)
         local gridSnapToggle = mod.pbSnapToGridMod and mod.pbSnapToGridMod(mouseState.hottestMods)
         local editorSnapEnabled = r.MIDIEditor_GetSetting_int(glob.liceData.editor, 'snap_enabled') == 1
-        local shouldSnapGrid = (editorSnapEnabled and not gridSnapToggle) or (not editorSnapEnabled and gridSnapToggle)
-        if shouldSnapGrid and glob.currentGrid then
-          local gridUnit = mu.MIDI_GetPPQ(activeTake) * glob.currentGrid
-          local som = r.MIDI_GetPPQPos_StartOfMeasure(activeTake, ppqpos)
-          local tickInMeasure = ppqpos - som
-          ppqpos = som + (gridUnit * math.floor((tickInMeasure / gridUnit) + 0.5))
+        local shouldSnapGrid = shouldSnapToggle(editorSnapEnabled, gridSnapToggle)
+        if shouldSnapGrid then
+          ppqpos = snapPpqToGrid(ppqpos, activeTake)
         end
 
         -- use active channel from editor (1-based in chunk, convert to 0-based for MIDI)
@@ -1864,17 +1831,17 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
         -- pitch snap handling (modifier toggles, default ON)
         local pitchSnapToggle = mod.pbSnapToPitchMod and mod.pbSnapToPitchMod(mouseState.hottestMods)
-        local shouldSnapPitch = (config.snapToSemitone and not pitchSnapToggle) or (not config.snapToSemitone and pitchSnapToggle)
+        local shouldSnapPitch = shouldSnapToggle(config.snapToSemitone, pitchSnapToggle)
         if shouldSnapPitch then
           semitones = snapToMicrotonal(semitones, config.tuningScale)
         end
-        semitones = math.max(-config.maxBendDown, math.min(config.maxBendUp, semitones))
+        semitones = clampSemitones(semitones)
 
         local pbValue = semitonesToPb(semitones)
         local msg2, msg3 = pbToBytes(pbValue)
 
         mu.MIDI_OpenWriteTransaction(activeTake)
-        mu.MIDI_InsertCC(activeTake, true, false, ppqpos, 0xE0, chan, msg2, msg3)
+        mu.MIDI_InsertCC(activeTake, true, false, ppqpos, CHANMSG_PITCHBEND, chan, msg2, msg3)
         mu.MIDI_CommitWriteTransaction(activeTake, true, true)
         clearCache()  -- Force refresh to show the new point
         undoText = 'Insert Pitch Bend Point'
@@ -1908,17 +1875,14 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
   return true, undoText
 end
 
--- get PB points for rendering
 local function getPBPoints()
   return pbPoints
 end
 
--- get drag state for marquee drawing
 local function getDragState()
   return dragState
 end
 
--- get configuration
 local function getConfig()
   return config
 end
@@ -1928,6 +1892,23 @@ end
 -- referencePitch is the note pitch to center the lines around
 local function getScaleSnapLines(referencePitch)
   if not config.tuningScale then return nil end
+
+  -- invalidate cache when config or view state changes
+  local meLanes = glob.meLanes
+  local meState = glob.meState
+  local lane = meLanes and meLanes[-1]
+  local key = string.format('%s_%d_%d_%s_%s_%s',
+    tostring(config.tuningScale), config.maxBendUp, config.maxBendDown,
+    tostring(lane and lane.topPixel), tostring(lane and lane.topValue),
+    tostring(meState and meState.pixelsPerPitch))
+  if key ~= snapLineCacheKey then
+    snapLineCache = {}
+    snapLineCacheKey = key
+  end
+
+  if snapLineCache[referencePitch] then
+    return snapLineCache[referencePitch]
+  end
 
   local scale = config.tuningScale
   local lines = {}
@@ -1968,10 +1949,10 @@ local function getScaleSnapLines(referencePitch)
     end
   end
 
+  snapLineCache[referencePitch] = lines
   return lines
 end
 
--- set configuration value
 local function setConfig(key, value)
   if config[key] ~= nil then
     config[key] = value
@@ -1979,7 +1960,6 @@ local function setConfig(key, value)
   end
 end
 
--- cycle through curve types
 local function cycleCurveType()
   config.curveType = (config.curveType + 1) % 5 -- 0-4 for STEP, LINEAR, SLOW_START, SLOW_END, BEZIER
   return config.curveType
@@ -2049,7 +2029,7 @@ local function snapSelectedToSemitone(take, midiUtils)
         if snappedSemitones ~= pt.semitones then
           local pbValue = semitonesToPb(snappedSemitones)
           local msg2, msg3 = pbToBytes(pbValue)
-          midiUtils.MIDI_SetCC(take, pt.idx, pt.selected, pt.muted, pt.ppqpos, 0xE0, chan, msg2, msg3)
+          midiUtils.MIDI_SetCC(take, pt.idx, pt.selected, pt.muted, pt.ppqpos, CHANMSG_PITCHBEND, chan, msg2, msg3)
           pt.pbValue = pbValue
           pt.semitones = snappedSemitones
           changed = true
@@ -2068,12 +2048,7 @@ end
 
 local function selectAll()
   local activeChannel = getActiveChannelFilter()
-  -- first deselect all points on all channels
-  for chan, points in pairs(pbPoints) do
-    for _, pt in ipairs(points) do
-      pt.selected = false
-    end
-  end
+  deselectAll()
   -- then select only visible/active channel points
   for chan, points in pairs(pbPoints) do
     if not activeChannel or chan == activeChannel then
@@ -2147,7 +2122,7 @@ local function deleteBeforePaste(take, midiUtils)
   local deleted = false
   for i = 0, ccCount - 1 do
     local rv, _, _, ppqpos, chanmsg, chan = midiUtils.MIDI_GetCC(take, i)
-    if rv and chanmsg == 0xE0 and clipboardSpan.channels[chan]
+    if rv and chanmsg == CHANMSG_PITCHBEND and clipboardSpan.channels[chan]
        and ppqpos >= targetMin and ppqpos <= targetMax then
       midiUtils.MIDI_DeleteCC(take, i)
       deleted = true
@@ -2168,14 +2143,9 @@ local function getCurveTypeName(curveType)
   return 'Unknown'
 end
 
--- get bitmap for rendering
-local function getPBBitmap()
-  return pbBitmap
-end
 
-local function setPBBitmap(bitmap)
-  pbBitmap = bitmap
-end
+-- gFX-based config dialog for bend range
+local configDialogState = nil  -- { active, fields, focusedField, scriptID }
 
 -- shutdown cleanup
 local function shutdown(destroyBitmap)
@@ -2183,10 +2153,6 @@ local function shutdown(destroyBitmap)
   if configDialogState and configDialogState.active then
     gfx.quit()
     configDialogState = nil
-  end
-  if pbBitmap then
-    destroyBitmap(pbBitmap)
-    pbBitmap = nil
   end
   pbPoints = {}
   hoveredPoint = nil
@@ -2200,22 +2166,18 @@ local function shutdown(destroyBitmap)
   clearCache()
 end
 
--- set MIDIUtils reference (called from Lib)
 local function setMIDIUtils(midiUtils)
   mu = midiUtils
 end
 
--- get center line state for drawing
 local function getCenterLineState()
   return centerLineState
 end
 
--- get draw state for visual feedback
 local function getDrawState()
   return drawState
 end
 
--- scan directory for .scl files
 local function getSclFiles()
   local files = {}
   if not config.sclDirectory then return files end
@@ -2233,7 +2195,6 @@ local function getSclFiles()
   return files
 end
 
--- load a tuning file by name
 local function loadTuningFile(filename)
   if not filename or not config.sclDirectory then
     config.tuningFile = nil
@@ -2251,9 +2212,6 @@ local function loadTuningFile(filename)
     config.tuningScale = nil
   end
 end
-
--- gFX-based config dialog for bend range
-local configDialogState = nil  -- { active, fields, focusedField, scriptID }
 
 local function configDialogLoop()
   if not configDialogState or not configDialogState.active then return end
@@ -2290,10 +2248,12 @@ local function configDialogLoop()
     return
   end
 
+  -- track frames since open to avoid 'b' key race (opening keypress picked up by gfx)
+  state.frameCount = (state.frameCount or 0) + 1
+
   -- cmd+W or 'b': same as Enter (save and close)
-  -- cmd+W produces char code 23 (ASCII ETB / Ctrl+W equivalent)
-  -- 'b' is 98 (the key that opens the dialog, also closes it)
-  if char == 23 or char == 98 then
+  -- 'b' only accepted after first frame to avoid race with the opening keypress
+  if char == 23 or (char == 98 and state.frameCount > 1) then
     char = 13  -- Treat as Enter
   end
 
@@ -2447,47 +2407,48 @@ local function configDialogLoop()
   state.wasMouseDown = gfx.mouse_cap & 1 == 1
 
   if mouseClicked and mx >= btnX and mx <= btnX + btnW and my >= tuningY - math.floor(2 * scale) and my <= tuningY + tuningBtnH then
-    -- build menu
+    -- build menu with position-to-file mapping
     local menuItems = { "None (12-TET)" }
     local sclFiles = getSclFiles()
-    local flatFileList = {}  -- Maps menu choice to filename
+    local posToFile = {}  -- maps menu position → filename
+    local pos = 1  -- "None" is position 1
 
     if #sclFiles > 0 then
-      table.insert(menuItems, "|")  -- Separator
+      table.insert(menuItems, "|")  -- separator (not counted in positions)
 
       -- group by first character for large collections
       if #sclFiles > 50 then
         local groups = {}
         for _, f in ipairs(sclFiles) do
           local firstChar = f:sub(1, 1):upper()
-          -- group 0-9 together
           if firstChar:match('%d') then firstChar = '0-9' end
           if not groups[firstChar] then groups[firstChar] = {} end
           table.insert(groups[firstChar], f)
         end
 
-        -- sort group keys
         local sortedKeys = {}
         for k in pairs(groups) do table.insert(sortedKeys, k) end
         table.sort(sortedKeys)
 
-        -- build submenus
         for _, key in ipairs(sortedKeys) do
           local groupFiles = groups[key]
           table.insert(menuItems, ">" .. key .. " (" .. #groupFiles .. ")")
-          for _, f in ipairs(groupFiles) do
+          pos = pos + 1  -- submenu header counts as a position
+          for j, f in ipairs(groupFiles) do
             local prefix = (f == config.tuningFile) and "!" or ""
+            -- close submenu on last item in group
+            if j == #groupFiles then prefix = "<" .. prefix end
             table.insert(menuItems, prefix .. f)
-            table.insert(flatFileList, f)
+            pos = pos + 1
+            posToFile[pos] = f
           end
-          table.insert(menuItems, "<")  -- End submenu
         end
       else
-        -- small collection, flat list
         for _, f in ipairs(sclFiles) do
           local prefix = (f == config.tuningFile) and "!" or ""
           table.insert(menuItems, prefix .. f)
-          table.insert(flatFileList, f)
+          pos = pos + 1
+          posToFile[pos] = f
         end
       end
     elseif not config.sclDirectory then
@@ -2502,18 +2463,15 @@ local function configDialogLoop()
     local choice = helper.showMenu(menuStr)
 
     if choice == 1 then
-      -- none (12-TET) - set to empty string to explicitly override
       projectOverrides.tuningFile = ""
       saveProjectState(state.scriptID)
       applyEffectiveConfig()
-    elseif choice > 1 and #flatFileList > 0 then
-      -- selected a .scl file (separator/submenu headers don't count)
-      local fileIdx = choice - 1
-      if flatFileList[fileIdx] then
-        projectOverrides.tuningFile = flatFileList[fileIdx]
-        saveProjectState(state.scriptID)
-        applyEffectiveConfig()
-      end
+      pbNeedsRedraw = true
+    elseif posToFile[choice] then
+      projectOverrides.tuningFile = posToFile[choice]
+      saveProjectState(state.scriptID)
+      applyEffectiveConfig()
+      pbNeedsRedraw = true
     end
   end
 
@@ -2679,11 +2637,7 @@ local function handleRightClick(mods)
 
   -- select the hovered point if not already selected
   if not hoveredPoint.point.selected then
-    for chan, points in pairs(pbPoints) do
-      for _, pt in ipairs(points) do
-        pt.selected = false
-      end
-    end
+    deselectAll()
     hoveredPoint.point.selected = true
   end
 
@@ -2696,14 +2650,12 @@ local function handleRightClick(mods)
   return false
 end
 
--- toggle microtonal line visualization
 local function toggleMicrotonalLines()
   config.showMicrotonalLines = not config.showMicrotonalLines
   pbNeedsRedraw = true
   return config.showMicrotonalLines
 end
 
--- get current active channel (0-15, or nil if showAllNotes)
 local function getActiveChannel()
   if config.showAllNotes then return nil end
   return config.activeChannel
@@ -2739,7 +2691,9 @@ local function showChannelMenu()
   pbNeedsRedraw = true
 end
 
--- export module interface
+-----------------------------------------------------------------------
+-- module interface
+-----------------------------------------------------------------------
 PitchBend.handleState = handleState
 PitchBend.saveState = saveState
 PitchBend.processPitchBend = processPitchBend
@@ -2759,8 +2713,6 @@ PitchBend.snapSelectedToSemitone = snapSelectedToSemitone
 PitchBend.getCurveTypeName = getCurveTypeName
 PitchBend.consumeRedraw = function() if pbNeedsRedraw then pbNeedsRedraw = false return true end return false end
 PitchBend.markDirty = function() pbNeedsRedraw = true end
-PitchBend.getPBBitmap = getPBBitmap
-PitchBend.setPBBitmap = setPBBitmap
 PitchBend.shutdown = shutdown
 PitchBend.setMIDIUtils = setMIDIUtils
 PitchBend.clearCache = clearCache
@@ -2778,7 +2730,6 @@ PitchBend.restoreCursor = function()
   glob.setCursor(glob.wantsRightButton and glob.bend_cursor_rmb or glob.bend_cursor)
 end
 
--- export utility functions for external use
 PitchBend.pbToSemitones = pbToSemitones
 PitchBend.semitonesToPb = semitonesToPb
 PitchBend.pbToBytes = pbToBytes
@@ -2786,9 +2737,9 @@ PitchBend.bytesToPb = bytesToPb
 PitchBend.snapToSemitone = snapToSemitone
 PitchBend.snapToMicrotonal = snapToMicrotonal
 
--- export constants
 PitchBend.PB_CENTER = PB_CENTER
 PitchBend.PB_MAX = PB_MAX
+PitchBend.CHANMSG_PITCHBEND = CHANMSG_PITCHBEND
 PitchBend.CURVE_STEP = CURVE_STEP
 PitchBend.CURVE_LINEAR = CURVE_LINEAR
 PitchBend.CURVE_SLOW_START = CURVE_SLOW_START

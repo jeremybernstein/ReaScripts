@@ -14,6 +14,7 @@ local classes = require 'MIDIRazorEdits_Classes'
 local glob = require 'MIDIRazorEdits_Global'
 local keys = require 'MIDIRazorEdits_Keys'
 local helper = require 'MIDIRazorEdits_Helper'
+local coords = require 'MIDIRazorEdits_Coords'
 local slicer = require 'MIDIRazorEdits_Slicer'
 local pitchbend = require 'MIDIRazorEdits_PitchBend'
 
@@ -76,12 +77,7 @@ local function recalcConstants(force)
 end
 
 local function pointConvertNative(x, y, windRect)
-  if helper.is_macos then
-    local x1, y1, x2, y2 = r.JS_Window_GetViewportFromRect(windRect.x1, windRect.y1, windRect.x2, windRect.y2, false)
-    local height = math.abs(y2 - y1)
-    return x, height - y
-  end
-  return x, y
+  return x, coords.screenYToNative(y, windRect)
 end
 
 local function prepMidiview(midiview)
@@ -627,7 +623,6 @@ local function createFrameBitmaps(midiview, windRect)
   if MOAR_BITMAPS then
   local meLanes = glob.meLanes
   if meLanes and next(meLanes) then
-    -- lane positions are now relative to bitmap origin (0,0)
     local bottomPixel = meLanes[0] and meLanes[#meLanes].bottomPixel or meLanes[-1].bottomPixel
     local w, h = math.floor(windRect:width() + 0.5), math.floor(bottomPixel + 0.5)
     bitmaps.top = createBitmap(1, 1)
@@ -888,7 +883,6 @@ end
 
 rebuildColors()
 
--- coords are now stored relative to bitmap origin, just round
 local function rectToLiceCoords(rect)
   return math.floor(rect.x1 + 0.5),
          math.floor(rect.y1 + 0.5),
@@ -896,7 +890,6 @@ local function rectToLiceCoords(rect)
          math.floor(rect.y2 + 0.5)
 end
 
--- coords are now stored relative to bitmap origin, just round
 local function pointToLiceCoords(x, y)
   return math.floor(x + 0.5), math.floor(y + 0.5)
 end
@@ -975,6 +968,31 @@ local function simpleLine(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antial
     r.rcw_DrawLineWithAlpha(bitmap, xx1, yy1, xx2, yy2, color, alpha, thickness or 2)
   else
     r.JS_LICE_Line(bitmap, xx1, yy1, xx2, yy2, color, alpha, mode, antialias)
+  end
+end
+
+-- draw dashed line between two points (horizontal or vertical)
+local function dashedLine(bitmap, x1, y1, x2, y2, color, alpha, mode, dashLen, gapLen)
+  dashLen = dashLen or 4
+  gapLen = gapLen or 3
+  if childHWND then
+    r.rcw_DrawDashedLineWithAlpha(bitmap, x1, y1, x2, y2, color, alpha, 1, dashLen, gapLen)
+  else
+    if x1 == x2 then
+      local top, bottom = math.min(y1, y2), math.max(y1, y2)
+      local y = top
+      while y < bottom do
+        simpleLine(bitmap, x1, y, x1, math.min(y + dashLen, bottom), color, alpha, mode, false)
+        y = y + dashLen + gapLen
+      end
+    else
+      local left, right = math.min(x1, x2), math.max(x1, x2)
+      local x = left
+      while x < right do
+        simpleLine(bitmap, x, y1, math.min(x + dashLen, right), y1, color, alpha, mode, false)
+        x = x + dashLen + gapLen
+      end
+    end
   end
 end
 
@@ -1087,6 +1105,35 @@ local function drawSlicer(hwnd, mode, antialias)
   end
 end
 
+-- Liang-Barsky line clipping algorithm (module-level for reuse across frames)
+-- returns clipped x1,y1,x2,y2 or nil if line is completely outside
+local function clipLine(x1, y1, x2, y2, clipRight, clipBottom)
+  local t0, t1 = 0, 1
+  local dx, dy = x2 - x1, y2 - y1
+
+  local function clipEdge(p, q)
+    if p == 0 then
+      return q >= 0
+    end
+    local t = q / p
+    if p < 0 then
+      if t > t1 then return false end
+      if t > t0 then t0 = t end
+    else
+      if t < t0 then return false end
+      if t < t1 then t1 = t end
+    end
+    return true
+  end
+
+  if not clipEdge(-dx, x1) then return nil end
+  if not clipEdge(dx, clipRight - x1) then return nil end
+  if not clipEdge(-dy, y1) then return nil end
+  if not clipEdge(dy, clipBottom - y1) then return nil end
+
+  return x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy
+end
+
 local pbBitmap = nil
 
 local function drawPitchBend(hwnd, mode, antialias)
@@ -1140,38 +1187,6 @@ local function drawPitchBend(hwnd, mode, antialias)
   -- Cache function lookups
   local mmax, mmin, mfloor, mabs = math.max, math.min, math.floor, math.abs
 
-  -- Liang-Barsky line clipping algorithm
-  -- Returns clipped x1,y1,x2,y2 or nil if line is completely outside
-  local function clipLine(x1, y1, x2, y2)
-    local t0, t1 = 0, 1
-    local dx, dy = x2 - x1, y2 - y1
-
-    -- Clip against each edge using parametric form
-    local function clipEdge(p, q)
-      if p == 0 then
-        return q >= 0  -- parallel to edge, check if inside
-      end
-      local t = q / p
-      if p < 0 then  -- entering
-        if t > t1 then return false end
-        if t > t0 then t0 = t end
-      else  -- leaving
-        if t < t0 then return false end
-        if t < t1 then t1 = t end
-      end
-      return true
-    end
-
-    -- Clip against all 4 edges
-    if not clipEdge(-dx, x1) then return nil end      -- left (x >= 0)
-    if not clipEdge(dx, clipRight - x1) then return nil end   -- right (x <= clipRight)
-    if not clipEdge(-dy, y1) then return nil end      -- top (y >= 0)
-    if not clipEdge(dy, clipBottom - y1) then return nil end  -- bottom (y <= clipBottom)
-
-    -- Calculate clipped endpoints
-    return x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy
-  end
-
   local activeChannel = nil
   if not config.showAllNotes then
     activeChannel = config.activeChannel
@@ -1210,26 +1225,18 @@ local function drawPitchBend(hwnd, mode, antialias)
     local npts = #points
     if npts > 0 then
       -- tether on first point if it has a direct note association
+      local laneTop = meLanes[-1].topPixel
+      local laneTopVal = meLanes[-1].topValue
+      local ppp = meState.pixelsPerPitch
+
       local firstPt = points[1]
       if firstPt and firstPt.screenX and firstPt.screenY then
         local firstNote = firstPt.associatedNotes and firstPt.associatedNotes[1]
         if firstNote and not firstPt.fallbackAssociation then
           local _, fy = pointToLiceCoords(firstPt.screenX, firstPt.screenY)
           local fx = math.floor(firstPt.screenX + 0.5)
-          local fCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - firstNote.pitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
-          local fY = math.floor(fCenterY + 0.5)
-          local fTop, fBottom = mmin(fY, fy), mmax(fY, fy)
-          local dashLen, gapLen = 4, 3
-          if childHWND then
-            r.rcw_DrawDashedLineWithAlpha(pbBitmap, fx, fTop, fx, fBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
-          else
-            local y = fTop
-            while y < fBottom do
-              local y2dash = mmin(y + dashLen, fBottom)
-              simpleLine(pbBitmap, fx, y, fx, y2dash, pbLineColor, 0.8, mode, false)
-              y = y + dashLen + gapLen
-            end
-          end
+          local fY = math.floor(coords.pitchToScreenY(firstNote.pitch, laneTop, laneTopVal, ppp) + 0.5)
+          dashedLine(pbBitmap, fx, mmin(fY, fy), fx, mmax(fY, fy), pbLineColor, 0.8, mode)
         end
       end
 
@@ -1239,41 +1246,91 @@ local function drawPitchBend(hwnd, mode, antialias)
         local pt2 = points[i + 1]
 
         if pt2 and pt1.screenX and pt1.screenY and pt2.screenX and pt2.screenY then
-          -- check for note boundary: skip curve if associated notes differ
           local pt1Note = pt1.associatedNotes and pt1.associatedNotes[1]
           local pt2Note = pt2.associatedNotes and pt2.associatedNotes[1]
-          -- curve break: only when associated notes actually differ
           local noteBoundary = pt1Note and pt2Note and pt1Note ~= pt2Note
           -- tether transitions: note ended (direct → fallback) or note started (fallback → direct)
           local noteEnded = pt1Note and not pt1.fallbackAssociation and pt2.fallbackAssociation
           local noteStarted = pt2Note and pt1.fallbackAssociation and not pt2.fallbackAssociation
 
-          if not noteBoundary then
-            local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
-            local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
+          local x1, y1 = pointToLiceCoords(pt1.screenX, pt1.screenY)
+          local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
 
-            -- REAPER shapes: 0=square, 1=linear, 2=slow, 3=fast start, 4=fast end, 5=bezier
+          if noteBoundary then
+            -- render full curve in note1's frame, split at boundary,
+            -- offset post-boundary half to note2's frame
+            local pitchShift = (pt2Note.pitch - pt1Note.pitch) * ppp
+            local y2in1 = y2 + pitchShift  -- pt2's value in note1's frame
+            local y1in2 = y1 - pitchShift  -- pt1's value in note2's frame
+
+            local note1EndX, note2StartX
+            if meState.pixelsPerTick then
+              note1EndX = (pt1Note.endppq - meState.leftmostTick) * meState.pixelsPerTick
+              note2StartX = (pt2Note.startppq - meState.leftmostTick) * meState.pixelsPerTick
+            elseif meState.pixelsPerSecond and glob.liceData and glob.liceData.take then
+              local take = glob.liceData.take
+              note1EndX = (r.MIDI_GetProjTimeFromPPQPos(take, pt1Note.endppq) - meState.leftmostTime) * meState.pixelsPerSecond
+              note2StartX = (r.MIDI_GetProjTimeFromPPQPos(take, pt2Note.startppq) - meState.leftmostTime) * meState.pixelsPerSecond
+            end
+
+            local shape = pt1.shape or 0
+            local beztension = pt1.beztension or 0
+
+            if note1EndX then
+              local ex = mfloor(note1EndX + 0.5)
+              local sx = mfloor(note2StartX + 0.5)
+
+              if childHWND then
+                --                       bitmap  x1  y1  x2  y2      shape bez   segPx clipX clipY          clipW              clipH      color        alpha thick
+                -- note1 half: curve in note1's frame, clip right at note1-end
+                r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1, x2, y2in1, shape, beztension, 0, 0, 0, mmin(ex, clipRight), clipBottom, pbLineColor, 0.8, 2)
+                -- note2 half: same curve shifted to note2's frame, clip left at note2-start
+                local cx = mmax(sx, 0)
+                r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1in2, x2, y2, shape, beztension, 0, cx, 0, clipRight - cx, clipBottom, pbLineColor, 0.8, 2)
+              else
+                -- fallback: approximate with clipped lines
+                if shape == 0 then
+                  -- note1 step
+                  local hx1, hy1, hx2, hy2 = clipLine(x1, y1, mmin(ex, x2), y1, clipRight, clipBottom)
+                  if hx1 then simpleLine(pbBitmap, hx1, hy1, hx2, hy2, pbLineColor, 0.8, mode, antialias) end
+                  -- note2 step
+                  hx1, hy1, hx2, hy2 = clipLine(mmax(sx, x1), y1in2, x2, y1in2, clipRight, clipBottom)
+                  if hx1 then simpleLine(pbBitmap, hx1, hy1, hx2, hy2, pbLineColor, 0.8, mode, antialias) end
+                  local vx1, vy1, vx2, vy2 = clipLine(x2, y1in2, x2, y2, clipRight, clipBottom)
+                  if vx1 then simpleLine(pbBitmap, vx1, vy1, vx2, vy2, pbLineColor, 0.8, mode, antialias) end
+                else
+                  -- note1 linear
+                  local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2in1, mmin(ex, clipRight), clipBottom)
+                  if cx1 then simpleLine(pbBitmap, cx1, cy1, cx2, cy2, pbLineColor, 0.8, mode, antialias) end
+                  -- note2 linear (interpolate Y at sx)
+                  local xRange = x2 - x1
+                  if xRange > 0 then
+                    local t = mmax(0, (mmax(sx, x1) - x1) / xRange)
+                    local syAtSx = y1in2 + t * (y2 - y1in2)
+                    cx1, cy1, cx2, cy2 = clipLine(mmax(sx, x1), syAtSx, x2, y2, clipRight, clipBottom)
+                    if cx1 then simpleLine(pbBitmap, cx1, cy1, cx2, cy2, pbLineColor, 0.8, mode, antialias) end
+                  end
+                end
+              end
+            end
+          else
             local shape = pt1.shape or 0
             local beztension = pt1.beztension or 0
 
             if childHWND then
-              -- Use native curve drawing with built-in clipping
               r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1, x2, y2, shape, beztension, 0, 0, 0, clipRight, clipBottom, pbLineColor, 0.8, 2)
             else
-              -- Fallback: simple line drawing
               if shape == 0 then
-                -- Square/Step: horizontal then vertical (clip each segment separately)
-                local hx1, hy1, hx2, hy2 = clipLine(x1, y1, x2, y1)  -- horizontal segment
+                local hx1, hy1, hx2, hy2 = clipLine(x1, y1, x2, y1, clipRight, clipBottom)
                 if hx1 then
                   simpleLine(pbBitmap, hx1, hy1, hx2, hy2, pbLineColor, 0.8, mode, antialias)
                 end
-                local vx1, vy1, vx2, vy2 = clipLine(x2, y1, x2, y2)  -- vertical segment
+                local vx1, vy1, vx2, vy2 = clipLine(x2, y1, x2, y2, clipRight, clipBottom)
                 if vx1 then
                   simpleLine(pbBitmap, vx1, vy1, vx2, vy2, pbLineColor, 0.8, mode, antialias)
                 end
               else
-                -- All other shapes: linear with proper clipping (curves not supported in fallback)
-                local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2)
+                local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2, clipRight, clipBottom)
                 if cx1 then
                   simpleLine(pbBitmap, cx1, cy1, cx2, cy2, pbLineColor, 0.8, mode, antialias)
                 end
@@ -1283,19 +1340,21 @@ local function drawPitchBend(hwnd, mode, antialias)
 
           -- draw tethers at note boundaries, note-end, or note-start transitions
           if noteBoundary or noteEnded or noteStarted then
-            local dashLen, gapLen = 4, 3
-
-            -- outgoing tether: at pt1 for noteBoundary, or noteEnded only if no boundary follows
+            -- outgoing tether
             if noteBoundary or (noteEnded and not pt2.fallbackAssociation) then
               local outScreenX, outScreenY
-              if noteEnded and not noteBoundary then
-                -- interpolate only when both points share the same note reference
+              -- for boundary/noteEnded: interpolate to note1's end position
+              if noteBoundary or noteEnded then
                 local endppq = pt1Note.endppq
                 local ppqRange = pt2.ppqpos - pt1.ppqpos
                 if ppqRange > 0 then
                   local t = (endppq - pt1.ppqpos) / ppqRange
                   outScreenX = pt1.screenX + t * (pt2.screenX - pt1.screenX)
-                  outScreenY = pt1.screenY + t * (pt2.screenY - pt1.screenY)
+                  -- interpolate using re-tethered Y for boundary case
+                  local targetScreenY = noteBoundary
+                    and (pt2.screenY + (pt2Note.pitch - pt1Note.pitch) * ppp)
+                    or pt2.screenY
+                  outScreenY = pt1.screenY + t * (targetScreenY - pt1.screenY)
                 else
                   outScreenX, outScreenY = pt1.screenX, pt1.screenY
                 end
@@ -1303,30 +1362,17 @@ local function drawPitchBend(hwnd, mode, antialias)
                 outScreenX, outScreenY = pt1.screenX, pt1.screenY
               end
 
-              local _, y1 = pointToLiceCoords(outScreenX, outScreenY)
+              local _, oy = pointToLiceCoords(outScreenX, outScreenY)
               local outX = math.floor(outScreenX + 0.5)
-              local outPitch = pt1Note.pitch
-              local outCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - outPitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
-              local outY = math.floor(outCenterY + 0.5)
-              local outTop, outBottom = mmin(outY, y1), mmax(outY, y1)
-
-              if childHWND then
-                r.rcw_DrawDashedLineWithAlpha(pbBitmap, outX, outTop, outX, outBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
-              else
-                local y = outTop
-                while y < outBottom do
-                  local y2dash = mmin(y + dashLen, outBottom)
-                  simpleLine(pbBitmap, outX, y, outX, y2dash, pbLineColor, 0.8, mode, false)
-                  y = y + dashLen + gapLen
-                end
-              end
+              local outY = math.floor(coords.pitchToScreenY(pt1Note.pitch, laneTop, laneTopVal, ppp) + 0.5)
+              dashedLine(pbBitmap, outX, mmin(outY, oy), outX, mmax(outY, oy), pbLineColor, 0.8, mode)
             end
 
-            -- incoming tether: at note start for noteStarted, at pt2 for noteBoundary
+            -- incoming tether
             if noteBoundary or noteStarted then
               local inScreenX, inScreenY
-              if noteStarted and not noteBoundary then
-                -- interpolate only when both points share the same note reference
+              -- for boundary/noteStarted: interpolate to note2's start position
+              if noteBoundary or noteStarted then
                 local startppq = pt2Note.startppq
                 local ppqRange = pt2.ppqpos - pt1.ppqpos
                 if ppqRange > 0 then
@@ -1340,23 +1386,10 @@ local function drawPitchBend(hwnd, mode, antialias)
                 inScreenX, inScreenY = pt2.screenX, pt2.screenY
               end
 
-              local _, y2 = pointToLiceCoords(inScreenX, inScreenY)
+              local _, iy = pointToLiceCoords(inScreenX, inScreenY)
               local inX = math.floor(inScreenX + 0.5)
-              local inPitch = pt2Note.pitch
-              local inCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - inPitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
-              local inY = math.floor(inCenterY + 0.5)
-              local inTop, inBottom = mmin(inY, y2), mmax(inY, y2)
-
-              if childHWND then
-                r.rcw_DrawDashedLineWithAlpha(pbBitmap, inX, inTop, inX, inBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
-              else
-                local y = inTop
-                while y < inBottom do
-                  local y2dash = mmin(y + dashLen, inBottom)
-                  simpleLine(pbBitmap, inX, y, inX, y2dash, pbLineColor, 0.8, mode, false)
-                  y = y + dashLen + gapLen
-                end
-              end
+              local inY = math.floor(coords.pitchToScreenY(pt2Note.pitch, laneTop, laneTopVal, ppp) + 0.5)
+              dashedLine(pbBitmap, inX, mmin(inY, iy), inX, mmax(inY, iy), pbLineColor, 0.8, mode)
             end
           end
         end
@@ -1367,44 +1400,21 @@ local function drawPitchBend(hwnd, mode, antialias)
       if lastPt and lastPt.screenX and lastPt.screenY then
         local lastNote = lastPt.associatedNotes and lastPt.associatedNotes[1]
         if lastNote and not lastPt.fallbackAssociation and lastNote.endppq > lastPt.ppqpos then
-          -- compute screen X at note end
           local endScreenX
           if meState.pixelsPerTick then
-            endScreenX = 0 + ((lastNote.endppq - meState.leftmostTick) * meState.pixelsPerTick)
+            endScreenX = (lastNote.endppq - meState.leftmostTick) * meState.pixelsPerTick
           elseif meState.pixelsPerSecond and glob.liceData then
             local endTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.take, lastNote.endppq)
-            endScreenX = 0 + ((endTime - meState.leftmostTime) * meState.pixelsPerSecond)
+            endScreenX = (endTime - meState.leftmostTime) * meState.pixelsPerSecond
           end
           if endScreenX then
             local lx, ly = pointToLiceCoords(lastPt.screenX, lastPt.screenY)
             local ex = math.floor(endScreenX + 0.5)
-            -- draw dashed extending line from last point to note end
-            local dashLen, gapLen = 4, 3
-            if childHWND then
-              r.rcw_DrawDashedLineWithAlpha(pbBitmap, lx, ly, ex, ly, pbLineColor, 0.8, 1, dashLen, gapLen)
-            else
-              local x = mmin(lx, ex)
-              local xEnd = mmax(lx, ex)
-              while x < xEnd do
-                local x2dash = mmin(x + dashLen, xEnd)
-                simpleLine(pbBitmap, x, ly, x2dash, ly, pbLineColor, 0.8, mode, false)
-                x = x + dashLen + gapLen
-              end
-            end
-            -- tether at note end
-            local endCenterY = meLanes[-1].topPixel + ((meLanes[-1].topValue - lastNote.pitch) * meState.pixelsPerPitch) + (meState.pixelsPerPitch / 2)
-            local endY = math.floor(endCenterY + 0.5)
-            local endTop, endBottom = mmin(endY, ly), mmax(endY, ly)
-            if childHWND then
-              r.rcw_DrawDashedLineWithAlpha(pbBitmap, ex, endTop, ex, endBottom, pbLineColor, 0.8, 1, dashLen, gapLen)
-            else
-              local y = endTop
-              while y < endBottom do
-                local y2dash = mmin(y + dashLen, endBottom)
-                simpleLine(pbBitmap, ex, y, ex, y2dash, pbLineColor, 0.8, mode, false)
-                y = y + dashLen + gapLen
-              end
-            end
+            -- dashed extending line from last point to note end
+            dashedLine(pbBitmap, lx, ly, ex, ly, pbLineColor, 0.8, mode)
+            -- vertical tether at note end
+            local endY = math.floor(coords.pitchToScreenY(lastNote.pitch, laneTop, laneTopVal, ppp) + 0.5)
+            dashedLine(pbBitmap, ex, mmin(endY, ly), ex, mmax(endY, ly), pbLineColor, 0.8, mode)
           end
         end
       end
@@ -1432,7 +1442,7 @@ local function drawPitchBend(hwnd, mode, antialias)
         end
       end
     end
-    end  -- channel filter
+    end
   end
 
   -- Draw marquee selection rectangle if active
@@ -1460,23 +1470,8 @@ local function drawPitchBend(hwnd, mode, antialias)
   local centerState = pitchbend.getCenterLineState()
   if centerState and (centerState.active or centerState.locked) then
     local _, cy = pointToLiceCoords(0, centerState.screenY)
-    -- Only draw if within bitmap bounds
     if cy >= 0 and cy < noteAreaHeight then
-      local centerColor = reBorderColor  -- Use main MRE border color (darker)
-      local dashLen = 6
-      local gapLen = 4
-      -- Use native dashed line if available (childHWND mode)
-      if childHWND then
-        r.rcw_DrawDashedLineWithAlpha(pbBitmap, 0, cy, noteAreaWidth, cy, centerColor, 1.0, 1, dashLen, gapLen)
-      else
-        -- Fallback: manual dashed line
-        local x = 0
-        while x < noteAreaWidth do
-          local x2 = mmin(x + dashLen, noteAreaWidth)
-          simpleLine(pbBitmap, x, cy, x2, cy, centerColor, 1.0, mode, false)
-          x = x + dashLen + gapLen
-        end
-      end
+      dashedLine(pbBitmap, 0, cy, noteAreaWidth, cy, reBorderColor, 1.0, mode, 6, 4)
     end
   end
 
@@ -1494,7 +1489,7 @@ local function drawPitchBend(hwnd, mode, antialias)
       local x2, y2 = pointToLiceCoords(pt2.screenX, pt2.screenY)
 
       -- Clip and draw
-      local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2)
+      local cx1, cy1, cx2, cy2 = clipLine(x1, y1, x2, y2, clipRight, clipBottom)
       if cx1 then
         simpleLine(pbBitmap, cx1, cy1, cx2, cy2, drawColor, 0.9, mode, antialias)
       end

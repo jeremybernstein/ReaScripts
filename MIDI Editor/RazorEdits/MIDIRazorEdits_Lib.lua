@@ -271,7 +271,6 @@ local function getTimeOffset()
 end
 
 local function updateTimeValueLeft(area)
-  -- area coords are now relative (0-based)
   if meState.timeBase == 'time' then
     local leftmostTime = meState.leftmostTime + (area.logicalRect.x1 / meState.pixelsPerSecond)
     return r.MIDI_GetPPQPosFromProjTime(glob.liceData.editorTake, leftmostTime - getTimeOffset()), leftmostTime
@@ -281,7 +280,6 @@ local function updateTimeValueLeft(area)
 end
 
 local function updateTimeValueRight(area, leftmost)
-  -- area coords are now relative (0-based)
   if meState.timeBase == 'time' then
     leftmost = leftmost or area.timeValue.time.min
     local rightmostTime = meState.leftmostTime + (area.logicalRect.x2 / meState.pixelsPerSecond)
@@ -592,16 +590,7 @@ local lastHoveredOrClickedLane
 ------------------------------------------------
 
 local function pitchInRange(pitch, bottomPitch, topPitch)
-  if meState.noteTab then
-    if meState.noteTabReverse[pitch] then
-      for i = bottomPitch, topPitch do
-        if pitch == meState.noteTab[i] then return true end
-      end
-    end
-  else
-    return pitch >= bottomPitch and pitch <= topPitch
-  end
-  return false
+  return helper.pitchInRange(pitch, bottomPitch, topPitch, meState)
 end
 
 local DEBUG_COPY = false  -- DEBUG flag for copy mode
@@ -4150,8 +4139,6 @@ local function processMouse()
   local ccLane
   local isActive
 
-  -- mouse coords are now relative (no screen offset added)
-  -- only adjust for ruler offset
   my = my - lice.MIDI_RULER_H -- correct for the RULER
 
   -- in PB mode, re-evaluate lane on each new click so CC/ruler clicks aren't

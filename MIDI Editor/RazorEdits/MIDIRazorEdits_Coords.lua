@@ -20,6 +20,7 @@
 local Coords = {}
 
 local r = reaper
+local helper = require 'MIDIRazorEdits_Helper'
 
 -- constants
 local PB_CENTER = 8192
@@ -32,16 +33,22 @@ Coords.PB_MAX = PB_MAX
 -- Platform helpers
 -----------------------------------------------------------------------------
 
-local is_macos = r.GetOS():find('OSX') ~= nil or r.GetOS():find('macOS') ~= nil
+-- cached screen height for macOS Y flip (avoids per-call JS_Window_GetViewportFromRect)
+local cachedScreenHeight = nil
+local cachedRectKey = nil
 
 -- convert screen Y from GetMousePosition() to native coords
 -- macOS screen Y is flipped (origin at bottom)
 function Coords.screenYToNative(y, windowRect)
-  if is_macos and windowRect then
-    local _, wy1, _, wy2 = r.JS_Window_GetViewportFromRect(
-      windowRect.x1, windowRect.y1, windowRect.x2, windowRect.y2, false)
-    local screenHeight = math.abs(wy2 - wy1)
-    return screenHeight - y
+  if helper.is_macos and windowRect then
+    local key = string.format('%d_%d_%d_%d', windowRect.x1, windowRect.y1, windowRect.x2, windowRect.y2)
+    if key ~= cachedRectKey then
+      local _, wy1, _, wy2 = r.JS_Window_GetViewportFromRect(
+        windowRect.x1, windowRect.y1, windowRect.x2, windowRect.y2, false)
+      cachedScreenHeight = math.abs(wy2 - wy1)
+      cachedRectKey = key
+    end
+    return cachedScreenHeight - y
   end
   return y
 end

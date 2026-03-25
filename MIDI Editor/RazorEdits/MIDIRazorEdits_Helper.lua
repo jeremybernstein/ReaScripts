@@ -834,6 +834,7 @@ Helper.compExpValueMiddle = compExpValueMiddle
 Helper.compExpValueTopBottom = compExpValueTopBottom
 
 Helper.GLOBAL_PREF_SLOP = GLOBAL_PREF_SLOP
+Helper.pitchInRange = pitchInRange
 
 Helper.VKeys_Intercept = VKeys_Intercept
 Helper.VKeys_GetState = VKeys_GetState

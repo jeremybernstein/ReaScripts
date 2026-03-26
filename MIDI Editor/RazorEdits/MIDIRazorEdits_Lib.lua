@@ -1534,8 +1534,11 @@ local function processCCs(activeTake, area, operation)
   end
 
   if operation == OP_STRETCH and area.unstretched and (not mod.singleMod() or area.active) then
-    hratio = (area.timeValue.ticks:size()) / (area.unstretchedTimeValue.ticks:size())
-    vratio = (area.timeValue.vals:size()) / (area.unstretchedTimeValue.vals:size())
+    local hdenom = area.unstretchedTimeValue.ticks:size()
+    local vdenom = area.unstretchedTimeValue.vals:size()
+    if hdenom == 0 or vdenom == 0 then return end
+    hratio = area.timeValue.ticks:size() / hdenom
+    vratio = area.timeValue.vals:size() / vdenom
     usingUnstretched = true
     if (hratio == 1 and (resizing == RS_LEFT or resizing == RS_RIGHT))
       or (vratio == 1 and (resizing == RS_TOP or resizing == RS_BOTTOM))
@@ -2243,6 +2246,8 @@ local function handlePaste()
     areas[#areas + 1] = area
 
     for take, events in pairs(v.events) do
+      -- validate take pointer (could be stale after undo/redo)
+      if not r.ValidatePtr(take, 'MediaItem_Take*') then goto nextTake end
       local activeTake, _ = prepItemInfoForTake(take)
       tInsertions = {}
       tDeletions = {}
@@ -2284,6 +2289,7 @@ local function handlePaste()
       processInsertions()
       noRestore[activeTake] = true -- force
       handleCommitTransaction(activeTake)
+      ::nextTake::
     end
   end
   noRestore = {}

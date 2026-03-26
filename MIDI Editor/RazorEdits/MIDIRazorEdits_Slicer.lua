@@ -66,8 +66,8 @@ local function calculateSlicerIntersections(area)
   local dy = y2 - y1
 
   local rows = (area.timeValue.vals.max - area.timeValue.vals.min) + 1
-  -- vertical line case
-  if dx == 0 then
+  -- vertical line or single row: all intersections at x1
+  if dx == 0 or rows <= 1 then
     for row = 0, rows - 1 do
       intersections[row] = x1
     end
@@ -76,11 +76,9 @@ local function calculateSlicerIntersections(area)
 
   -- find where the line crosses each row
   for row = 0, rows - 1 do
-    -- calculate the y-coordinate for this row
     local row_y = area.timeValue.vals.min + (row / (rows - 1)) * (area.timeValue.vals.max - area.timeValue.vals.min)
 
-    -- solve for x: x = x1 + (row_y - y1) * (dx / dy)
-    local t = (row_y - y1) / dy
+    local t = dy ~= 0 and (row_y - y1) / dy or 0
     local intersection_x = x1 + t * dx
 
     -- clamp to bounding box if needed

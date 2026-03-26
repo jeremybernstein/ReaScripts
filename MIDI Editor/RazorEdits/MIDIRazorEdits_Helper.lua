@@ -350,6 +350,17 @@ local function hashValue(value)
     return tostring(value)
   end
 
+  -- fast path for common MIDI event tables: avoid sort+concat overhead
+  if value.idx then
+    return string.format('d%d', value.idx)
+  end
+  if value.ppqpos then
+    return string.format('n%d_%d_%d_%d_%s',
+      value.ppqpos, value.endppqpos or 0, value.chan or 0,
+      value.pitch or 0, value.op or '')
+  end
+
+  -- generic fallback
   local parts = {}
   local keys = {}
   for k in pairs(value) do
@@ -389,17 +400,13 @@ end
 
 ----------------------------------------------------
 
+-- in custom note order, bottomPitch/topPitch are noteTab indices, not MIDI pitches
 local function pitchInRange(pitch, bottomPitch, topPitch, meState)
   if meState and meState.noteTab then
-    if meState.noteTabReverse[pitch] then
-      for i = bottomPitch, topPitch do
-        if pitch == meState.noteTab[i] then return true end
-      end
-    end
-  else
-    return pitch >= bottomPitch and pitch <= topPitch
+    local idx = meState.noteTabReverse[pitch]
+    return idx ~= nil and idx >= bottomPitch and idx <= topPitch
   end
-  return false
+  return pitch >= bottomPitch and pitch <= topPitch
 end
 
 local function getNoteSegments(areas, itemInfo, ppqpos, endppqpos, pitch, onlyArea, meState)
@@ -522,7 +529,11 @@ local function getIntersection(e1, e2)
   )
 end
 
--- Returns a table of TimeValueExtents objects representing the non-intersecting parts of extents1
+-- Returns a table of TimeValueExtents objects representing the non-intersecting parts of extents1.
+-- Produces up to 4 strips: left/right (full val range, tick range outside intersection)
+-- and top/bottom (intersection tick range, val range outside intersection).
+-- These strips share single-point boundaries but do NOT overlap in area —
+-- left/right tick ranges end where top/bottom tick ranges begin.
 local function getNonIntersectingAreas(e1, e2)
   local intersection = getIntersection(e1, e2)
   if not intersection then

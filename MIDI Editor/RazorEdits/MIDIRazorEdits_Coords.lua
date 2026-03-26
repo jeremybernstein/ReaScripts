@@ -214,22 +214,6 @@ function Coords.screenXToPPQ_Tick(screenX, windowX1, leftmostTick, pixelsPerTick
   return leftmostTick + ((screenX - windowX1) / pixelsPerTick)
 end
 
------------------------------------------------------------------------------
--- LICE bitmap coordinate helpers
------------------------------------------------------------------------------
 
--- convert screen rect to LICE bitmap coords
-function Coords.rectToLice(rect, screenRectX1, screenRectY1)
-  return math.floor((rect.x1 - screenRectX1) + 0.5),
-         math.floor((rect.y1 - screenRectY1) + 0.5),
-         math.floor((rect.x2 - screenRectX1) + 0.5),
-         math.floor((rect.y2 - screenRectY1) + 0.5)
-end
-
--- convert screen point to LICE bitmap coords
-function Coords.pointToLice(x, y, screenRectX1, screenRectY1)
-  return math.floor((x - screenRectX1) + 0.5),
-         math.floor((y - screenRectY1) + 0.5)
-end
 
 return Coords

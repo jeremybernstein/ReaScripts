@@ -1224,7 +1224,16 @@ local function drawPitchBend(hwnd, mode, antialias)
     if config.showAllNotes or chan == activeChannel then
     local npts = #points
     if npts > 0 then
-      -- tether on first point if it has a direct note association
+      -- TETHER DESIGN: dashed vertical lines connecting PB points to their
+      -- associated note's pitch center. drawn at the PB POINT positions, not
+      -- at note on/off boundaries (notes are already visible).
+      --
+      -- three places tethers are drawn:
+      -- 1. first point in channel → its note center (here, before the loop)
+      -- 2. at note association changes → last point for outgoing note,
+      --    first point for incoming note (inside the loop)
+      -- 3. last point in channel → horizontal extension to note end +
+      --    vertical tether at note end (after the loop)
       local laneTop = meLanes[-1].topPixel
       local laneTopVal = meLanes[-1].topValue
       local ppp = meState.pixelsPerPitch
@@ -1281,12 +1290,18 @@ local function drawPitchBend(hwnd, mode, antialias)
               local sx = mfloor(note2StartX + 0.5)
 
               if childHWND then
-                --                       bitmap  x1  y1  x2  y2      shape bez   segPx clipX clipY          clipW              clipH      color        alpha thick
+                --                       bitmap  x1  y1  x2  y2      shape bez   segPx clipX clipY  clipW  clipH  color  alpha thick
                 -- note1 half: curve in note1's frame, clip right at note1-end
-                r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1, x2, y2in1, shape, beztension, 0, 0, 0, mmin(ex, clipRight), clipBottom, pbLineColor, 0.8, 2)
+                local cw1 = mmin(ex, clipRight)
+                if cw1 > 0 then
+                  r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1, x2, y2in1, shape, beztension, 0, 0, 0, cw1, clipBottom, pbLineColor, 0.8, 2)
+                end
                 -- note2 half: same curve shifted to note2's frame, clip left at note2-start
                 local cx = mmax(sx, 0)
-                r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1in2, x2, y2, shape, beztension, 0, cx, 0, clipRight - cx, clipBottom, pbLineColor, 0.8, 2)
+                local cw2 = clipRight - cx
+                if cw2 > 0 then
+                  r.rcw_DrawCurveWithAlpha(pbBitmap, x1, y1in2, x2, y2, shape, beztension, 0, cx, 0, cw2, clipBottom, pbLineColor, 0.8, 2)
+                end
               else
                 -- fallback: approximate with clipped lines
                 if shape == 0 then
@@ -1338,56 +1353,21 @@ local function drawPitchBend(hwnd, mode, antialias)
             end
           end
 
-          -- draw tethers at note boundaries, note-end, or note-start transitions
+          -- tethers at note association changes: draw at the PB point positions
+          -- (not at note on/off — the notes are already visible)
           if noteBoundary or noteEnded or noteStarted then
-            -- outgoing tether
+            -- outgoing: last point for note1 → note1 center
             if noteBoundary or (noteEnded and not pt2.fallbackAssociation) then
-              local outScreenX, outScreenY
-              -- for boundary/noteEnded: interpolate to note1's end position
-              if noteBoundary or noteEnded then
-                local endppq = pt1Note.endppq
-                local ppqRange = pt2.ppqpos - pt1.ppqpos
-                if ppqRange > 0 then
-                  local t = (endppq - pt1.ppqpos) / ppqRange
-                  outScreenX = pt1.screenX + t * (pt2.screenX - pt1.screenX)
-                  -- interpolate using re-tethered Y for boundary case
-                  local targetScreenY = noteBoundary
-                    and (pt2.screenY + (pt2Note.pitch - pt1Note.pitch) * ppp)
-                    or pt2.screenY
-                  outScreenY = pt1.screenY + t * (targetScreenY - pt1.screenY)
-                else
-                  outScreenX, outScreenY = pt1.screenX, pt1.screenY
-                end
-              else
-                outScreenX, outScreenY = pt1.screenX, pt1.screenY
-              end
-
-              local _, oy = pointToLiceCoords(outScreenX, outScreenY)
-              local outX = math.floor(outScreenX + 0.5)
+              local _, oy = pointToLiceCoords(pt1.screenX, pt1.screenY)
+              local outX = math.floor(pt1.screenX + 0.5)
               local outY = math.floor(coords.pitchToScreenY(pt1Note.pitch, laneTop, laneTopVal, ppp) + 0.5)
               dashedLine(pbBitmap, outX, mmin(outY, oy), outX, mmax(outY, oy), pbLineColor, 0.8, mode)
             end
 
-            -- incoming tether
+            -- incoming: first point for note2 → note2 center
             if noteBoundary or noteStarted then
-              local inScreenX, inScreenY
-              -- for boundary/noteStarted: interpolate to note2's start position
-              if noteBoundary or noteStarted then
-                local startppq = pt2Note.startppq
-                local ppqRange = pt2.ppqpos - pt1.ppqpos
-                if ppqRange > 0 then
-                  local t = (startppq - pt1.ppqpos) / ppqRange
-                  inScreenX = pt1.screenX + t * (pt2.screenX - pt1.screenX)
-                  inScreenY = pt1.screenY + t * (pt2.screenY - pt1.screenY)
-                else
-                  inScreenX, inScreenY = pt2.screenX, pt2.screenY
-                end
-              else
-                inScreenX, inScreenY = pt2.screenX, pt2.screenY
-              end
-
-              local _, iy = pointToLiceCoords(inScreenX, inScreenY)
-              local inX = math.floor(inScreenX + 0.5)
+              local _, iy = pointToLiceCoords(pt2.screenX, pt2.screenY)
+              local inX = math.floor(pt2.screenX + 0.5)
               local inY = math.floor(coords.pitchToScreenY(pt2Note.pitch, laneTop, laneTopVal, ppp) + 0.5)
               dashedLine(pbBitmap, inX, mmin(inY, iy), inX, mmax(inY, iy), pbLineColor, 0.8, mode)
             end

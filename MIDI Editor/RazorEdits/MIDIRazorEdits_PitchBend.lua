@@ -831,14 +831,17 @@ local function findNoteAtTime(chan, ppqpos, targetPitch)
   end
 
   if #soundingNotes == 0 then
-    -- no sounding note: closest is either channelNotes[lo] or channelNotes[lo+1]
+    -- no sounding note: check lo-1, lo, lo+1 for closest by start/end distance
     local closestNote = channelNotes[lo]
     local closestDist = math.min(math.abs(closestNote.startppq - ppqpos), math.abs(closestNote.endppq - ppqpos))
-    if lo < n then
-      local next = channelNotes[lo + 1]
-      local nextDist = math.abs(next.startppq - ppqpos)
-      if nextDist < closestDist then
-        closestNote = next
+    for _, idx in ipairs({ lo - 1, lo + 1 }) do
+      if idx >= 1 and idx <= n then
+        local note = channelNotes[idx]
+        local dist = math.min(math.abs(note.startppq - ppqpos), math.abs(note.endppq - ppqpos))
+        if dist < closestDist then
+          closestDist = dist
+          closestNote = note
+        end
       end
     end
     return closestNote
@@ -2788,5 +2791,15 @@ function PitchBend.handleKey(vState, mods)
   -- key handling currently in Lib.lua processKeys
   return false
 end
+
+-- test-only: expose internals for integration testing
+PitchBend._test = {
+  extractAndAssociate = function(take, midiUtils)
+    local events = extractPBEvents(take, midiUtils)
+    associatePBWithNotes(take, events, midiUtils)
+    return events, notesByChannel
+  end,
+  findNoteAtTime = findNoteAtTime,
+}
 
 return PitchBend

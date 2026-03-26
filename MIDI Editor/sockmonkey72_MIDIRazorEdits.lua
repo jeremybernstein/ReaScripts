@@ -1,15 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.20
+-- @version 1.5.0-beta.21
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix tuning menu: selection was off-by-N with grouped submenus
---   - fix config dialog: 'b' key no longer immediately closes dialog on open
---   - fix note boundary curves: curve direction now matches pitch bend direction per note
---   - fix pb note-search algo: no longer misses longer sounding notes behind short ones
---   - tuning change now updates microtonal line display immediately
---   - perf: binary search for note lookups and center-line positioning
+--   - fix tethers: drawn at first/last PB point per note, not at note on/off positions
+--   - fix slicer: no longer crashes on single-row areas
+--   - dead code removal, cleanup
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

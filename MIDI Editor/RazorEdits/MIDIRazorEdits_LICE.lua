@@ -1383,7 +1383,7 @@ local function drawPitchBend(hwnd, mode, antialias)
           local endScreenX
           if meState.pixelsPerTick then
             endScreenX = (lastNote.endppq - meState.leftmostTick) * meState.pixelsPerTick
-          elseif meState.pixelsPerSecond and glob.liceData then
+          elseif meState.pixelsPerSecond and glob.liceData and glob.liceData.take then
             local endTime = r.MIDI_GetProjTimeFromPPQPos(glob.liceData.take, lastNote.endppq)
             endScreenX = (endTime - meState.leftmostTime) * meState.pixelsPerSecond
           end

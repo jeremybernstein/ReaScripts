@@ -1,12 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.21
+-- @version 1.5.0-beta.22
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix tethers: drawn at first/last PB point per note, not at note on/off positions
---   - fix slicer: no longer crashes on single-row areas
---   - dead code removal, cleanup
+--   - fix crash on nil take pointer
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

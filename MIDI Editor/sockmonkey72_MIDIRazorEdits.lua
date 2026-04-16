@@ -1,10 +1,21 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.22
+-- @version 1.5.0-beta.23
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix crash on nil take pointer
+--   - fix: ruler clicks/interaction restored in all modes (cursor resets, clicks pass through)
+--   - fix: drag-to-create area completing properly when released outside piano roll
+--   - fix: lost button-up detection when overlapping windows capture mouse events
+--   - fix: defensive re-establishment of message intercepts if released by another script
+--   - fix: focus-loss during drag now properly finalizes or cancels the operation
+--   - fix: PB settings (and all module settings) now reload live from Settings dialog
+--   - fix: PB config defaults properly restored when ExtState is deleted
+--   - fix: color overrides no longer R/B-swapped on Windows (convertColorFromNative removed for user colors)
+--   - fix: Settings color pickers now show actual theme-derived colors as defaults
+--   - add: PB horizontal drag clamps to visible view bounds
+--   - add: PB vertical drag clamps to visible note area
+--   - add: PB drag cross-point behavior: Clamp mode (REAPER default, ±1 ppq) and Absorb mode (setting)
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

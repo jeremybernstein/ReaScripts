@@ -356,6 +356,26 @@ local function refreshMouseIntercepts()
   end
 end
 
+-- re-establish intercepts if another script released them
+local lastEnsureTime = 0
+local function ensureIntercepts()
+  if not glob.liceData or not glob.isIntercept then return end
+  if glob.currentTime - lastEnsureTime < 0.25 then return end
+  lastEnsureTime = glob.currentTime
+  for _, intercept in ipairs(mouseIntercepts) do
+    local rv = r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
+    if rv == 1 then
+      -- was released by another script, re-established; reset timestamp
+      intercept.timestamp = 0
+    elseif rv == -1 then
+      -- another script took it, force reclaim
+      r.JS_WindowMessage_Release(glob.liceData.midiview, intercept.message)
+      r.JS_WindowMessage_Intercept(glob.liceData.midiview, intercept.message, intercept.passthrough)
+      intercept.timestamp = 0
+    end
+  end
+end
+
 local function passthroughIntercepts()
   if not glob.liceData then return end
   for _, intercept in ipairs(mouseIntercepts) do -- no app passthroughs
@@ -443,7 +463,11 @@ local function peekAppIntercepts(force)
         glob.editorIsForeground = (wpl ~= 0)
         if not glob.editorIsForeground then
           glob.setCursor(glob.normal_cursor)
+          local wasDragging = Lice.button.drag
           resetButtons()  -- clear stale button state on focus loss
+          if wasDragging then
+            Lice.button.release = true  -- finalize drag properly on next frame
+          end
           helper.VKeys_ClearState()  -- clear stale key state on focus loss
           r.TrackCtl_SetToolTip("", 0, 0, false)  -- dismiss lingering tooltips
         elseif not wasForeground then
@@ -879,6 +903,13 @@ local function rebuildColors()
   reBorderColor = convertColorFromNative(r.GetThemeColor('areasel_outline', 0) + (0xFF << 24))
   reFillContrastColor = generateVibrantContrast32(reFillColor)
   reBorderContrastColor = generateVibrantContrast32(reBorderColor)
+  -- export theme-derived PB defaults so Settings dialog can display them
+  if glob.scriptID then
+    r.SetExtState(glob.scriptID, 'pbThemeLineColor', tostring(reBorderContrastColor), false)
+    r.SetExtState(glob.scriptID, 'pbThemePointColor', tostring(reBorderColor), false)
+    r.SetExtState(glob.scriptID, 'pbThemeSelectedColor', tostring(reFillContrastColor), false)
+    r.SetExtState(glob.scriptID, 'pbThemeHoveredColor', tostring(0xFFFFFF00), false)
+  end
 end
 
 rebuildColors()
@@ -1175,10 +1206,11 @@ local function drawPitchBend(hwnd, mode, antialias)
 
   -- Colors for pitch bend visualization (user override or MRE theme colors)
   -- User colors are stored as ARGB, need conversion on Windows (swap R/B)
-  local pbLineColor = config.lineColor and convertColorFromNative(config.lineColor) or reBorderContrastColor
-  local pbPointColor = config.pointColor and convertColorFromNative(config.pointColor) or reBorderColor
-  local pbSelectedColor = config.selectedColor and convertColorFromNative(config.selectedColor) or reFillContrastColor
-  local pbHoveredColor = config.hoveredColor and convertColorFromNative(config.hoveredColor) or 0xFFFFFF00
+  -- user colors are already ARGB (from settings dialog); theme colors are pre-converted
+  local pbLineColor = config.lineColor or reBorderContrastColor
+  local pbPointColor = config.pointColor or reBorderColor
+  local pbSelectedColor = config.selectedColor or reFillContrastColor
+  local pbHoveredColor = config.hoveredColor or 0xFFFFFF00
 
   -- Clip boundaries (bitmap coords, 0-based)
   local clipBottom = noteAreaHeight
@@ -1774,6 +1806,8 @@ Lice.endIntercepts = endIntercepts
 
 Lice.passthroughIntercepts = passthroughIntercepts
 Lice.forwardInterceptedClick = forwardInterceptedClick
+Lice.refreshMouseIntercepts = refreshMouseIntercepts
+Lice.ensureIntercepts = ensureIntercepts
 Lice.peekIntercepts = peekIntercepts
 
 Lice.peekAppIntercepts = peekAppIntercepts

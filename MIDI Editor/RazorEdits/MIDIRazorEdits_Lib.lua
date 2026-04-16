@@ -3988,21 +3988,31 @@ local function ValidateMouse()
 
     if not isValidMouseAction and lice.button.drag and wasValid then
       lice.peekIntercepts(mx, my) -- attempt to prevent annoying race condition
-      isValidMouseAction = testValidMouseAction() -- isValidMouseAction will remain false here, but for completeness...
-      -- if isValidMouseAction then _P('unexpected fortune!') end
+      isValidMouseAction = testValidMouseAction()
+      -- lost button-up: OS says released but no WM message arrived
+      -- (e.g., overlapping floating window captured it)
+      if not isValidMouseAction and lice.button.drag and mState == 0 then
+        lice.resetButtons()
+        lice.button.release = true
+        wasValid = false
+        return true, mx, my
+      end
     end
 
     local inDeadZone = isDeadZone(mx, my)
     -- Check that mouse cursor is hovered over a valid midiview area
     if not isValidMouseAction then
       isValidMouseAction = isMidiViewHovered and not inDeadZone
-      --[[ I think that the point of this is to catch mouse-ups which happen
-           outside of the midiview and are thus lost, but it ends up being a race
-           condition with the window messages, which are first intercepted below.
-           Have now introduced a fallback, above, which should catch this. --]]
+      --[[ catch drags/releases that end outside the content area (ruler, dead zone).
+           peekIntercepts (above) may have already caught the button-up and set
+           release=true (clearing drag), so check both flags. --]]
       if lice.button.drag then
         lice.resetButtons()
         lice.button.release = true
+      end
+      if lice.button.release then
+        wasValid = false
+        return true, mx, my
       end
     end
 
@@ -4015,16 +4025,17 @@ local function ValidateMouse()
 
   wasValid = false
 
+  local prevDeadzoneButton = deadzone_button_state
   deadzone_button_state = mState
-  -- skip passthrough when mouse is outside midiview and no buttons held
-  if isMidiViewHovered or mState ~= 0 then
+  -- forward intercepted messages: when hovered, button held, or button just released in dead zone
+  if isMidiViewHovered or mState ~= 0 or prevDeadzoneButton ~= 0 then
     lice.passthroughIntercepts()
   end
 
   lice.button.click = false
   lice.button.drag = false
   lice.button.release = true
-  glob.prevCursor = -1
+  glob.setCursor(glob.normal_cursor)
 
   doBail()
   return false
@@ -4283,6 +4294,7 @@ local function processMouse()
                                                          hovered = isHovered,
                                                          hoveredOnly = isOnlyHovered,
                                                          ccLane = ccLane,
+                                                         clickedLane = clickedLane,
                                                          inop = inop,
                                                          hottestMods = hottestMods,
                                                          doubleClicked = lice.button.dblclick })
@@ -4799,6 +4811,10 @@ local function checkForSettingsUpdate()
     r.DeleteExtState(scriptID, 'settingsUpdated', false)
     if state ~= '' then
       restorePreferences()
+      slicer.handleState(scriptID)
+      pitchbend.handleState(scriptID)
+      pitchbend.markDirty()
+      lice.reloadSettings()
     end
   end
 end
@@ -4874,6 +4890,7 @@ local function loop()
   end
 
   lice.peekAppIntercepts()
+  lice.ensureIntercepts()
 
   lice.initLice(currEditor)
 

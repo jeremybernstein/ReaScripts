@@ -108,6 +108,8 @@ local prefsPbMaxBendDown
 local pbMaxBendDown
 local prefsPbSnapToSemitone
 local pbSnapToSemitone
+local prefsPbDragCrossMode
+local pbDragCrossMode
 local prefsPbShowAllNotes
 local pbShowAllNotes
 local prefsPbSclDirectory
@@ -551,6 +553,11 @@ local function handleSavedMappings()
   if not prefsPbSnapToSemitone then prefsPbSnapToSemitone = 0 end
   pbSnapToSemitone = prefsPbSnapToSemitone
 
+  state = r.GetExtState(scriptID_Save, 'pbDragCrossMode')
+  prefsPbDragCrossMode = state ~= '' and tonumber(state) or 0
+  if not prefsPbDragCrossMode then prefsPbDragCrossMode = 0 end
+  pbDragCrossMode = prefsPbDragCrossMode
+
   state = r.GetExtState(scriptID_Save, 'pbShowAllNotes')
   prefsPbShowAllNotes = state ~= '' and tonumber(state) or 1
   if not prefsPbShowAllNotes then prefsPbShowAllNotes = 1 end
@@ -714,6 +721,7 @@ local function hasChanges() -- could throttle this if it's a performance concern
   if pbMaxBendUp ~= prefsPbMaxBendUp then return true end
   if pbMaxBendDown ~= prefsPbMaxBendDown then return true end
   if pbSnapToSemitone ~= prefsPbSnapToSemitone then return true end
+  if pbDragCrossMode ~= prefsPbDragCrossMode then return true end
   if pbShowAllNotes ~= prefsPbShowAllNotes then return true end
   if pbSclDirectory ~= prefsPbSclDirectory then return true end
   if pbDefaultTuning ~= prefsPbDefaultTuning then return true end
@@ -841,6 +849,13 @@ local function drawButtons()
     end
     prefsPbSnapToSemitone = pbSnapToSemitone
 
+    if pbDragCrossMode ~= 0 then
+      r.SetExtState(scriptID_Save, 'pbDragCrossMode', tostring(pbDragCrossMode), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'pbDragCrossMode', true)
+    end
+    prefsPbDragCrossMode = pbDragCrossMode
+
     if pbShowAllNotes ~= 1 then
       r.SetExtState(scriptID_Save, 'pbShowAllNotes', tostring(pbShowAllNotes), true)
     else
@@ -917,6 +932,7 @@ local function drawButtons()
     pbMaxBendUp = 48
     pbMaxBendDown = 48
     pbSnapToSemitone = 0
+    pbDragCrossMode = 0
     pbShowAllNotes = 1
     pbSclDirectory = '~/Documents/scl'
     pbDefaultTuning = ''
@@ -1051,6 +1067,14 @@ local function drawPitchBendOptions()
   pbSnapToSemitone = snap and 1 or 0
 
   ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Drag Across Points:')
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, 280)
+  rv, pbDragCrossMode = ImGui.RadioButtonEx(ctx, 'Clamp##pbDragCross', pbDragCrossMode, 0)
+  ImGui.SameLine(ctx)
+  rv, pbDragCrossMode = ImGui.RadioButtonEx(ctx, 'Absorb##pbDragCross', pbDragCrossMode, 1)
+
+  ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Display Filter:')
   ImGui.SameLine(ctx)
   ImGui.SetCursorPosX(ctx, 280)
@@ -1128,6 +1152,12 @@ local function drawPitchBendOptions()
   ImGui.Text(ctx, 'Color Overrides (uncheck to use theme):')
   ImGui.Spacing(ctx)
 
+  -- read theme-derived defaults exported by running script
+  local themeLineColor = tonumber(r.GetExtState(scriptID_Save, 'pbThemeLineColor')) or 0xFFFF8800
+  local themePointColor = tonumber(r.GetExtState(scriptID_Save, 'pbThemePointColor')) or 0xFF0088FF
+  local themeSelectedColor = tonumber(r.GetExtState(scriptID_Save, 'pbThemeSelectedColor')) or 0xFFFF0000
+  local themeHoveredColor = tonumber(r.GetExtState(scriptID_Save, 'pbThemeHoveredColor')) or 0xFFFFFF00
+
   -- convert ARGB (storage/LICE) to RGBA (ReaImGui)
   local function argbToRgba(argb)
     if not argb then return nil end
@@ -1151,62 +1181,62 @@ local function drawPitchBendOptions()
   local rv, col, enabled
   local colorX = 32  -- fixed X position for color squares
 
-  -- Line color (default orange)
+  -- Line color
   ImGui.AlignTextToFramePadding(ctx)
   enabled = pbLineColor ~= nil
   rv, enabled = ImGui.Checkbox(ctx, '##lineColorEnabled', enabled)
   if rv then
-    if enabled then pbLineColor = 0xFFFF8800 else pbLineColor = nil end
+    if enabled then pbLineColor = themeLineColor else pbLineColor = nil end
   end
   ImGui.SameLine(ctx)
   ImGui.SetCursorPosX(ctx, colorX)
   if not enabled then ImGui.BeginDisabled(ctx) end
-  col = argbToRgba(pbLineColor) or 0xFF8800FF  -- orange in RGBA (default)
+  col = argbToRgba(pbLineColor) or argbToRgba(themeLineColor)
   rv, col = ImGui.ColorEdit4(ctx, 'Curve Line##lineColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
   if rv and enabled then pbLineColor = rgbaToArgb(col) end
   if not enabled then ImGui.EndDisabled(ctx) end
 
-  -- Point color (unselected, default blue)
+  -- Point color (unselected)
   ImGui.AlignTextToFramePadding(ctx)
   enabled = pbPointColor ~= nil
   rv, enabled = ImGui.Checkbox(ctx, '##pointColorEnabled', enabled)
   if rv then
-    if enabled then pbPointColor = 0xFF0088FF else pbPointColor = nil end
+    if enabled then pbPointColor = themePointColor else pbPointColor = nil end
   end
   ImGui.SameLine(ctx)
   ImGui.SetCursorPosX(ctx, colorX)
   if not enabled then ImGui.BeginDisabled(ctx) end
-  col = argbToRgba(pbPointColor) or 0x0088FFFF  -- blue in RGBA (default)
+  col = argbToRgba(pbPointColor) or argbToRgba(themePointColor)
   rv, col = ImGui.ColorEdit4(ctx, 'Point (unselected)##pointColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
   if rv and enabled then pbPointColor = rgbaToArgb(col) end
   if not enabled then ImGui.EndDisabled(ctx) end
 
-  -- Selected color (default red)
+  -- Selected color
   ImGui.AlignTextToFramePadding(ctx)
   enabled = pbSelectedColor ~= nil
   rv, enabled = ImGui.Checkbox(ctx, '##selectedColorEnabled', enabled)
   if rv then
-    if enabled then pbSelectedColor = 0xFFFF0000 else pbSelectedColor = nil end
+    if enabled then pbSelectedColor = themeSelectedColor else pbSelectedColor = nil end
   end
   ImGui.SameLine(ctx)
   ImGui.SetCursorPosX(ctx, colorX)
   if not enabled then ImGui.BeginDisabled(ctx) end
-  col = argbToRgba(pbSelectedColor) or 0xFF0000FF  -- red in RGBA (default)
+  col = argbToRgba(pbSelectedColor) or argbToRgba(themeSelectedColor)
   rv, col = ImGui.ColorEdit4(ctx, 'Point (selected)##selectedColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
   if rv and enabled then pbSelectedColor = rgbaToArgb(col) end
   if not enabled then ImGui.EndDisabled(ctx) end
 
-  -- Hovered color (default yellow)
+  -- Hovered color
   ImGui.AlignTextToFramePadding(ctx)
   enabled = pbHoveredColor ~= nil
   rv, enabled = ImGui.Checkbox(ctx, '##hoveredColorEnabled', enabled)
   if rv then
-    if enabled then pbHoveredColor = 0xFFFFFF00 else pbHoveredColor = nil end
+    if enabled then pbHoveredColor = themeHoveredColor else pbHoveredColor = nil end
   end
   ImGui.SameLine(ctx)
   ImGui.SetCursorPosX(ctx, colorX)
   if not enabled then ImGui.BeginDisabled(ctx) end
-  col = argbToRgba(pbHoveredColor) or 0xFFFF00FF  -- yellow in RGBA (default)
+  col = argbToRgba(pbHoveredColor) or argbToRgba(themeHoveredColor)
   rv, col = ImGui.ColorEdit4(ctx, 'Point (hovered)##hoveredColor', col, ImGui.ColorEditFlags_NoInputs | ImGui.ColorEditFlags_AlphaBar)
   if rv and enabled then pbHoveredColor = rgbaToArgb(col) end
   if not enabled then ImGui.EndDisabled(ctx) end

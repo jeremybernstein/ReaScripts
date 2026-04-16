@@ -48,6 +48,9 @@ local CURVE_SLOW_END = 3
 local CURVE_BEZIER = 4
 
 -- configuration (will be loaded from ExtState)
+local DRAG_CROSS_CLAMP = 0   -- clamp at neighbor ±1 ppq (REAPER default)
+local DRAG_CROSS_ABSORB = 1  -- absorb crossed points, delete on commit
+
 local config = {
   maxBendUp = 48,       -- semitones (MPE default)
   maxBendDown = 48,
@@ -55,6 +58,7 @@ local config = {
   curveType = CURVE_STEP,
   showAllNotes = true,
   activeChannel = 0,    -- 0-15
+  dragCrossMode = DRAG_CROSS_CLAMP, -- default matches REAPER CC editor
   sclDirectory = nil,
   tuningFile = nil,     -- nil = 12-TET
   tuningScale = nil,
@@ -463,28 +467,46 @@ local function handleState(scriptID)
   if stateVal and stateVal ~= '' then
     local val = tonumber(stateVal)
     if val then systemDefaults.maxBendUp = val end
+  else
+    systemDefaults.maxBendUp = 48
   end
 
   stateVal = r.GetExtState(scriptID, 'pbMaxBendDown')
   if stateVal and stateVal ~= '' then
     local val = tonumber(stateVal)
     if val then systemDefaults.maxBendDown = val end
+  else
+    systemDefaults.maxBendDown = 48
   end
 
   stateVal = r.GetExtState(scriptID, 'pbSnapToSemitone')
   if stateVal and stateVal ~= '' then
     config.snapToSemitone = stateVal == '1'
+  else
+    config.snapToSemitone = true
   end
 
   stateVal = r.GetExtState(scriptID, 'pbCurveType')
   if stateVal and stateVal ~= '' then
     local val = tonumber(stateVal)
     if val then config.curveType = val end
+  else
+    config.curveType = CURVE_STEP
   end
 
   stateVal = r.GetExtState(scriptID, 'pbShowAllNotes')
   if stateVal and stateVal ~= '' then
     config.showAllNotes = stateVal == '1'
+  else
+    config.showAllNotes = true
+  end
+
+  stateVal = r.GetExtState(scriptID, 'pbDragCrossMode')
+  if stateVal and stateVal ~= '' then
+    local val = tonumber(stateVal)
+    if val then config.dragCrossMode = val end
+  else
+    config.dragCrossMode = DRAG_CROSS_CLAMP
   end
 
   stateVal = r.GetExtState(scriptID, 'pbSclDirectory')
@@ -933,6 +955,95 @@ local function marqueeSelectPoints(x1, y1, x2, y2)
   return anySelected
 end
 
+-- absorb/restore non-selected points crossed by dragged selection
+-- returns true if pbPoints changed (needs redraw)
+local function sweepAbsorb(dragState, pbPoints)
+  if not dragState or not dragState.nonSelected then return false end
+  local changed = false
+
+  for chan, nsList in pairs(dragState.nonSelected) do
+    -- build sweep range from selected points on this channel
+    local sweepMin, sweepMax
+    for _, sel in ipairs(dragState.selectedStarts) do
+      if sel.chan == chan then
+        local lo = math.min(sel.startPpq, sel.point.ppqpos)
+        local hi = math.max(sel.startPpq, sel.point.ppqpos)
+        if not sweepMin or lo < sweepMin then sweepMin = lo end
+        if not sweepMax or hi > sweepMax then sweepMax = hi end
+      end
+    end
+    if not sweepMin then goto nextChan end
+
+    -- absorb: non-selected points inside sweep range
+    for i = #nsList, 1, -1 do
+      local ns = nsList[i]
+      if not ns.absorbed and ns.point.ppqpos > sweepMin and ns.point.ppqpos < sweepMax then
+        ns.absorbed = true
+        -- remove from pbPoints[chan]
+        local pts = pbPoints[chan]
+        if pts then
+          for j = #pts, 1, -1 do
+            if pts[j] == ns.point then
+              table.remove(pts, j)
+              break
+            end
+          end
+        end
+        changed = true
+      end
+    end
+
+    -- restore: absorbed points no longer inside sweep range
+    for i = #nsList, 1, -1 do
+      local ns = nsList[i]
+      if ns.absorbed and (ns.point.ppqpos <= sweepMin or ns.point.ppqpos >= sweepMax) then
+        ns.absorbed = false
+        -- insert back into pbPoints[chan] sorted by ppqpos
+        local pts = pbPoints[chan]
+        if pts then
+          local inserted = false
+          for j = 1, #pts do
+            if pts[j].ppqpos > ns.point.ppqpos then
+              table.insert(pts, j, ns.point)
+              inserted = true
+              break
+            end
+          end
+          if not inserted then pts[#pts + 1] = ns.point end
+        end
+        changed = true
+      end
+    end
+
+    ::nextChan::
+  end
+  return changed
+end
+
+-- restore all absorbed points back to pbPoints (for drag cancel)
+local function restoreAbsorbed(dragState, pbPoints)
+  if not dragState or not dragState.nonSelected then return end
+  for chan, nsList in pairs(dragState.nonSelected) do
+    for _, ns in ipairs(nsList) do
+      if ns.absorbed then
+        ns.absorbed = false
+        local pts = pbPoints[chan]
+        if pts then
+          local inserted = false
+          for j = 1, #pts do
+            if pts[j].ppqpos > ns.point.ppqpos then
+              table.insert(pts, j, ns.point)
+              inserted = true
+              break
+            end
+          end
+          if not inserted then pts[#pts + 1] = ns.point end
+        end
+      end
+    end
+  end
+end
+
 -- finalize a drag operation on mouse release, returns undo text or nil
 local function finalizeDragRelease(activeTake)
   if not dragState then return nil end
@@ -990,8 +1101,36 @@ local function finalizeDragRelease(activeTake)
         break
       end
     end
-    if anyMoved then
-      commitSelectedToMIDI(activeTake, dragState.selectedStarts)
+
+    -- collect absorbed points for deletion
+    local absorbedForDelete = {}
+    if dragState.nonSelected then
+      for _, nsList in pairs(dragState.nonSelected) do
+        for _, ns in ipairs(nsList) do
+          if ns.absorbed then
+            absorbedForDelete[#absorbedForDelete + 1] = ns.point
+          end
+        end
+      end
+      -- sort by idx descending so deletions don't invalidate earlier indices
+      table.sort(absorbedForDelete, function(a, b) return a.idx > b.idx end)
+    end
+
+    if anyMoved or #absorbedForDelete > 0 then
+      mu.MIDI_OpenWriteTransaction(activeTake)
+      -- commit moved points
+      for _, sel in ipairs(dragState.selectedStarts) do
+        local msg2, msg3 = pbToBytes(sel.point.pbValue)
+        mu.MIDI_SetCC(activeTake, sel.point.idx,
+          sel.point.selected, sel.point.muted,
+          sel.point.ppqpos, CHANMSG_PITCHBEND, sel.chan,
+          msg2, msg3)
+      end
+      -- delete absorbed points
+      for _, pt in ipairs(absorbedForDelete) do
+        mu.MIDI_DeleteCC(activeTake, pt.idx)
+      end
+      mu.MIDI_CommitWriteTransaction(activeTake, true, true)
       return 'Modify Pitch Bend'
     elseif dragState.pendingDeselect then
       dragState.pendingDeselect.selected = false
@@ -1118,8 +1257,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     end
   end
 
-  -- handle mouse released outside bounds (mx/my nil but released true)
-  -- this prevents stuck drag state when mouse leaves the editor area
+  -- handle mouse outside content area (mx/my nil: ruler, outside editor, etc.)
   if not mx or not my then
     if mouseState.released then
       if dragState or drawState or centerLineState.active then
@@ -1210,6 +1348,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       centerLineState.active = false
       centerLineState.locked = false
       drawState = nil
+      restoreAbsorbed(dragState, pbPoints)
       dragState = nil
     elseif compExpHeld and not dragState then
       if not hasSelection() then
@@ -1270,11 +1409,10 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       pbNeedsRedraw = true
     end
 
-    -- pass through clicks outside note area (CC lanes, ruler, etc.)
+    -- pass through clicks outside note area (ruler, CC lanes, etc.)
+    -- uses clickedLane from lane detection (before my is clamped to note bounds)
     if mouseState.clicked or mouseState.doubleClicked then
-      local noteArea = glob.meLanes and glob.meLanes[-1]
-      if noteArea and not dragState and not drawState
-         and (my < noteArea.topPixel or my > noteArea.bottomPixel) then
+      if not dragState and not drawState and mouseState.clickedLane ~= -1 then
         return false
       end
     end
@@ -1446,6 +1584,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
         -- initialize dragState for point dragging (store all selected points' start positions)
         local selectedStarts = {}
+        local nonSelected = {}
         for chan, points in pairs(pbPoints) do
           for _, pt in ipairs(points) do
             if pt.selected then
@@ -1455,6 +1594,9 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
                 startPpq = pt.ppqpos,
                 startSemitones = pt.semitones,
               })
+            else
+              if not nonSelected[chan] then nonSelected[chan] = {} end
+              table.insert(nonSelected[chan], { point = pt, chan = chan, absorbed = false })
             end
           end
         end
@@ -1471,6 +1613,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           startMy = my,
           isMarquee = false,
           selectedStarts = selectedStarts,
+          nonSelected = nonSelected,
           anchorIdx = anchorIdx,
           pendingDeselect = shiftHeld and wasSelected and hoveredPoint.point or nil,
         }
@@ -1550,9 +1693,17 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
 
         if dragState.dragAxis == 'y' then
           -- vertical: value change only
+          -- clamp my to visible note area
+          local noteArea = glob.meLanes and glob.meLanes[-1]
+          local clampedMy = my
+          if noteArea then
+            clampedMy = math.max(noteArea.topPixel, math.min(noteArea.bottomPixel, my))
+          end
+          local clampedDy = clampedMy - dragState.startMy
+
           local deltaSemitones = 0
           if meState.pixelsPerPitch and meState.pixelsPerPitch > 0 then
-            deltaSemitones = -dy / meState.pixelsPerPitch
+            deltaSemitones = -clampedDy / meState.pixelsPerPitch
           end
 
           -- pitch snap: snap anchor, derive delta from snapped position
@@ -1591,10 +1742,49 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           if shouldSnapGrid then
             anchorNewPpq = snapPpqToGrid(anchorNewPpq, activeTake)
           end
+
+          -- clamp to visible view
+          local viewWidth = glob.liceData.screenRect:width()
+          local leftPpq = screenXToPpq(0, activeTake)
+          local rightPpq = screenXToPpq(viewWidth, activeTake)
+          if leftPpq and rightPpq then
+            anchorNewPpq = math.max(leftPpq, math.min(rightPpq, anchorNewPpq))
+          end
+
+          -- clamp to neighbor boundaries (per-channel, ±1 ppq from nearest non-selected)
+          if config.dragCrossMode == DRAG_CROSS_CLAMP and dragState.nonSelected then
+            local clampMin, clampMax
+            for _, sel in ipairs(dragState.selectedStarts) do
+              local nsList = dragState.nonSelected[sel.chan]
+              if nsList then
+                for _, ns in ipairs(nsList) do
+                  if ns.point.ppqpos < sel.startPpq then
+                    -- neighbor to the left: can't move left of it + 1
+                    local limit = ns.point.ppqpos + 1 - sel.startPpq + anchor.startPpq
+                    if not clampMin or limit > clampMin then clampMin = limit end
+                  elseif ns.point.ppqpos > sel.startPpq then
+                    -- neighbor to the right: can't move right of it - 1
+                    local limit = ns.point.ppqpos - 1 - sel.startPpq + anchor.startPpq
+                    if not clampMax or limit < clampMax then clampMax = limit end
+                  end
+                end
+              end
+            end
+            if clampMin then anchorNewPpq = math.max(clampMin, anchorNewPpq) end
+            if clampMax then anchorNewPpq = math.min(clampMax, anchorNewPpq) end
+          end
+
           local snappedDeltaPpq = math.floor(anchorNewPpq - anchor.startPpq + 0.5)
 
           for _, sel in ipairs(dragState.selectedStarts) do
             sel.point.ppqpos = sel.startPpq + snappedDeltaPpq
+          end
+
+          -- absorb mode: absorb/restore non-selected points crossed during drag
+          if config.dragCrossMode == DRAG_CROSS_ABSORB then
+            if sweepAbsorb(dragState, pbPoints) then
+              pbNeedsRedraw = true
+            end
           end
         end
       end

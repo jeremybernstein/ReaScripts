@@ -1350,6 +1350,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       drawState = nil
       restoreAbsorbed(dragState, pbPoints)
       dragState = nil
+      setTooltip("", 0, 0, false)
     elseif compExpHeld and not dragState then
       if not hasSelection() then
         -- no selection: show tooltip, don't draw center line

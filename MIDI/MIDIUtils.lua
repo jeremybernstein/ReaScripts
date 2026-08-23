@@ -1,11 +1,11 @@
 -- @description MIDI Utils API
--- @version 0.2.07-beta.6
+-- @version 0.2.07-beta.7
 -- @author sockmonkey72
 -- @about
 --   # MIDI Utils API
 --   Drop-in replacement for REAPER's high-level MIDI API
 -- @changelog
---   - fix note-off management when extents are trimmed
+--   - changes to the default CC curve preference take effect immediately, no restart
 -- @provides
 --   [nomain] MIDIUtils.lua
 --   {MIDIUtils}/*
@@ -121,16 +121,28 @@ local function spairs(t, order) -- sorted iterator (https://stackoverflow.com/qu
   end
 end
 
+-- prefer the live value: reaper.ini is only flushed periodically, and the cached fallback
+-- below would otherwise pin the value for the lifetime of the script
 local function ReadREAPERConfigVar_Int(name)
-  if configVarCache[name] then return configVarCache[name] end
+  if r.get_config_var_string then
+    local rv, val = r.get_config_var_string(name)
+    if rv and val and val ~= '' then
+      local num = tonumber(val)
+      if num then return math.floor(num) end
+    end
+  end
+
+  local cached = configVarCache[name]
+  if cached ~= nil then return cached or nil end -- false == known miss
   for line in io.lines(r.GetResourcePath()..'/reaper.ini') do
-    local match = string.match(line, name..'='..'(%d+)$')
+    local match = string.match(line, '^'..name..'=(%-?%d+)$') -- values can be negative
     if match then
-      match = math.floor(match)
+      match = math.floor(tonumber(match))
       configVarCache[name] = match
       return match
     end
   end
+  configVarCache[name] = false -- else every call rescans the whole file
   return nil
 end
 
@@ -1420,14 +1432,16 @@ local function MIDI_SetCC(take, idx, selected, muted, ppqpos, chanmsg, chan, msg
   return rv
 end
 
+-- 4th return: whether a CCBZ event is actually present (a bezier CC without one reads as
+-- tension 0), so callers can round-trip the absence instead of writing a redundant CCBZ
 local function MIDI_GetCCShape(take, idx)
   EnsureTake(take)
   local event = ccEvents[idx + 1]
   if event and event:is_a(CCEvent) and event.idx == idx and not event.delete then
     local rv, _, bztension = GetBezierData(idx, event)
-    return true, ((event.flags & 0xF0) >> 4) & 7, rv and bztension or 0.
+    return true, ((event.flags & 0xF0) >> 4) & 7, rv and bztension or 0., rv and true or false
   end
-  return false, 0, 0.
+  return false, 0, 0., false
 end
 
 local function MIDI_SetCCShape(take, idx, shape, beztension)
@@ -1453,10 +1467,10 @@ local function MIDI_InsertCC(take, selected, muted, ppqpos, chanmsg, chan, msg2,
   local lastEventPPQ = #MIDIEvents ~= 0 and MIDIEvents[#MIDIEvents].ppqpos or 0
   chanmsg = chanmsg < 0xA0 or chanmsg >= 0xF0 and 0xB0 or chanmsg
   local newFlags = FlagsFromSelMute(selected, muted)
-  local defaultCCShape = ReadREAPERConfigVar_Int('midiccenv') or 0
-  if defaultCCShape ~= -1 then
-    defaultCCShape = defaultCCShape & 7
-    if defaultCCShape >= 0 and defaultCCShape <= 5 then
+  local defaultCCShape = ReadREAPERConfigVar_Int('midiccenv')
+  if defaultCCShape and defaultCCShape >= 0 then -- negative/absent == no default, leave square
+    defaultCCShape = defaultCCShape & 7 -- shape is the low 3 bits, the rest is undocumented
+    if defaultCCShape <= 5 then
       newFlags = newFlags | (defaultCCShape << 4)
     end
   end

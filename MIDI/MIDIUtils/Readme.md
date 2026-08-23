@@ -402,6 +402,7 @@ transaction, which will write all changes in a single bulk set action.
   * 5 - bezier
 
   `number` beztension: bezier tension
+  `boolean` CCBZ-flag: whether a `CCBZ` event for this shape exists in the original MIDI stream
 
 **MIDI_SetCCShape**
 

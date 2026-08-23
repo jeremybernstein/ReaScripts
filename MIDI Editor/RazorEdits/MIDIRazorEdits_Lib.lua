@@ -1714,7 +1714,7 @@ local function processCCs(activeTake, area, operation)
           if laneIsVel then
             helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), endppqpos = endppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, pitch = pitch, vel = vel, relvel = relvel })
           else
-            helper.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, msg2 = msg2, msg3 = msg3 })
+            helper.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = ppqpos + areaTickExtent:size(), chanmsg = chanmsg, chan = chan, msg2 = msg2, msg3 = msg3, shape = event.shape, beztension = event.beztension, hasBezier = event.hasBezier })
           end
         elseif operation == OP_DELETE then
           helper.addUnique(tDeletions, { type = laneIsVel and mu.NOTE_TYPE or mu.CC_TYPE, idx = idx })
@@ -1752,7 +1752,7 @@ local function processCCs(activeTake, area, operation)
             -- end
           else
             if newppqpos then
-              helper.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, chanmsg = chanmsg, chan = chan, msg2 = newmsg2 or msg2, msg3 = newmsg3 or msg3 })
+              helper.addUnique(tInsertions, { type = mu.CC_TYPE, selected = selected, muted = muted, ppqpos = newppqpos, chanmsg = chanmsg, chan = chan, msg2 = newmsg2 or msg2, msg3 = newmsg3 or msg3, shape = event.shape, beztension = event.beztension, hasBezier = event.hasBezier })
             end
           end
         else
@@ -1887,7 +1887,11 @@ local function processInsertions()
         touchedMIDI = true
       end
     else
-      mu.MIDI_InsertCC(activeTake, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+      local rv, newidx = mu.MIDI_InsertCC(activeTake, event.selected, event.muted, event.ppqpos, event.chanmsg, event.chan, event.msg2, event.msg3)
+      if rv and newidx and event.shape then
+        -- nil tension when the source had no CCBZ: don't inject a meta event the source lacked
+        mu.MIDI_SetCCShape(activeTake, newidx, event.shape, event.hasBezier and event.beztension or nil)
+      end
       touchedMIDI = true
     end
   end
@@ -2058,6 +2062,9 @@ local function generateSourceInfo(area, op, force, overlap)
             if wants and val <= topValue and val >= bottomValue then
               event.idx = idx
               event.val = val
+              if not laneIsVel then -- only for kept events, re-inserted CCs would otherwise get the default shape
+                _, event.shape, event.beztension, event.hasBezier = mu.MIDI_GetCCShape(activeTake, idx)
+              end
               sourceInfo.sourceEvents[#sourceInfo.sourceEvents + 1] = event
             end
           end
@@ -2511,7 +2518,10 @@ local function analyzeChunk()
   glob.currentGrid, glob.currentSwing = r.MIDI_GetGrid(activeTake)
 
   local _, midiccenvConfig = r.get_config_var_string('midiccenv')
-  glob.defaultCCCurve = tonumber(midiccenvConfig) or 0
+  local midiccenv = math.floor(tonumber(midiccenvConfig) or 0)
+  -- shape is the low 3 bits, the rest is other lane state: a square default with any high bit
+  -- set would otherwise read as non-square
+  glob.defaultCCCurve = (midiccenv >= 0 and (midiccenv & 7) <= 5) and (midiccenv & 7) or 0
 
   local mePrevLanes = meLanes
   meLanes = {}

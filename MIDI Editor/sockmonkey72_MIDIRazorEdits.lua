@@ -1,10 +1,12 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0-beta.24
+-- @version 1.5.0
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix: PB ruler tooltip showing when ME isn't in the foreground
+--   - promote to release
+--   - CC curve shape/bezier tension is preserved when copying/moving/duplicating
+--   - changes to the default CC curve preference take effect immediately, no restart
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="f979b50487f15480ac8b5f78741e713a394dc99d">
+<index version="1" name="sockmonkey72 Scripts" commit="a002e0bd09da8eeeebbc675472c72bc1dae548b3">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -213,6 +213,13 @@ add ImGui implementation of config script]]></changelog>
         <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset.so</source>
         <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_x64.dll</source>
         <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a67521ebb4a93751af0c55cf43b2bd231c2f08a6/MIDI/automidireset/reaper_automidireset_w32.dll</source>
+      </version>
+      <version name="1.4.0" author="sockmonkey72" time="2026-08-23T14:17:00Z">
+        <source platform="darwin" file="reaper_automidireset.dylib">https://github.com/jeremybernstein/ReaScripts/raw/a002e0bd09da8eeeebbc675472c72bc1dae548b3/MIDI/automidireset/reaper_automidireset.dylib</source>
+        <source platform="linux64" file="reaper_automidireset.so">https://github.com/jeremybernstein/ReaScripts/raw/a002e0bd09da8eeeebbc675472c72bc1dae548b3/MIDI/automidireset/reaper_automidireset_x86_64.so</source>
+        <source platform="linux-aarch64" file="reaper_automidireset_aarch64.so">https://github.com/jeremybernstein/ReaScripts/raw/a002e0bd09da8eeeebbc675472c72bc1dae548b3/MIDI/automidireset/reaper_automidireset_aarch64.so</source>
+        <source platform="win64" file="reaper_automidireset_x64.dll">https://github.com/jeremybernstein/ReaScripts/raw/a002e0bd09da8eeeebbc675472c72bc1dae548b3/MIDI/automidireset/reaper_automidireset_x64.dll</source>
+        <source platform="win32" file="reaper_automidireset_w32.dll">https://github.com/jeremybernstein/ReaScripts/raw/a002e0bd09da8eeeebbc675472c72bc1dae548b3/MIDI/automidireset/reaper_automidireset_w32.dll</source>
       </version>
     </reapack>
     <reapack name="MIDIUtils.lua" type="script" desc="MIDI Utils API">

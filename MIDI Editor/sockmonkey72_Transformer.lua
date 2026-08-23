@@ -1,10 +1,10 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.9
+-- @version 1.1.0-beta.10
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix crash on nil fsFlags when recalling presets
+--   - fix swing-grid quantization
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -25,7 +25,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.1.0-beta.9'
+local versionStr = '1.1.0-beta.10'
 
 local r = reaper
 

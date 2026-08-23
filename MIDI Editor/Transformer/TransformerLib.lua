@@ -231,6 +231,46 @@ local function getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
 end
 Shared.getGridUnitFromSubdiv = getGridUnitFromSubdiv
 
+-- swing is in REAPER units (-1..1, 0 == straight): the offbeat of each grid pair sits at
+-- gridUnit * (1 + swing * 0.5). rounding must happen against those points -- rounding to the
+-- straight grid and displacing afterwards leaves the decision boundaries unswung, which sends
+-- everything between the straight and swung midpoints to the wrong grid point
+local function swungGridPoints(ppqinmeasure, gridUnit, swing)
+  local pair = gridUnit * 2
+  local pairStart = math.floor(ppqinmeasure / pair) * pair
+  return pairStart, pairStart + (gridUnit * (1 + (swing or 0) * 0.5)), pairStart + pair
+end
+Shared.swungGridPoints = swungGridPoints
+
+local function snapToSwungGrid(ppqinmeasure, gridUnit, swing, roundmode)
+  local down, off, nextdown = swungGridPoints(ppqinmeasure, gridUnit, swing)
+  if roundmode == 'floor' then
+    return ppqinmeasure >= nextdown and nextdown or ppqinmeasure >= off and off or down
+  elseif roundmode == 'ceil' then
+    return ppqinmeasure <= down and down or ppqinmeasure <= off and off or nextdown
+  end
+  local best, bestdist = down, math.abs(ppqinmeasure - down)
+  for _, pt in ipairs({ off, nextdown }) do
+    local dist = math.abs(ppqinmeasure - pt)
+    if dist <= bestdist then best, bestdist = pt, dist end -- ties round up, as before
+  end
+  return best
+end
+Shared.snapToSwungGrid = snapToSwungGrid
+
+-- the grid's own swing wins for '$grid' (param1 == -1), otherwise the metric grid params.
+-- MPC swing is 0..100 with 50 == straight, REAPER swing -100..100 with 0 == straight
+local function getSwingAmount(subdiv, mgParams)
+  local gridSwing = (subdiv and subdiv < 0) and (Shared.gridInfo().currentSwing or 0) or 0
+  if gridSwing ~= 0 then return gridSwing end
+  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
+  if mgMods == gdefs.MG_GRID_SWING then
+    return mgReaSwing and ((mgParams.swing or 0) * 0.01) or (((mgParams.swing or 50) - 50) * 0.04)
+  end
+  return 0
+end
+Shared.getSwingAmount = getSwingAmount
+
 local function getValue(event, property, bipolar)
   if not property then return 0 end
   local is14bit = false
@@ -364,14 +404,18 @@ local globalCtx = TransformerContext()
 
 -- Deprecation tracking (warns once per key per session)
 local sharedAccessWarnings = {}
-local SHARED_DEPRECATION_ENABLED = true -- set false to silence during dev
+local SHARED_DEPRECATION_ENABLED = false -- set true to trace Shared.* access during ctx migration
 
--- Shared proxy for deprecation warnings
+-- Shared proxy for deprecation warnings.
+-- while tracing, the values live in sharedBacking so that every access misses SharedProxy and
+-- reaches __index -- storing them in SharedProxy itself makes __index unreachable, and no
+-- warning can ever fire. untraced, they stay in SharedProxy so the hot path is a plain read
+local sharedBacking = {}
 local SharedProxy = {}
 local SharedMT = {
   __index = function(t, key)
-    local value = rawget(t, key)
-    if value and SHARED_DEPRECATION_ENABLED and not sharedAccessWarnings[key] then
+    local value = sharedBacking[key]
+    if value ~= nil and not sharedAccessWarnings[key] then
       sharedAccessWarnings[key] = true
       local info = debug.getinfo(2, 'Sl')
       local source = info and info.source and info.source:match('([^/\\]+)$') or '?'
@@ -381,10 +425,15 @@ local SharedMT = {
     return value
   end,
   __newindex = function(t, key, value)
-    rawset(t, key, value)
-  end
+    sharedBacking[key] = value
+  end,
+  __pairs = function() return next, sharedBacking, nil end
 }
-setmetatable(SharedProxy, SharedMT)
+if SHARED_DEPRECATION_ENABLED then setmetatable(SharedProxy, SharedMT) end
+
+local function sharedProxyHas(key) -- either store, depending on tracing
+  return rawget(SharedProxy, key) ~= nil or sharedBacking[key] ~= nil
+end
 
 -- SharedProxy delegates to globalCtx (backward compat)
 SharedProxy.mu = mu
@@ -411,8 +460,11 @@ SharedProxy.lengthFormatRebuf = TimeUtils.lengthFormatRebuf
 -- fnStringToFn will be added after it's defined (line ~1110)
 
 -- Replace Shared table with proxy (keeps existing assignments but adds deprecation tracking)
+-- don't overwrite what the proxy already delegates: the pre-ctx accessors return the
+-- module-level tables, and for state that only ctx writes (gridInfo) or only ctx resets
+-- (addLengthInfo/moveCursorInfo _Take fields) that split the readers from the writers
 for k, v in pairs(Shared) do
-  SharedProxy[k] = v
+  if not sharedProxyHas(k) then SharedProxy[k] = v end
 end
 Shared = SharedProxy
 
@@ -3067,6 +3119,8 @@ TransformerLib.setWantsStripRepetitions = function(way) currentStripRepetitions 
 TransformerLib.TypeRegistry = TypeRegistry
 
 TransformerLib.TransformerContext = TransformerContext
+TransformerLib.snapToSwungGrid = snapToSwungGrid
+TransformerLib.swungGridPoints = swungGridPoints
 TransformerLib.getGlobalContext = function() return globalCtx end
 
 return TransformerLib

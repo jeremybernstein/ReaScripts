@@ -16,7 +16,6 @@ local r = reaper
 local gdefs = require 'TransformerGeneralDefs'
 local adefs = require 'TransformerActionDefs'
 
-local mgdefs = require 'types/TransformerMetricGrid'
 
 local function setMusicalLength(event, take, PPQ, mgParams)
   if not take then return event.projlen end
@@ -37,26 +36,9 @@ end
 
 -- calculate distance% from oldppqpos to nearest grid point (with swing)
 -- must be called BEFORE quantization/strength application
-local function calculateDistancePercent(oldppqpos, som, gridUnit, ppqinmeasure, mgParams, useGridSwing)
-  -- find nearest grid point (always round-to-nearest for distance calc)
-  local nearestGrid = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5))
-
-  -- apply swing to nearestGrid (same logic as quantize functions)
-  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
-  if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
-    local half = gridUnit * 0.5
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit - half and localpos < gridUnit + half then
-      nearestGrid = nearestGrid + (gridUnit * 0.5 * scale)
-    end
-  elseif mgMods == gdefs.MG_GRID_SWING then
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit then
-      local scale = ((mgParams.swing - 50) * 2) * 0.01
-      nearestGrid = nearestGrid + (gridUnit * scale)
-    end
-  end
+local function calculateDistancePercent(oldppqpos, som, gridUnit, ppqinmeasure, swing)
+  -- always round-to-nearest for distance calc
+  local nearestGrid = som + Shared.snapToSwungGrid(ppqinmeasure, gridUnit, swing)
 
   local distance = math.abs(oldppqpos - nearestGrid)
   local distancePercent = (distance / gridUnit) * 100
@@ -313,7 +295,7 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
   local strength = tonumber(mgParams.param2)
 
   local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local useGridSwing = subdiv < 0 and Shared.gridInfo().currentSwing ~= 0
+  local swing = Shared.getSwingAmount(subdiv, mgParams)
 
   if gridUnit == 0 then return event.projtime end
 
@@ -322,25 +304,7 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, oldppqpos)
 
   local ppqinmeasure = oldppqpos - som -- get the position from the start of the measure
-  local roundval = (mgParams.roundmode == 'floor') and 0 or (mgParams.roundmode == 'ceil') and 0.9999 or 0.5
-  local newppqpos = som + (gridUnit * math.floor((ppqinmeasure / gridUnit) + roundval))
-
-  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
-
-  if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
-    local half = gridUnit * 0.5
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit - half and localpos < gridUnit + half then
-      newppqpos = newppqpos + (gridUnit * 0.5 * scale)
-    end
-  elseif mgMods == gdefs.MG_GRID_SWING then
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit then
-      local scale = ((mgParams.swing - 50) * 2) * 0.01 -- convert to -1. - 1. for scaling
-      newppqpos = newppqpos + (gridUnit * scale)
-    end
-  end
+  local newppqpos = som + Shared.snapToSwungGrid(ppqinmeasure, gridUnit, swing, mgParams.roundmode)
 
   -- direction constraints
   local dirFlags = mgParams.directionFlags or 0xF
@@ -355,7 +319,7 @@ local function quantizeMusicalPosition(event, take, PPQ, mgParams)
     local effectiveStrength = strength
     -- calculate distance% from original position to nearest grid BEFORE strength application
     if hasDistanceScaling then
-      local distancePercent = calculateDistancePercent(oldppqpos, som, gridUnit, ppqinmeasure, mgParams, useGridSwing)
+      local distancePercent = calculateDistancePercent(oldppqpos, som, gridUnit, ppqinmeasure, swing)
       effectiveStrength = applyDistanceScaling(strength, distancePercent, mgParams.distanceRangeMin, mgParams.distanceRangeMax)
     end
 
@@ -443,7 +407,7 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
   local strength = tonumber(mgParams.param2)
 
   local gridUnit = Shared.getGridUnitFromSubdiv(subdiv, PPQ, mgParams)
-  local useGridSwing = subdiv < 0 and Shared.gridInfo().currentSwing ~= 0
+  local swing = Shared.getSwingAmount(subdiv, mgParams)
 
   if gridUnit == 0 then return event.projtime end
 
@@ -456,32 +420,12 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
 
   local ppqinmeasure = endppqpos - som -- get the position from the start of the measure
 
-  local roundval = (mgParams.roundmode == 'floor') and 0 or (mgParams.roundmode == 'ceil') and 0.9999 or 0.5
-  local quant = (gridUnit * math.floor((ppqinmeasure / gridUnit) + roundval))
+  local quant = Shared.snapToSwungGrid(ppqinmeasure, gridUnit, swing, mgParams.roundmode)
   local newendppqpos = som + quant
   local newppqlen = newendppqpos - ppqpos
-  if newppqlen < ppqlen * 0.5 then
-    newendppqpos = som + quant + gridUnit
+  if newppqlen < ppqlen * 0.5 then -- collapsed the note: push out to the next grid point
+    newendppqpos = som + Shared.snapToSwungGrid(quant + 1, gridUnit, swing, 'ceil')
     newppqlen = newendppqpos - ppqpos
-  end
-
-  local mgMods, mgReaSwing = mgdefs.getMetricGridModifiers(mgParams)
-
-  if useGridSwing or (mgMods == gdefs.MG_GRID_SWING and mgReaSwing) then
-    local scale = useGridSwing and Shared.gridInfo().currentSwing or (mgParams.swing * 0.01)
-    local half = gridUnit * 0.5
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit - half and localpos < gridUnit + half then
-      newendppqpos = newendppqpos + (gridUnit * 0.5 * scale)
-      newppqlen = newendppqpos - ppqpos
-    end
-  elseif mgMods == gdefs.MG_GRID_SWING then
-    local localpos = ppqinmeasure % (gridUnit * 2)
-    if localpos >= gridUnit then
-      local scale = ((mgParams.swing - 50) * 2) * 0.01 -- convert to -1. - 1. for scaling
-      newendppqpos = newendppqpos + (gridUnit * scale)
-      newppqlen = newendppqpos - ppqpos
-    end
   end
 
   -- direction constraints (shrink = end earlier, grow = end later)
@@ -497,7 +441,7 @@ local function quantizeMusicalEndPos(event, take, PPQ, mgParams)
     local effectiveStrength = strength
     -- calculate distance% from original end position to nearest grid BEFORE strength application
     if hasDistanceScaling then
-      local distancePercent = calculateDistancePercent(endppqpos, som, gridUnit, ppqinmeasure, mgParams, useGridSwing)
+      local distancePercent = calculateDistancePercent(endppqpos, som, gridUnit, ppqinmeasure, swing)
       effectiveStrength = applyDistanceScaling(strength, distancePercent, mgParams.distanceRangeMin, mgParams.distanceRangeMax)
     end
 

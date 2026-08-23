@@ -462,7 +462,7 @@ local function buildMusicalParams(gridType)
     local editor = r.MIDIEditor_GetActive()
     local take = editor and r.MIDIEditor_GetTake(editor)
     if take then
-      _, _, swing = r.MIDI_GetGrid(take)
+      _, swing = r.MIDI_GetGrid(take)
     end
   else  -- Manual
     qnString = '$' .. gridDivLabels[divIndex + 1]
@@ -478,7 +478,7 @@ local function buildMusicalParams(gridType)
   -- append swing if applicable
   if gridMode == 1 and gridStyleIndex == 3 then
     notation = notation .. '|sw(' .. swingStrength .. '.00)'
-  elseif gridMode == 0 and swing > 0 then
+  elseif gridMode == 0 and swing ~= 0 then -- negative swing is legal
     notation = notation .. '|sw(' .. string.format('%.2f', swing * 100) .. ')'
   end
 
@@ -523,7 +523,7 @@ local function getSwingValue()
     local editor = r.MIDIEditor_GetActive()
     local take = editor and r.MIDIEditor_GetTake(editor)
     if take then
-      local _, _, swing = r.MIDI_GetGrid(take)
+      local _, swing = r.MIDI_GetGrid(take)
       return swing
     end
     return 0
@@ -1449,8 +1449,8 @@ local function applyQuantizeToEvents(events, take)
     local editor = r.MIDIEditor_GetActive()
     local editorTake = editor and r.MIDIEditor_GetTake(editor)
     if editorTake then
-      local _, div, swingVal = r.MIDI_GetGrid(editorTake)
-      gridUnit = ppq * 4 * div  -- div is fraction of whole note
+      local gridQN, swingVal = r.MIDI_GetGrid(editorTake)
+      gridUnit = ppq * gridQN  -- MIDI_GetGrid reports the grid in QN
       swing = swingVal or 0
     else
       return events  -- no grid available
@@ -1507,17 +1507,9 @@ local function applyQuantizeToEvents(events, take)
     local measureStartTime = r.TimeMap_QNToTime(measureStart)
     local measureStartPPQ = r.MIDI_GetPPQPosFromProjTime(take, measureStartTime)
 
-    -- quantize relative to measure
+    -- quantize relative to measure (same swung-grid snap the action uses)
     local ppqInMeasure = oldPPQ - measureStartPPQ
-    local newPPQInMeasure = gridUnit * math.floor((ppqInMeasure / gridUnit) + 0.5)
-
-    -- apply swing (offset every other grid position)
-    if swing > 0 then
-      local gridIndex = math.floor(ppqInMeasure / gridUnit)
-      if gridIndex % 2 == 1 then
-        newPPQInMeasure = newPPQInMeasure + (gridUnit * swing)
-      end
-    end
+    local newPPQInMeasure = tx.snapToSwungGrid(ppqInMeasure, gridUnit, swing)
 
     local newPPQ = measureStartPPQ + newPPQInMeasure
 

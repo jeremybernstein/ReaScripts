@@ -391,12 +391,14 @@ local function onGrid(event, property, take, PPQ)
   local ppqpos = r.MIDI_GetPPQPosFromProjTime(take, event.projtime - timeAdjust)
   local measppq = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
   local gridUnit = grid * PPQ
-  local subMeas = math.floor((gridUnit * 2) + 0.5)
-  local swingUnit = swing and math.floor((gridUnit + (swing * gridUnit * 0.5)) + 0.5) or nil
+  if gridUnit == 0 then return false end
 
-  local testppq = (ppqpos - measppq) % subMeas
-  if testppq == 0 or (swingUnit and testppq % swingUnit == 0) then
-    return true
+  local ppqinmeasure = ppqpos - measppq
+  local testppq = math.floor(ppqinmeasure + 0.5)
+  -- compare against the swung points themselves: a modulo test reports false hits on negative swing
+  local down, off, nextdown = Shared.swungGridPoints(ppqinmeasure, gridUnit, swing)
+  for _, pt in ipairs({ down, off, nextdown }) do
+    if testppq == math.floor(pt + 0.5) then return true end
   end
   return false
 end
@@ -443,18 +445,8 @@ local function inGridRange(take, PPQ, event, rangeMin, rangeMax)
   local som = r.MIDI_GetPPQPos_StartOfMeasure(take, ppqpos)
   local ppqinmeasure = ppqpos - som
 
-  -- find nearest grid point
-  local nearestGrid = gridUnit * math.floor((ppqinmeasure / gridUnit) + 0.5)
-
-  -- apply swing adjustment if enabled
-  if swing and swing ~= 0 then
-    local subMeas = math.floor((gridUnit * 2) + 0.5)
-    local localpos = ppqinmeasure % subMeas
-    -- if on an odd grid point, adjust for swing
-    if localpos >= gridUnit - (gridUnit * 0.5) and localpos < gridUnit + (gridUnit * 0.5) then
-      nearestGrid = nearestGrid + (swing * gridUnit * 0.5)
-    end
-  end
+  -- find nearest grid point (swung, if the grid swings)
+  local nearestGrid = Shared.snapToSwungGrid(ppqinmeasure, gridUnit, swing)
 
   -- calculate distance as percentage of grid unit
   local distance = math.abs(ppqinmeasure - nearestGrid)

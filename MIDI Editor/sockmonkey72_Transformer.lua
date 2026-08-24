@@ -1,10 +1,11 @@
 -- @description MIDI Transformer
--- @version 1.1.0-beta.10
+-- @version 1.1.0-beta.11
 -- @author sockmonkey72
 -- @about
 --   # MIDI Transformer
 -- @changelog
---   - fix swing-grid quantization
+--   - improve 'Export Script' row layout so we don't need additional vertical space
+--   - de-jank Preset Notes field, should be more reliable
 -- @provides
 --   {Transformer}/*
 --   Transformer/icons/*
@@ -25,7 +26,7 @@
 -----------------------------------------------------------------------------
 --------------------------------- STARTUP -----------------------------------
 
-local versionStr = '1.1.0-beta.10'
+local versionStr = '1.1.0-beta.11'
 
 local r = reaper
 
@@ -211,6 +212,7 @@ local newFolderParentPath = ''
 local scriptWritesMainContext = true
 local scriptWritesMIDIContexts = true
 local scriptIgnoreSelectionInArrangeView = true
+local scriptOptionsOpen = false
 local refocusField = false
 local refocusOnNextIteration = false
 
@@ -3408,13 +3410,21 @@ local function windowFn()
   saveX, saveY = ImGui.GetCursorPos(ctx)
 
   if presetInputVisible then
-    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+    if not scriptOptionsOpen and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
       presetInputVisible = false
       presetInputDoesScript = false
       handledEscape = true
     end
 
-    ImGui.SetNextItemWidth(ctx, 2.5 * DEFAULT_ITEM_WIDTH)
+    -- clamp the row to the left of the notes panel: overlapping items would steal its hover
+    -- (restoreX is still the left margin here, it gets offset to the notes panel below)
+    local sectionButtonWidth = DEFAULT_ITEM_WIDTH * 1.5
+    local itemSpacingX = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
+    local rowWidth = (restoreX + 60 * currentFontWidth) - ImGui.GetCursorPosX(ctx) - scaled(10)
+    local inputWidth = math.min(2.5 * DEFAULT_ITEM_WIDTH,
+                                presetInputDoesScript and (rowWidth - sectionButtonWidth - itemSpacingX) or rowWidth)
+
+    ImGui.SetNextItemWidth(ctx, math.max(inputWidth, DEFAULT_ITEM_WIDTH))
     if refocusOnNextIteration then
       ImGui.SetKeyboardFocusHere(ctx)
       refocusOnNextIteration = false
@@ -3445,43 +3455,67 @@ local function windowFn()
     end
 
     if presetInputDoesScript then
+      -- options live in a popup: this row can't grow vertically, the window height is fixed
       ImGui.SameLine(ctx)
-      local saveXPos = ImGui.GetCursorPosX(ctx)
-      local rv, sel = ImGui.Checkbox(ctx, 'Main', scriptWritesMainContext)
-      if rv then
-        scriptWritesMainContext = sel
-        r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
-        refocusOnNextIteration = true
-      end
+      local sectionLabel = scriptWritesMainContext
+        and (scriptWritesMIDIContexts and 'Main+MIDI' or 'Main')
+        or (scriptWritesMIDIContexts and 'MIDI' or 'No Section')
+      ImGui.Button(ctx, sectionLabel, sectionButtonWidth)
       if ImGui.IsItemHovered(ctx) then
-        refocusField = true
+        refocusField = true -- clicking off the name field mustn't dismiss it
         inOKDialog = false
-      end
-
-      ImGui.SameLine(ctx)
-      rv, sel = ImGui.Checkbox(ctx, 'MIDI', scriptWritesMIDIContexts)
-      if rv then
-        scriptWritesMIDIContexts = sel
-        r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
-        refocusOnNextIteration = true
-      end
-      if ImGui.IsItemHovered(ctx) then
-        refocusField = true
-        inOKDialog = false
-      end
-
-      ImGui.SetCursorPosX(ctx, saveXPos)
-      rv, sel = ImGui.Checkbox(ctx, 'Ignore Selection in Arrange View', scriptIgnoreSelectionInArrangeView)
-      if rv then
-        scriptIgnoreSelectionInArrangeView = sel -- not persistent
-        refocusOnNextIteration = true
-      end
-      if ImGui.IsItemHovered(ctx) then
-        refocusField = true
-        inOKDialog = false
+        if ImGui.IsMouseClicked(ctx, 0) then
+          ImGui.OpenPopup(ctx, '##scriptoptions')
+        end
       end
     end
     manageSaveAndOverwrite(presetPathAndFilenameFromLastInput, doSavePreset, 2)
+  end
+
+  -- submitted unconditionally: an open popup which stops being submitted blocks hover window-wide
+  local scriptOptionsWasOpen = scriptOptionsOpen
+  scriptOptionsOpen = false
+
+  if ImGui.BeginPopup(ctx, '##scriptoptions', ImGui.WindowFlags_NoMove) then
+    scriptOptionsOpen = true
+    refocusField = true -- the name field is inactive while we're up here, keep it alive
+    inOKDialog = false
+
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+      ImGui.CloseCurrentPopup(ctx)
+      handledEscape = true
+    end
+
+    ImGui.TextDisabled(ctx, 'Add script to section...')
+    ImGui.Spacing(ctx)
+
+    local rv, sel = ImGui.Checkbox(ctx, 'Main', scriptWritesMainContext)
+    if rv then
+      scriptWritesMainContext = sel
+      r.SetExtState(scriptID, 'scriptWritesMainContext', scriptWritesMainContext and '1' or '0', true)
+    end
+
+    rv, sel = ImGui.Checkbox(ctx, 'MIDI Editor', scriptWritesMIDIContexts)
+    if rv then
+      scriptWritesMIDIContexts = sel
+      r.SetExtState(scriptID, 'scriptWritesMIDIContexts', scriptWritesMIDIContexts and '1' or '0', true)
+    end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    rv, sel = ImGui.Checkbox(ctx, 'Ignore Selection in Arrange View', scriptIgnoreSelectionInArrangeView)
+    if rv then
+      scriptIgnoreSelectionInArrangeView = sel -- not persistent
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
+  if scriptOptionsWasOpen and not scriptOptionsOpen then
+    refocusField = true
+    refocusOnNextIteration = true
   end
 
   restoreX = restoreX + 60 * currentFontWidth
@@ -3491,23 +3525,32 @@ local function windowFn()
 
   if not presetNotesViewEditor then
     ImGui.BeginGroup(ctx)
-    local noBuf = false
-    if presetNotesBuffer == '' then noBuf = true end
-    if noBuf then ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFFFF7F) end
-    ImGui.SetCursorPos(ctx, restoreX + (framePaddingX / 2), restoreY + (framePaddingY / 2))
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.TextWrapped(ctx, presetNotesBuffer == '' and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
-    if ImGui.IsItemHovered(ctx) and ImGui.IsMouseDoubleClicked(ctx, 0) then
+
+    -- hit-test the whole panel, not the text item: IsItemHovered() on an id-less item is false
+    -- whenever anything else holds hover/active, and only the glyphs themselves were clickable
+    local nx1, ny1 = vx + restoreX, vy + restoreY
+    local nx2, ny2 = vx + windowSizeX - 20, vy + presetButtonBottom
+    local notesHovered = ImGui.IsWindowHovered(ctx) and ImGui.IsMouseHoveringRect(ctx, nx1, ny1, nx2, ny2)
+    if notesHovered and ImGui.GetMouseClickedCount(ctx, 0) > 1 then
       presetNotesViewEditor = true
       justChanged = true
     end
+    if notesHovered then -- nothing else says this area is clickable
+      ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx), nx1, ny1, nx2, ny2, 0xFFFFFF3F, 2)
+    end
+
+    local noBuf = not tg.isValidString(presetNotesBuffer) -- nil buffer must still show the hint
+    if noBuf then ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFFFF7F) end
+    ImGui.SetCursorPos(ctx, restoreX + (framePaddingX / 2), restoreY + (framePaddingY / 2))
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.TextWrapped(ctx, noBuf and 'Double-Click To Edit Preset Notes' or presetNotesBuffer)
     if noBuf then ImGui.PopStyleColor(ctx) end
     ImGui.SetCursorPos(ctx, restoreX, restoreY)
     ImGui.EndGroup(ctx)
     updateCurrentRect()
   else
     if justChanged then ImGui.SetKeyboardFocusHere(ctx) end
-    local retval, buf = ImGui.InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer, windowSizeX - restoreX - 20, presetButtonBottom - restoreY, inputFlag)
+    local retval, buf = ImGui.InputTextMultiline(ctx, '##presetnotes', presetNotesBuffer or '', windowSizeX - restoreX - 20, presetButtonBottom - restoreY, inputFlag)
     if justChanged and ImGui.IsItemActivated(ctx) then
       justChanged = false
     end

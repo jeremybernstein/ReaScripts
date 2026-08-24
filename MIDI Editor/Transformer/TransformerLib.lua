@@ -2748,7 +2748,7 @@ local function loadPresetFromTable(presetTab)
   scriptIgnoreSelectionInArrangeView = presetTab.scriptIgnoreSelectionInArrangeView
   tg.setNotesInChord(presetTab.notesInChord)
   currentStripRepetitions = presetTab.stripRepetitions
-  return presetTab.notes
+  return presetTab.notes or '' -- notes is omitted from the preset when empty, callers want a string
 end
 
 local function loadPreset(pPath)

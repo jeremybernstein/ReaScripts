@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="71bbc690244528311bbe5a54d1ce5eaf34533483">
+<index version="1" name="sockmonkey72 Scripts" commit="0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -2457,6 +2457,54 @@ RazorEdits/MIDIUtils.lua https://raw.githubusercontent.com/jeremybernstein/ReaSc
         <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_SelectedNotes.lua">https://github.com/jeremybernstein/ReaScripts/raw/bb4099d4db94d0cd04c06aaf6af7829ea6f99c15/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_SelectedNotes.lua</source>
         <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_Slicer.lua">https://github.com/jeremybernstein/ReaScripts/raw/bb4099d4db94d0cd04c06aaf6af7829ea6f99c15/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_Slicer.lua</source>
         <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_Settings.lua">https://github.com/jeremybernstein/ReaScripts/raw/bb4099d4db94d0cd04c06aaf6af7829ea6f99c15/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_Settings.lua</source>
+      </version>
+      <version name="1.5.1-beta.1" author="sockmonkey72" time="2026-08-26T09:10:09Z">
+        <changelog><![CDATA[- pitch bend display and editing now respect the MIDI editor's channel filter,
+  including multi-channel filters set in the event filter dialog
+- marquee selection no longer selects PB points on hidden channels
+- hiding a channel deselects any selected PB points, so they won't be deleted or
+  dragged while invisible
+- new PB points take the channel of the note you're pointing at, for both
+  double-click insert and freehand draw
+- when showing all channels, clicking empty space no longer inserts a point
+  measured against a note that isn't there (MIDI 60, C4)
+- channel is always visible: hovering a point shows its channel, otherwise the
+  ruler shows the channel on which the next edit will land
+- the pitch bend channel menu no longer sets the MIDI editor's "channel for new
+  events" — it could never set it reliably, and MRE now tracks its own channel internally
+- note selection changes from outside of MRE (via script f.e.) will not change MRE's
+  channel target out from under the user]]></changelog>
+        <source file="RazorEdits/MIDIRazorEdits_Analyze.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Analyze.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Classes.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Classes.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Coords.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Coords.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Global.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Global.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Helper.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Helper.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Keys.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Keys.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_LICE.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_LICE.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Lib.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Lib.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Mode.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Mode.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_PitchBend.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_PitchBend.lua</source>
+        <source file="RazorEdits/MIDIRazorEdits_Slicer.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MIDIRazorEdits_Slicer.lua</source>
+        <source file="RazorEdits/MRE_CMD.pdf">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MRE_CMD.pdf</source>
+        <source file="RazorEdits/MRE_README.md">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/MRE_README.md</source>
+        <source file="RazorEdits/PitchBendMode_README.md">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/PitchBendMode_README.md</source>
+        <source file="RazorEdits/bend.cur">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/bend.cur</source>
+        <source file="RazorEdits/bend_rmb.cur">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/bend_rmb.cur</source>
+        <source file="RazorEdits/curve.cur">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/curve.cur</source>
+        <source file="RazorEdits/rmb.cur">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/rmb.cur</source>
+        <source file="RazorEdits/slicer.cur">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/slicer.cur</source>
+        <source file="RazorEdits/slicer_rmb.cur">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/slicer_rmb.cur</source>
+        <source file="RazorEdits/lib/lua-scala/LICENSE">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/lib/lua-scala/LICENSE</source>
+        <source file="RazorEdits/lib/lua-scala/scl.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/lib/lua-scala/scl.lua</source>
+        <source file="RazorEdits/lib/semver/MIT-LICENSE.txt">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/lib/semver/MIT-LICENSE.txt</source>
+        <source file="RazorEdits/lib/semver/README.md">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/lib/semver/README.md</source>
+        <source file="RazorEdits/lib/semver/semver.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/RazorEdits/lib/semver/semver.lua</source>
+        <source file="RazorEdits/MIDIUtils.lua">https://raw.githubusercontent.com/jeremybernstein/ReaScripts/refs/heads/jb/extents_fixup/MIDI/MIDIUtils.lua</source>
+        <source main="main midi_editor">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/sockmonkey72_MIDIRazorEdits.lua</source>
+        <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_PitchBend.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_PitchBend.lua</source>
+        <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_SelectedNotes.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_SelectedNotes.lua</source>
+        <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_Slicer.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_Slicer.lua</source>
+        <source main="main midi_editor" file="sockmonkey72_MIDIRazorEdits_Settings.lua">https://github.com/jeremybernstein/ReaScripts/raw/0bb5fe03b721b11ec6644fbca1d8ccf62db45bd6/MIDI%20Editor/sockmonkey72_MIDIRazorEdits_Settings.lua</source>
       </version>
     </reapack>
     <reapack name="sockmonkey72_NudgeMIDI.lua" type="script" desc="Nudge MIDI">

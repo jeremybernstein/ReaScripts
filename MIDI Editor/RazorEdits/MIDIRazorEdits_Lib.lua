@@ -2570,6 +2570,8 @@ local function analyzeChunk()
   filterChannel = tonumber(filterChannel)
   filterEnabled = tonumber(filterEnabled)
   editorFilterChannels = filterEnabled ~= 0 and multiChanFilter ~= 0 and multiChanFilter or nil
+  -- expose to PB mode (own module) -- main-mode paths use the file-local above
+  meState.filterChannels = editorFilterChannels
 
   --[[
   0 = show all
@@ -3141,11 +3143,6 @@ local function processKeys()
     if not glob.slicerQuitAfterProcess and keyMatches(vState, keyMappings.pitchBendMode) then
       glob.inPitchBendMode = true
       glob.inSlicerMode = false
-      local pbConfig = pitchbend.getConfig()
-      if not pbConfig.showAllNotes then
-        local meActiveChan = math.max(0, (glob.meState.activeChannel or 1) - 1)
-        pitchbend.setConfig('activeChannel', meActiveChan)
-      end
       return
     end
     passUnconsumedKeys(vState) -- we might not want this
@@ -3162,12 +3159,8 @@ local function processKeys()
     glob.inPitchBendMode = not glob.inPitchBendMode
     if glob.inPitchBendMode then
       glob.inSlicerMode = false -- exclusive modes
-      -- seed activeChannel from MIDI editor's active channel (if filtering)
-      local pbConfig = pitchbend.getConfig()
-      if not pbConfig.showAllNotes then
-        local meActiveChan = math.max(0, (glob.meState.activeChannel or 1) - 1)
-        pitchbend.setConfig('activeChannel', meActiveChan)
-      end
+      -- activeChannel is MRE's own (restored from ProjExtState); never re-seeded
+      -- from the editor, whose channel we corrupt just by polling the item chunk
     end
     return
   end

@@ -1219,16 +1219,11 @@ local function drawPitchBend(hwnd, mode, antialias)
   -- Cache function lookups
   local mmax, mmin, mfloor, mabs = math.max, math.min, math.floor, math.abs
 
-  local activeChannel = nil
-  if not config.showAllNotes then
-    activeChannel = config.activeChannel
-  end
-
   if config.showMicrotonalLines and config.tuningScale then
     local snapLineColor = 0xFF39FF14
     local drawnPitches = {}
     for chan, points in pairs(pbPoints) do
-      if config.showAllNotes or chan == activeChannel then
+      if pitchbend.isChannelVisible(chan) then
         for _, pt in ipairs(points) do
           if pt.associatedNotes and #pt.associatedNotes > 0 then
             local refPitch = pt.associatedNotes[1].pitch
@@ -1253,7 +1248,7 @@ local function drawPitchBend(hwnd, mode, antialias)
   -- Draw PB curves for each channel
   for chan, points in pairs(pbPoints) do
     -- filter by active channel if showAllNotes is false
-    if config.showAllNotes or chan == activeChannel then
+    if pitchbend.isChannelVisible(chan) then
     local npts = #points
     if npts > 0 then
       -- TETHER DESIGN: dashed vertical lines connecting PB points to their

@@ -185,6 +185,7 @@ end
 local function clearCache()
   cache.take = nil
   cache.midiHash = nil
+  cache.targetMx, cache.targetMy, cache.targetHash, cache.targetChan = nil, nil, nil, nil
   for k in pairs(cache.viewState) do
     cache.viewState[k] = nil
   end
@@ -353,12 +354,21 @@ local function getActiveChannelFilter()
   return config.activeChannel
 end
 
+-- editor's EVTFILTER channel mask is primary, the 'h' menu narrows within it.
+-- you can't edit what you can't see: this gates drawing AND every path that
+-- can put a point into the selection set.
+local function isChannelVisible(chan)
+  local mask = glob.meState and glob.meState.filterChannels
+  if mask and (mask & (1 << chan)) == 0 then return false end
+  if config.showAllNotes then return true end
+  return chan == config.activeChannel
+end
+
 -- hit test: check if mouse position is near a PB point
 local function hitTestPoint(mx, my, tolerance)
   tolerance = tolerance or 8
-  local activeChannel = getActiveChannelFilter()
   for chan, points in pairs(pbPoints) do
-    if not activeChannel or chan == activeChannel then
+    if isChannelVisible(chan) then
       for i, pt in ipairs(points) do
         if pt.screenX and pt.screenY then
           local dx = math.abs(mx - pt.screenX)
@@ -378,9 +388,8 @@ end
 -- hit region: middle 85% horizontally, 16px vertically from the Y range
 local function hitTestCurve(mx, my)
   local tolerance = 16
-  local activeChannel = getActiveChannelFilter()
   for chan, points in pairs(pbPoints) do
-    if not activeChannel or chan == activeChannel then
+    if isChannelVisible(chan) then
       for i = 1, #points - 1 do
         local pt1 = points[i]
         local pt2 = points[i + 1]
@@ -633,10 +642,6 @@ local function saveActiveChannel()
     r.SetProjExtState(0, glob.scriptID, 'pbShowAllNotes', config.showAllNotes and '1' or '0')
     r.MarkProjectDirty(0)
   end
-  if glob.liceData.editor and not config.showAllNotes then
-    r.MIDIEditor_OnCommand(glob.liceData.editor, 40775) -- goose whatever this annoying bug is in REAPER (https://forum.cockos.com/showthread.php?p=2917377#post2917377)
-    r.MIDIEditor_OnCommand(glob.liceData.editor, config.activeChannel + 40482)
-  end
 end
 
 -- clear project overrides (revert to system defaults)
@@ -724,7 +729,7 @@ local function associatePBWithNotes(take, pbEvents, mu)
   for i = 0, noteCount - 1 do
     local rv, selected, muted, startppq, endppq, noteChan, pitch, vel = mu.MIDI_GetNote(take, i)
     if rv then
-      local note = { pitch = pitch, startppq = startppq, endppq = endppq, chan = noteChan }
+      local note = { pitch = pitch, startppq = startppq, endppq = endppq, chan = noteChan, selected = selected }
       if not notesByChannel[noteChan] then notesByChannel[noteChan] = {} end
       table.insert(notesByChannel[noteChan], note)
     end
@@ -885,6 +890,52 @@ local function findNoteAtTime(chan, ppqpos, targetPitch)
   end
 end
 
+-- nearest note to the cursor across VISIBLE channels -- the single answer to
+-- "which note am I bending", and in MPE that IS "which channel".
+-- both insertion paths use this; neither declares a channel of its own.
+-- total ordering matters: pairs() has no defined order, so without a tiebreak
+-- all the way down, an exact tie could resolve differently run to run.
+--   1. sounding beats merely nearby
+--   2. closest to the cursor pitch (unbent pitch -- see note below)
+--   3. the declared channel wins (the escape hatch for unison MPE doubling)
+--   4. lowest channel number, purely for determinism
+-- NOTE: compares note.pitch, NOT the sounding (bent) pitch. a heavily bent note
+-- renders away from where this looks for it. deliberate: resolving bend per note
+-- per frame is not worth the complexity.
+local function findNearestNote(ppqpos, targetPitch, window)
+  window = window or 0
+  local best, bestChan, bestSounding, bestDist = nil, nil, false, math.huge
+  for chan, channelNotes in pairs(notesByChannel) do
+    if isChannelVisible(chan) then
+      for _, note in ipairs(channelNotes) do
+        local sounding = note.startppq <= ppqpos and note.endppq > ppqpos
+        -- symmetric window: upcoming notes, and ones that just ended (bend tails)
+        local nearby = (note.startppq > ppqpos and note.startppq <= ppqpos + window)
+                    or (note.endppq <= ppqpos and note.endppq >= ppqpos - window)
+        if sounding or nearby then
+          local dist = math.abs(note.pitch - targetPitch)
+          local better
+          if best == nil then better = true
+          elseif sounding ~= bestSounding then better = sounding
+          elseif dist ~= bestDist then better = dist < bestDist
+          elseif (chan == config.activeChannel) ~= (bestChan == config.activeChannel) then
+            better = chan == config.activeChannel
+          else better = chan < bestChan end
+          if better then best, bestChan, bestSounding, bestDist = note, chan, sounding, dist end
+        end
+      end
+    end
+  end
+  return best, bestChan
+end
+
+-- search window for findNearestNote: 2x grid, min 1/8 beat
+local function noteSearchWindow(take)
+  local ppq = take and mu.MIDI_GetPPQ(take) or 960
+  local gridWindow = glob.currentGrid and (ppq * glob.currentGrid * 2) or 0
+  return math.max(gridWindow, ppq / 8)
+end
+
 -- calculate visible PPQ range with margin for curves that span into view
 local function getVisiblePPQRange(take)
   local meState = glob.meState
@@ -942,13 +993,15 @@ end
 -- select all PB points within a screen rect, returns true if any selected
 local function marqueeSelectPoints(x1, y1, x2, y2)
   local anySelected = false
-  for _, points in pairs(pbPoints) do
-    for _, pt in ipairs(points) do
-      if pt.screenX and pt.screenY
-         and pt.screenX >= x1 and pt.screenX <= x2
-         and pt.screenY >= y1 and pt.screenY <= y2 then
-        pt.selected = true
-        anySelected = true
+  for chan, points in pairs(pbPoints) do
+    if isChannelVisible(chan) then
+      for _, pt in ipairs(points) do
+        if pt.screenX and pt.screenY
+           and pt.screenX >= x1 and pt.screenX <= x2
+           and pt.screenY >= y1 and pt.screenY <= y2 then
+          pt.selected = true
+          anySelected = true
+        end
       end
     end
   end
@@ -1191,6 +1244,57 @@ local function commitDrawPath(activeTake)
   return 'Draw Pitch Bend'
 end
 
+-- track MRE's active channel to a single-channel selection.
+-- only bites while filtering (MRE's own selection paths are gated by
+-- isChannelVisible, so a PB selection is always already on the visible channel) --
+-- the live case is a NOTE selected on a hidden channel, since REAPER owns note
+-- selection. same behaviour the draw path already applies when adopting a note's
+-- channel. inert while the deciding selection spans channels: selecting across
+-- channels is a feature here, and silently retargeting would fight it.
+local lastFollowChannel = nil
+local pendingEntrySeed = false
+
+-- includeNotes is true only on the first frame after entering PB mode. per-frame,
+-- notes are deliberately ignored: deselect-on-hide empties the PB pool whenever you
+-- switch channels, and a notes fallback would then drag the view to whatever note
+-- happened to be selected, one frame after you chose a channel by hand.
+local function followSelectionChannel(includeNotes)
+  -- the pools must NOT be merged -- a stale note selection on some other channel
+  -- would veto a deliberate PB click, which is backwards.
+  local found = nil
+  for chan, points in pairs(pbPoints) do
+    for _, pt in ipairs(points) do
+      if pt.selected then
+        if found ~= nil and found ~= chan then return end  -- PB spans channels
+        found = chan
+        break
+      end
+    end
+  end
+
+  if found == nil and includeNotes then
+    for chan, notes in pairs(notesByChannel) do
+      for _, note in ipairs(notes) do
+        if note.selected then
+          if found ~= nil and found ~= chan then return end  -- notes span channels
+          found = chan
+          break
+        end
+      end
+    end
+  end
+
+  if found == nil then return end
+  if found == lastFollowChannel then return end  -- also lets a manual 'h' override stick
+  lastFollowChannel = found
+
+  if config.activeChannel ~= found then
+    config.activeChannel = found
+    saveActiveChannel()
+    pbNeedsRedraw = true
+  end
+end
+
 -- process PB mode (called from main loop)
 local function processPitchBend(mx, my, mouseState, mu, activeTake)
   if not glob.inPitchBendMode then return false end
@@ -1257,6 +1361,34 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
     end
   end
 
+  if not dragState then
+    -- BEFORE deselect-on-hide: follow may be about to reveal the very channel a
+    -- selection lives on (e.g. another script just selected points there)
+    followSelectionChannel(pendingEntrySeed)
+    pendingEntrySeed = false
+
+    -- drop selection on channels that are hidden (editor filter or 'h' menu):
+    -- a stale selection there would let delete/drag hit data the user can't see.
+    -- unguarded scan rather than change-detection -- it self-limits, since once
+    -- dropped there is nothing left to drop and no sync fires.
+    local dropped = false
+    for chan, points in pairs(pbPoints) do
+      if not isChannelVisible(chan) then
+        for _, pt in ipairs(points) do
+          if pt.selected then
+            pt.selected = false
+            dropped = true
+          end
+        end
+      end
+    end
+    if dropped then
+      if activeTake then syncSelectionToMIDI(activeTake, mu) end  -- commits without undo
+      pbNeedsRedraw = true
+    end
+  end
+
+
   -- handle mouse outside content area (mx/my nil: ruler, outside editor, etc.)
   if not mx or not my then
     if mouseState.released then
@@ -1321,22 +1453,42 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
       local soundingPitch = basePitch + st
       local noteName = pitchToNoteName(soundingPitch)
       local tipX, tipY = r.GetMousePosition()
-      setTooltip(string.format("%.2f st (%s)", st, noteName), tipX + 12, tipY + 12, true)
-    elseif not config.showAllNotes then
+      setTooltip(string.format("Ch %d | %.2f st (%s)", hoveredPoint.chan + 1, st, noteName),
+                 tipX + 12, tipY + 12, true)
+    else
+      -- readout is unconditional: knowing where input lands matters MOST in All mode
       local screenRect = glob.liceData and glob.liceData.screenRect
       local windRect = glob.liceData and glob.liceData.windRect
       if screenRect and windRect then
         local activeChan = getActiveChannelFilter()
+        local centerX = math.floor((screenRect.x1 + screenRect.x2) / 2)
+        -- screenRect Y is native-converted on macOS, convert back for TrackCtl_SetToolTip
+        -- offset direction differs: Y-down on Windows, Y-up on macOS (Cocoa)
+        local rulerY = math.floor(coords.nativeYToScreen(screenRect.y1, windRect)) + (helper.is_macos and 85 or -60)
+        local label
         if activeChan then
-          local centerX = math.floor((screenRect.x1 + screenRect.x2) / 2)
-          -- screenRect Y is native-converted on macOS, convert back for TrackCtl_SetToolTip
-          -- offset direction differs: Y-down on Windows, Y-up on macOS (Cocoa)
-          local rulerY = math.floor(coords.nativeYToScreen(screenRect.y1, windRect)) + (helper.is_macos and 85 or -60)
-          setTooltip(string.format("Ch %d (h=menu)", activeChan + 1), centerX, rulerY, true)
+          label = string.format('Ch %d (h=menu)', activeChan + 1)  -- filtered: target is fixed
+        else
+          -- All mode: resolve the live target, so option (c)'s "nothing happens"
+          -- over empty space reads as a state rather than a broken click.
+          -- cached on cursor + MIDI hash: this walks every visible note
+          if cache.targetMx ~= mx or cache.targetMy ~= my or cache.targetHash ~= cache.midiHash then
+            cache.targetMx, cache.targetMy, cache.targetHash = mx, my, cache.midiHash
+            local ppq = screenXToPpq(mx, activeTake)
+            local _, tChan
+            if ppq then
+              _, tChan = findNearestNote(ppq, screenYToPitch(my), noteSearchWindow(activeTake))
+            end
+            cache.targetChan = tChan
+          end
+          label = cache.targetChan
+                  and string.format('All -> Ch %d (h=menu)', cache.targetChan + 1)
+                  or 'All -> no target (h=menu)'
         end
+        setTooltip(label, centerX, rulerY, true)
+      else
+        setTooltip("", 0, 0, false)
       end
-    else
-      setTooltip("", 0, 0, false)
     end
 
     -- center line positioning mode (comp/exp modifier held without dragging)
@@ -1459,8 +1611,7 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
         end
       elseif drawHeld then
         -- draw modifier: always start draw, even over existing points
-        local meState = glob.meState
-        local activeChan = meState.activeChannel and meState.activeChannel > 0 and (meState.activeChannel - 1) or 0
+        local activeChan = config.activeChannel or 0  -- fallback; nearest-note search below usually wins
 
         -- calculate initial point (snap based on current shift state)
         local ppqpos = screenXToPpq(mx, activeTake)
@@ -1471,36 +1622,18 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           ppqpos = snapPpqToGrid(ppqpos, activeTake)
         end
 
-        -- find initial reference note from mouse Y position (nearest note by pitch)
-        -- search ALL channels, then adopt that channel for drawing
-        -- NOTE: keep in sync with associatePBWithNotes (~line 644)
+        -- which note am I bending? the note answers the channel.
         local mousePitch = screenYToPitch(my)
-        local drawPpq = activeTake and mu.MIDI_GetPPQ(activeTake) or 960
-        local gridLookahead = glob.currentGrid and (drawPpq * glob.currentGrid * 2) or 0
-        local lookahead = math.max(gridLookahead, drawPpq / 8)  -- 2x grid, min 1/8 beat
-        local refNote = nil
-        local minPitchDist = math.huge
-        -- search all channels for nearest note by pitch
-        for chan, channelNotes in pairs(notesByChannel) do
-          for _, note in ipairs(channelNotes) do
-            -- include sounding notes OR notes starting within lookahead
-            local isSounding = note.startppq <= ppqpos and note.endppq > ppqpos
-            local isUpcoming = note.startppq > ppqpos and note.startppq <= ppqpos + lookahead
-            if isSounding or isUpcoming then
-              local pitchDist = math.abs(note.pitch - mousePitch)
-              if pitchDist < minPitchDist then
-                minPitchDist = pitchDist
-                refNote = note
-                activeChan = chan  -- adopt this channel
-              end
-            end
+        local refNote, foundChan = findNearestNote(ppqpos, mousePitch, noteSearchWindow(activeTake))
+        if refNote then
+          activeChan = foundChan
+          -- adopt channel so the display follows (skip in All mode; nothing to narrow)
+          if not config.showAllNotes then
+            config.activeChannel = activeChan
+            saveActiveChannel()
           end
-        end
-        -- adopt channel: update config so display filters to this channel
-        -- (skip if showAllNotes - use cmd+rightclick to switch channel explicitly)
-        if refNote and not config.showAllNotes then
-          config.activeChannel = activeChan
-          saveActiveChannel()
+        elseif config.showAllNotes then
+          return true  -- no note to infer from and no channel declared: don't guess
         end
         local refPitch = refNote and refNote.pitch or 60
 
@@ -2010,14 +2143,19 @@ local function processPitchBend(mx, my, mouseState, mu, activeTake)
           ppqpos = snapPpqToGrid(ppqpos, activeTake)
         end
 
-        -- use active channel from editor (1-based in chunk, convert to 0-based for MIDI)
-        local chan = math.max(0, (meState.activeChannel or 1) - 1)
-
         -- get target pitch from mouse Y position
         local targetPitch = screenYToPitch(my)
 
-        -- find the associated note to calculate semitone offset from
-        local refNote = findNoteAtTime(chan, ppqpos, targetPitch)
+        -- same question as the draw path, same answer: the note picks the channel
+        local refNote, foundChan = findNearestNote(ppqpos, targetPitch, noteSearchWindow(activeTake))
+        local chan
+        if refNote then
+          chan = foundChan
+        elseif not config.showAllNotes then
+          chan = config.activeChannel or 0  -- explicit single-channel target
+        else
+          return true  -- no note to infer from and no channel declared: don't guess
+        end
         local refPitch = refNote and refNote.pitch or 60  -- Default to middle C if no note
 
         -- calculate semitone offset: how far from reference note pitch
@@ -2162,11 +2300,10 @@ end
 local function showCurveMenu(take, midiUtils)
   if not take or not midiUtils then return nil end
 
-  local activeChannel = getActiveChannelFilter()
   local hasPoints = false
   local hasSelection = false
   for chan, points in pairs(pbPoints) do
-    if not activeChannel or chan == activeChannel then
+    if isChannelVisible(chan) then
       for _, pt in ipairs(points) do
         hasPoints = true
         if pt.selected then hasSelection = true end
@@ -2189,7 +2326,7 @@ local function showCurveMenu(take, midiUtils)
     local changed = false
     midiUtils.MIDI_OpenWriteTransaction(take)
     for chan, points in pairs(pbPoints) do
-      if not activeChannel or chan == activeChannel then
+      if isChannelVisible(chan) then
         for _, pt in ipairs(points) do
           if not hasSelection or pt.selected then
             midiUtils.MIDI_SetCCShape(take, pt.idx, shapeNum, pt.beztension or 0)
@@ -2241,11 +2378,10 @@ local function snapSelectedToSemitone(take, midiUtils)
 end
 
 local function selectAll()
-  local activeChannel = getActiveChannelFilter()
   deselectAll()
   -- then select only visible/active channel points
   for chan, points in pairs(pbPoints) do
-    if not activeChannel or chan == activeChannel then
+    if isChannelVisible(chan) then
       for _, pt in ipairs(points) do
         pt.selected = true
       end
@@ -2850,11 +2986,6 @@ local function toggleMicrotonalLines()
   return config.showMicrotonalLines
 end
 
-local function getActiveChannel()
-  if config.showAllNotes then return nil end
-  return config.activeChannel
-end
-
 local function showChannelMenu()
   -- extra guard: don't show menu if not in foreground (gfx.showmenu brings app to front)
   if not glob.editorIsForeground then return end
@@ -2918,7 +3049,8 @@ PitchBend.isConfigDialogOpen = isConfigDialogOpen
 PitchBend.hasProjectOverrides = hasProjectOverrides
 PitchBend.handleRightClick = handleRightClick
 PitchBend.toggleMicrotonalLines = toggleMicrotonalLines
-PitchBend.getActiveChannel = getActiveChannel
+PitchBend.getActiveChannel = getActiveChannelFilter
+PitchBend.isChannelVisible = isChannelVisible
 PitchBend.showChannelMenu = showChannelMenu
 PitchBend.restoreCursor = function()
   glob.setCursor(glob.wantsRightButton and glob.bend_cursor_rmb or glob.bend_cursor)
@@ -2948,11 +3080,10 @@ end
 function PitchBend.enter()
   glob.inPitchBendMode = true
   glob.inSlicerMode = false -- exclusive modes
-  -- seed activeChannel from ME if filtering is active
-  if not config.showAllNotes then
-    local meActiveChan = math.max(0, (glob.meState.activeChannel or 1) - 1)
-    config.activeChannel = meActiveChan
-  end
+  -- activeChannel is ours: restored from ProjExtState in handleState, not re-read
+  -- from the editor (whose value we corrupt just by polling the item chunk)
+  lastFollowChannel = nil  -- re-resolve on entry; the old value outlives the mode
+  pendingEntrySeed = true  -- one shot: let a selected NOTE pick the channel on entry
 end
 
 function PitchBend.exit()

@@ -1,12 +1,24 @@
 -- @description MIDI Razor Edits
--- @version 1.5.0
+-- @version 1.5.1-beta.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - promote to release
---   - CC curve shape/bezier tension is preserved when copying/moving/duplicating
---   - changes to the default CC curve preference take effect immediately, no restart
+--   - pitch bend display and editing now respect the MIDI editor's channel filter,
+--     including multi-channel filters set in the event filter dialog
+--   - marquee selection no longer selects PB points on hidden channels
+--   - hiding a channel deselects any selected PB points, so they won't be deleted or
+--     dragged while invisible
+--   - new PB points take the channel of the note you're pointing at, for both
+--     double-click insert and freehand draw
+--   - when showing all channels, clicking empty space no longer inserts a point
+--     measured against a note that isn't there (MIDI 60, C4)
+--   - channel is always visible: hovering a point shows its channel, otherwise the
+--     ruler shows the channel on which the next edit will land
+--   - the pitch bend channel menu no longer sets the MIDI editor's "channel for new
+--     events" — it could never set it reliably, and MRE now tracks its own channel internally
+--   - note selection changes from outside of MRE (via script f.e.) will not change MRE's
+--     channel target out from under the user
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

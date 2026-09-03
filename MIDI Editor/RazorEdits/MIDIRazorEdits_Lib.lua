@@ -524,7 +524,7 @@ updateAreaFromTimeValue = function(area, noCheck)
         y2 = math.floor((meLanes[-1].bottomPixel + (meState.bottomPitch * meState.pixelsPerPitch)) + 0.5)
       end
     else
-      if meState.noteTab then
+      if meState.noteTab and not area.ccLane then
         local topPixel = 0  -- relative (0-based)
         local multi = meState.pixelsPerPitch
         -- in noteTab mode, topValue is 127 (or less if scrolled)
@@ -4642,7 +4642,7 @@ local function processMouse()
                 for i, testArea in ipairs(areas) do
                   if (testArea.ccLane == area.ccLane or (not testArea.ccLane and not area.ccLane)) then
                     local bottomPixel = meLanes[area.ccLane or -1].bottomPixel
-                    if meState.noteTab then
+                    if meState.noteTab and not area.ccLane then
                       bottomPixel = math.min(bottomPixel, meLanes[-1].topPixel + math.floor(((#meState.noteTab - (127 - meState.topPitch)) * meState.pixelsPerPitch) + 0.5))
                     end
                     if testArea.viewRect.y2 + dy > bottomPixel then dy = 0 break end
@@ -4712,7 +4712,8 @@ local function processMouse()
           end
         end
 
-        if meState.noteTab then
+        -- only relevant in the note area: CC lanes always live below the last note row
+        if meState.noteTab and not areas[#areas].ccLane then
           -- bottomPixel is relative (0-based)
           local bottomPixel = math.floor(((#meState.noteTab - (127 - meState.topPitch)) * meState.pixelsPerPitch) + 0.5)
           if areas[#areas].logicalRect.y1 > bottomPixel then

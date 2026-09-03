@@ -1,10 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.5.1-beta.2
+-- @version 1.5.1-beta.3
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix CC lane razor creation in 'hide unused note rows' mode
+--   - fix hashing of non-integer ppq values (slicer crash)
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*

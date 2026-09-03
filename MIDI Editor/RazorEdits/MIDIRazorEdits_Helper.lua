@@ -341,6 +341,10 @@ end
 
 ----------------------------------------------------
 
+local function roundValue(value)
+  return value and math.floor(value + 0.5) or nil
+end
+
 local function hashValue(value)
   local t = type(value)
   if t == "number" then
@@ -356,7 +360,7 @@ local function hashValue(value)
   end
   if value.ppqpos then
     return string.format('n%d_%d_%d_%d_%s',
-      value.ppqpos, value.endppqpos or 0, value.chan or 0,
+      roundValue(value.ppqpos), roundValue(value.endppqpos) or 0, value.chan or 0,
       value.pitch or 0, value.op or '')
   end
 

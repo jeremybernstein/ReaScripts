@@ -173,9 +173,20 @@ local function buildNewKeyMap()
   -- _T(modMappings)
 end
 
+-- keyMatches() aliases 'del' to 'back' (the mac delete key sends VK_BACK), so
+-- interception has to cover both codes or the twin still reaches REAPER
+local function altVKey(map)
+  return map.baseKey == 'del' and keys.vKeyLookup['back'] or nil
+end
+
 local function keyIsMapped(k)
   for _, map in pairs(keyMappings) do
-    if map.vKey == k then return true end
+    if map.vKey == k or altVKey(map) == k then return true end
+  end
+  -- pb keys are intercepted unconditionally by initLiceKeys, so they have to be
+  -- forwardable too, or an unconsumed one is swallowed instead of reaching the editor
+  for _, map in pairs(pbKeyMappings) do
+    if map.vKey == k or altVKey(map) == k then return true end
   end
   return false
 end
@@ -186,11 +197,15 @@ local function initLiceKeys(onlyGlobal)
     for _, map in pairs(keyMappings) do
       if map.vKey and (not onlyGlobal or map.global) then
         helper.VKeys_Intercept(map.vKey, 1)
+        local alt = altVKey(map)
+        if alt then helper.VKeys_Intercept(alt, 1) end
       end
     end
     for _, map in pairs(pbKeyMappings) do
       if map.vKey then
         helper.VKeys_Intercept(map.vKey, 1)
+        local alt = altVKey(map)
+        if alt then helper.VKeys_Intercept(alt, 1) end
       end
     end
     keyCt = keyCt + 1
@@ -202,11 +217,15 @@ local function shutdownLiceKeys(onlyGlobal)
     for _, map in pairs(keyMappings) do
       if map.vKey and (not onlyGlobal or map.global) then
         helper.VKeys_Intercept(map.vKey, -1)
+        local alt = altVKey(map)
+        if alt then helper.VKeys_Intercept(alt, -1) end
       end
     end
     for _, map in pairs(pbKeyMappings) do
       if map.vKey then
         helper.VKeys_Intercept(map.vKey, -1)
+        local alt = altVKey(map)
+        if alt then helper.VKeys_Intercept(alt, -1) end
       end
     end
     keyCt = keyCt - 1

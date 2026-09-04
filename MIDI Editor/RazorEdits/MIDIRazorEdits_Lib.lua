@@ -760,12 +760,29 @@ local function processNotes(activeTake, area, operation)
         -- create temporary areas from deletion extents for segment calculation
         -- this ensures getNoteSegments uses the correct extents (merged or separate)
         -- instead of glob.areas which always has both source+dest merged
+        -- segmentation has to see EVERY moving area's deletion extents, not just
+        -- this one's: a note crossing two moved areas needs a cut at each, and the
+        -- tDelQueries dedupe means only the first area's pass computes segments
+        -- 'area' may not be a member of areas (temp-area paths), so seed it directly
+        local delSources = { area }
+        if not duplicatingArea then
+          for _, other in ipairs(areas) do
+            if other ~= area and not other.ccLane and other.unstretchedTimeValue then
+              delSources[#delSources + 1] = other
+            end
+          end
+        end
+
+        -- getNoteSegments only reads timeValue/unstretchedTimeValue, so a bare
+        -- table beats Area.new(serialize()) here: this runs per area per take on
+        -- every drag frame, and cloning was O(areas^2) serializations a frame
         glob.deletionAreas = {}
-        for _, extent in ipairs(deletionExtents) do
-          local delArea = Area.new(area:serialize())
-          delArea.timeValue = extent
-          delArea.unstretched, delArea.unstretchedTimeValue = nil, nil
-          table.insert(glob.deletionAreas, delArea)
+        for _, delSrc in ipairs(delSources) do
+          local srcExtents = delSrc == area and deletionExtents
+            or helper.getExtentUnion(delSrc.timeValue, delSrc.unstretchedTimeValue)
+          for _, extent in ipairs(srcExtents) do
+            glob.deletionAreas[#glob.deletionAreas + 1] = { timeValue = extent }
+          end
         end
         for _, extent in ipairs(deletionExtents) do
           tmpArea.timeValue = extent
@@ -780,7 +797,7 @@ local function processNotes(activeTake, area, operation)
           _P('insertMode ON - SKIPPING deletions')
         end
       end
-      insert = true -- won't do anything anymore because we pre-process
+      insert = true -- drives the getNoteSegments re-segmentation below
     else
       return -- not doing anything? don't do anything.
     end
@@ -789,6 +806,7 @@ local function processNotes(activeTake, area, operation)
       local tmpArea = Area.new(area:serialize()) -- only used for event selection
       local cacheMods = currentMods
       currentMods = MouseMods.new() -- clear out for the operation
+      keys.mod.setMods(currentMods) -- mod.*Mod() reads the Keys-side copy, not ours
       tmpArea.unstretched, tmpArea.unstretchedTimeValue = area.unstretched, area.unstretchedTimeValue
       if not glob.insertMode then
         processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- target
@@ -796,6 +814,7 @@ local function processNotes(activeTake, area, operation)
       tmpArea.timeValue = area.unstretchedTimeValue
       processNotesWithGeneration(activeTake, tmpArea, OP_STRETCH_DELETE) -- source
       currentMods = cacheMods
+      keys.mod.setMods(currentMods)
       insert = true
     else
       return -- not doing anything? don't do anything.
@@ -1008,6 +1027,12 @@ local function processNotes(activeTake, area, operation)
         end
 
         if movingArea or duplicatingArea then
+          -- where this event lands at the destination, clamped to the area unless
+          -- overlaps are preserved. computed ONCE: the overlap analysis below and the
+          -- insert further down have to agree, and they used to derive it separately
+          local copyPpqpos = (ppqpos + deltaTicks < areaLeftmostTick and not overlapped) and areaLeftmostTick or ppqpos + deltaTicks
+          local copyEndppqpos = (endppqpos + deltaTicks > areaRightmostTick and not overlapped) and areaRightmostTick or endppqpos + deltaTicks
+
           -- for move (not copy), preserve note segments outside the source area
           if movingArea and not duplicatingArea then
             local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil)
@@ -1028,9 +1053,6 @@ local function processNotes(activeTake, area, operation)
           -- for copy: check if copied note position overlaps original note position
           -- only segment/delete original if there's actual overlap (same pitch conflict)
           if duplicatingArea then
-            -- compute actual copy position (with area clipping)
-            local copyPpqpos = (ppqpos + deltaTicks < areaLeftmostTick and not overlapped) and areaLeftmostTick or ppqpos + deltaTicks
-            local copyEndppqpos = (endppqpos + deltaTicks > areaRightmostTick and not overlapped) and areaRightmostTick or endppqpos + deltaTicks
             -- check if copy overlaps original (would create same-pitch overlap)
             -- use <= and >= because endppqpos is inclusive
             -- also check deltaPitch == 0, otherwise copy is at different pitch (no collision)
@@ -1164,9 +1186,6 @@ local function processNotes(activeTake, area, operation)
           else
             newpitch = pitch - deltaPitch
           end
-          local copyPpqpos = (ppqpos + deltaTicks < areaLeftmostTick and not mod.overlapMod()) and areaLeftmostTick or ppqpos + deltaTicks
-          local copyEndppqpos = (endppqpos + deltaTicks > areaRightmostTick and not mod.overlapMod()) and areaRightmostTick or endppqpos + deltaTicks
-
           if DEBUG_COPY then
             _P('--- ADDING COPIED NOTE ---')
             _P('  from source idx', idx, 'pitch', pitch, 'ppq', ppqpos, '-', endppqpos)
@@ -1181,7 +1200,11 @@ local function processNotes(activeTake, area, operation)
                             chan = chan, pitch = newpitch,
                             vel = vel, relvel = relvel }
                           )
-          if not glob.insertMode and mod.overlapMod() then
+          -- MOVE only. with overlapMod the pre-deletion pass (see the OP_DELETE call
+          -- above) excludes the source events, so this is what removes them. a copy
+          -- runs no pre-deletion at all, so deleting here turned copy into move as
+          -- soon as the dest rect no longer overlapped the source note
+          if not duplicatingArea and not glob.insertMode and mod.overlapMod() then
             if DEBUG_COPY then
               _P('  overlapMod + !insertMode -> DELETING source note idx', idx)
             end
@@ -1198,7 +1221,7 @@ local function processNotes(activeTake, area, operation)
         else
           if newppqpos and newendppqpos and newppqpos < newendppqpos then
             if newendppqpos - newppqpos > GLOBAL_PREF_SLOP then
-              if insert then -- only called for stretching
+              if insert then -- set by the move AND stretch paths
                 local segments = not event.segments and helper.getNoteSegments(areas, itemInfo, newppqpos or ppqpos, newendppqpos or endppqpos, newpitch or pitch, nil, meState)
                 if segments then -- should only be done once per full iter, in fact, since these are the segments for all areas
                   for _, seg in ipairs(segments) do
@@ -1289,24 +1312,30 @@ local function processNotes(activeTake, area, operation)
       end
     end
 
-    -- enumerate all notes at dest and segment those that overlap copies
-    local idx = -1
+    -- dest bounds are loop-invariant: hoisted out of the per-note enumeration.
+    -- use the dest area pitch range, not the source area's
+    local destLeft = math.floor(areaLeftmostTick + 0.5)
+    local destRight = math.floor(areaRightmostTick + 0.5)
+    local destBottomPitch = math.floor(timeValue.vals.min + 0.5)
+    local destTopPitch = math.floor(timeValue.vals.max + 0.5)
+
+    -- enumerate all notes at dest and segment those that overlap copies.
+    -- MIDI_EnumNotes walks MIDIEvents in order, which is ppq-ascending as long as
+    -- nothing has been inserted this transaction -- true here, since insertions are
+    -- queued in tInsertions until processInsertions() and MIDI_SetNote replaces
+    -- in place. so once a note starts at/after destRight, no later one can overlap
+    local destIdx = -1
     while true do
-      idx = mu.MIDI_EnumNotes(activeTake, idx)
-      if not idx or idx == -1 then break end
-      if not sourceIdxSet[idx] then  -- skip sourceEvents notes (already handled)
-        local _, sel, muted, ppqpos, endppqpos, chan, pitch, vel, relvel = mu.MIDI_GetNote(activeTake, idx)
-        -- check if this note overlaps dest area (timeValue)
-        local destLeft = math.floor(areaLeftmostTick + 0.5)
-        local destRight = math.floor(areaRightmostTick + 0.5)
-        -- use dest area pitch range, not source area pitch range
-        local destBottomPitch = math.floor(timeValue.vals.min + 0.5)
-        local destTopPitch = math.floor(timeValue.vals.max + 0.5)
+      destIdx = mu.MIDI_EnumNotes(activeTake, destIdx)
+      if not destIdx or destIdx == -1 then break end
+      if not sourceIdxSet[destIdx] then  -- skip sourceEvents notes (already handled)
+        local _, sel, muted, ppqpos, endppqpos, chan, pitch, vel, relvel = mu.MIDI_GetNote(activeTake, destIdx)
+        if ppqpos >= destRight then break end
 
         -- DEBUG: show all notes being considered
         if DEBUG_COPY then
           local inDest = endppqpos > destLeft and ppqpos < destRight and pitchInRange(pitch, destBottomPitch, destTopPitch)
-          _P('  note idx', idx, ': ppq', ppqpos, '-', endppqpos, 'pitch', pitch, 'inDestArea:', inDest, 'isSourceNote:', sourceIdxSet[idx] or false)
+          _P('  note idx', destIdx, ': ppq', ppqpos, '-', endppqpos, 'pitch', pitch, 'inDestArea:', inDest, 'isSourceNote:', sourceIdxSet[destIdx] or false)
         end
 
         if endppqpos > destLeft and ppqpos < destRight
@@ -1359,7 +1388,7 @@ local function processNotes(activeTake, area, operation)
                 helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = sel, muted = muted,
                   ppqpos = seg[1], endppqpos = seg[2], chan = chan, pitch = pitch, vel = vel, relvel = relvel })
               end
-              helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+              helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = destIdx })
             else
               -- insertMode but no overlapping copies - skip this note entirely
               if DEBUG_COPY then
@@ -1392,7 +1421,7 @@ local function processNotes(activeTake, area, operation)
               helper.addUnique(tInsertions, { type = mu.NOTE_TYPE, selected = sel, muted = muted,
                 ppqpos = seg[1], endppqpos = seg[2], chan = chan, pitch = pitch, vel = vel, relvel = relvel })
             end
-            helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = idx })
+            helper.addUnique(tDeletions, { type = mu.NOTE_TYPE, idx = destIdx })
           end
         end
       end
@@ -1441,11 +1470,66 @@ local function laneIsVelocity(area)
   return area.ccLane and (meLanes[area.ccLane].type == 0x200 or meLanes[area.ccLane].type == 0x207)
 end
 
-local function addControlPoints(activeTake, area)
+-- keyed by take, like area.sourceInfo: every editable take is processed against
+-- the same area but has its own events, offset and sampled edge values.
+-- deltaTicks is passed on the move path only; it drives the destination guards
+local function addControlPoints(activeTake, area, deltaTicks)
+  -- DRAFT: destination guards. cp1/cp4 carry the SOURCE edge values so the moved
+  -- contour keeps its lead-in, which means they perturb whatever surrounds the
+  -- destination. these sit two ticks further out holding the destination's OWN
+  -- pre-move value, so nothing beyond them changes:
+  --
+  --   destMin-2   destMin-1  destMin        destMax  destMax+1  destMax+2
+  --   [dest orig] [src edge] [content... ...content] [src edge] [dest orig]
+  --      guard       cp1        cp2           cp3       cp4        guard
+  --
+  -- unlike the control points below these are re-sampled every pass: the
+  -- destination only exists once the drag has moved, and handleOpenTransaction
+  -- restores the take before each pass, so what we read is always the pre-move
+  -- curve. sampling has to stay ahead of the OP_DELETE passes at the call site
+  area.destGuards = area.destGuards or {}
+
+  if glob.wantsDestGuards
+    and area.ccLane
+    and not laneIsVelocity(area)
+    and deltaTicks -- move path only; the stretch/widget sites don't pass it
+    and area.sourceInfo[activeTake].sourceEvents
+    and #area.sourceInfo[activeTake].sourceEvents ~= 0
+  then
+    local itemInfo = glob.liceData.itemInfo and glob.liceData.itemInfo[activeTake]
+    local offsetPPQ = itemInfo and itemInfo.offsetPPQ or 0
+    local guardMin = area.timeValue.ticks.min - offsetPPQ - 2
+    local guardMax = area.timeValue.ticks.max - offsetPPQ + 2
+
+    -- MIDI_GetCCValueAtTime is a full scan of MIDIEvents, so only re-sample when
+    -- the destination has actually moved. the take is restored before each pass,
+    -- so the same position always yields the same pre-move value
+    local prev = area.destGuards[activeTake]
+    if not (prev and prev.min == guardMin and prev.max == guardMax) then
+      local ref = area.sourceInfo[activeTake].sourceEvents[1]
+      local guards = { min = guardMin, max = guardMax }
+
+      local function guardAt(ppq)
+        local rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, ref.chanmsg, ref.chan, ref.msg2, ppq, true)
+        if not rv then return end
+        local guard = mu.tableCopy(ref)
+        guard.ppqpos, guard.msg2, guard.msg3 = ppq, msg2out, msg3out
+        guards[#guards + 1] = guard
+      end
+
+      guardAt(guardMin)
+      guardAt(guardMax)
+
+      area.destGuards[activeTake] = guards
+    end
+  else
+    area.destGuards[activeTake] = nil
+  end
+
   if glob.wantsControlPoints and
     area.ccLane
     and not laneIsVelocity(area)
-    and not area.controlPoints
+    and not (area.controlPoints and area.controlPoints[activeTake])
     and area.sourceInfo[activeTake].sourceEvents
     and #area.sourceInfo[activeTake].sourceEvents ~= 0
   then
@@ -1454,38 +1538,57 @@ local function addControlPoints(activeTake, area)
     local sourceInfo = area.sourceInfo[activeTake]
     local sourceEvents = sourceInfo.sourceEvents
 
+    area.controlPoints = area.controlPoints or {}
+
     if sourceInfo.potentialControlPoints and #sourceInfo.potentialControlPoints == 4 then
-      area.controlPoints = {}
+      area.controlPoints[activeTake] = {}
       return
     end
 
-    newEvent = mu.tableCopy(sourceEvents[1])
-    local rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, newEvent.chanmsg, newEvent.chan, newEvent.msg2, area.timeValue.ticks.min, true)
+    -- area extents live in the reference take's frame, but everything we sample
+    -- and insert here is in THIS take's, so shift by the take's offset
+    local itemInfo = glob.liceData.itemInfo and glob.liceData.itemInfo[activeTake]
+    local offsetPPQ = itemInfo and itemInfo.offsetPPQ or 0
+    local cpMin = area.timeValue.ticks.min - offsetPPQ
+    local cpMax = area.timeValue.ticks.max - offsetPPQ
+
+    -- sample the curve value AT each area edge. both points of a pair carry that
+    -- same value: the outer one (cp1/cp4) pins the curve outside the area, the
+    -- inner one (cp2/cp3) is transformed with the content so the moved contour
+    -- is preserved end to end. baseMsg2/3 keeps the pristine sample, since the
+    -- points are built once but re-transformed on every drag pass
+    local first, last = sourceEvents[1], sourceEvents[#sourceEvents]
+    local rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, first.chanmsg, first.chan, first.msg2, cpMin, true)
+
     if rv then
-      newEvent.ppqpos = area.timeValue.ticks.min - 1
-      newEvent.msg2 = msg2out
-      newEvent.msg3 = msg3out
+      newEvent = mu.tableCopy(first)
+      newEvent.ppqpos = cpMin - 1
+      newEvent.msg2, newEvent.msg3 = msg2out, msg3out
       cp1 = newEvent
     end
 
-    newEvent = mu.tableCopy(sourceEvents[1])
-    newEvent.ppqpos = area.timeValue.ticks.min
+    newEvent = mu.tableCopy(first)
+    newEvent.ppqpos = cpMin
+    if rv then newEvent.msg2, newEvent.msg3 = msg2out, msg3out end
+    newEvent.baseMsg2, newEvent.baseMsg3 = newEvent.msg2, newEvent.msg3
     cp2 = newEvent
 
-    newEvent = mu.tableCopy(sourceEvents[#sourceEvents])
-    newEvent.ppqpos = area.timeValue.ticks.max
+    rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, last.chanmsg, last.chan, last.msg2, cpMax, true)
+
+    newEvent = mu.tableCopy(last)
+    newEvent.ppqpos = cpMax
+    if rv then newEvent.msg2, newEvent.msg3 = msg2out, msg3out end
+    newEvent.baseMsg2, newEvent.baseMsg3 = newEvent.msg2, newEvent.msg3
     cp3 = newEvent
 
-    newEvent = mu.tableCopy(sourceEvents[#sourceEvents])
-    rv, _, _, _, _, msg2out, msg3out = mu.MIDI_GetCCValueAtTime(activeTake, newEvent.chanmsg, newEvent.chan, newEvent.msg2, area.timeValue.ticks.max, true)
     if rv then
-      newEvent.ppqpos = area.timeValue.ticks.max + 1
-      newEvent.msg2 = msg2out
-      newEvent.msg3 = msg3out
+      newEvent = mu.tableCopy(last)
+      newEvent.ppqpos = cpMax + 1
+      newEvent.msg2, newEvent.msg3 = msg2out, msg3out
       cp4 = newEvent
     end
 
-    area.controlPoints = { cp1, cp2, cp3, cp4 }
+    area.controlPoints[activeTake] = { cp1, cp2, cp3, cp4 }
   end
 end
 
@@ -1574,6 +1677,13 @@ local function processCCs(activeTake, area, operation)
     widgeting = true
   end
 
+  -- no deltaTicks: the widget reshapes values in place like a stretch, so the
+  -- edge points anchor the boundaries rather than travelling with the content,
+  -- and there is no destination to guard
+  if widgeting and glob.wantsWidgetControlPoints then
+    addControlPoints(activeTake, area)
+  end
+
   local process = true
   if wantsPaste or operation == OP_COPY or operation == OP_CUT or operation == OP_PASTE or operation == OP_SELECT or operation == OP_UNSELECT then
     process = false
@@ -1612,7 +1722,7 @@ local function processCCs(activeTake, area, operation)
     tmpArea.timeValue.ticks:shift(areaTickExtent:size())
     processCCsWithGeneration(activeTake, tmpArea, OP_DELETE)
   elseif movingArea then
-    addControlPoints(activeTake, area)
+    addControlPoints(activeTake, area, deltaTicks)
     if deltaTicks ~= 0 or deltaVal ~= 0 then
       if laneIsVel then
         -- no move/copy support for vel/rel vel atm
@@ -1789,11 +1899,56 @@ local function processCCs(activeTake, area, operation)
   end
 
   -- outside of the enumeration
-  if area.controlPoints then
-    helper.addUnique(tInsertions, area.controlPoints[1])
-    helper.addUnique(tInsertions, area.controlPoints[2])
-    helper.addUnique(tInsertions, area.controlPoints[3])
-    helper.addUnique(tInsertions, area.controlPoints[4])
+  local cp = area.controlPoints and area.controlPoints[activeTake]
+  if cp then
+    -- the points are built once at drag start (cp1/cp4 must sample the take
+    -- before the operation mutates it), so their positions are stale by now:
+    -- re-anchor them to the area's CURRENT extent or they land at the source
+    -- timeValue is area.timeValue already shifted into this take's frame
+    local cpMin, cpMax = timeValue.ticks.min, timeValue.ticks.max
+    if cp[1] then cp[1].ppqpos = cpMin - 1 end
+    if cp[2] then cp[2].ppqpos = cpMin end
+    if cp[3] then cp[3].ppqpos = cpMax end
+    if cp[4] then cp[4].ppqpos = cpMax + 1 end
+
+    -- cp1/cp4 keep the sampled edge value, pinning the curve outside the area.
+    -- cp2/cp3 take the same value shifted by the content's delta, so the moved
+    -- contour is unchanged. always recomputed from baseMsg2/3: this runs on
+    -- every drag pass and must not accumulate.
+    -- movingArea ONLY, deliberately: a move transplants the content unchanged so
+    -- its contour has to stay rigid, but a stretch is reshaping the content on
+    -- purpose -- there the edge points stay put and anchor the boundaries while
+    -- the interior scales. don't "fix" this by extending it to stretchingArea
+    if movingArea and deltaVal and deltaVal ~= 0 then
+      local function shiftEdge(c)
+        if not (c and c.baseMsg3) then return end
+        local cval = pitchbend and ((c.baseMsg3 << 7) | c.baseMsg2)
+          or onebyte and c.baseMsg2 or c.baseMsg3
+        cval = cval - deltaVal
+        c.msg2 = onebyte and clipInt(cval) or pitchbend and (cval & 0x7F) or c.baseMsg2
+        c.msg3 = onebyte and c.baseMsg3 or pitchbend and ((cval >> 7) & 0x7F) or clipInt(cval)
+      end
+      shiftEdge(cp[2])
+      shiftEdge(cp[3])
+    end
+    -- cp2/cp3 only earn their place when the transform above moved them off the
+    -- outer point's value. without it (stretch, widget) they are exact duplicates
+    -- of cp1/cp4 one tick away, and cp1/cp4 already pin those boundaries
+    local function sameValue(a, b)
+      return a and b and a.msg2 == b.msg2 and a.msg3 == b.msg3
+    end
+
+    helper.addUnique(tInsertions, cp[1])
+    if not sameValue(cp[2], cp[1]) then helper.addUnique(tInsertions, cp[2]) end
+    if not sameValue(cp[3], cp[4]) then helper.addUnique(tInsertions, cp[3]) end
+    helper.addUnique(tInsertions, cp[4])
+  end
+
+  local guards = area.destGuards and area.destGuards[activeTake]
+  if guards then
+    for _, guard in ipairs(guards) do
+      helper.addUnique(tInsertions, guard)
+    end
   end
 
   if stretchingArea and (resizing == RS_TOP or resizing == RS_BOTTOM) then
@@ -1896,6 +2051,8 @@ local function processInsertions()
     end
   end
 
+  -- safe to run after the insertions: MIDIUtils deletes by the ORIGINAL index
+  -- (noteEvents[idx + 1]) and inserts append, so nothing gets renumbered
   for _, event in ipairs(tDeletions) do
     if event.type == mu.NOTE_TYPE then
       mu.MIDI_DeleteNote(activeTake, event.idx)
@@ -2306,6 +2463,14 @@ end
 local function handleProcessAreas(singleArea, forceSourceInfo)
   local clipboardInited = false
 
+  local function runProcess(activeTake, area, operation)
+    if not area.ccLane then
+      processNotes(activeTake, area, operation)
+    else
+      processCCs(activeTake, area, operation)
+    end
+  end
+
   for _, take in ipairs(glob.liceData.allTakes) do
     local activeTake = prepItemInfoForTake(take)
 
@@ -2327,6 +2492,8 @@ local function handleProcessAreas(singleArea, forceSourceInfo)
 
     areaTickExtent = Extent.new(math.huge, -math.huge)
 
+    -- NB: 'operation' is latched take-wide from the first area that carries one,
+    -- and runProcess applies it to every area. one keystroke == one operation
     local function preProcessArea(area) -- captures 'operation'
       if not operation then operation = area.operation end
 
@@ -2345,19 +2512,9 @@ local function handleProcessAreas(singleArea, forceSourceInfo)
       end
     end
 
-    mu.MIDI_OpenWriteTransaction(activeTake)
-
     if operation == OP_SELECT then
       mu.MIDI_SelectAll(activeTake, false) -- should 'select' unselect everything else?
       touchedMIDI = true
-    end
-
-    local function runProcess(area)
-      if not area.ccLane then
-        processNotes(activeTake, area, operation)
-      else
-        processCCs(activeTake, area, operation)
-      end
     end
 
     if (operation == OP_COPY or operation == OP_CUT) and not clipboardInited then
@@ -2369,7 +2526,7 @@ local function handleProcessAreas(singleArea, forceSourceInfo)
     tDeletions = {}
     tDelQueries = {}
     if hovering then
-      runProcess(hovering)
+      runProcess(activeTake, hovering, operation)
     else
       if dragDirection then
         local ddString = helper.dragDirectionToString(dragDirection)
@@ -2377,8 +2534,8 @@ local function handleProcessAreas(singleArea, forceSourceInfo)
           swapAreas(helper.sortAreas(areas, ddString))
         end
       end
-      for i, area in ipairs(areas) do
-        runProcess(area)
+      for _, area in ipairs(areas) do
+        runProcess(activeTake, area, operation)
       end
     end
     processInsertions()
@@ -2960,6 +3117,21 @@ local function restorePreferences()
     if stateVal then glob.wantsControlPoints = stateVal == 1 and true or false end
   end
 
+  -- both are sub-options: meaningless unless wantsControlPoints is on
+  glob.wantsDestGuards = false -- default
+  stateVal = r.GetExtState(scriptID, 'wantsDestGuards')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.wantsDestGuards = glob.wantsControlPoints and stateVal == 1 and true or false end
+  end
+
+  glob.wantsWidgetControlPoints = false -- default
+  stateVal = r.GetExtState(scriptID, 'wantsWidgetControlPoints')
+  if stateVal then
+    stateVal = tonumber(stateVal)
+    if stateVal then glob.wantsWidgetControlPoints = glob.wantsControlPoints and stateVal == 1 and true or false end
+  end
+
   glob.wantsFullLaneDefault = false -- default
   stateVal = r.GetExtState(scriptID, 'wantsFullLaneDefault')
   if stateVal then
@@ -3066,8 +3238,10 @@ end
 local contextMods = 0
 local contextCode = nil
 
+-- hand back the keys we intercepted but didn't consume in this context. only
+-- MAPPED keys need this: unmapped ones were never intercepted and reached REAPER
+-- on their own, so forwarding those would fire their action twice. requires SWS
 local function passUnconsumedKeys(vState)
-  -- pass anything else through, requires SWS
   if hasSWS and glob.liceData then
     -- _P(contextMods, contextCode, hottestMods:flags())
     local hotMods = hottestMods:flags() == contextMods
@@ -3079,7 +3253,7 @@ local function passUnconsumedKeys(vState)
         else
           if lice.keyIsMapped(k) then
             -- _P('passing a key', k)
-            r.CF_SendActionShortcut(glob.liceData.editor, 32060, k)
+            r.CF_SendActionShortcut(glob.liceData.editor, 32060, k) -- 32060 = MIDI editor section
           end
         end
       end
@@ -3909,6 +4083,10 @@ local function processWidget(mx, my, mouseState)
         if glob.widgetInfo then
           glob.widgetInfo.side = nil
         end
+        -- widget drags never reach the razor-area release path, so drop the
+        -- cached control points here or the next drag reuses stale edge samples
+        area.controlPoints = nil
+        area.destGuards = nil
       end
     else
       area.widgetExtents = Extent.new(0.5, 0.5)
@@ -4755,6 +4933,7 @@ local function processMouse()
         area.unstretched = nil
         area.unstretchedTimeValue = nil
         area.controlPoints = nil
+        area.destGuards = nil
       end
 
       for idx = #removals, 1, -1 do
@@ -4884,6 +5063,24 @@ local function loop()
 
   -- End process when no MIDI editor is open
   if not currEditor then return end
+
+  -- Keep process idle in event list (section 32061) and notation views -- there's
+  -- no piano roll to draw over, and the key intercepts have to go back to the editor.
+  -- MIDIEditor_GetMode: 0 = piano roll, 1 = event list, -1 = invalid, and an
+  -- UNDOCUMENTED 2 = notation. test for 'not piano roll' rather than a mode list
+  if r.MIDIEditor_GetMode(currEditor) ~= 0 then
+    -- an in-flight drag has to be finalized first, or it stays live and resumes
+    -- when the user switches back. resetButtons() before flagging the release, or
+    -- button.drag stays set, the drag is still treated as live and we never idle
+    if resizing ~= RS_UNCLICKED then
+      lice.resetButtons()
+      lice.button.release = true
+    else
+      lice.shutdownLice()
+      r.defer(function() xpcall(loop, onCrash) end)
+      return
+    end
+  end
 
   local editorTake = r.MIDIEditor_GetTake(currEditor)
   -- Keep process idle when there is no take

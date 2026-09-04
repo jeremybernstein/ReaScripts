@@ -96,6 +96,10 @@ local prefsWidgetStretchMode
 local widgetStretchMode
 local prefsWantsControlPoints
 local wantsControlPoints
+local prefsWantsDestGuards
+local wantsDestGuards
+local prefsWantsWidgetControlPoints
+local wantsWidgetControlPoints
 local prefsSlicerDefaultTrim
 local slicerDefaultTrim
 local prefsWantsFullLaneDefault
@@ -512,6 +516,16 @@ local function handleSavedMappings()
   if not prefsWantsControlPoints then prefsWantsControlPoints = 0 end
   wantsControlPoints = prefsWantsControlPoints
 
+  state = r.GetExtState(scriptID_Save, 'wantsDestGuards')
+  prefsWantsDestGuards = state ~= '' and tonumber(state) or 0
+  if not prefsWantsDestGuards then prefsWantsDestGuards = 0 end
+  wantsDestGuards = prefsWantsDestGuards
+
+  state = r.GetExtState(scriptID_Save, 'wantsWidgetControlPoints')
+  prefsWantsWidgetControlPoints = state ~= '' and tonumber(state) or 0
+  if not prefsWantsWidgetControlPoints then prefsWantsWidgetControlPoints = 0 end
+  wantsWidgetControlPoints = prefsWantsWidgetControlPoints
+
   state = r.GetExtState(scriptID_Save, 'stretchMode')
   prefsStretchMode = state ~= '' and tonumber(state) or 0
   if not prefsStretchMode then prefsStretchMode = 0 end
@@ -716,6 +730,8 @@ local function hasChanges() -- could throttle this if it's a performance concern
   if wantsRightButton ~= prefsWantsRightButton then return true end
   if slicerDefaultTrim ~= prefsSlicerDefaultTrim then return true end
   if wantsControlPoints ~= prefsWantsControlPoints then return true end
+  if wantsDestGuards ~= prefsWantsDestGuards then return true end
+  if wantsWidgetControlPoints ~= prefsWantsWidgetControlPoints then return true end
   if stretchMode ~= prefsStretchMode then return true end
   if widgetStretchMode ~= prefsWidgetStretchMode then return true end
   if pbMaxBendUp ~= prefsPbMaxBendUp then return true end
@@ -784,11 +800,25 @@ local function drawButtons()
     end
 
     if wantsControlPoints ~= 0 then
-      r.SetExtState(scriptID_Save, 'wantsControlPoints', tostring(stretchMode), true)
+      r.SetExtState(scriptID_Save, 'wantsControlPoints', tostring(wantsControlPoints), true)
     else
       r.DeleteExtState(scriptID_Save, 'wantsControlPoints', true)
     end
     prefsWantsControlPoints = wantsControlPoints
+
+    if wantsDestGuards ~= 0 then
+      r.SetExtState(scriptID_Save, 'wantsDestGuards', tostring(wantsDestGuards), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'wantsDestGuards', true)
+    end
+    prefsWantsDestGuards = wantsDestGuards
+
+    if wantsWidgetControlPoints ~= 0 then
+      r.SetExtState(scriptID_Save, 'wantsWidgetControlPoints', tostring(wantsWidgetControlPoints), true)
+    else
+      r.DeleteExtState(scriptID_Save, 'wantsWidgetControlPoints', true)
+    end
+    prefsWantsWidgetControlPoints = wantsWidgetControlPoints
 
     -- stretch mode
     if stretchMode ~= 0 then
@@ -1254,6 +1284,27 @@ local function drawMiscOptions()
   local saveX = ImGui.GetCursorPosX(ctx)
   rv, cp = ImGui.Checkbox(ctx, '##wantsControlPoints', cp == 1 and true or false)
   wantsControlPoints = cp and 1 or 0
+
+  -- sub-options: only meaningful while the main control points pref is on
+  if wantsControlPoints == 0 then ImGui.BeginDisabled(ctx) end
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, '    Guard Destination Context:')
+  local dg = wantsDestGuards
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, saveX)
+  rv, dg = ImGui.Checkbox(ctx, '##wantsDestGuards', dg == 1 and true or false)
+  wantsDestGuards = dg and 1 or 0
+
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, '    Control Points for Widget:')
+  local wcp = wantsWidgetControlPoints
+  ImGui.SameLine(ctx)
+  ImGui.SetCursorPosX(ctx, saveX)
+  rv, wcp = ImGui.Checkbox(ctx, '##wantsWidgetControlPoints', wcp == 1 and true or false)
+  wantsWidgetControlPoints = wcp and 1 or 0
+
+  if wantsControlPoints == 0 then ImGui.EndDisabled(ctx) end
 
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Value Stretch Mode (Area):')

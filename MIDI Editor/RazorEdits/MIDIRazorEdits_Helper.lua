@@ -354,14 +354,21 @@ local function hashValue(value)
     return tostring(value)
   end
 
-  -- fast path for common MIDI event tables: avoid sort+concat overhead
-  if value.idx then
-    return string.format('d%d', value.idx)
-  end
+  -- fast path for common MIDI event tables: avoid sort+concat overhead.
+  -- tInsertions/tDeletions are shared across every area, lane and event type of
+  -- a take, so the hash must carry everything which distinguishes two events.
+  -- ppqpos is tested before idx: insertions are frequently tableCopy()d source
+  -- events and carry the source idx, so an idx-keyed hash would collapse the
+  -- several insertions derived from one event (note segments, bezier control
+  -- points). only deletions are idx-only.
   if value.ppqpos then
-    return string.format('n%d_%d_%d_%d_%s',
-      roundValue(value.ppqpos), roundValue(value.endppqpos) or 0, value.chan or 0,
-      value.pitch or 0, value.op or '')
+    return string.format('n%d_%d_%d_%d_%d_%d_%d_%d_%s',
+      value.type or -1, roundValue(value.ppqpos), roundValue(value.endppqpos) or 0,
+      value.chan or 0, value.pitch or 0, value.chanmsg or 0,
+      value.msg2 or -1, value.msg3 or -1, value.op or '')
+  end
+  if value.idx then
+    return string.format('d%d_%d', value.type or -1, value.idx)
   end
 
   -- generic fallback

@@ -137,6 +137,8 @@ Global.currentSwing = nil
 Global.stretchMode = 0 -- default = compress/expand
 Global.widgetStretchMode = 1
 Global.wantsControlPoints = false
+Global.wantsDestGuards = false          -- sub-option of wantsControlPoints
+Global.wantsWidgetControlPoints = false -- sub-option of wantsControlPoints
 Global.wantsRightButton = false
 
 Global.areas = {}

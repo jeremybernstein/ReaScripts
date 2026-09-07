@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="sockmonkey72 Scripts" commit="b485c68412f5d6c91b1c76a828329d972c9513bb">
+<index version="1" name="sockmonkey72 Scripts" commit="e1d15dd3840081e9c1b69d0f3c0719775585d9e2">
   <category name="Envelopes">
     <reapack name="sockmonkey72_Add point for current value on visible armed envelopes of selected tracks at edit cursor.lua" type="script" desc="Add point for current value on visible armed envelopes of selected tracks at edit cursor">
       <metadata>
@@ -28724,6 +28724,12 @@ Kenny Gioia's "Razor Edit - Fast Mode in REAPER"
 
 * Fix TCP context menu positioning when the REAPER window is not left-aligned with the screen. Contributed by @PhelixK (thank you)!]]></changelog>
         <source file="Peace_MOD.ReaperThemeZip">https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.6/Peace_MOD.ReaperThemeZip</source>
+      </version>
+      <version name="1.7.7-beta.1" author="sockmonkey72" time="2026-09-07T08:41:37Z">
+        <changelog><![CDATA[Changes since 1.7.6:
+
+* Some font fixups (general improvements and some reactions to recent-ish REAPER font changes on macOS & Linux)]]></changelog>
+        <source file="Peace_MOD.ReaperThemeZip">https://github.com/jeremybernstein/REAPER_Peace/releases/download/v1.7.7-beta.1/Peace_MOD.ReaperThemeZip</source>
       </version>
     </reapack>
   </category>

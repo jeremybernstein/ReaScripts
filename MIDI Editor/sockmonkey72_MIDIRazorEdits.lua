@@ -1,23 +1,10 @@
 -- @description MIDI Razor Edits
--- @version 1.5.1-beta.4
+-- @version 1.5.1
 -- @author sockmonkey72
 -- @about
 --   # MIDI Razor Edits
 -- @changelog
---   - fix delete key falling through to the MIDI editor and deleting selected notes
---   - fix notes losing segments when split by an area (delete, move, stretch)
---   - fix a note crossing several areas only being cut at the first one when moving
---   - prevent copy with 'preserve overlaps' from deleting the source notes
---   - fix potential for CC events at the same position in different lanes being dropped
---   - fix potential for note and CC deletions colliding when one operation spans both
---   - CC control points: correct position and value tracking when moving, per-take
---     handling, and placement when editing several items at once
---   - fix 'add control points' preference never being saved
---   - new pref: guard destination context (CC control points)
---   - new pref: add control points for the widget
---   - hide MRE in event list and notation views, and give the keys back to the editor
---   - fix pitch bend mode keys being swallowed instead of passed to the editor
---   - perf: fewer full event scans and allocations while dragging
+--   - version bump to release
 -- @provides
 --   {RazorEdits}/*
 --   {RazorEdits}/{lib}/{lua-scala}/*
